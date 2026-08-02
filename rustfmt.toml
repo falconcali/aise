@@ -1,0 +1,14 @@
+# Keep direct `rustfmt` runs consistent with `cargo fmt`.
+edition = "2024"
+style_edition = "2024"
+
+# Favor a slightly wider style for modern displays while keeping reviews readable.
+max_width = 120
+fn_call_width = 80
+chain_width = 80
+single_line_if_else_max_width = 60
+
+# Optional knobs to revisit later:
+# use_small_heuristics = "Default"
+# newline_style = "Auto"
+# cargo +nightly fmt --all -- --config imports_granularity=Crate use合并
