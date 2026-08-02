@@ -1,11 +1,11 @@
 ---
-name: npc-doc-gen
-description: Generate AISE project documentation (design / refactor / spec / review / issue) from the current conversation, with a unified filename convention, correct directory placement, and type-specific structural requirements. Use when the user asks to turn the current discussion into an AISE doc, e.g. "write a design doc", "turn this into a refactor doc", "start a spec for this plan", "write up a review", "log this as an issue", or "put this discussion under doc/design".
+name: aise-doc-gen
+description: Generate aise project documentation (design / refactor / spec / review / issue) from the current conversation, with a unified filename convention, correct directory placement, and type-specific structural requirements. Use when the user asks to turn the current discussion into an aise doc, e.g. "write a design doc", "turn this into a refactor doc", "start a spec for this plan", "write up a review", "log this as an issue", or "put this discussion under doc/design".
 ---
 
-# npc-doc-gen — AISE documentation generator
+# aise-doc-gen — aise documentation generator
 
-Turn the current conversation into a well-formed document under the AISE
+Turn the current conversation into a well-formed document under the aise
 repo's `doc/` tree. The core value is consistent naming, correct directory,
 and the right structure for each document type.
 
@@ -88,7 +88,7 @@ Get-Date -Format yyyy-MM-dd
 
 - Distill an English phrase that recovers the topic in one glance, ≤ 6 words.
 - All lowercase, joined by `-`.
-- Examples: `message-pipeline-refactor`, `director-intent-design`, `world-ctx-channel-split`.
+- Examples: `turn-runtime-refactor`, `writer-planner-design`, `character-think-pipeline`.
 - For a phased spec, append `-phase-N` (e.g. `-phase-0`).
 
 Never put non-ASCII characters in the filename; the topic always stays English
@@ -107,13 +107,13 @@ Format:
 
 Examples:
 
-- `2026-04-21-cross-world-sync-design-opus.md`
-- `2026-04-21-director-intent-refactor-opus.md`
-- `2026-04-21-director-intent-spec-opus.md`
-- `2026-04-21-skill-discovery-review-opus.md`
+- `2026-04-21-turn-runtime-design-opus.md`
+- `2026-04-21-writer-planner-refactor-opus.md`
+- `2026-04-21-writer-planner-spec-opus.md`
+- `2026-04-21-validation-pipeline-review-opus.md`
 
 Join with the directory from Step 1 and write to `<repo-root>/doc/...`. The repo
-root is the AISE repository root; infer it from the shell working directory
+root is the aise repository root; infer it from the shell working directory
 or use the path the user gave.
 
 **Before writing**: if the target file already exists, do not overwrite. Append
@@ -170,7 +170,7 @@ Shared baseline is in §4; below are only the constraints unique to each type.
      priority or phase.
   4. **Target structure** and **migration steps**.
   5. **External impact**: URLs, APIs, DB schema, prompts, config files.
-- AISE defaults to hard refactors (no fallback, no dual paths — see
+- aise defaults to hard refactors (no fallback, no dual paths — see
   `R-REFACTOR-01/02` in `AGENTS.md`). Default to that; if you keep
   compatibility, state the reason explicitly.
 

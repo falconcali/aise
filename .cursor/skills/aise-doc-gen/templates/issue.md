@@ -38,7 +38,7 @@ If reproducible, list steps. If flaky, state the rate + known triggers.
 
 **Environment**:
 
-- AISE version / commit: {sha or tag}
+- aise version / commit: {sha or tag}
 - OS:
 - Model:
 - Other relevant config:

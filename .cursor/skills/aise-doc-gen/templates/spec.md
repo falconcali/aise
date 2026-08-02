@@ -134,7 +134,7 @@ Every rule must be testable.
 ### 4.3 Observability
 
 - Emit `tracing::info_span!("tool.invoke", tool = %name, call_id)`. (R-OBS-02)
-- Counter `npc_tool_invocations_total{tool, status}` incremented per call.
+- Counter `aise_tool_invocations_total{tool, status}` incremented per call.
 
 ---
 
@@ -150,7 +150,7 @@ Each item ends with a concrete check (test name / rg query / curl call).
 - [ ] `cargo test tool_runtime::` passes
 - [ ] `rg 'OldToolAbstraction' src/` returns zero matches (old code fully removed)
 - [ ] Event `tool.completed` emitted with envelope shape §3.3 — verified by `cargo test tool_events::completed_shape`
-- [ ] Metric `npc_tool_invocations_total` visible via `/metrics`
+- [ ] Metric `aise_tool_invocations_total` visible via `/metrics`
 
 ---
 

@@ -17,7 +17,8 @@ Architecture and refactor baseline:
 - `R-ARCH-03` MUST budget hot paths for allocations, copies, concurrency,
   backpressure, and latency; NEVER add unbounded fan-out or hidden queues.
 - `R-ARCH-04` MUST keep caches, queues, contexts, histories, and snapshots
-  (including per-NPC history and memory) bounded with a cleanup/eviction policy.
+  (including per-Turn context, character thoughts, and memory) bounded with a
+  cleanup/eviction policy.
 - `R-ARCH-05` MUST make failures diagnosable and key behavior observable and
   testable.
 - `R-REFACTOR-01` MUST complete refactors in one change, with NO fallback
@@ -73,8 +74,22 @@ Errors and observability:
 - `R-OBS-05` Core/domain MUST use typed (`thiserror`) errors and NEVER leak
   `anyhow::Error`; the app layer MAY use `anyhow`.
 
-Project-specific hard constraints:
-- TBD (define once the aise architecture and entry points are settled).
+Project-specific hard constraints (see doc/design/Architecture.md):
+- `R-AISE-01` Turn execution MUST be orchestrated by `TurnRuntime`; pipelines
+  MUST NOT call each other directly.
+- `R-AISE-02` Every pipeline MUST implement `TurnExecutionPipeline` and
+  interact only through `&mut TurnExecutionContext`; no hidden shared state.
+- `R-AISE-03` `TurnExecutionContext` lives only for one Turn; it MUST NOT be
+  persisted directly or shared across Turns.
+- `R-AISE-04` Module boundaries MUST follow the architecture directory layout:
+  `runtime` / `context` / `planning` / `character` / `story` / `validation` /
+  `persistence` / `domain`. Cross-boundary imports follow `R-LAYER-01`.
+- `R-AISE-05` `TurnCommitter` MUST guarantee atomicity, consistency, and
+  recoverability of the Turn commit.
+- `R-AISE-06` The Validation/Repair loop MUST have a bounded budget; on
+  exhaustion, the Turn MUST fail with a diagnosable error, not loop forever.
+- `R-AISE-07` Character thoughts are a character's viewpoint, not world facts;
+  they MUST NOT be committed as world state by the generator.
 
 ---
 

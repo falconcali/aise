@@ -50,11 +50,11 @@ mod tests;
 ```
 
 ```text
-src/npc/
-  dialogue.rs
+src/character/
+  character_think.rs
   memory.rs
   tests/
-    dialogue_tests.rs
+    character_think_tests.rs
     memory_tests.rs
 ```
 
@@ -78,7 +78,7 @@ src/npc/
 - Constants and statics SHOULD use `SCREAMING_SNAKE_CASE`.
 - Lifetimes SHOULD use single letters such as `'a` and `'b`.
 - API view and snapshot structs SHOULD use an `XxxInfo` suffix (e.g.
-  `NpcInfo`, `SessionInfo`).
+  `CharacterInfo`, `TurnInfo`).
 - Configuration structs SHOULD use an `XxxConfig` suffix.
 - Write/command argument bundles SHOULD use an `XxxSpec` suffix.
 
@@ -93,7 +93,7 @@ src/npc/
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NpcId(Arc<str>);
+pub struct CharacterId(Arc<str>);
 ```
 
 ---
@@ -141,7 +141,7 @@ pub struct NpcId(Arc<str>);
 self.turn_counter += 1;
 
 // GOOD
-// Tick is visible to the sweeper; avoids unloading an NPC mid-turn.
+// Tick is visible to the sweeper; avoids unloading a character mid-turn.
 self.turn_counter += 1;
 ```
 

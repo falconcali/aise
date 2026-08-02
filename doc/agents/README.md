@@ -10,10 +10,30 @@ L1 entry: [AGENTS.md](../../AGENTS.md).
 |---|---|---|---|
 | L1 | [AGENTS.md](../../AGENTS.md) | Auto-loaded | Core rules, doc routing, waiver |
 | L2 | [guardrails/](./guardrails/) | On demand | Cross-cutting rules |
-| L3 | modules/ (TBD) | On demand | Subsystem rules, added as the architecture lands |
+| L3 | `modules/` | On demand | Per-subsystem rules, one file per architecture module |
 
 MUST open only the L2/L3 docs relevant to the current task.
 NEVER load the whole L2/L3 set by default.
+
+---
+
+## L3 Module Map
+
+One L3 file per architecture module (see
+[doc/design/Architecture.md](../../design/Architecture.md) §15). Create the
+file on demand when a subsystem needs subsystem-specific rules; until then
+the path below is only a planned target.
+
+| Module | L3 path | Coverage |
+|---|---|---|
+| `runtime` | `modules/runtime.md` | Turn runtime, execution context, pipeline trait |
+| `context` | `modules/context.md` | Baseline context builder, retrieval pipeline, context model |
+| `planning` | `modules/planning.md` | Writer planner, plan model |
+| `character` | `modules/character.md` | Character think pipeline, character model |
+| `story` | `modules/story.md` | Story generator, repairer, story model |
+| `validation` | `modules/validation.md` | Validation pipeline, validators |
+| `persistence` | `modules/persistence.md` | Turn committer, commit semantics |
+| `domain` | `modules/domain.md` | World, character, memory, narrative domain types |
 
 ---
 

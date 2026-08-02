@@ -40,7 +40,7 @@ match analyze_intent(&ctx).await {
 let span = tracing::info_span!(
     "llm.complete",
     model = %self.model_name(),
-    npc_id = %npc.id
+    turn_id = %ctx.turn_id
 );
 async move { /* ... */ }.instrument(span).await
 ```
@@ -56,8 +56,8 @@ async move { /* ... */ }.instrument(span).await
 
 ```rust
 // GOOD
-if let Err(e) = npc.memory.spawn_memory_extraction(...).await {
-    tracing::warn!(npc_id = %npc.id, error = %e, "memory extraction failed");
+if let Err(e) = memory_pipeline.spawn_extraction(...).await {
+    tracing::warn!(turn_id = %ctx.turn_id, error = %e, "memory extraction failed");
 }
 ```
 
@@ -72,13 +72,13 @@ if let Err(e) = npc.memory.spawn_memory_extraction(...).await {
 
 ```rust
 // BAD
-tracing::info!("npc {} handled event for session {}", npc_id, session_id);
+tracing::info!("turn {} handled event for session {}", turn_id, session_id);
 
 // GOOD
 tracing::info!(
     session_id = %session_id,
-    npc_id = %npc_id,
-    "npc handled event"
+    turn_id = %turn_id,
+    "turn handled event"
 );
 ```
 
@@ -96,11 +96,11 @@ tracing::info!(
 
 ```rust
 // BAD
-let npc = state.npcs.get(&id).unwrap();
+let character = state.characters.get(&id).unwrap();
 
 // GOOD
-let npc = state
-    .npcs
+let character = state
+    .characters
     .get(&id)
-    .ok_or_else(|| anyhow::anyhow!("npc {id} not found"))?;
+    .ok_or_else(|| anyhow::anyhow!("character {id} not found"))?;
 ```

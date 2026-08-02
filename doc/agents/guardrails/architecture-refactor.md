@@ -36,7 +36,7 @@ This is the principle; for concrete import and injection rules see
 **Level: MUST**
 
 - MUST define size limits for caches, histories, queues, snapshots, and
-  contexts (including per-NPC dialogue history and memory).
+  contexts (including per-Turn context, character thoughts, and memory).
 - MUST define a cleanup or eviction policy for bounded memory.
 - NEVER introduce unbounded memory growth.
 

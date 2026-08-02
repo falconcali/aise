@@ -12,8 +12,8 @@
 ```rust
 // BAD
 let mut w = state.write().await;
-let npc = w.npcs.get(&id).unwrap().clone();
-let reply = npc.think(prompt).await?; // lock held across .await
+let pipeline = w.pipelines.get(&id).unwrap().clone();
+pipeline.execute(&mut ctx).await; // lock held across .await
 w.turn_counter += 1;
 
 // GOOD
@@ -21,9 +21,9 @@ w.turn_counter += 1;
     let mut w = state.write().await;
     w.turn_counter += 1;
 }
-let npc = { state.read().await.npcs.get(&id).cloned() };
-if let Some(npc) = npc {
-    let reply = npc.think(prompt).await?;
+let pipeline = { state.read().await.pipelines.get(&id).cloned() };
+if let Some(pipeline) = pipeline {
+    pipeline.execute(&mut ctx).await?;
 }
 ```
 
@@ -41,10 +41,10 @@ if let Some(npc) = npc {
 // GOOD
 let snapshot = {
     let s = state.read().await;
-    s.npcs.get(&id).cloned()
+    s.characters.get(&id).cloned()
 };
-if let Some(npc) = snapshot {
-    npc.think(prompt).await?;
+if let Some(character) = snapshot {
+    character.think(&ctx).await?;
 }
 ```
 
