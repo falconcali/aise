@@ -42,8 +42,9 @@ Concurrency:
 Code organization:
 - `R-CODE-01` MUST keep `mod.rs` and `lib.rs` as index only (module decls,
   re-exports, attributes); NEVER put functions, items, constants, or any other
-  code there. For new modules SHOULD prefer Rust 2018-style `foo.rs` over
-  `foo/mod.rs`.
+  code there. Modules MUST use the directory layout (`foo/mod.rs` entry with
+  sibling files in `foo/`); NEVER use a Rust 2018-style sibling `foo.rs`
+  entry file.
 - `R-CODE-02` MUST put unit tests in `tests/<source>_tests.rs`; NEVER inline
   `mod tests { ... }`.
 - `R-CODE-05` MUST keep code comment-free: NEVER add `//` line comments, `///`

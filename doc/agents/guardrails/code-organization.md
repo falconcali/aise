@@ -11,9 +11,10 @@
 - NEVER put structs, enums, traits, impls, functions, constants, statics, type
   aliases, or business logic in `mod.rs` or `lib.rs`.
 - MUST put code in dedicated files and re-export from `mod.rs` / `lib.rs`.
-- For new modules, MUST prefer the Rust 2018 style (`foo.rs` with a sibling
-  `foo/` directory) over `foo/mod.rs`; reserve `mod.rs` for legacy modules and
-  migrate it when substantially touched.
+- Modules MUST use the classic directory layout: index in `foo/mod.rs` with
+  sibling files under `foo/`. NEVER use a Rust 2018-style `foo.rs` entry file
+  with a sibling `foo/` directory; migrate any existing `foo.rs` entries to
+  `foo/mod.rs`.
 - Binary bootstrap (tracing init, signal wiring, config loading glue) belongs
   in `main.rs`, NEVER in `lib.rs`.
 

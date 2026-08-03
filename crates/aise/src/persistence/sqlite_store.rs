@@ -22,7 +22,7 @@ impl SqliteStore {
 
         let options = SqliteConnectOptions::from_str(url)?.create_if_missing(true);
         let pool = SqlitePoolOptions::new().max_connections(5).connect_with(options).await?;
-        sqlx::migrate!("./assets/mig").run(&pool).await?;
+        sqlx::migrate!("./assets/persistence/mig").run(&pool).await?;
         Ok(Arc::new(Self { pool }))
     }
 }
