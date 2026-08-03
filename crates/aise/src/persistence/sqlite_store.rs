@@ -170,16 +170,14 @@ impl Store for SqliteStore {
 
         for (seq, event) in commit.events.iter().enumerate() {
             let payload = serde_json::to_string(&event.payload)?;
-            sqlx::query(
-                "INSERT INTO story_events (id, turn_id, seq, kind, payload) VALUES (?, ?, ?, ?, ?)",
-            )
-            .bind(event.id.as_str())
-            .bind(event.turn_id.as_str())
-            .bind(seq as i64)
-            .bind(event_kind_str(event.kind))
-            .bind(&payload)
-            .execute(&mut *tx)
-            .await?;
+            sqlx::query("INSERT INTO story_events (id, turn_id, seq, kind, payload) VALUES (?, ?, ?, ?, ?)")
+                .bind(event.id.as_str())
+                .bind(event.turn_id.as_str())
+                .bind(seq as i64)
+                .bind(event_kind_str(event.kind))
+                .bind(&payload)
+                .execute(&mut *tx)
+                .await?;
         }
 
         for character in &commit.characters {

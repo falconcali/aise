@@ -28,7 +28,11 @@ impl LlmProvider for StubLlm {
         Ok("Hello World".to_string())
     }
 
-    async fn complete_stream(&self, _req: &aise::llm::message::CompletionRequest, _on_delta: DeltaSink) -> Result<(), LlmError> {
+    async fn complete_stream(
+        &self,
+        _req: &aise::llm::message::CompletionRequest,
+        _on_delta: DeltaSink,
+    ) -> Result<(), LlmError> {
         Ok(())
     }
 }
@@ -47,17 +51,18 @@ impl TurnEventSink for Recorder {
 async fn build_engine(db_url: &str) -> Arc<AiseEngine> {
     let store = SqliteStore::connect(db_url).await.expect("connect store");
     let llm: Arc<dyn LlmProvider> = Arc::new(StubLlm);
+    let config = AiseConfig::default();
     let runtime = TurnRuntime::new(vec![
         Box::<TurnInitializer>::default(),
         Box::new(BaselineContextBuilder::new(store.clone())),
         Box::new(WriterPlanner),
         Box::new(ContextRetrievalPipeline),
         Box::new(CharacterThinkPipeline),
-        Box::new(StoryGenerator::new(llm.clone())),
+        Box::new(StoryGenerator::new(llm.clone(), &config.llm, config.turn.max_tokens)),
         Box::new(ValidationPipeline::default()),
         Box::new(TurnCommitter::new(store.clone())),
     ]);
-    Arc::new(AiseEngine::new(runtime, store, llm, AiseConfig::default()))
+    Arc::new(AiseEngine::new(runtime, store, llm, config))
 }
 
 fn temp_db_path(label: &str) -> String {
@@ -87,7 +92,11 @@ async fn full_flow_returns_hello_world_and_persists() {
         let events = recorder.events.lock().unwrap();
         assert_eq!(events.len(), 11);
         assert!(events.iter().any(|e| matches!(e, TurnEvent::StageStarted("turn_initializer"))));
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::StageStarted("baseline_ctx_builder"))));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, TurnEvent::StageStarted("baseline_ctx_builder")))
+        );
         assert!(events.iter().any(|e| matches!(e, TurnEvent::StageStarted("writer_planner"))));
         assert!(events.iter().any(|e| matches!(e, TurnEvent::StageStarted("context_retrieval"))));
         assert!(events.iter().any(|e| matches!(e, TurnEvent::StageStarted("character_think"))));
@@ -115,8 +124,14 @@ async fn second_turn_loads_history_from_store() {
     let recorder = Recorder::default();
     let story_id = StoryId::from("story-2");
 
-    engine.run_turn(&story_id, "第一回合".to_string(), &recorder).await.expect("turn 1");
-    engine.run_turn(&story_id, "第二回合".to_string(), &recorder).await.expect("turn 2");
+    engine
+        .run_turn(&story_id, "第一回合".to_string(), &recorder)
+        .await
+        .expect("turn 1");
+    engine
+        .run_turn(&story_id, "第二回合".to_string(), &recorder)
+        .await
+        .expect("turn 2");
 
     let store = engine.store();
     let turns = store.load_story(&story_id, 10).await.expect("load story");

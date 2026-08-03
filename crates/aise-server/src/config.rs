@@ -76,6 +76,7 @@ impl ServerConfig {
             }
         };
         config.apply_env_overrides();
+        config.resolve_llm_api_key();
         config
     }
 
@@ -153,4 +154,25 @@ impl ServerConfig {
             }
         }
     }
+
+    fn resolve_llm_api_key(&mut self) {
+        if let Some(value) = self.aise.llm.api_key.clone() {
+            self.aise.llm.api_key = resolve_api_key(value, |name| std::env::var(name).ok());
+        }
+    }
 }
+
+fn resolve_api_key(value: String, get_env: impl Fn(&str) -> Option<String>) -> Option<String> {
+    if let Some(name) = value.strip_prefix("env:") {
+        get_env(name).filter(|v| !v.is_empty())
+    } else {
+        match get_env(&value) {
+            Some(v) if !v.is_empty() => Some(v),
+            _ => Some(value),
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "tests/config_tests.rs"]
+mod tests;

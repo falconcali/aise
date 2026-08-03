@@ -4,7 +4,6 @@
 # 可通过环境变量 AISE_CONFIG 指定其它配置文件路径。
 #
 # 敏感信息（如 LLM API Key）请勿写入本文件；请使用环境变量
-# AISE_LLM_API_KEY 提供，程序会自动覆盖文件中的配置。
 
 # 监听地址
 listen_addr = "127.0.0.1:3000"
@@ -12,21 +11,19 @@ listen_addr = "127.0.0.1:3000"
 # 并发会话上限（R-ARCH-04）
 max_sessions = 64
 
-# 日志输出目录（位于 data/ trace/ 之外，不会上传 git）
 trace_dir = "trace"
 
 # 前端静态资源目录；留空则使用 aise-server crate 内置的 assets/
 # assets_dir = ""
 
 [aise.llm]
-base_url = "http://localhost:11434/v1"
-# api_key = ""  # 建议使用环境变量 AISE_LLM_API_KEY
-model = "qwen2.5"
+base_url = "https://api.deepseek.com"
+api_key = "env:DEEPSEEK_API_KEY"
+model = "deepseek-v4-flash"
 max_concurrent = 4
 temperature = 0.8
 
 [aise.storage]
-# SQLite 数据库路径（相对工作目录；位于 data/ 下，不会上传 git）
 database_url = "data/aise.db"
 
 [aise.turn]

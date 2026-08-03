@@ -22,7 +22,7 @@ pub async fn build_engine(config: &ServerConfig) -> Result<Arc<AiseEngine>, anyh
         Box::new(WriterPlanner),
         Box::new(ContextRetrievalPipeline),
         Box::new(CharacterThinkPipeline),
-        Box::new(StoryGenerator::new(llm.clone())),
+        Box::new(StoryGenerator::new(llm.clone(), &config.aise.llm, config.aise.turn.max_tokens)),
         Box::new(ValidationPipeline::default()),
         Box::new(TurnCommitter::new(store.clone())),
     ]);

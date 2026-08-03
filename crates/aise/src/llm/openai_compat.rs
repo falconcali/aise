@@ -25,7 +25,11 @@ impl OpenAiCompatProvider {
     }
 
     fn endpoint(&self) -> String {
-        format!("{}/v1/chat/completions", self.base_url)
+        if self.base_url.ends_with("/chat/completions") {
+            self.base_url.clone()
+        } else {
+            format!("{}/chat/completions", self.base_url)
+        }
     }
 }
 
@@ -142,3 +146,7 @@ fn parse_delta(data: &str) -> Result<Option<String>, LlmError> {
     let chunk: StreamChunk = serde_json::from_str(data).map_err(|e| LlmError::Protocol(format!("bad chunk: {e}")))?;
     Ok(chunk.choices.into_iter().next().and_then(|c| c.delta.content))
 }
+
+#[cfg(test)]
+#[path = "tests/openai_compat_tests.rs"]
+mod tests;
