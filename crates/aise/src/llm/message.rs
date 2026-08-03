@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// One chat message as sent to the LLM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: Role,
@@ -15,7 +14,6 @@ pub enum Role {
     Assistant,
 }
 
-/// A completion request for any provider backend.
 #[derive(Debug, Clone)]
 pub struct CompletionRequest {
     pub model: String,

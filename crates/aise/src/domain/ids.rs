@@ -1,7 +1,3 @@
-//! Strongly-typed identifiers over `Arc<str>` (R-CODE-04).
-//!
-//! Different ID domains use distinct types so they can never be confused.
-
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::sync::Arc;

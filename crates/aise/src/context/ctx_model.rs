@@ -1,10 +1,6 @@
+use crate::domain::character::CharacterState;
 use serde::{Deserialize, Serialize};
 
-use crate::domain::character::CharacterState;
-
-/// AI-visible baseline context assembled from persisted world state
-/// (Architecture.md §7). Shaped like SillyTavern's character card + world
-/// book + chat history.
 #[derive(Debug, Clone, Default)]
 pub struct BaselineContext {
     pub story_instructions: String,
@@ -24,7 +20,6 @@ pub struct StoryConfig {
     pub language: String,
 }
 
-/// One retrieved context item (Architecture.md §9).
 #[derive(Debug, Clone)]
 pub struct ContextItem {
     pub source: ContextSource,

@@ -1,15 +1,13 @@
+use super::ids::{EventId, TurnId};
 use serde::{Deserialize, Serialize};
 
-use super::ids::{EventId, TurnId};
-
-/// One committed story turn (the persisted result of a Turn).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoryTurn {
     pub id: TurnId,
     pub player_input: String,
     pub story_text: String,
     pub summary_delta: Option<String>,
-    /// Unix milliseconds.
+
     pub created_at: i64,
 }
 
@@ -30,7 +28,6 @@ pub enum EventKind {
     Chapter,
 }
 
-/// Rolling story summary used by BaselineContextBuilder.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StorySummary {
     pub text: String,

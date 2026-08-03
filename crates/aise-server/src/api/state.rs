@@ -1,11 +1,8 @@
-use std::sync::Arc;
-
-use aise::AiseEngine;
-
 use crate::config::ServerConfig;
 use crate::session::SessionRegistry;
+use aise::AiseEngine;
+use std::sync::Arc;
 
-/// Composition root state shared by all handlers.
 pub struct AppState {
     pub engine: Arc<AiseEngine>,
     pub registry: Arc<SessionRegistry>,

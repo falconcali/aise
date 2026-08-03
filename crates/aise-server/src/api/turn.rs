@@ -1,20 +1,16 @@
-use std::convert::Infallible;
-use std::sync::Arc;
-
+use crate::api::dto::TurnRequest;
+use crate::api::state::AppState;
+use crate::error::ApiError;
+use crate::session::SessionId;
 use aise::{TurnEvent, TurnEventSink};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use futures::channel::mpsc::UnboundedSender;
 use futures::stream::{Stream, StreamExt};
+use std::convert::Infallible;
+use std::sync::Arc;
 
-use crate::api::dto::TurnRequest;
-use crate::api::state::AppState;
-use crate::error::ApiError;
-use crate::session::SessionId;
-
-/// Streams one Turn to the browser over SSE:
-/// `event: stage|token|validation|done`.
 pub async fn run_turn(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -28,17 +24,12 @@ pub async fn run_turn(
     let story_id = session.story_id.clone();
     let player_input = req.player_input;
 
-    // Bridge engine events onto a channel the SSE stream reads.
-    // Unbounded for now; backpressure lands with the token-stream budget
-    // (R-ARCH-03).
     let (tx, rx) = futures::channel::mpsc::unbounded();
     let sink = SseSink { tx };
 
     let engine = state.engine.clone();
     let session_for_task = session.clone();
     tokio::spawn(async move {
-        // Per-session lock serializes concurrent Turns (world state safety);
-        // held for the whole Turn, released when the task ends.
         let _guard = session_for_task.lock_turn().await;
         match engine.run_turn(&story_id, player_input, &sink).await {
             Ok(_) => {}
@@ -50,7 +41,6 @@ pub async fn run_turn(
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
-/// Bridges engine `TurnEvent`s to SSE `Event`s.
 struct SseSink {
     tx: UnboundedSender<Event>,
 }

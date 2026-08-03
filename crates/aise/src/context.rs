@@ -1,5 +1,3 @@
-//! AI context assembly: baseline cognition builder and context retrieval.
-
 pub mod baseline_ctx_builder;
 pub mod ctx_model;
 pub mod retrieval_pipeline;

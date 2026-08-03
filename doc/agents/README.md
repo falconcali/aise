@@ -44,7 +44,7 @@ the path below is only a planned target.
 | Reshape architecture / refactor a subsystem | [guardrails/architecture-refactor.md](./guardrails/architecture-refactor.md) |
 | Add or change module/layer boundaries | [guardrails/layer-dependencies.md](./guardrails/layer-dependencies.md) |
 | Touch shared state, locks, or LLM call sites | [guardrails/concurrency.md](./guardrails/concurrency.md) |
-| Write tests / add `mod.rs` / name types / place config / adjust comments | [guardrails/code-organization.md](./guardrails/code-organization.md) |
+| Write tests / add `mod.rs` / name types / place config / format imports / enforce no comments | [guardrails/code-organization.md](./guardrails/code-organization.md) |
 | Add error handling, logging, tracing, or events | [guardrails/observability.md](./guardrails/observability.md) |
 | Set up the toolchain, lints, `unsafe`, or dependencies | [guardrails/toolchain.md](./guardrails/toolchain.md) |
 

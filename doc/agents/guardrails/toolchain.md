@@ -7,14 +7,8 @@
 - Code MUST pass `cargo fmt --check`.
 - Code MUST pass `cargo clippy` with the project lint set; CI MUST treat
   warnings as errors (`-D warnings`).
-- NEVER add `#[allow(...)]` without a brief justification comment on the same
-  attribute.
-
-```rust
-// GOOD
-#[allow(clippy::too_many_arguments)] // builder is generated; splitting hurts call sites
-pub fn new(/* ... */) -> Self { /* ... */ }
-```
+- NEVER add `#[allow(...)]` except via the waiver process; inline justification
+  comments are not permitted (`R-CODE-05`).
 
 ---
 
@@ -24,7 +18,8 @@ pub fn new(/* ... */) -> Self { /* ... */ }
 
 - Crates MUST set `#![forbid(unsafe_code)]` by default.
 - Any `unsafe` block MUST carry a waiver (`R-LINT-02`) and a `// SAFETY:`
-  comment stating the invariant being upheld.
+  comment stating the invariant being upheld; this is the only permitted `//`
+  comment (`R-CODE-05`).
 - NEVER use `unsafe` to silence a borrow-check or lifetime error that a safe
   refactor can fix.
 

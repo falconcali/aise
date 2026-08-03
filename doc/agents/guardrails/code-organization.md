@@ -6,8 +6,8 @@
 
 - `mod.rs` and `lib.rs` files may contain only module declarations (`mod`,
   `pub mod`), visibility re-exports (`pub use`, `pub(crate) use`,
-  `pub(super) use`), attributes on those items (`#[cfg]`, `#[allow]`,
-  `#![forbid(unsafe_code)]`), and module docs (`//!`).
+  `pub(super) use`), and attributes on those items (`#[cfg]`, `#[allow]`,
+  `#![forbid(unsafe_code)]`).
 - NEVER put structs, enums, traits, impls, functions, constants, statics, type
   aliases, or business logic in `mod.rs` or `lib.rs`.
 - MUST put code in dedicated files and re-export from `mod.rs` / `lib.rs`.
@@ -20,8 +20,6 @@
 ```rust
 // GOOD - lib.rs
 #![forbid(unsafe_code)]
-
-//! `gateway` crate root.
 
 pub mod app;
 pub mod config;
@@ -98,18 +96,15 @@ pub struct CharacterId(Arc<str>);
 
 ---
 
-## R-CODE-05 - Public API comments
+## R-CODE-05 - No comments in code
 
 **Level: MUST**
 
-- MUST add `///` doc comments only when the public contract is not obvious from
-  the name, type, and module context.
-- MUST document non-obvious ownership, lifetime, locking, side effects,
-  persistence, I/O, invariants, defaults, units, ranges, and caller
-  obligations.
-- NEVER add doc comments that restate the signature or narrate implementation.
-- SHOULD omit doc comments for obvious constructors, getters, setters, one-line
-  forwards, and self-explanatory data carriers.
+- NEVER add `//` line comments, `///` doc comments, or `//!` module docs to any
+  code. The code itself is the only documentation.
+- Sole exceptions: `// SAFETY:` on a waived `unsafe` block (see `R-LINT-02`)
+  and the `// WAIVER:` marker from the Waiver Process.
+- NEVER restate the signature or narrate the implementation.
 
 ---
 
@@ -126,50 +121,31 @@ pub struct CharacterId(Arc<str>);
 
 ---
 
-## R-CODE-07 - Code comments
+## R-CODE-07 - Compact `use` imports
 
 **Level: MUST**
 
-- Comments MUST be concise English.
-- Comments MUST explain non-obvious why, not obvious what.
-- NEVER add empty commentary such as "Import the module", "Define the
-  function", or "Return the result".
+- The `use` imports at the top of a file MUST form one contiguous block:
+  NEVER leave blank lines between consecutive `use` statements.
+- The import block MUST sit at the very top of the file, followed by a single
+  blank line before the first item.
+- Sorting inside the block MUST be delegated to `rustfmt` (`R-LINT-01`); do
+  NOT hand-sort or split imports into groups.
 
 ```rust
-// BAD
-// increment counter
-self.turn_counter += 1;
+// GOOD - one contiguous import block
+use crate::domain::ids::CharacterId;
+use serde::{Deserialize, Serialize};
 
-// GOOD
-// Tick is visible to the sweeper; avoids unloading a character mid-turn.
-self.turn_counter += 1;
-```
-
----
-
-## R-CODE-08 - Module-level `//!` docs
-
-**Level: SHOULD**
-
-- `lib.rs` and every `mod.rs` SHOULD carry a `//!` doc stating the module's
-  role and boundary (what it owns, what it does NOT own).
-- Regular source files MAY omit `//!`; add one only when the file represents
-  a stable concept whose responsibility is not obvious from its name.
-- Keep `//!` to a few sentences. NEVER duplicate the design doc, `README`, or
-  `AGENTS.md`; link to them by path instead.
-- NEVER use `//!` to narrate implementation or list every item in the file.
-
-```rust
-// GOOD - lib.rs
-//! `gateway` crate root.
-//!
-//! Hosts the `gateway-server` binary's library surface. Per `R-CODE-01`, this
-//! file is an index only: module declarations, re-exports, attributes, and
-//! `//!` docs. No items, no functions, no business logic.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CharacterThought {
+    // ...
+}
 ```
 
 ```rust
-// BAD - restates what readers can see
-//! This module contains `GatewayConfig`. It has a `from_env` function that
-//! reads environment variables and returns a `GatewayConfig`.
+// BAD - blank line inside the import block
+use crate::domain::ids::CharacterId;
+
+use serde::{Deserialize, Serialize};
 ```

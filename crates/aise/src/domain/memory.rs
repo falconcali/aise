@@ -1,6 +1,5 @@
-use serde::{Deserialize, Serialize};
-
 use super::ids::{CharacterId, MemoryId};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEntry {
@@ -8,7 +7,7 @@ pub struct MemoryEntry {
     pub owner: CharacterId,
     pub kind: MemoryKind,
     pub content: String,
-    /// Unix milliseconds.
+
     pub created_at: i64,
 }
 
@@ -19,7 +18,6 @@ pub enum MemoryKind {
     Secret,
 }
 
-/// A requested memory write, produced by a story draft.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryPatch {
     pub owner: CharacterId,

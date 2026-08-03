@@ -1,15 +1,12 @@
-use async_trait::async_trait;
-
 use crate::error::AiseError;
 use crate::llm::provider::LlmProvider;
 use crate::runtime::pipeline::TurnExecutionPipeline;
 use crate::runtime::turn_execution_ctx::TurnExecutionContext;
+use async_trait::async_trait;
 use std::sync::Arc;
 
-/// Creates the story from baseline context + plan + retrieved context +
-/// character thoughts (Architecture.md §11). Outputs `ctx.draft`.
 pub struct StoryGenerator {
-    #[allow(dead_code)] // llm is exercised once prompt assembly is implemented
+    #[allow(dead_code)]
     llm: Arc<dyn LlmProvider>,
 }
 
@@ -26,7 +23,6 @@ impl TurnExecutionPipeline for StoryGenerator {
     }
 
     async fn execute(&self, _ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
-        // Framework stub: build CompletionRequest, call self.llm.complete.
         Ok(())
     }
 }

@@ -1,5 +1,3 @@
-//! Story creation: generator, repairer, and the draft model.
-
 pub mod story_generator;
 pub mod story_model;
 pub mod story_repairer;

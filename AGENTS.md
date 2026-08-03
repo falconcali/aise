@@ -41,27 +41,28 @@ Concurrency:
 
 Code organization:
 - `R-CODE-01` MUST keep `mod.rs` and `lib.rs` as index only (module decls,
-  re-exports, attributes, `//!`); NEVER put functions, items, constants, or
-  any other code there. For new modules SHOULD prefer Rust 2018-style `foo.rs`
-  over `foo/mod.rs`.
+  re-exports, attributes); NEVER put functions, items, constants, or any other
+  code there. For new modules SHOULD prefer Rust 2018-style `foo.rs` over
+  `foo/mod.rs`.
 - `R-CODE-02` MUST put unit tests in `tests/<source>_tests.rs`; NEVER inline
   `mod tests { ... }`.
-- `R-CODE-05` MUST add `///` docs only for non-obvious public contracts
-  (ownership, locking, side effects, invariants, units); NEVER restate the
-  signature.
+- `R-CODE-05` MUST keep code comment-free: NEVER add `//` line comments, `///`
+  doc comments, or `//!` module docs; the code is its own documentation. Sole
+  exceptions: `// SAFETY:` on a waived `unsafe` block (`R-LINT-02`) and the
+  `// WAIVER:` marker from the Waiver Process.
 - `R-CODE-06` MUST keep runtime state and configuration separated; MUST roll
   configuration into typed `*Config` types.
-- `R-CODE-07` Comments MUST explain non-obvious why, not obvious what; NEVER add
-  empty narration.
-- `R-CODE-08` Module-level `//!` SHOULD state role and boundary on `lib.rs` and
-  `mod.rs`; SHOULD stay short and link out rather than duplicate design docs or
-  `AGENTS.md`.
+- `R-CODE-07` MUST keep `use` imports compact: NEVER leave blank lines between
+  consecutive `use` statements; the import block is one contiguous group at
+  the top of the file. Sorting within the group is left to `rustfmt`
+  (`R-LINT-01`).
 
 Toolchain:
 - `R-LINT-01` MUST pass `cargo fmt` and `clippy`; CI treats warnings as errors;
-  any `#[allow]` MUST carry a justification.
+  any `#[allow]` MUST go through the waiver process instead of an inline
+  justification comment.
 - `R-LINT-02` Crates MUST set `#![forbid(unsafe_code)]` by default; any `unsafe`
-  needs a waiver and a `// SAFETY:` comment.
+  needs a waiver and a `// SAFETY:` comment (the only permitted `//` comment).
 - `R-DEP-01` MUST pin a single edition and a documented MSRV; justify new
   dependencies.
 
@@ -104,7 +105,8 @@ task -> doc table: [`doc/agents/README.md`](doc/agents/README.md).
   [doc/agents/guardrails/layer-dependencies.md](doc/agents/guardrails/layer-dependencies.md).
 - Touch shared state, locks, or LLM call sites:
   [doc/agents/guardrails/concurrency.md](doc/agents/guardrails/concurrency.md).
-- Write tests, add `mod.rs`, name types, place config, or adjust comments:
+- Write tests, add `mod.rs`, name types, place config, format imports, or
+  enforce no comments:
   [doc/agents/guardrails/code-organization.md](doc/agents/guardrails/code-organization.md).
 - Add error handling, logging, tracing, or events:
   [doc/agents/guardrails/observability.md](doc/agents/guardrails/observability.md).

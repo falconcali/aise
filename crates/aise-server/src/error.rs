@@ -2,8 +2,6 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
-/// HTTP-facing error. The bootstrap layer MAY use anyhow (R-OBS-05), but
-/// errors that cross the HTTP boundary are typed.
 #[derive(Debug)]
 pub enum ApiError {
     NotFound(String),

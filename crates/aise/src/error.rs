@@ -1,9 +1,6 @@
+use crate::llm::LlmError;
 use thiserror::Error;
 
-use crate::llm::LlmError;
-
-/// Typed error for the `aise` core library (R-OBS-05). Domain/core never leak
-/// `anyhow::Error`.
 #[derive(Debug, Error)]
 pub enum AiseError {
     #[error("story {0} not found")]

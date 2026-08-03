@@ -1,13 +1,10 @@
-use async_trait::async_trait;
-use uuid::Uuid;
-
 use crate::domain::ids::TurnId;
 use crate::error::AiseError;
 use crate::runtime::pipeline::TurnExecutionPipeline;
 use crate::runtime::turn_execution_ctx::TurnExecutionContext;
+use async_trait::async_trait;
+use uuid::Uuid;
 
-/// First stage of every Turn: assigns identity and validates the request
-/// (Architecture.md §6). Prepares only objects; loads no business data.
 #[derive(Default)]
 pub struct TurnInitializer;
 

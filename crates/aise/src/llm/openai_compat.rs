@@ -1,14 +1,12 @@
-use async_trait::async_trait;
-use futures::StreamExt;
-use serde::{Deserialize, Serialize};
-
 use crate::config::LlmConfig;
 use crate::llm::error::LlmError;
 use crate::llm::limiter::LlmLimiter;
 use crate::llm::message::{ChatMessage, CompletionRequest};
 use crate::llm::provider::{DeltaSink, LlmProvider};
+use async_trait::async_trait;
+use futures::StreamExt;
+use serde::{Deserialize, Serialize};
 
-/// OpenAI-compatible chat completions client (OpenAI, Ollama, vLLM, ...).
 pub struct OpenAiCompatProvider {
     base_url: String,
     api_key: Option<String>,
@@ -110,8 +108,6 @@ impl LlmProvider for OpenAiCompatProvider {
     }
 }
 
-/// Pops complete SSE lines off the buffer; keeps a partial tail. Each line is
-/// copied out so the buffer can be drained afterwards without a borrow clash.
 fn extract_sse_lines(buf: &mut Vec<u8>) -> Result<Vec<String>, LlmError> {
     let mut lines = Vec::new();
     let mut start = 0;

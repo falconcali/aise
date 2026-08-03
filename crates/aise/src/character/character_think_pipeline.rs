@@ -1,11 +1,8 @@
-use async_trait::async_trait;
-
 use crate::error::AiseError;
 use crate::runtime::pipeline::TurnExecutionPipeline;
 use crate::runtime::turn_execution_ctx::TurnExecutionContext;
+use async_trait::async_trait;
 
-/// Simulates the current cognition of key characters requested by the plan
-/// (Architecture.md §10). Outputs `ctx.character_thoughts`.
 #[derive(Default)]
 pub struct CharacterThinkPipeline;
 
@@ -16,7 +13,6 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
     }
 
     async fn execute(&self, _ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
-        // Framework stub: honor ctx.plan.character_requests.
         Ok(())
     }
 }

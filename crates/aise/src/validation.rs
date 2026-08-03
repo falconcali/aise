@@ -1,5 +1,3 @@
-//! Quality gates: validation pipeline, result model, and validators.
-
 pub mod validation_model;
 pub mod validation_pipeline;
 pub mod validators;

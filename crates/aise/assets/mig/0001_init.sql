@@ -1,17 +1,14 @@
--- Initial schema for aise.
--- Created_at values are Unix milliseconds.
-
 CREATE TABLE IF NOT EXISTS worlds (
     id          TEXT PRIMARY KEY,
     name        TEXT NOT NULL,
-    state       TEXT NOT NULL, -- serialized WorldState
+    state       TEXT NOT NULL,
     created_at  INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS characters (
     id          TEXT PRIMARY KEY,
     world_id    TEXT NOT NULL REFERENCES worlds(id),
-    state       TEXT NOT NULL, -- serialized CharacterState
+    state       TEXT NOT NULL,
     created_at  INTEGER NOT NULL,
     updated_at  INTEGER NOT NULL
 );
@@ -22,7 +19,7 @@ CREATE TABLE IF NOT EXISTS story_turns (
     player_input    TEXT NOT NULL,
     story_text      TEXT NOT NULL,
     summary_delta   TEXT,
-    status          TEXT NOT NULL, -- 'committed' | 'failed'
+    status          TEXT NOT NULL,
     created_at      INTEGER NOT NULL
 );
 

@@ -1,9 +1,6 @@
+use super::ids::CharacterId;
 use serde::{Deserialize, Serialize};
 
-use super::ids::CharacterId;
-
-/// Persisted state of one character. `internal_state` is a character's
-/// viewpoint and MUST NOT be committed as world fact (R-AISE-07).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CharacterState {
     pub id: CharacterId,
@@ -25,7 +22,6 @@ pub struct Relation {
     pub affinity: i32,
 }
 
-/// A requested mutation to one character, produced by a story draft.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CharacterPatch {
     pub id: CharacterId,

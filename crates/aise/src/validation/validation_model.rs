@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// Outcome of one validation pass (Architecture.md §13).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ValidationResult {
     pub pass: bool,
@@ -10,7 +9,7 @@ pub struct ValidationResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationIssue {
     pub severity: Severity,
-    /// Stable machine-readable code, e.g. `character_consistency`.
+
     pub code: String,
     pub message: String,
 }

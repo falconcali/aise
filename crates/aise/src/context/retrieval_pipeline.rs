@@ -1,12 +1,8 @@
-use async_trait::async_trait;
-
 use crate::error::AiseError;
 use crate::runtime::pipeline::TurnExecutionPipeline;
 use crate::runtime::turn_execution_ctx::TurnExecutionContext;
+use async_trait::async_trait;
 
-/// Fills the context gaps requested by the WriterPlan (Architecture.md §9).
-///
-/// Pipeline shape: retriever(s) -> context merger -> `ctx.retrieved_ctx`.
 #[derive(Default)]
 pub struct ContextRetrievalPipeline;
 
@@ -17,7 +13,6 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
     }
 
     async fn execute(&self, _ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
-        // Framework stub: honor ctx.plan.retrieval_requests.
         Ok(())
     }
 }

@@ -1,15 +1,10 @@
+use super::model::{Session, SessionId, SessionInfo};
+use aise::domain::{StoryId, TurnId};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-use aise::domain::{StoryId, TurnId};
 use uuid::Uuid;
 
-use super::model::{Session, SessionId, SessionInfo};
-
-/// Owns the session lifecycle: create/list/delete, per-session Turn
-/// serialization, and a bounded quota with eviction (R-ARCH-04). One owner
-/// (R-ARCH-02): the registry, nothing else, mutates the map.
 pub struct SessionRegistry {
     sessions: tokio::sync::Mutex<HashMap<SessionId, Arc<Session>>>,
     capacity: usize,
@@ -29,7 +24,7 @@ impl SessionRegistry {
             return Err(super::SessionError::QuotaExceeded(self.capacity));
         }
         let id = SessionId::new(Uuid::new_v4().to_string());
-        // Story id is independent from session id; the engine only sees stories.
+
         let story_id = StoryId::from(Uuid::new_v4().to_string());
         let created_at = now_millis();
         let session = Session::new(id, name, story_id, created_at);
@@ -48,7 +43,6 @@ impl SessionRegistry {
         items
     }
 
-    /// Removes the session and returns whether it existed.
     pub async fn delete(&self, id: &SessionId) -> bool {
         self.sessions.lock().await.remove(id).is_some()
     }

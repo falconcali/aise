@@ -1,6 +1,3 @@
-//! Pure domain types: data, invariants, and pure logic. Zero dependency on
-//! outer layers (R-LAYER-01); no I/O.
-
 pub mod character;
 pub mod ids;
 pub mod memory;

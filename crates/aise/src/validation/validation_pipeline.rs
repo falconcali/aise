@@ -1,14 +1,10 @@
-use async_trait::async_trait;
-
 use crate::error::AiseError;
 use crate::runtime::pipeline::TurnExecutionPipeline;
 use crate::runtime::turn_execution_ctx::TurnExecutionContext;
 use crate::validation::validators::consistency::ConsistencyValidator;
 use crate::validation::validators::schema::SchemaValidator;
+use async_trait::async_trait;
 
-/// Runs deterministic + story validation and sets `ctx.validation`
-/// (Architecture.md §13). The Repair/Validation loop budget is enforced by
-/// `TurnRuntime` (R-AISE-06).
 #[derive(Default)]
 pub struct ValidationPipeline {
     schema: SchemaValidator,

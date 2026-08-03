@@ -1,7 +1,6 @@
-use std::sync::Arc;
-
 use aise_server::session::SessionRegistry;
 use aise_server::{AppState, ServerConfig, build_engine, router};
+use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
 
@@ -9,7 +8,6 @@ use tracing_subscriber::prelude::*;
 async fn main() -> anyhow::Result<()> {
     let config = ServerConfig::load();
 
-    // Logs go to stdout (debug) and a rolling file under `trace/` (git-ignored).
     std::fs::create_dir_all(&config.trace_dir)?;
     let file_appender = tracing_appender::rolling::daily(&config.trace_dir, "aise.log");
     let (file_writer, _file_guard) = tracing_appender::non_blocking(file_appender);

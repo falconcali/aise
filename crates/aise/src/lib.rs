@@ -1,11 +1,5 @@
 #![forbid(unsafe_code)]
 
-//! `aise` — AI Story Engine core library.
-//!
-//! Pipeline-driven, turn-based narrative engine: one player input triggers one
-//! complete Story Turn orchestrated by `TurnRuntime` (see
-//! `doc/design/Architecture.md`). This crate is an index only (R-CODE-01).
-
 pub mod character;
 pub mod config;
 pub mod context;

@@ -1,5 +1,3 @@
-//! HTTP API surface: routes, DTOs, and SSE turn streaming.
-
 pub mod dto;
 pub mod routes;
 pub mod session;

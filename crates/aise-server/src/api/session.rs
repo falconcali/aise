@@ -1,13 +1,11 @@
-use std::sync::Arc;
-
-use axum::Json;
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
-
 use crate::api::dto::CreateSessionRequest;
 use crate::api::state::AppState;
 use crate::error::ApiError;
 use crate::session::{SessionId, SessionInfo};
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use std::sync::Arc;
 
 pub async fn create_session(
     State(state): State<Arc<AppState>>,

@@ -1,6 +1,3 @@
-//! LLM infrastructure: provider boundary, message models, and the shared
-//! concurrency limiter (R-CONC-04). No engine logic here.
-
 pub mod error;
 pub mod limiter;
 pub mod message;

@@ -1,6 +1,3 @@
-//! Turn runtime: pipeline trait, shared execution context, budgets, trace,
-//! and the orchestrator. See `doc/design/Architecture.md` §4.
-
 pub mod initializer;
 pub mod pipeline;
 pub mod trace;

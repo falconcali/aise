@@ -1,9 +1,3 @@
-use async_trait::async_trait;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
-use std::path::Path;
-use std::str::FromStr;
-use std::sync::Arc;
-
 use crate::domain::character::CharacterState;
 use crate::domain::ids::{CharacterId, StoryId};
 use crate::domain::memory::MemoryEntry;
@@ -11,27 +5,28 @@ use crate::domain::narrative::StoryTurn;
 use crate::domain::world::WorldState;
 use crate::error::AiseError;
 use crate::persistence::store::{Store, TurnCommit};
+use async_trait::async_trait;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
+use std::path::Path;
+use std::str::FromStr;
+use std::sync::Arc;
 
-/// SQLite-backed `Store`. Migrations are embedded and applied at connect time.
 pub struct SqliteStore {
-    #[allow(dead_code)] // pool is exercised once load/commit query bodies are implemented
+    #[allow(dead_code)]
     pool: SqlitePool,
 }
 
 impl SqliteStore {
     pub async fn connect(url: &str) -> Result<Arc<Self>, AiseError> {
         ensure_database_dir(url)?;
-        // sqlx does not create missing files by default; flip that on for
-        // first-run ergonomics.
+
         let options = SqliteConnectOptions::from_str(url)?.create_if_missing(true);
         let pool = SqlitePoolOptions::new().max_connections(5).connect_with(options).await?;
-        sqlx::migrate!("./migrations").run(&pool).await?;
+        sqlx::migrate!("./assets/mig").run(&pool).await?;
         Ok(Arc::new(Self { pool }))
     }
 }
 
-/// Creates the database file's parent directory so `data/aise.db` works on
-/// first run. `:memory:` has no path and is skipped.
 fn ensure_database_dir(url: &str) -> Result<(), AiseError> {
     if url.starts_with(':') {
         return Ok(());
@@ -48,7 +43,6 @@ fn ensure_database_dir(url: &str) -> Result<(), AiseError> {
 #[async_trait]
 impl Store for SqliteStore {
     async fn load_world(&self, story_id: &StoryId) -> Result<Option<WorldState>, AiseError> {
-        // Framework stub.
         let _ = story_id;
         Ok(None)
     }
@@ -69,7 +63,6 @@ impl Store for SqliteStore {
     }
 
     async fn commit_turn(&self, commit: &TurnCommit) -> Result<(), AiseError> {
-        // Framework stub: wrap all writes in one transaction.
         let _ = commit;
         Ok(())
     }

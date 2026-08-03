@@ -12,6 +12,10 @@ target/
 # SQLite database files created at runtime
 *.db
 
+# Local environment overrides (never committed); the example template is kept.
+.env
+!.env.example
+
 # Runtime data (databases) and logs -- deliberately not version-controlled.
 /data/*
 /trace/*

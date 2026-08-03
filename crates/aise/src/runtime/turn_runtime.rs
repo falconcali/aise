@@ -1,15 +1,9 @@
-use std::time::Instant;
-
 use crate::error::AiseError;
 use crate::runtime::pipeline::TurnExecutionPipeline;
 use crate::runtime::trace::TraceEvent;
 use crate::runtime::turn_execution_ctx::TurnExecutionContext;
+use std::time::Instant;
 
-/// Orchestrates the fixed Turn pipeline sequence (Architecture.md §4).
-///
-/// This is the only caller of pipelines (R-AISE-01). Stage budget and the
-/// Validation/Repair loop are enforced here; conditional stages (retrieval,
-/// character think) are encoded in the pipeline list by the assembler.
 pub struct TurnRuntime {
     pipelines: Vec<Box<dyn TurnExecutionPipeline>>,
 }

@@ -1,16 +1,14 @@
-use std::sync::Arc;
-
+use crate::api::session::{create_session, delete_session, list_sessions};
+use crate::api::state::AppState;
+use crate::api::turn::run_turn;
+use crate::config::ServerConfig;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Router, response::Response};
+use std::sync::Arc;
 use tower_http::services::ServeDir;
-
-use crate::api::session::{create_session, delete_session, list_sessions};
-use crate::api::state::AppState;
-use crate::api::turn::run_turn;
-use crate::config::ServerConfig;
 
 pub fn router(state: Arc<AppState>, config: &ServerConfig) -> Router {
     let assets_dir = config.resolved_assets_dir();
