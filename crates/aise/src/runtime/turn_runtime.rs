@@ -1,9 +1,8 @@
 use crate::error::AiseError;
 use crate::runtime::event::{TurnEvent, TurnEventSink};
 use crate::runtime::pipeline::TurnExecutionPipeline;
-use crate::runtime::trace::TraceEvent;
+use crate::runtime::trace::{PipelineData, SpanPayload};
 use crate::runtime::turn_execution_ctx::TurnExecutionContext;
-use std::time::Instant;
 
 pub struct TurnRuntime {
     pipelines: Vec<Box<dyn TurnExecutionPipeline>>,
@@ -18,12 +17,22 @@ impl TurnRuntime {
         for pipeline in &self.pipelines {
             let stage = pipeline.stage();
             sink.emit(TurnEvent::StageStarted(stage));
-            let start = Instant::now();
-            pipeline.execute(ctx).await?;
-            ctx.trace.events.push(TraceEvent {
-                stage,
-                elapsed: start.elapsed(),
-            });
+            let pending = ctx.trace.begin_span("aise.pipeline", stage);
+            let outcome = pipeline.execute(ctx).await;
+            let payload = match &outcome {
+                Ok(()) => SpanPayload::Pipeline(PipelineData {
+                    stage: stage.to_owned(),
+                    status: "ok".into(),
+                    error: None,
+                }),
+                Err(error) => SpanPayload::Pipeline(PipelineData {
+                    stage: stage.to_owned(),
+                    status: "error".into(),
+                    error: Some(error.to_string()),
+                }),
+            };
+            ctx.trace.end_span_with(pending, &payload);
+            outcome?;
         }
         Ok(())
     }

@@ -15,7 +15,7 @@
       "env": {
         "RUST_BACKTRACE": "1",
         "RUST_LOG": "info",
-        "AISE_CONFIG": "${workspaceFolder}/config/server.toml"
+        "AISE_CONFIG": "${workspaceFolder}/config/aise_config.toml"
       }
     },
     {
@@ -28,7 +28,7 @@
       "environment": [
         { "name": "RUST_BACKTRACE", "value": "1" },
         { "name": "RUST_LOG", "value": "info" },
-        { "name": "AISE_CONFIG", "value": "${workspaceFolder}/config/server.toml" }
+        { "name": "AISE_CONFIG", "value": "${workspaceFolder}/config/aise_config.toml" }
       ],
       "console": "integratedTerminal",
       "preLaunchTask": "build"

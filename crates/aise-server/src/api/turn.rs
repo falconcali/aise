@@ -23,9 +23,10 @@ pub async fn run_turn(
         .ok_or_else(|| ApiError::NotFound("session".into()))?;
     let story_id = session.story_id.clone();
     let player_input = req.player_input;
+    let include_trace = req.include_trace;
 
     let (tx, rx) = futures::channel::mpsc::unbounded();
-    let sink = SseSink { tx };
+    let sink = SseSink { tx, include_trace };
 
     let engine = state.engine.clone();
     let session_for_task = session.clone();
@@ -43,6 +44,7 @@ pub async fn run_turn(
 
 struct SseSink {
     tx: UnboundedSender<Event>,
+    include_trace: bool,
 }
 
 impl TurnEventSink for SseSink {
@@ -54,6 +56,15 @@ impl TurnEventSink for SseSink {
                 Event::default().event("validation").data(if pass { "pass" } else { "fail" })
             }
             TurnEvent::Finished { turn_id } => Event::default().event("done").data(turn_id.to_string()),
+            TurnEvent::Trace(trace) => {
+                if !self.include_trace {
+                    return;
+                }
+                match serde_json::to_string(&trace) {
+                    Ok(json) => Event::default().event("trace").data(json),
+                    Err(_) => return,
+                }
+            }
         };
         let _ = self.tx.unbounded_send(sse);
     }

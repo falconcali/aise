@@ -274,7 +274,7 @@ struct TurnExecutionContext {
 
 
     trace:
-        ExecutionTrace,
+        TraceRecorder,
 }
 ```
 

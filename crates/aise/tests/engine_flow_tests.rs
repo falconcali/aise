@@ -90,7 +90,7 @@ async fn full_flow_returns_hello_world_and_persists() {
 
     {
         let events = recorder.events.lock().unwrap();
-        assert_eq!(events.len(), 11);
+        assert_eq!(events.len(), 12);
         assert!(events.iter().any(|e| matches!(e, TurnEvent::StageStarted("turn_initializer"))));
         assert!(
             events
@@ -106,6 +106,7 @@ async fn full_flow_returns_hello_world_and_persists() {
         assert!(events.iter().any(|e| matches!(e, TurnEvent::Validation { pass: true })));
         assert!(events.iter().any(|e| matches!(e, TurnEvent::Token(t) if t == "Hello World")));
         assert!(events.iter().any(|e| matches!(e, TurnEvent::Finished { .. })));
+        assert!(events.iter().any(|e| matches!(e, TurnEvent::Trace(_))));
     }
 
     let store = engine.store();
@@ -113,6 +114,56 @@ async fn full_flow_returns_hello_world_and_persists() {
     assert_eq!(turns.len(), 1);
     assert_eq!(turns[0].story_text, "Hello World");
     assert_eq!(turns[0].player_input, "开始吧");
+
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn turn_trace_records_llm_prompt_and_response() {
+    let db = temp_db_path("trace");
+    let engine = build_engine(&db).await;
+    let recorder = Recorder::default();
+    let story_id = StoryId::from("story-trace");
+
+    let result = engine
+        .run_turn(&story_id, "请讲一个故事".to_string(), &recorder)
+        .await
+        .expect("run turn");
+
+    let events = recorder.events.lock().unwrap();
+    let trace = events
+        .iter()
+        .find_map(|e| match e {
+            TurnEvent::Trace(t) => Some(t.clone()),
+            _ => None,
+        })
+        .expect("trace event");
+    assert_eq!(trace.turn_id, result.turn_id.to_string());
+    assert_eq!(trace.story_id, "story-trace");
+    assert!(!trace.trace_id.is_empty());
+    assert!(trace.duration_ms > 0);
+
+    let kinds: Vec<_> = trace.spans.iter().map(|s| s.kind.as_str()).collect();
+    assert!(kinds.contains(&"aise.turn"));
+    assert!(kinds.contains(&"aise.pipeline"));
+    assert!(kinds.contains(&"aise.llm_call"));
+    assert!(kinds.contains(&"aise.tool_call"));
+    assert!(kinds.contains(&"aise.validation"));
+    assert!(kinds.contains(&"aise.persist"));
+
+    let llm = trace.spans.iter().find(|s| s.kind == "aise.llm_call").expect("llm span");
+    let payload = llm.payload.as_object().expect("llm payload object");
+    assert_eq!(payload.get("status").and_then(|v| v.as_str()), Some("ok"));
+    assert_eq!(payload.get("response").and_then(|v| v.as_str()), Some("Hello World"));
+    let messages = payload.get("messages").and_then(|v| v.as_array()).expect("messages");
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].get("role").and_then(|v| v.as_str()), Some("user"));
+    assert_eq!(messages[0].get("content").and_then(|v| v.as_str()), Some("请讲一个故事"));
+
+    let root = trace.spans.iter().find(|s| s.kind == "aise.turn").expect("root span");
+    let root_payload = root.payload.as_object().expect("root payload");
+    assert_eq!(root_payload.get("status").and_then(|v| v.as_str()), Some("ok"));
+    assert_eq!(root_payload.get("player_input").and_then(|v| v.as_str()), Some("请讲一个故事"));
 
     let _ = std::fs::remove_file(&db);
 }

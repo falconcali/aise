@@ -2,7 +2,7 @@ use crate::character::character_model::CharacterThought;
 use crate::context::ctx_model::{BaselineContext, ContextItem};
 use crate::domain::ids::{StoryId, TurnId};
 use crate::planning::writer_planner::WriterPlan;
-use crate::runtime::trace::ExecutionTrace;
+use crate::runtime::trace::TraceRecorder;
 use crate::runtime::turn_budget::TurnBudget;
 use crate::story::story_model::StoryDraft;
 use crate::validation::ValidationResult;
@@ -25,7 +25,7 @@ pub struct TurnExecutionContext {
     pub validation: ValidationResult,
 
     pub budget: TurnBudget,
-    pub trace: ExecutionTrace,
+    pub trace: TraceRecorder,
 }
 
 impl TurnExecutionContext {
@@ -41,7 +41,7 @@ impl TurnExecutionContext {
             draft: None,
             validation: ValidationResult::default(),
             budget: TurnBudget::default(),
-            trace: ExecutionTrace::default(),
+            trace: TraceRecorder::new(),
         }
     }
 }

@@ -2,10 +2,11 @@ use crate::domain::narrative::StoryTurn;
 use crate::error::AiseError;
 use crate::persistence::store::{Store, TurnCommit};
 use crate::runtime::pipeline::TurnExecutionPipeline;
+use crate::runtime::trace::{PersistData, SpanPayload};
 use crate::runtime::turn_execution_ctx::TurnExecutionContext;
 use async_trait::async_trait;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub struct TurnCommitter {
     store: Arc<dyn Store>,
@@ -47,6 +48,25 @@ impl TurnExecutionPipeline for TurnCommitter {
             memory: Vec::new(),
             summary: String::new(),
         };
-        self.store.commit_turn(&commit).await
+        let pending = ctx.trace.begin_span("aise.persist", "turn_committer.commit");
+        let started = Instant::now();
+        let outcome = self.store.commit_turn(&commit).await;
+        let latency_ms = started.elapsed().as_millis() as u64;
+        let payload = match &outcome {
+            Ok(()) => SpanPayload::Persist(PersistData {
+                turn_id: ctx.turn_id.to_string(),
+                status: "ok".into(),
+                error: None,
+                latency_ms,
+            }),
+            Err(error) => SpanPayload::Persist(PersistData {
+                turn_id: ctx.turn_id.to_string(),
+                status: "error".into(),
+                error: Some(error.to_string()),
+                latency_ms,
+            }),
+        };
+        ctx.trace.end_span_with(pending, &payload);
+        outcome
     }
 }

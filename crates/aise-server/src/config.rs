@@ -52,7 +52,7 @@ impl ServerConfig {
     pub fn config_path() -> PathBuf {
         std::env::var_os("AISE_CONFIG")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("config").join("server.toml"))
+            .unwrap_or_else(|| PathBuf::from("config").join("aise_config.toml"))
     }
 
     pub fn load() -> Self {

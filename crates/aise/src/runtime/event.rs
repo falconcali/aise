@@ -1,4 +1,5 @@
 use crate::domain::ids::TurnId;
+use crate::runtime::trace::TurnTrace;
 
 #[derive(Debug, Clone)]
 pub enum TurnEvent {
@@ -9,6 +10,8 @@ pub enum TurnEvent {
     Validation { pass: bool },
 
     Finished { turn_id: TurnId },
+
+    Trace(TurnTrace),
 }
 
 pub trait TurnEventSink: Send + Sync {
