@@ -18,7 +18,7 @@ pub async fn build_engine(config: &ServerConfig) -> Result<Arc<AiseEngine>, anyh
 
     let runtime = TurnRuntime::new(vec![
         Box::<TurnInitializer>::default(),
-        Box::new(BaselineContextBuilder),
+        Box::new(BaselineContextBuilder::new(store.clone())),
         Box::new(WriterPlanner),
         Box::new(ContextRetrievalPipeline),
         Box::new(CharacterThinkPipeline),

@@ -1,3 +1,4 @@
+pub mod event;
 pub mod initializer;
 pub mod pipeline;
 pub mod trace;
@@ -5,6 +6,7 @@ pub mod turn_budget;
 pub mod turn_execution_ctx;
 pub mod turn_runtime;
 
+pub use event::{TurnEvent, TurnEventSink, TurnResult};
 pub use initializer::TurnInitializer;
 pub use pipeline::TurnExecutionPipeline;
 pub use trace::{ExecutionTrace, TraceEvent};

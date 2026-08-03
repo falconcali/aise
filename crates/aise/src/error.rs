@@ -18,6 +18,9 @@ pub enum AiseError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+
     #[error("validation failed after {0} repair rounds; giving up")]
     ValidationBudgetExhausted(u32),
 

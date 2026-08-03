@@ -35,7 +35,16 @@ impl TurnExecutionPipeline for WriterPlanner {
         "writer_planner"
     }
 
-    async fn execute(&self, _ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
+    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
+        ctx.plan = Some(WriterPlan {
+            need_retrieval: false,
+            need_character_thinking: false,
+            retrieval_requests: Vec::new(),
+            character_requests: Vec::new(),
+            story_goal: StoryGoal {
+                summary: ctx.player_input.clone(),
+            },
+        });
         Ok(())
     }
 }

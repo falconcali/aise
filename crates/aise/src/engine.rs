@@ -1,5 +1,5 @@
 use crate::config::AiseConfig;
-use crate::domain::ids::{StoryId, TurnId};
+use crate::domain::ids::StoryId;
 use crate::error::AiseError;
 use crate::llm::provider::LlmProvider;
 use crate::persistence::store::Store;
@@ -7,26 +7,7 @@ use crate::runtime::turn_execution_ctx::TurnExecutionContext;
 use crate::runtime::turn_runtime::TurnRuntime;
 use std::sync::Arc;
 
-#[derive(Debug, Clone)]
-pub enum TurnEvent {
-    StageStarted(&'static str),
-
-    Token(String),
-
-    Validation { pass: bool },
-
-    Finished { turn_id: TurnId },
-}
-
-pub trait TurnEventSink: Send + Sync {
-    fn emit(&self, event: TurnEvent);
-}
-
-#[derive(Debug, Clone)]
-pub struct TurnResult {
-    pub turn_id: TurnId,
-    pub story_text: String,
-}
+pub use crate::runtime::event::{TurnEvent, TurnEventSink, TurnResult};
 
 pub struct AiseEngine {
     runtime: TurnRuntime,
@@ -36,7 +17,6 @@ pub struct AiseEngine {
 }
 
 impl AiseEngine {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(runtime: TurnRuntime, store: Arc<dyn Store>, llm: Arc<dyn LlmProvider>, config: AiseConfig) -> Self {
         Self {
             runtime,
@@ -65,11 +45,15 @@ impl AiseEngine {
         sink: &dyn TurnEventSink,
     ) -> Result<TurnResult, AiseError> {
         let mut ctx = TurnExecutionContext::new(story_id.clone(), player_input);
-        self.runtime.run(&mut ctx).await?;
+        self.runtime.run(&mut ctx, sink).await?;
 
         let turn_id = ctx.turn_id.clone();
         let story_text = ctx.draft.as_ref().map(|d| d.story_text.clone()).unwrap_or_default();
 
+        sink.emit(TurnEvent::Validation {
+            pass: ctx.validation.pass,
+        });
+        sink.emit(TurnEvent::Token(story_text.clone()));
         sink.emit(TurnEvent::Finished {
             turn_id: turn_id.clone(),
         });

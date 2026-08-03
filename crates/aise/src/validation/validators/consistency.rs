@@ -7,6 +7,9 @@ pub struct ConsistencyValidator;
 
 impl ConsistencyValidator {
     pub async fn validate(&self, _ctx: &TurnExecutionContext) -> Result<ValidationResult, AiseError> {
-        Ok(ValidationResult::default())
+        Ok(ValidationResult {
+            pass: true,
+            issues: Vec::new(),
+        })
     }
 }
