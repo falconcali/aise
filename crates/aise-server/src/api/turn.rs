@@ -1,0 +1,70 @@
+use std::convert::Infallible;
+use std::sync::Arc;
+
+use aise::{TurnEvent, TurnEventSink};
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use futures::channel::mpsc::UnboundedSender;
+use futures::stream::{Stream, StreamExt};
+
+use crate::api::dto::TurnRequest;
+use crate::api::state::AppState;
+use crate::error::ApiError;
+use crate::session::SessionId;
+
+/// Streams one Turn to the browser over SSE:
+/// `event: stage|token|validation|done`.
+pub async fn run_turn(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(req): Json<TurnRequest>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let session = state
+        .registry
+        .get(&SessionId::new(id))
+        .await
+        .ok_or_else(|| ApiError::NotFound("session".into()))?;
+    let story_id = session.story_id.clone();
+    let player_input = req.player_input;
+
+    // Bridge engine events onto a channel the SSE stream reads.
+    // Unbounded for now; backpressure lands with the token-stream budget
+    // (R-ARCH-03).
+    let (tx, rx) = futures::channel::mpsc::unbounded();
+    let sink = SseSink { tx };
+
+    let engine = state.engine.clone();
+    let session_for_task = session.clone();
+    tokio::spawn(async move {
+        // Per-session lock serializes concurrent Turns (world state safety);
+        // held for the whole Turn, released when the task ends.
+        let _guard = session_for_task.lock_turn().await;
+        match engine.run_turn(&story_id, player_input, &sink).await {
+            Ok(_) => {}
+            Err(e) => tracing::error!(error = %e, "turn failed"),
+        }
+    });
+
+    let stream = rx.map(Ok::<_, Infallible>);
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+/// Bridges engine `TurnEvent`s to SSE `Event`s.
+struct SseSink {
+    tx: UnboundedSender<Event>,
+}
+
+impl TurnEventSink for SseSink {
+    fn emit(&self, event: TurnEvent) {
+        let sse = match event {
+            TurnEvent::StageStarted(stage) => Event::default().event("stage").data(stage),
+            TurnEvent::Token(text) => Event::default().event("token").data(text),
+            TurnEvent::Validation { pass } => {
+                Event::default().event("validation").data(if pass { "pass" } else { "fail" })
+            }
+            TurnEvent::Finished { turn_id } => Event::default().event("done").data(turn_id.to_string()),
+        };
+        let _ = self.tx.unbounded_send(sse);
+    }
+}

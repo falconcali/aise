@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AISE — AI Story Engine</title>
+  <link rel="stylesheet" href="/assets/style.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <h1>AISE</h1>
+      <form id="new-session-form" autocomplete="off">
+        <input id="session-name" placeholder="新故事名称" />
+        <button type="submit">新建</button>
+      </form>
+      <ul id="session-list"></ul>
+      <p id="sidebar-hint">选择或新建一个故事会话</p>
+    </aside>
+    <main id="stage">
+      <div id="story"></div>
+      <form id="turn-form" autocomplete="off">
+        <input id="player-input" placeholder="输入你的行动…" disabled />
+        <button id="send-btn" type="submit" disabled>发送</button>
+      </form>
+    </main>
+  </div>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

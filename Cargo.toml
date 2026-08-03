@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = ["crates/aise", "crates/aise-server"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+
+# Crate-wide lint policy. Each member opts in via `[lints] workspace = true`.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+# Single source of truth for dependency versions across members.
+[workspace.dependencies]
+async-trait = "0.1"
+anyhow = "1"
+axum = "0.8"
+futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+tower-http = { version = "0.6", features = ["fs", "trace", "cors"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy = "0.15"
+uuid = { version = "1", features = ["v4"] }

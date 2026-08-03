@@ -9,6 +9,13 @@ target/
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
 
+# SQLite database files created at runtime
+*.db
+
+# Runtime data (databases) and logs -- deliberately not version-controlled.
+/data/*
+/trace/*
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
