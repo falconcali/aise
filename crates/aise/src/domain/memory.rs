@@ -17,10 +17,3 @@ pub enum MemoryKind {
     Inferred,
     Secret,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoryPatch {
-    pub owner: CharacterId,
-    pub kind: MemoryKind,
-    pub content: String,
-}

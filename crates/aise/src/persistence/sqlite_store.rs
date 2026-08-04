@@ -1,3 +1,4 @@
+use crate::core::turn_validation::StateChange;
 use crate::domain::character::CharacterState;
 use crate::domain::ids::{CharacterId, StoryId};
 use crate::domain::memory::{MemoryEntry, MemoryKind};
@@ -133,26 +134,19 @@ impl Store for SqliteStore {
     async fn commit_turn(&self, commit: &TurnCommit) -> Result<(), AiseError> {
         let mut tx = self.pool.begin().await?;
 
-        let world = match &commit.world {
-            Some(w) => w.clone(),
-            None => WorldState {
-                id: commit.story_id.clone(),
-                name: String::new(),
-                facts: Vec::new(),
-                characters: Vec::new(),
-            },
-        };
-        let world_state = serde_json::to_string(&world)?;
-        sqlx::query(
-            "INSERT INTO worlds (id, name, state, created_at) VALUES (?, ?, ?, ?) \
-             ON CONFLICT(id) DO UPDATE SET name = excluded.name, state = excluded.state",
-        )
-        .bind(world.id.as_str())
-        .bind(&world.name)
-        .bind(&world_state)
-        .bind(commit.turn.created_at)
-        .execute(&mut *tx)
-        .await?;
+        if let StateChange::Replace(world) = &commit.world {
+            let world_state = serde_json::to_string(world)?;
+            sqlx::query(
+                "INSERT INTO worlds (id, name, state, created_at) VALUES (?, ?, ?, ?) \
+                 ON CONFLICT(id) DO UPDATE SET name = excluded.name, state = excluded.state",
+            )
+            .bind(world.id.as_str())
+            .bind(&world.name)
+            .bind(&world_state)
+            .bind(commit.turn.created_at)
+            .execute(&mut *tx)
+            .await?;
+        }
 
         sqlx::query(
             "INSERT INTO story_turns (id, world_id, player_input, story_text, summary_delta, status, created_at) \

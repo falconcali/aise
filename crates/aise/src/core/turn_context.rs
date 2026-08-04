@@ -4,7 +4,7 @@ use crate::core::turn_contract::{CommittedTurnResult, TurnControl, TurnIdentity,
 use crate::core::turn_data::{BaselineContext, CharacterThought, ContextItem, WriterPlan};
 use crate::core::turn_pipeline::TurnStage;
 use crate::core::turn_trace::{PendingSpan, TraceRecorder};
-use crate::core::turn_validation::ValidationResult;
+use crate::core::turn_validation::{ValidatedChangeSet, ValidationDecision, ValidationResult};
 use crate::domain::ids::{StoryId, TurnId};
 use crate::error::AiseError;
 use serde::Serialize;
@@ -22,7 +22,9 @@ pub struct TurnExecutionContext {
     retrieved: Vec<ContextItem>,
     thoughts: Vec<CharacterThought>,
     proposal: Option<StoryProposal>,
+    proposal_revision: u32,
     validation: Option<ValidationResult>,
+    change_set: Option<ValidatedChangeSet>,
     committed_result: Option<CommittedTurnResult>,
 }
 
@@ -51,7 +53,9 @@ impl TurnExecutionContext {
             retrieved: Vec::new(),
             thoughts: Vec::new(),
             proposal: None,
+            proposal_revision: 0,
             validation: None,
+            change_set: None,
             committed_result: None,
         })
     }
@@ -172,16 +176,63 @@ impl TurnExecutionContext {
         Ok(())
     }
 
-    pub fn set_validation_result(&mut self, result: ValidationResult) -> Result<(), AiseError> {
+    pub fn set_validation_result(
+        &mut self,
+        result: ValidationResult,
+        change_set: Option<ValidatedChangeSet>,
+    ) -> Result<(), AiseError> {
         self.expect_phase(TurnPhase::ProposalReady)?;
-        let next = if result.pass {
-            TurnPhase::ReadyToCommit
-        } else {
-            TurnPhase::Failed
-        };
+        match result.decision() {
+            ValidationDecision::Pass => {
+                let change_set = change_set
+                    .ok_or_else(|| AiseError::InvariantViolation("pass validation requires a change set".into()))?;
+                self.change_set = Some(change_set);
+                self.phase = TurnPhase::ReadyToCommit;
+            }
+            ValidationDecision::Repair => {
+                if change_set.is_some() {
+                    return Err(AiseError::InvariantViolation(
+                        "repair validation must not carry a change set".into(),
+                    ));
+                }
+                self.phase = TurnPhase::RepairRequired;
+            }
+            ValidationDecision::Reject => {
+                if change_set.is_some() {
+                    return Err(AiseError::InvariantViolation(
+                        "reject validation must not carry a change set".into(),
+                    ));
+                }
+                self.phase = TurnPhase::Failed;
+            }
+        }
         self.validation = Some(result);
-        self.phase = next;
         Ok(())
+    }
+
+    pub fn replace_story_proposal(&mut self, proposal: StoryProposal) -> Result<(), AiseError> {
+        self.expect_phase(TurnPhase::RepairRequired)?;
+        self.proposal = Some(proposal);
+        self.validation = None;
+        self.change_set = None;
+        self.proposal_revision = self.proposal_revision.saturating_add(1);
+        self.phase = TurnPhase::ProposalReady;
+        Ok(())
+    }
+
+    pub fn validation_decision(&self) -> Result<ValidationDecision, AiseError> {
+        match &self.validation {
+            Some(result) => Ok(result.decision()),
+            None => Err(AiseError::InvariantViolation("no validation result".into())),
+        }
+    }
+
+    pub fn change_set(&self) -> Option<&ValidatedChangeSet> {
+        self.change_set.as_ref()
+    }
+
+    pub fn proposal_revision(&self) -> u32 {
+        self.proposal_revision
     }
 
     pub fn set_committed_result(&mut self, result: CommittedTurnResult) -> Result<(), AiseError> {

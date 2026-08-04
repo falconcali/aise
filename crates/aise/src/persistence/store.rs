@@ -1,3 +1,4 @@
+use crate::core::turn_validation::StateChange;
 use crate::domain::character::CharacterState;
 use crate::domain::ids::{CharacterId, StoryId};
 use crate::domain::memory::MemoryEntry;
@@ -22,7 +23,6 @@ pub struct TurnCommit {
     pub turn: StoryTurn,
     pub events: Vec<crate::domain::narrative::StoryEvent>,
     pub characters: Vec<CharacterState>,
-    pub world: Option<WorldState>,
+    pub world: StateChange<WorldState>,
     pub memory: Vec<MemoryEntry>,
-    pub summary: String,
 }

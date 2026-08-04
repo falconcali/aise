@@ -76,7 +76,7 @@ Errors and observability:
 - `R-OBS-05` Core/domain MUST use typed (`thiserror`) errors and NEVER leak
   `anyhow::Error`; the app layer MAY use `anyhow`.
 
-Project-specific hard constraints (see doc/design/Architecture.md):
+Project-specific hard constraints (see doc/design/2026-08-04-Architecture-gpt.md):
 - `R-AISE-01` Turn execution MUST be orchestrated by `TurnRuntime`; pipelines
   MUST NOT call each other directly.
 - `R-AISE-02` Every pipeline MUST implement `TurnExecutionPipeline` and

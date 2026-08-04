@@ -1,5 +1,5 @@
 use aise::AiseError;
-use aise::core::story_proposal::StoryProposal;
+use aise::core::story_proposal::{ProposedWorldChange, StoryProposal};
 use aise::core::turn_budget::{TurnBudget, TurnBudgetLimits};
 use aise::core::turn_context::TurnExecutionContext;
 use aise::core::turn_contract::{
@@ -8,7 +8,7 @@ use aise::core::turn_contract::{
 use aise::core::turn_data::{BaselineContext, ContextItem, ContextSource, WriterPlan};
 use aise::core::turn_pipeline::TurnExecutionPipeline;
 use aise::core::turn_trace::TraceRecorder;
-use aise::core::turn_validation::ValidationResult;
+use aise::core::turn_validation::{StateChange, ValidatedChangeSet, ValidationDecision, ValidationResult};
 use aise::domain::ids::{StoryId, TurnId};
 use std::time::{Duration, Instant};
 
@@ -42,6 +42,36 @@ fn new_ctx() -> TurnExecutionContext {
         TraceRecorder::new(),
     )
     .unwrap()
+}
+
+fn proposal(text: &str) -> StoryProposal {
+    StoryProposal {
+        story_text: text.to_string(),
+        events: Vec::new(),
+        character_changes: Vec::new(),
+        world_change: ProposedWorldChange::default(),
+        memory_changes: Vec::new(),
+        summary_delta: None,
+    }
+}
+
+fn change_set(text: &str) -> ValidatedChangeSet {
+    ValidatedChangeSet::new(
+        text.to_string(),
+        Vec::new(),
+        Vec::new(),
+        StateChange::Unchanged,
+        Vec::new(),
+        None,
+    )
+}
+
+fn advance_to_proposal(ctx: &mut TurnExecutionContext) {
+    ctx.complete_initialization().unwrap();
+    ctx.set_prepared_context(BaselineContext::default()).unwrap();
+    ctx.set_writer_plan(WriterPlan::default()).unwrap();
+    ctx.complete_context_preparation().unwrap();
+    ctx.set_story_proposal(proposal("text")).unwrap();
 }
 
 #[test]
@@ -83,8 +113,11 @@ fn request_normalizes_and_digests_stable() {
 fn context_rejects_invalid_phase_transition() {
     let mut ctx = new_ctx();
     assert!(ctx.set_writer_plan(WriterPlan::default()).is_err());
-    assert!(ctx.set_story_proposal(StoryProposal::default()).is_err());
-    assert!(ctx.set_validation_result(ValidationResult::default()).is_err());
+    assert!(ctx.set_story_proposal(proposal("text")).is_err());
+    assert!(
+        ctx.set_validation_result(ValidationResult::reject("bad", "rejected"), None)
+            .is_err()
+    );
     assert!(
         ctx.set_committed_result(CommittedTurnResult {
             turn_id: TurnId::from("turn-1"),
@@ -138,21 +171,11 @@ fn context_advances_through_phases() {
     ctx.complete_context_preparation().unwrap();
     assert_eq!(ctx.phase(), TurnPhase::ContextReady);
 
-    ctx.set_story_proposal(StoryProposal {
-        story_text: "text".into(),
-        events: Vec::new(),
-        character_updates: Vec::new(),
-        world_updates: Vec::new(),
-        memory_updates: Vec::new(),
-    })
-    .unwrap();
+    ctx.set_story_proposal(proposal("text")).unwrap();
     assert_eq!(ctx.phase(), TurnPhase::ProposalReady);
 
-    ctx.set_validation_result(ValidationResult {
-        pass: true,
-        issues: Vec::new(),
-    })
-    .unwrap();
+    ctx.set_validation_result(ValidationResult::pass(), Some(change_set("text")))
+        .unwrap();
     assert_eq!(ctx.phase(), TurnPhase::ReadyToCommit);
 
     ctx.set_committed_result(CommittedTurnResult {
@@ -166,25 +189,13 @@ fn context_advances_through_phases() {
 #[test]
 fn failed_validation_never_reaches_ready_to_commit() {
     let mut ctx = new_ctx();
-    ctx.complete_initialization().unwrap();
-    ctx.set_prepared_context(BaselineContext::default()).unwrap();
-    ctx.set_writer_plan(WriterPlan::default()).unwrap();
-    ctx.complete_context_preparation().unwrap();
-    ctx.set_story_proposal(StoryProposal {
-        story_text: "text".into(),
-        events: Vec::new(),
-        character_updates: Vec::new(),
-        world_updates: Vec::new(),
-        memory_updates: Vec::new(),
-    })
-    .unwrap();
+    advance_to_proposal(&mut ctx);
 
-    ctx.set_validation_result(ValidationResult {
-        pass: false,
-        issues: Vec::new(),
-    })
-    .unwrap();
+    ctx.set_validation_result(ValidationResult::reject("bad", "rejected"), None)
+        .unwrap();
     assert_eq!(ctx.phase(), TurnPhase::Failed);
+    assert_eq!(ctx.validation_decision().unwrap(), ValidationDecision::Reject);
+    assert!(ctx.change_set().is_none());
     assert!(
         ctx.set_committed_result(CommittedTurnResult {
             turn_id: TurnId::from("turn-1"),
@@ -192,4 +203,48 @@ fn failed_validation_never_reaches_ready_to_commit() {
         })
         .is_err()
     );
+}
+
+#[test]
+fn pass_is_the_only_decision_that_carries_change_set() {
+    let mut ctx = new_ctx();
+    advance_to_proposal(&mut ctx);
+
+    assert!(ctx.set_validation_result(ValidationResult::pass(), None).is_err());
+    assert!(
+        ctx.set_validation_result(ValidationResult::reject("bad", "rejected"), Some(change_set("text")))
+            .is_err()
+    );
+    assert!(
+        ctx.set_validation_result(ValidationResult::repair("fixable", "fix me"), Some(change_set("text")))
+            .is_err()
+    );
+
+    ctx.set_validation_result(ValidationResult::pass(), Some(change_set("text")))
+        .unwrap();
+    assert_eq!(ctx.phase(), TurnPhase::ReadyToCommit);
+    assert_eq!(ctx.validation_decision().unwrap(), ValidationDecision::Pass);
+    assert_eq!(ctx.change_set().unwrap().story_text(), "text");
+}
+
+#[test]
+fn repair_invalidates_previous_validation_and_change_set() {
+    let mut ctx = new_ctx();
+    advance_to_proposal(&mut ctx);
+
+    ctx.set_validation_result(ValidationResult::repair("fixable", "fix me"), None)
+        .unwrap();
+    assert_eq!(ctx.phase(), TurnPhase::RepairRequired);
+    assert_eq!(ctx.proposal_revision(), 0);
+
+    ctx.replace_story_proposal(proposal("v2")).unwrap();
+    assert_eq!(ctx.phase(), TurnPhase::ProposalReady);
+    assert_eq!(ctx.proposal_revision(), 1);
+    assert!(ctx.validation().is_none());
+    assert!(ctx.change_set().is_none());
+
+    ctx.set_validation_result(ValidationResult::pass(), Some(change_set("v2")))
+        .unwrap();
+    assert_eq!(ctx.phase(), TurnPhase::ReadyToCommit);
+    assert_eq!(ctx.change_set().unwrap().story_text(), "v2");
 }

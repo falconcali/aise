@@ -23,9 +23,3 @@ pub enum FactSource {
     CommittedTurn,
     UserEdit,
 }
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct WorldPatch {
-    pub add_facts: Vec<WorldFact>,
-    pub remove_fact_indices: Vec<usize>,
-}

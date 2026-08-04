@@ -20,7 +20,7 @@
 
 ## 1.1 v3.1 修订说明
 
-本版本相对 v3.0 的修订（与 Turn Runtime Codegen Spec 同步，适用基线 `main@c14f84e`）：
+本版本相对 v3.0 的修订（与 `2026-08004-Turn-Runtime-Codegen-Spec-gpt.md` 同步，适用基线 `main@c14f84e`）：
 
 1. Story 串行化由 `AiseEngine` 内部的 `StoryTurnCoordinator` 强制，不再依赖 `Session::lock_turn`。
 2. Session 是临时连接资源，Story 是持久化领域对象，两者不构成一对一架构不变量。

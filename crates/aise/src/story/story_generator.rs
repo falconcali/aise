@@ -1,8 +1,7 @@
-use crate::core::story_proposal::StoryProposal;
+use crate::core::story_proposal::{ProposedEvent, ProposedWorldChange, StoryProposal};
 use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::domain::ids::EventId;
-use crate::domain::narrative::{EventKind, StoryEvent};
+use crate::domain::narrative::EventKind;
 use crate::error::AiseError;
 use crate::llm::gateway::LlmGateway;
 use crate::llm::message::{ChatMessage, CompletionSpec, Role};
@@ -39,20 +38,16 @@ impl TurnExecutionPipeline for StoryGenerator {
         let scope = ctx.llm_call_scope(TurnStage::StoryGenerator);
         let completion = self.gateway.complete(scope, spec).await?;
         let story_text = completion.text;
-        let turn_id = ctx.turn_id().clone();
-        let event = StoryEvent {
-            id: EventId::from(format!("{turn_id}#0")),
-            turn_id,
-            seq: 0,
-            kind: EventKind::Action,
-            payload: serde_json::json!({ "text": story_text }),
-        };
         ctx.set_story_proposal(StoryProposal {
-            story_text,
-            events: vec![event],
-            character_updates: Vec::new(),
-            world_updates: Vec::new(),
-            memory_updates: Vec::new(),
+            story_text: story_text.clone(),
+            events: vec![ProposedEvent {
+                kind: EventKind::Action,
+                summary: story_text,
+            }],
+            character_changes: Vec::new(),
+            world_change: ProposedWorldChange::default(),
+            memory_changes: Vec::new(),
+            summary_delta: None,
         })
     }
 }

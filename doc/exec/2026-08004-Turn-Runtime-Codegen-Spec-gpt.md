@@ -6,15 +6,15 @@
 
 适用基线：`main@c14f84e`。
 
-本文不是新的业务架构，而是将 [Architecture.md](./Architecture.md) 中的目标架构收敛为可执行的文件、类型、接口、迁移顺序和验收标准。
+本文不是新的业务架构，而是将 [2026-08-04-Architecture-gpt.md](./2026-08-04-Architecture-gpt.md) 中的目标架构收敛为可执行的文件、类型、接口、迁移顺序和验收标准。
 
 实现必须同时遵守：
 
 1. 根目录 `AGENTS.md` 及其按任务路由的 Guardrails。
-2. `Architecture.md` 中未被本文明确修订的架构约束。
+2. `2026-08-04-Architecture-gpt.md` 中未被本文明确修订的架构约束。
 3. 本文定义的实现边界、命名、顺序和验收条件。
 
-本文明确修订 `Architecture.md v3.0` 的以下内容，并要求在第一阶段同步形成 `Architecture.md v3.1`：
+本文明确修订 `2026-08-04-Architecture-gpt.md v3.0` 的以下内容，并要求在第一阶段同步形成 `2026-08-04-Architecture-gpt.md v3.1`：
 
 - Story 串行化由 `AiseEngine` 内部的 `StoryTurnCoordinator` 强制，不再依赖 `Session::lock_turn`。
 - Session 是临时连接资源，Story 是持久化领域对象，两者不构成一对一架构不变量。
@@ -1031,11 +1031,10 @@ HTTP 层不得创建无所有者的 `tokio::spawn`。
 
 只修改文档：
 
-1. 将本文第 1 节列出的架构修订同步到 `Architecture.md`。
+1. 将本文第 1 节列出的架构修订同步到 `2026-08-04-Architecture-gpt.md`。
 2. 更新模块图、Context 阶段表、串行化所有者和 LLM 章节。
-3. 将 `当前架构代码与设计对比.md` 的目标基线改为 v3.1，但保留真实实现差距。
 
-验收：三份文档之间不存在 Session lock、Initializer、Story Proposal、Core 依赖和 LLM 所有权冲突。
+验收：两份文档（`2026-08-04-Architecture-gpt.md` 与本文）之间不存在 Session lock、Initializer、Story Proposal、Core 依赖和 LLM 所有权冲突。
 
 ### Phase 1：Core Contracts 与有效 Context
 
@@ -1231,8 +1230,7 @@ rg "lock_turn|turn_lock" crates
 9. 不用 `unwrap`、`expect` 或 panic 表达业务错误。
 10. 不持有 Mutex/RwLock Guard 跨 `.await`。
 11. 不新增无界 Vec、channel、queue、retry、loop 或 fan-out。
-12. 完成后更新 `当前架构代码与设计对比.md` 的真实状态。
-13. 报告实际运行的 fmt、clippy、test 和静态检查结果；未运行不得声称通过。
+12. 报告实际运行的 fmt、clippy、test 和静态检查结果；未运行不得声称通过。
 
 若当前代码与本文不一致，AI 应按当前 Phase 迁移到本文目标，不得修改 Spec 来迁就旧实现。若发现本文内部矛盾、数据迁移不可恢复或需要扩大权威状态范围，应停止编码并提出具体问题。
 

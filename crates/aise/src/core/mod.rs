@@ -8,7 +8,10 @@ pub mod turn_pipeline;
 pub mod turn_trace;
 pub mod turn_validation;
 
-pub use story_proposal::StoryProposal;
+pub use story_proposal::{
+    ProposedAffinityDelta, ProposedCharacterChange, ProposedEvent, ProposedMemoryChange, ProposedWorldChange,
+    StoryProposal,
+};
 pub use turn_budget::{LlmReservation, TurnBudget, TurnBudgetLimits};
 pub use turn_context::{TurnExecutionContext, TurnLlmCallScope};
 pub use turn_contract::{
@@ -24,4 +27,6 @@ pub use turn_trace::{
     LlmCallContent, LlmCallData, MAX_LLM_CONTENT_CHARS, MAX_LLM_RESPONSE_CHARS, MessageData, PendingSpan, PersistData,
     PipelineData, SpanPayload, ToolCallData, TraceRecorder, TraceSpan, TurnData, TurnTrace, ValidationData, truncate,
 };
-pub use turn_validation::{Severity, ValidationIssue, ValidationResult, fatal};
+pub use turn_validation::{
+    Severity, StateChange, ValidatedChangeSet, ValidationDecision, ValidationIssue, ValidationResult, fatal, repairable,
+};

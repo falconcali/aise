@@ -20,7 +20,7 @@ NEVER load the whole L2/L3 set by default.
 ## L3 Module Map
 
 One L3 file per architecture module (see
-[doc/design/Architecture.md](../../design/Architecture.md) §15). Create the
+[doc/design/2026-08-04-Architecture-gpt.md](../../design/2026-08-04-Architecture-gpt.md) §15). Create the
 file on demand when a subsystem needs subsystem-specific rules; until then
 the path below is only a planned target.
 

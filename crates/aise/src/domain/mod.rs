@@ -4,8 +4,8 @@ pub mod memory;
 pub mod narrative;
 pub mod world;
 
-pub use character::{CharacterPatch, CharacterState, InternalState, Relation};
+pub use character::{CharacterState, InternalState, Relation};
 pub use ids::{CharacterId, EventId, MemoryId, StoryId, TurnId};
-pub use memory::{MemoryEntry, MemoryKind, MemoryPatch};
+pub use memory::{MemoryEntry, MemoryKind};
 pub use narrative::{EventKind, StoryEvent, StorySummary, StoryTurn};
-pub use world::{FactSource, WorldFact, WorldPatch, WorldState};
+pub use world::{FactSource, WorldFact, WorldState};

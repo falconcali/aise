@@ -21,11 +21,3 @@ pub struct Relation {
     pub other: CharacterId,
     pub affinity: i32,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CharacterPatch {
-    pub id: CharacterId,
-    pub set_health: Option<i32>,
-    pub set_goals: Option<Vec<String>>,
-    pub adjust_affinity: Vec<(CharacterId, i32)>,
-}

@@ -92,7 +92,7 @@ impl AiseEngine {
                 .committed_result()
                 .ok_or_else(|| AiseError::InvariantViolation("committed turn missing committed result".into()))?;
             sink.emit(TurnEvent::Validation {
-                pass: ctx.validation().map(|v| v.pass).unwrap_or(false),
+                pass: ctx.validation().map(|v| v.is_pass()).unwrap_or(false),
             });
             sink.emit(TurnEvent::Token(committed.story_text.clone()));
             sink.emit(TurnEvent::Finished {

@@ -1,7 +1,8 @@
 use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_event::{TurnEvent, TurnEventSink};
-use crate::core::turn_pipeline::TurnExecutionPipeline;
+use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::core::turn_trace::{PipelineData, SpanPayload};
+use crate::core::turn_validation::ValidationDecision;
 use crate::error::AiseError;
 
 pub struct TurnRuntime {
@@ -33,6 +34,15 @@ impl TurnRuntime {
             };
             ctx.trace().end_span_with(pending, &payload);
             outcome?;
+            if stage == TurnStage::Validation && !matches!(ctx.validation_decision()?, ValidationDecision::Pass) {
+                let issues = ctx.validation().map(|result| result.issues()).unwrap_or_default();
+                let detail = issues
+                    .iter()
+                    .map(|issue| format!("{}: {}", issue.code, issue.message))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(AiseError::ValidationRejected(detail));
+            }
         }
         Ok(())
     }

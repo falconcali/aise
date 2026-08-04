@@ -32,12 +32,15 @@ impl TurnExecutionPipeline for TurnCommitter {
                 ctx.phase()
             )));
         }
-        let (story_text, events) = {
-            let proposal = ctx
-                .proposal()
-                .ok_or_else(|| AiseError::InvariantViolation("no proposal to commit".into()))?;
-            (proposal.story_text.clone(), proposal.events.clone())
-        };
+        let change_set = ctx
+            .change_set()
+            .ok_or_else(|| AiseError::InvariantViolation("committer requires a validated change set".into()))?;
+        let story_text = change_set.story_text().to_owned();
+        let events = change_set.events().to_vec();
+        let characters = change_set.character_changes().to_vec();
+        let world = change_set.world_change().clone();
+        let memory = change_set.memory_changes().to_vec();
+        let summary_delta = change_set.summary_delta().map(str::to_owned);
         let turn_id = ctx.turn_id().clone();
         let committed_story_text = story_text.clone();
         let commit = TurnCommit {
@@ -46,14 +49,13 @@ impl TurnExecutionPipeline for TurnCommitter {
                 id: turn_id.clone(),
                 player_input: ctx.player_input().to_string(),
                 story_text,
-                summary_delta: None,
+                summary_delta,
                 created_at: ctx.identity().started_at_ms(),
             },
             events,
-            characters: Vec::new(),
-            world: None,
-            memory: Vec::new(),
-            summary: String::new(),
+            characters,
+            world,
+            memory,
         };
         let pending = ctx.trace().begin_span("aise.persist", "turn_committer.commit");
         let started = Instant::now();

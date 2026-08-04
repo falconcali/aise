@@ -6,7 +6,7 @@
 > 注入）与 `first_mes`（角色开场白）在 AISE 中被注入模型与故事开场取代（§3、§4）。
 >
 > 本文是设计文档，只定义目标格式、语义与集成点，不约束实现细节。与
-> `Architecture.md` 冲突时以 `Architecture.md` 为准。
+> `2026-08-04-Architecture-gpt.md` 冲突时以 `2026-08-04-Architecture-gpt.md` 为准。
 
 ## 1. 设计目标
 
@@ -20,7 +20,7 @@ Info）、上下文预设三件套，靠 `extensions` 字段做跨平台兼容�
   （`start`），角色卡不承载开场白。** AISE 不是跟角色聊天的工具，而是创造故事的
   工具，开场锚定故事起点，不绑定到某个角色。
 - **权威性语义**（`Canonical World Fact` / `Character Belief` / `Character Memory` /
-  `Retrieved Lore`，见 `Architecture.md` §10.2）——世界书条目必须带来源标签，不能
+  `Retrieved Lore`，见 `2026-08-04-Architecture-gpt.md` §10.2）——世界书条目必须带来源标签，不能
   全部当世界事实，否则违反 `R-AISE-07`。
 
 设计原则：
@@ -38,7 +38,7 @@ Info）、上下文预设三件套，靠 `extensions` 字段做跨平台兼容�
 - **知识（进上下文）与规则（驱动逻辑）必须分离，规则不扁平化成世界书条目。**
   `instructions.rules`、`boundaries`、`config`、角色卡 `think_style` /
   `knowledge_boundary` 是 Validator / Planner / Character Think 的确定性输入，
-  需要类型化字段供确定性校验（`Architecture.md` §13.1），文本条目无法承担。
+  需要类型化字段供确定性校验（`2026-08-04-Architecture-gpt.md` §13.1），文本条目无法承担。
 - 参考 ST 字段语义（`mes_example`、世界书 `constant` / `selective`），但明确标注
   权威性与知识边界，供 Validation 与 Retrieval 使用。`first_mes` /
   `alternate_greetings`（角色开场白）与 `position` / `depth`（按位置注入）等聊天
@@ -152,7 +152,7 @@ AISE 权威性字段。
 - AISE 的注入模型按**语义段**与**优先级**声明（§4 `config`），注入位置稳定、
   可预测，适合 Turn 驱动的确定性组装。
 
-权威性语义（对齐 `Architecture.md` §10.2 上下文分类）：
+权威性语义（对齐 `2026-08-04-Architecture-gpt.md` §10.2 上下文分类）：
 
 - `authority: canonical` 条目 → `ContextSource::WorldKnowledge`，可被视作世界事实，
   但不能自动写回 `WorldState`，写回必须走提案与 `ValidatedChangeSet`。
@@ -347,7 +347,7 @@ player_input              <- TurnRequest
   构造提示（`R-OBS-02` 要求包 span，结构化字段）。
 - `boundaries` 与 `knowledge_boundary` 供 `ValidationPipeline` 做
   `Knowledge Boundary` / `Player Control Boundary` 检查（确定性部分为硬门槛，
-  语义部分走 Narrative Validation，`Architecture.md` §13）。
+  语义部分走 Narrative Validation，`2026-08-04-Architecture-gpt.md` §13）。
 
 ## 6. 制作与发布工作流
 
@@ -377,13 +377,13 @@ aise pack export --story <id>        # 导出标准包（可携带封面 PNG）
 - `aise pack validate <file>`：校验 `spec` / `spec_version` / 必填字段 /
   世界书条目引用完整性；输出诊断（复用 `validation` 目录的 issue 结构）。
 - `aise pack import <file>`：幂等导入。同 `story_id`（由 `meta.title` + 版本哈希
-  派生）重复导入返回原 story，不重复种入（对齐 `Architecture.md` §4.3 幂等语义）。
+  派生）重复导入返回原 story，不重复种入（对齐 `2026-08-04-Architecture-gpt.md` §4.3 幂等语义）。
 - `aise pack export --story <id>`：从权威状态导出标准故事包，可带封面图。
 
 ### 6.2 导入落库（种子 vs 运行状态）
 
 新增种子表，与运行状态分离，避免覆盖 `FactSource` 语义（修复
-`当前架构代码与设计对比.md` §10.2 的 `world == None` 覆盖问题）：
+`world == None` 覆盖问题）：
 
 ```sql
 CREATE TABLE IF NOT EXISTS story_packs (
@@ -421,7 +421,7 @@ CREATE TABLE IF NOT EXISTS lore_entries (
 注入与匹配配置（`config.inject` / `config.retrieval`，§4）随 `story_packs.payload`
 原子导入，运行时由 Baseline Builder 解析进 `StoryReadSnapshot`，不在
 `lore_entries` 中逐行复制。第二步动态召回所需的 embedding 向量属于可重建的派生
-状态（`Architecture.md` §14.2），通过 outbox 在事务提交后更新，不落入
+状态（`2026-08-04-Architecture-gpt.md` §14.2），通过 outbox 在事务提交后更新，不落入
 `lore_entries`。
 
 ### 6.3 Store 端口扩展
