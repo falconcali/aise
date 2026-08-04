@@ -25,7 +25,6 @@ impl TurnExecutionPipeline for StoryGenerator {
     }
 
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
-        ctx.complete_context_preparation()?;
         let max_output = ctx.budget().remaining_output_tokens().min(u32::MAX as u64) as u32;
         let spec = CompletionSpec {
             messages: vec![ChatMessage {

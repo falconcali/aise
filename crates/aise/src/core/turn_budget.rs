@@ -23,6 +23,7 @@ struct TurnBudgetUsage {
     input_tokens: u64,
     output_tokens: u64,
     total_tokens: u64,
+    repair_rounds: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -73,6 +74,18 @@ impl TurnBudget {
 
     pub fn llm_calls(&self) -> u32 {
         self.usage.llm_calls
+    }
+
+    pub fn repair_rounds(&self) -> u32 {
+        self.usage.repair_rounds
+    }
+
+    pub fn consume_repair_round(&mut self) -> Result<(), AiseError> {
+        if self.usage.repair_rounds >= self.limits.max_repair_rounds {
+            return Err(AiseError::ValidationBudgetExhausted(self.usage.repair_rounds));
+        }
+        self.usage.repair_rounds += 1;
+        Ok(())
     }
 
     pub fn input_tokens(&self) -> u64 {

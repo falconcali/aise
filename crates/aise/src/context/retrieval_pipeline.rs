@@ -16,24 +16,7 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
     }
 
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
-        let plan = ctx
-            .plan()
-            .ok_or_else(|| AiseError::InvariantViolation("writer plan not set before retrieval".into()))?
-            .clone();
-        if plan.retrieval_requests.is_empty() {
-            let pending = ctx.trace().begin_span("aise.tool_call", "context.retrieval");
-            ctx.trace().end_span_with(
-                pending,
-                &SpanPayload::ToolCall(ToolCallData {
-                    tool: "context.retrieval".into(),
-                    args: serde_json::json!({ "need_retrieval": false }),
-                    result: serde_json::json!({ "items": 0 }),
-                    ok: true,
-                    latency_ms: 0,
-                }),
-            );
-            return ctx.set_retrieved_context(Vec::new());
-        }
+        let request_count = ctx.plan().map(|plan| plan.retrieval_requests.len()).unwrap_or_default();
         let limit = ctx.budget().max_retrieved_items();
         let items: Vec<ContextItem> = ctx
             .baseline()
@@ -54,7 +37,7 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
             pending,
             &SpanPayload::ToolCall(ToolCallData {
                 tool: "context.retrieval".into(),
-                args: serde_json::json!({ "need_retrieval": true, "limit": limit }),
+                args: serde_json::json!({ "requests": request_count, "limit": limit }),
                 result: serde_json::json!({ "items": items.len() }),
                 ok: true,
                 latency_ms,

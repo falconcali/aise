@@ -180,6 +180,34 @@ impl TurnExecutionContext {
         Ok(())
     }
 
+    pub fn requires_retrieval(&self) -> Result<bool, AiseError> {
+        let plan = self
+            .plan
+            .as_ref()
+            .ok_or_else(|| AiseError::InvariantViolation("writer plan not set before retrieval check".into()))?;
+        Ok(!plan.retrieval_requests.is_empty())
+    }
+
+    pub fn skip_retrieval(&mut self) -> Result<(), AiseError> {
+        self.expect_phase(TurnPhase::Planned)?;
+        self.retrieved = Vec::new();
+        Ok(())
+    }
+
+    pub fn requires_character_thinking(&self) -> Result<bool, AiseError> {
+        let plan = self
+            .plan
+            .as_ref()
+            .ok_or_else(|| AiseError::InvariantViolation("writer plan not set before character think check".into()))?;
+        Ok(!plan.character_requests.is_empty())
+    }
+
+    pub fn skip_character_thinking(&mut self) -> Result<(), AiseError> {
+        self.expect_phase(TurnPhase::Planned)?;
+        self.thoughts = Vec::new();
+        Ok(())
+    }
+
     pub fn set_story_proposal(&mut self, proposal: StoryProposal) -> Result<(), AiseError> {
         self.expect_phase(TurnPhase::ContextReady)?;
         self.proposal = Some(proposal);
@@ -236,6 +264,24 @@ impl TurnExecutionContext {
             Some(result) => Ok(result.decision()),
             None => Err(AiseError::InvariantViolation("no validation result".into())),
         }
+    }
+
+    pub fn consume_repair_round(&mut self) -> Result<(), AiseError> {
+        self.budget.consume_repair_round()
+    }
+
+    pub fn validation_error(&self) -> Result<AiseError, AiseError> {
+        let result = self
+            .validation
+            .as_ref()
+            .ok_or_else(|| AiseError::InvariantViolation("no validation result".into()))?;
+        let detail = result
+            .issues()
+            .iter()
+            .map(|issue| format!("{}: {}", issue.code, issue.message))
+            .collect::<Vec<_>>()
+            .join("; ");
+        Ok(AiseError::ValidationRejected(detail))
     }
 
     pub fn change_set(&self) -> Option<&ValidatedChangeSet> {

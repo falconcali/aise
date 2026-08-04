@@ -18,8 +18,8 @@ use aise::llm::provider::{DeltaSink, LlmProvider};
 use aise::persistence::SqliteStore;
 use aise::persistence::TurnCommitter;
 use aise::planning::WriterPlanner;
-use aise::runtime::{StoryTurnCoordinator, TurnInitializer, TurnRuntime};
-use aise::story::StoryGenerator;
+use aise::runtime::{StoryTurnCoordinator, TurnInitializer, TurnPipelineSet, TurnRuntime};
+use aise::story::{StoryGenerator, StoryRepairer};
 use aise::validation::ValidationPipeline;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -80,16 +80,19 @@ async fn build_engine(db_url: &str) -> Arc<AiseEngine> {
     let config = AiseConfig::default();
     let gateway = Arc::new(LlmGateway::new(provider, config.llm.clone()).expect("gateway"));
     let coordinator = StoryTurnCoordinator::new(&config.coordinator);
-    let runtime = TurnRuntime::new(vec![
-        Box::<TurnInitializer>::default(),
-        Box::new(BaselineContextBuilder::new(store.clone())),
-        Box::new(WriterPlanner),
-        Box::new(ContextRetrievalPipeline),
-        Box::new(CharacterThinkPipeline),
-        Box::new(StoryGenerator::new(gateway.clone())),
-        Box::new(ValidationPipeline::default()),
-        Box::new(TurnCommitter::new(store.clone())),
-    ]);
+    let pipeline_set = TurnPipelineSet::builder()
+        .initializer(Box::<TurnInitializer>::default())
+        .baseline_builder(Box::new(BaselineContextBuilder::new(store.clone())))
+        .writer_planner(Box::new(WriterPlanner))
+        .retrieval(Box::new(ContextRetrievalPipeline))
+        .character_think(Box::new(CharacterThinkPipeline))
+        .story_generator(Box::new(StoryGenerator::new(gateway.clone())))
+        .validation(Box::new(ValidationPipeline::default()))
+        .story_repairer(Box::new(StoryRepairer::new(gateway.clone())))
+        .committer(Box::new(TurnCommitter::new(store.clone())))
+        .build()
+        .expect("pipeline set");
+    let runtime = TurnRuntime::new(pipeline_set);
     Arc::new(AiseEngine::new(runtime, store, coordinator, config))
 }
 
@@ -126,7 +129,7 @@ async fn full_flow_returns_hello_world_and_persists() {
 
     {
         let events = recorder.events.lock().unwrap();
-        assert_eq!(events.len(), 12);
+        assert_eq!(events.len(), 10);
         assert!(
             events
                 .iter()
@@ -145,16 +148,6 @@ async fn full_flow_returns_hello_world_and_persists() {
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::ContextRetrieval)))
-        );
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::CharacterThink)))
-        );
-        assert!(
-            events
-                .iter()
                 .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::StoryGenerator)))
         );
         assert!(
@@ -166,6 +159,16 @@ async fn full_flow_returns_hello_world_and_persists() {
             events
                 .iter()
                 .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::TurnCommitter)))
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::ContextRetrieval)))
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::CharacterThink)))
         );
         assert!(events.iter().any(|e| matches!(e, TurnEvent::Validation { pass: true })));
         assert!(events.iter().any(|e| matches!(e, TurnEvent::Token(t) if t == "Hello World")));
@@ -274,16 +277,19 @@ async fn response_loss_retry_does_not_call_llm_again() {
     let provider: Arc<dyn LlmProvider> = Arc::new(CountingLlm { calls: calls.clone() });
     let gateway = Arc::new(LlmGateway::new(provider, config.llm.clone()).expect("gateway"));
     let coordinator = StoryTurnCoordinator::new(&config.coordinator);
-    let runtime = TurnRuntime::new(vec![
-        Box::<TurnInitializer>::default(),
-        Box::new(BaselineContextBuilder::new(store.clone())),
-        Box::new(WriterPlanner),
-        Box::new(ContextRetrievalPipeline),
-        Box::new(CharacterThinkPipeline),
-        Box::new(StoryGenerator::new(gateway.clone())),
-        Box::new(ValidationPipeline::default()),
-        Box::new(TurnCommitter::new(store.clone())),
-    ]);
+    let pipeline_set = TurnPipelineSet::builder()
+        .initializer(Box::<TurnInitializer>::default())
+        .baseline_builder(Box::new(BaselineContextBuilder::new(store.clone())))
+        .writer_planner(Box::new(WriterPlanner))
+        .retrieval(Box::new(ContextRetrievalPipeline))
+        .character_think(Box::new(CharacterThinkPipeline))
+        .story_generator(Box::new(StoryGenerator::new(gateway.clone())))
+        .validation(Box::new(ValidationPipeline::default()))
+        .story_repairer(Box::new(StoryRepairer::new(gateway.clone())))
+        .committer(Box::new(TurnCommitter::new(store.clone())))
+        .build()
+        .expect("pipeline set");
+    let runtime = TurnRuntime::new(pipeline_set);
     let engine = Arc::new(AiseEngine::new(runtime, store, coordinator, config));
     let recorder = Recorder::default();
 

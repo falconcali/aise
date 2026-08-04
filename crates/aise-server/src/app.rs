@@ -5,8 +5,8 @@ use aise::context::{BaselineContextBuilder, ContextRetrievalPipeline};
 use aise::llm::{LlmGateway, LlmProvider, OpenAiCompatProvider};
 use aise::persistence::{SqliteStore, Store, TurnCommitter};
 use aise::planning::WriterPlanner;
-use aise::runtime::{StoryTurnCoordinator, TurnInitializer, TurnRuntime};
-use aise::story::StoryGenerator;
+use aise::runtime::{StoryTurnCoordinator, TurnInitializer, TurnPipelineSet, TurnRuntime};
+use aise::story::{StoryGenerator, StoryRepairer};
 use aise::validation::ValidationPipeline;
 use std::sync::Arc;
 
@@ -18,16 +18,18 @@ pub async fn build_engine(config: &ServerConfig) -> Result<Arc<AiseEngine>, anyh
 
     let coordinator = StoryTurnCoordinator::new(&config.aise.coordinator);
 
-    let runtime = TurnRuntime::new(vec![
-        Box::<TurnInitializer>::default(),
-        Box::new(BaselineContextBuilder::new(store.clone())),
-        Box::new(WriterPlanner),
-        Box::new(ContextRetrievalPipeline),
-        Box::new(CharacterThinkPipeline),
-        Box::new(StoryGenerator::new(gateway.clone())),
-        Box::new(ValidationPipeline::default()),
-        Box::new(TurnCommitter::new(store.clone())),
-    ]);
+    let pipeline_set = TurnPipelineSet::builder()
+        .initializer(Box::<TurnInitializer>::default())
+        .baseline_builder(Box::new(BaselineContextBuilder::new(store.clone())))
+        .writer_planner(Box::new(WriterPlanner))
+        .retrieval(Box::new(ContextRetrievalPipeline))
+        .character_think(Box::new(CharacterThinkPipeline))
+        .story_generator(Box::new(StoryGenerator::new(gateway.clone())))
+        .validation(Box::new(ValidationPipeline::default()))
+        .story_repairer(Box::new(StoryRepairer::new(gateway.clone())))
+        .committer(Box::new(TurnCommitter::new(store.clone())))
+        .build()?;
+    let runtime = TurnRuntime::new(pipeline_set);
 
     Ok(Arc::new(AiseEngine::new(runtime, store, coordinator, config.aise.clone())))
 }

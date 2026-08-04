@@ -14,8 +14,8 @@ use aise::llm::message::{CompletionRequest, EmbeddingOutput, EmbeddingRequest};
 use aise::llm::provider::{DeltaSink, LlmProvider};
 use aise::persistence::{SqliteStore, TurnCommitter};
 use aise::planning::WriterPlanner;
-use aise::runtime::{StoryTurnCoordinator, TurnInitializer, TurnRuntime};
-use aise::story::StoryGenerator;
+use aise::runtime::{StoryTurnCoordinator, TurnInitializer, TurnPipelineSet, TurnRuntime};
+use aise::story::{StoryGenerator, StoryRepairer};
 use aise::validation::ValidationPipeline;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -82,16 +82,19 @@ async fn build_engine(db_url: &str, delay: Duration) -> TestEngine {
     });
     let gateway = Arc::new(LlmGateway::new(provider, config.llm.clone()).expect("gateway"));
     let coordinator = StoryTurnCoordinator::new(&config.coordinator);
-    let runtime = TurnRuntime::new(vec![
-        Box::<TurnInitializer>::default(),
-        Box::new(BaselineContextBuilder::new(store.clone())),
-        Box::new(WriterPlanner),
-        Box::new(ContextRetrievalPipeline),
-        Box::new(CharacterThinkPipeline),
-        Box::new(StoryGenerator::new(gateway.clone())),
-        Box::new(ValidationPipeline::default()),
-        Box::new(TurnCommitter::new(store.clone())),
-    ]);
+    let pipeline_set = TurnPipelineSet::builder()
+        .initializer(Box::<TurnInitializer>::default())
+        .baseline_builder(Box::new(BaselineContextBuilder::new(store.clone())))
+        .writer_planner(Box::new(WriterPlanner))
+        .retrieval(Box::new(ContextRetrievalPipeline))
+        .character_think(Box::new(CharacterThinkPipeline))
+        .story_generator(Box::new(StoryGenerator::new(gateway.clone())))
+        .validation(Box::new(ValidationPipeline::default()))
+        .story_repairer(Box::new(StoryRepairer::new(gateway.clone())))
+        .committer(Box::new(TurnCommitter::new(store.clone())))
+        .build()
+        .expect("pipeline set");
+    let runtime = TurnRuntime::new(pipeline_set);
     TestEngine {
         engine: Arc::new(AiseEngine::new(runtime, store, coordinator, config)),
         max_active,

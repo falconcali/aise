@@ -18,9 +18,6 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
             .plan()
             .ok_or_else(|| AiseError::InvariantViolation("writer plan not set before character think".into()))?
             .clone();
-        if plan.character_requests.is_empty() {
-            return ctx.set_character_thoughts(Vec::new());
-        }
         let player_input = ctx.player_input().to_string();
         let thoughts: Vec<CharacterThought> = plan
             .character_requests
