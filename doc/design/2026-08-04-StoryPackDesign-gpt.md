@@ -39,6 +39,10 @@ Info）、上下文预设三件套，靠 `extensions` 字段做跨平台兼容�
   嵌入约定）。
 - 种子数据（Seed）与运行时状态（Committed）分离：卡片/世界书只做一次种子导入，
   运行时只能通过 `ValidatedChangeSet` 产生 `FactSource::CommittedTurn` 事实。
+- **故事包是唯一必选格式，人物卡与角色卡、世界书均为可选增强。** 缺失时引擎在
+  运行时依赖 LLM 即兴生成角色设定与世界细节，不要求作者手动填充所有字段。
+- **玩家必须有角色。** 故事包可提供默认玩家卡（`player`），缺失时玩家在开局时
+  从 `characters` 中选择一个角色，或创建一个新角色卡。
 
 ## 2. 人物卡 aise_char_v1
 
@@ -173,9 +177,9 @@ Info）、上下文预设三件套，靠 `extensions` 字段做跨平台兼容�
     "rules": ["玩家输入不改变已确立的世界事实"]
   },
   "config": { "genre": "fantasy", "tone": "mysterious" },  // 对应 StoryConfig
-  "player": { "name": "旅人", "bio": "…" },  // 玩家角色卡（aise_char_v1 子集）
-  "characters": [ … ],                       // aise_char_v1[]，至少一个
-  "world_book": { … },                       // aise_world_v1（可选）
+  "player": { "name": "旅人", "bio": "…" },  // 可选默认玩家卡（aise_char_v1 子集）；缺失时玩家开局时选择或创建角色卡
+  "characters": [ … ],                       // aise_char_v1[]，可选，无则引擎即兴生成 NPC
+  "world_book": { … },                       // aise_world_v1，可选，无则依赖 LLM 常识
   "start": {
     "scene": "灰林入口的黄昏…",               // 初始场景 → current_scene
     "first_mes": "你站在灰林边缘…"            // 开场白
@@ -194,10 +198,13 @@ Info）、上下文预设三件套，靠 `extensions` 字段做跨平台兼容�
 - `meta` 不进运行时，只用于目录、索引和发布清单。
 - `instructions` / `config` / `constraints` / `start` → `BaselineContext`
   的 `story_instructions` / `story_config` / `active_constraints` / `current_scene`。
-- `characters` / `player` → 物化为 `CharacterState`（`player_character` 优先取
-  `player`，否则取第一个角色）。
-- `world_book` → 导入为世界书条目；`constant` 条目由 Baseline 无条件加载，
-  `selective` 条目由 Retrieval 关键词扫描。
+- `characters` / `player` → 物化为 `CharacterState`。玩家必须有角色：`player` 为
+  可选默认玩家卡，提供时作为 `player_character` 候选；缺失时玩家在开局时从
+  `characters` 中选择一个角色或创建一个新角色卡，`player_character` 在首个 Turn
+  开始时确定。`characters` 可选，缺失时 NPC 由 LLM 在叙事中即兴生成。
+- `world_book` → 可选。提供时导入为世界书条目；`constant` 条目由 Baseline 无条件
+  加载，`selective` 条目由 Retrieval 关键词扫描。缺失时无种子知识注入，检索
+  pipeline 跳过，世界细节由 LLM 在叙事过程中自行构建。
 - `boundaries` 交给 Validation（`R-AISE-06` 预算内完成）。
 
 ## 5. 与 Context Builder 的配合
@@ -212,11 +219,11 @@ wiAfter → dialogueExamples`，但按 AISE 的 Baseline 字段重组：
 story_instructions        <- story.instructions.system_prompt + 角色 system_prompt
 active_constraints        <- story.constraints
 story_config              <- story.config
-player_character          <- story.player
-relevant_characters       <- story.characters（受 budget.max_retrieved_items 裁剪）
+player_character          <- story.player（可选默认卡；缺失时开局时玩家选择/创建）
+relevant_characters       <- story.characters（可选，缺失时 LLM 生成 NPC）
 current_scene             <- story.start.scene
-world knowledge           <- world_book constant entries（authority=canonical）
-retrieved lore            <- ContextRetrievalPipeline（selective 条目）
+world knowledge           <- world_book constant entries（authority=canonical，缺失时为空）
+retrieved lore            <- ContextRetrievalPipeline（selective 条目，无种子条目时跳过）
 recent_story              <- store.load_story（历史 Turn）
 story_summary             <- store（可重建投影）
 player_input              <- TurnRequest

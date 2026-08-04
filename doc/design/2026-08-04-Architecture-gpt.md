@@ -1,4 +1,4 @@
-# AISE（AI Story Engine）技术架构设计 v3.0
+# AISE（AI Story Engine）技术架构设计 v3.1
 
 ## 1. 文档定位
 
@@ -15,6 +15,21 @@
 - 模块依赖方向和横切能力的所有权。
 
 具体模型提示词、数据库表结构、算法和供应商 SDK 不属于本文范围。
+
+---
+
+## 1.1 v3.1 修订说明
+
+本版本相对 v3.0 的修订（与 Turn Runtime Codegen Spec 同步，适用基线 `main@c14f84e`）：
+
+1. Story 串行化由 `AiseEngine` 内部的 `StoryTurnCoordinator` 强制，不再依赖 `Session::lock_turn`。
+2. Session 是临时连接资源，Story 是持久化领域对象，两者不构成一对一架构不变量。
+3. 新增 `core` Turn Contracts 层，Runtime、Engine、LLM Gateway 和所有 Pipeline 单向依赖它。
+4. `TurnExecutionContext` 创建时必须已有有效的 Identity、Request、Budget、Deadline、Cancellation 和 Trace；不得存在空 ID 或半初始化对象。
+5. `TurnInitializer` 只负责 Turn 内部对象准备和状态初始化，不加载 Story、World、Character、Memory 或历史；请求规范化由 `TurnRequest::try_new` 在 Context 构造前完成。
+6. `StoryDraft` 改为不可信的 `StoryProposal`；只有 `ValidatedChangeSet` 可以进入 Commit。
+7. 状态表是当前权威状态，Canonical Events 是不可变审计记录；本阶段不实现完整 Event Sourcing。
+8. 所有 LLM 横切事务统一由 `LlmGateway` 处理。
 
 ---
 
@@ -46,23 +61,18 @@ Story Client
 Story Turn API
       |
       v
-Session::lock_turn
-  Story-level Serialization
-      |
-      v
 AiseEngine::run_turn
-      |
+      |   (内部 StoryTurnCoordinator 强制 Story 级串行化)
       v
 TurnRuntime::run
       |
       +-- TurnInitializer
       +-- BaselineContextBuilder
       +-- WriterPlanner
-      +-- ContextRetrievalPipeline
-      +-- CharacterThinkPipeline
+      +-- ContextRetrievalPipeline    when requested
+      +-- CharacterThinkPipeline      when requested
       +-- StoryGenerator
-      +-- ValidationPipeline
-      +-- StoryRepairer
+      +-- ValidationPipeline / StoryRepairer   (bounded repair loop)
       +-- TurnCommitter
       |
       v
@@ -72,16 +82,18 @@ Committed Turn Result
 TurnEventSink
 ```
 
-`Session::lock_turn` 负责 Story 级 Turn 串行化。`AiseEngine` 管理一次 Turn 的入口和结果发布，`TurnRuntime` 管理固定工作流和 Turn 生命周期。
+`StoryTurnCoordinator` 注入 `AiseEngine`，由 `AiseEngine::run_turn` 内部调用，负责 Story 级 Turn 串行化。`AiseEngine::run_turn` 管理一次 Turn 的入口、串行化和结果发布，`TurnRuntime` 管理固定工作流和 Turn 生命周期。所有 HTTP、CLI、测试和任务消费者都无法绕过 Coordinator。
 
 横切能力由应用组合根创建并注入：
 
 - Store / Repository。
-- LLM Provider。
-- 全局 LLM 并发限制器。
+- `LlmGateway`（统一限流、排队、deadline、取消、token usage、计费和 tracing）。
+- `StoryTurnCoordinator`（每 Story 一个容量为 1 的执行 permit）。
 - 配置与预算策略。
 - Trace、Metrics 和 Event Sink。
 - Clock、ID Generator 等运行时能力。
+
+新增 `core` Turn Contracts 层：Runtime、Engine、LLM Gateway 和所有 Pipeline 单向依赖 `core`，`core` 不得反向依赖任何业务模块或外层类型。
 
 Pipeline 不得自行创建这些长生命周期服务。
 
@@ -94,7 +106,7 @@ Pipeline 不得自行创建这些长生命周期服务。
 同一个 `StoryId` 在任意时刻最多只能有一个正在执行的 Turn。串行化范围覆盖完整生命周期，而不只是数据库提交：
 
 ```text
-Session::lock_turn
+StoryTurnCoordinator::acquire
     -> Context Load
     -> Planning
     -> Generation
@@ -110,11 +122,21 @@ Session::lock_turn
 
 ### 4.2 所有入口统一执行
 
-Story 串行化是应用级不变量。HTTP、CLI、任务消费者、测试入口和未来新增的传输层在调用 `AiseEngine::run_turn` 前，都必须先获得对应 Story 所属 Session 的 Turn 执行权。
+Story 串行化是应用级不变量。`StoryTurnCoordinator` 注入 `AiseEngine`，`AiseEngine::run_turn` 内部完成 Story permit 获取与释放。HTTP、CLI、任务消费者、测试入口和未来新增的传输层调用 `AiseEngine::run_turn` 时都无法绕过串行化。
 
-单进程部署由 `Session::lock_turn` 提供异步互斥。Session 与 Story 保持一对一关系，Session 数量和每个 Session 的等待请求必须有容量上限。
+单进程实现要求：
 
-多实例部署时，`Session::lock_turn` 背后的实现必须扩展为能够覆盖所有实例的协调机制，并提供 fencing token、租约或等价的所有权校验。无论采用何种协调机制，提交阶段仍必须校验故事版本。
+- 每个 `StoryId` 一个容量为 1 的执行 permit。
+- Permit 等待队列有全局和 per-Story 上限。
+- 等待受 Turn deadline 和 cancellation 约束。
+- Map 锁只用于同步获取或更新 Entry，不得跨 `.await` 持有。
+- Turn 生命周期持有的是 owned permit，不是 `MutexGuard` 或 `RwLockGuard`。
+- Entry 在无 owner、无 waiter 且空闲超过配置时间后回收。
+- Shutdown 时拒绝新请求，取消等待者，并等待已拥有 Turn 在宽限期内结束。
+
+Session 是临时连接资源，Story 是持久化领域对象，两者不构成一对一架构不变量。`Session` 不再拥有执行锁，`Session::turn_lock` / `Session::lock_turn` 已删除。
+
+多实例部署时，`StoryTurnCoordinator` 背后的实现必须扩展为能够覆盖所有实例的协调机制，并提供 fencing token、租约或等价的所有权校验。无论采用何种协调机制，提交阶段仍必须校验故事版本。
 
 ### 4.3 版本与幂等
 
@@ -126,7 +148,14 @@ stored_revision == base_revision
 
 提交成功后原子地推进 Story revision。版本校验是串行化之外的最终一致性防线，用于发现锁失效、进程切换和非标准入口造成的冲突。
 
-客户端或入口层应提供稳定的幂等键。相同幂等键不得创建或应用两个 Turn。
+客户端或入口层必须提供稳定的幂等键。幂等唯一键为 `(story_id, idempotency_key)`：
+
+- 相同 key、相同规范化请求：返回原 `CommittedTurnResult`，不再次调用 LLM、不再次提交。
+- 相同 key、不同请求摘要：返回 `IdempotencyConflict`。
+- Commit 成功但响应丢失后，重试必须恢复原结果。
+- `turn_id` 唯一约束不能替代 idempotency key。
+
+请求规范化（长度检查、稳定 request digest）在 `TurnRequest::try_new` 中完成，先于 Context 构造。
 
 ---
 
@@ -153,25 +182,29 @@ Story Generator
       v
 Validation Pipeline
       |
-      +-- pass ------------------------------+
-      |                                      |
-      +-- repairable and budget available    |
-      |         |                            |
-      |         v                            |
-      |    Story Repairer                    |
-      |         |                            |
-      |         +----> Validation Pipeline   |
-      |                                      |
-      +-- non-repairable or exhausted -> Fail
-                                             |
-                                             v
-                                      Turn Committer
-                                             |
-                                             v
-                                      Turn Result
+      +-- Pass -----------------------------------+
+      |                                           |
+      +-- Repair (budget available)               |
+      |         |                                 |
+      |         v                                 |
+      |    Story Repairer (循环内辅助 Pipeline)   |
+      |         |                                 |
+      |         +----> Validation Pipeline        |
+      |                                           |
+      +-- Reject or budget exhausted -> Fail      |
+      |                                           |
+      +-------------------------------------------+
+                                                  |
+                                                  v
+                                           Turn Committer
+                                                  |
+                                                  v
+                                           Committed Turn Result
 ```
 
-Runtime 根据 `WriterPlan` 跳过可选阶段，但不能重排阶段，也不支持运行时任意组合 Pipeline。条件判断由 Runtime 负责，已跳过阶段不得产生 `StageStarted` 事件。
+工作流固定为八步：Initializer -> Baseline Builder -> Writer Planner -> [Retrieval] -> [Character Think] -> Story Generator -> Validation/Repair loop -> Committer。`StoryRepairer` 是 Validation 循环内的辅助 Pipeline，不是独立的第九个业务阶段。
+
+Runtime 根据 `WriterPlan` 推导的请求集合决定是否执行可选阶段：`retrieval_requests.is_empty()` 表示跳过 Retrieval，`character_requests.is_empty()` 表示跳过 Character Think。不得保留 `need_retrieval`、`need_character_thinking` 之类可能与请求集合矛盾的布尔值。Runtime 不能重排阶段，也不支持运行时任意组合 Pipeline。条件判断由 Runtime 负责，已跳过阶段不得产生 `StageStarted` 事件，由 Runtime 通过 Context 的显式方法记录空结果并推进 Phase。
 
 若未来需要另一种工作流，应定义新的带版本固定工作流，并在应用启动时验证完整性。不得通过任意 Pipeline 插件拼接改变当前工作流的不变量。
 
@@ -184,7 +217,7 @@ Pipeline 接口：
 ```rust
 #[async_trait]
 pub trait TurnExecutionPipeline: Send + Sync {
-    fn stage(&self) -> &'static str;
+    fn stage(&self) -> TurnStage;
 
     async fn execute(
         &self,
@@ -193,11 +226,11 @@ pub trait TurnExecutionPipeline: Send + Sync {
 }
 ```
 
-`stage()` 返回稳定、低基数的阶段标识，用于事件、日志、指标和 Trace。
+`TurnStage` 是有穷枚举，`stage()` 返回稳定、低基数的阶段标识，用于事件、日志、指标和 Trace；禁止 Pipeline 自定义动态 Stage 名称。
 
 `execute()` 的语义：
 
-- `Ok(())` 表示阶段后置条件已经满足，Runtime 可以进入下一阶段。
+- `Ok(())` 表示该 Pipeline 自身执行成功并写入了合法阶段结果。Validation 返回 `Repair` 或 `Reject` 是合法业务结果，可以返回 `Ok(())`，但 Runtime 必须立即读取 Decision 并分支；它不等于整个 Turn 成功。
 - `Err(AiseError)` 表示当前执行路径不能继续，Runtime 立即停止后续 Pipeline。
 - 错误必须包含足够的阶段和原因信息，不得只返回布尔值或静默降级。
 - Pipeline 不得吞掉错误，不得在内部进行无界重试。
@@ -206,16 +239,17 @@ Runtime 使用 fail-fast 协议：任何 Pipeline 返回 `Err`，本 Turn 执行
 
 错误模型必须能够区分：
 
-- 请求或领域数据错误。
-- Story 不存在。
-- LLM 或工具调用错误。
-- Store / I/O 错误。
-- Validation 不可修复。
-- Validation 预算耗尽。
-- Turn 超时或取消。
-- Story revision 冲突。
-- 幂等冲突。
-- 内部不变量破坏。
+- InvalidRequest：请求或领域数据错误。
+- StoryNotFound。
+- Llm / Store / I/O 错误。
+- ValidationRejected：Validation 不可修复。
+- ValidationBudgetExhausted：Validation 预算耗尽。
+- TurnDeadlineExceeded。
+- Cancelled。
+- RevisionConflict：Story revision 冲突。
+- IdempotencyConflict。
+- Backpressure。
+- InvariantViolation：内部不变量破坏。
 
 Turn 终态只有：
 
@@ -234,10 +268,10 @@ Conflict
 
 `TurnRuntime` 是 Turn Workflow Orchestrator，负责：
 
-- 执行固定工作流。
+- 执行固定八步工作流（Initializer -> Baseline Builder -> Writer Planner -> [Retrieval] -> [Character Think] -> Story Generator -> Validation/Repair loop -> Committer）。
 - 检查阶段前置条件和后置条件。
-- 控制可选 Pipeline。
-- 管理 Validation / Repair 循环。
+- 根据请求集合控制可选 Pipeline。
+- 管理 Validation / Repair 循环，Repair 预算在调用 Repairer 之前消费。
 - 统一执行预算、deadline 和取消信号。
 - 将阶段开始写入事件，并将阶段成功和失败写入 Trace。
 - 在错误发生时停止工作流并返回诊断信息。
@@ -253,77 +287,42 @@ Conflict
 概念调用流程：
 
 ```rust
-async fn execute_pipeline(
-    pipeline: &dyn TurnExecutionPipeline,
-    ctx: &mut TurnExecutionContext,
-    sink: &dyn TurnEventSink,
-) -> Result<(), AiseError> {
-    let stage = pipeline.stage();
-    sink.emit(TurnEvent::StageStarted(stage));
-    let pending = ctx.trace.begin_span("aise.pipeline", stage);
-    let outcome = pipeline.execute(ctx).await;
+execute(initializer, ctx).await?;
+execute(baseline_builder, ctx).await?;
+execute(writer_planner, ctx).await?;
 
-    let payload = match &outcome {
-        Ok(()) => SpanPayload::Pipeline(PipelineData {
-            stage: stage.to_owned(),
-            status: "ok".into(),
-            error: None,
-        }),
-        Err(error) => SpanPayload::Pipeline(PipelineData {
-            stage: stage.to_owned(),
-            status: "error".into(),
-            error: Some(error.to_string()),
-        }),
-    };
-    ctx.trace.end_span_with(pending, &payload);
-
-    match outcome {
-        Ok(()) => Ok(()),
-        Err(error) => Err(error),
-    }
+if ctx.requires_retrieval()? {
+    execute(retrieval, ctx).await?;
+} else {
+    ctx.skip_retrieval()?;
 }
 
-async fn execute_turn(
-    request: TurnRequest,
-    sink: &dyn TurnEventSink,
-) -> Result<TurnResult, AiseError> {
-    let mut ctx = TurnExecutionContext::new(request)?;
+if ctx.requires_character_thinking()? {
+    execute(character_think, ctx).await?;
+} else {
+    ctx.skip_character_thinking()?;
+}
 
-    execute_pipeline(&turn_initializer, &mut ctx, sink).await?;
-    execute_pipeline(&baseline_ctx_builder, &mut ctx, sink).await?;
-    execute_pipeline(&writer_planner, &mut ctx, sink).await?;
+ctx.complete_context_preparation()?;
+execute(story_generator, ctx).await?;
 
-    if ctx.plan_requires_retrieval()? {
-        execute_pipeline(&context_retrieval_pipeline, &mut ctx, sink).await?;
-    }
-
-    if ctx.plan_requires_character_thinking()? {
-        execute_pipeline(&character_think_pipeline, &mut ctx, sink).await?;
-    }
-
-    execute_pipeline(&story_generator, &mut ctx, sink).await?;
-
-    loop {
-        execute_pipeline(&validation_pipeline, &mut ctx, sink).await?;
-
-        match ctx.validation_decision()? {
-            ValidationDecision::Pass => break,
-            ValidationDecision::Repair => {
-                ctx.budget.consume_repair_round()?;
-                execute_pipeline(&story_repairer, &mut ctx, sink).await?;
-            }
-            ValidationDecision::Reject => {
-                return Err(ctx.validation_error()?);
-            }
+loop {
+    execute(validation, ctx).await?;
+    match ctx.validation_decision()? {
+        ValidationDecision::Pass => break,
+        ValidationDecision::Repair => {
+            ctx.consume_repair_round()?;
+            execute(story_repairer, ctx).await?;
         }
+        ValidationDecision::Reject => return Err(ctx.validation_error()?),
     }
-
-    execute_pipeline(&turn_committer, &mut ctx, sink).await?;
-    ctx.committed_result()
 }
+
+execute(committer, ctx).await?;
+ctx.committed_result()
 ```
 
-`execute_pipeline` 统一处理 Pipeline 返回值：成功时记录成功状态，失败时记录结构化错误并把原错误返回给 `execute_turn`。`execute_turn` 使用 `?` 立即终止当前 Turn，因此失败阶段之后的 Pipeline，包括 `TurnCommitter`，都不会继续执行。该代码用于表达控制语义，不要求实现逐字一致。
+Repair 预算在调用 Repairer 之前消费。`max_repair_rounds = 0` 表示不允许 Repair，而不是无限次数。Runtime 在每个 Pipeline 前后检查 cancellation、deadline、预期 Phase 和后置 Phase；失败后不得启动下一个 Pipeline。该代码用于表达控制语义，不要求实现逐字一致。
 
 ---
 
@@ -368,51 +367,129 @@ struct TurnExecutionContext {
     identity: TurnIdentity,
     phase: TurnPhase,
     request: TurnRequest,
-    snapshot: StorySnapshot,
-    baseline: BaselineContext,
-    plan: Option<WriterPlan>,
-    retrieved: BoundedContextItems,
-    thoughts: BoundedCharacterThoughts,
-    proposal: Option<StoryDraft>,
-    validation: ValidationResult,
-    change_set: Option<ValidatedChangeSet>,
+    control: TurnControl,
     budget: TurnBudget,
-    trace: TraceRecorder,
+    trace: TurnTraceRecorder,
+    snapshot: Option<StoryReadSnapshot>,
+    baseline: Option<BaselineContext>,
+    plan: Option<WriterPlan>,
+    retrieved: Vec<ContextItem>,
+    thoughts: Vec<CharacterThought>,
+    proposal: Option<StoryProposal>,
+    proposal_revision: u32,
+    validation: Option<ValidationResult>,
+    change_set: Option<ValidatedChangeSet>,
+    committed_result: Option<CommittedTurnResult>,
 }
 ```
 
-`StorySnapshot` 包含 `base_revision`，表示本 Turn 读取到的权威状态版本。
+字段全部私有。`Option` 只表示阶段产物尚未产生；阶段正确性由私有字段、Phase 状态机和有语义的方法共同保证，不依赖 `Option::unwrap`。
+
+Context 创建时即持有有效的 Identity、Request、Budget、Control（deadline + cancellation）和 Trace，满足 `TurnPhase::Created` 的全部不变量。`StoryReadSnapshot` 包含 `base_revision`，表示本 Turn 从 Store 原子读取的权威状态版本。
+
+Engine 必须先创建以下有效对象，再构造 Context：
+
+```rust
+pub struct ExecuteTurnSpec {
+    pub story_id: StoryId,
+    pub idempotency_key: IdempotencyKey,
+    pub player_input: String,
+    pub cancellation: TurnCancellation,
+}
+
+pub struct TurnRequest {
+    player_input: String,
+    request_digest: RequestDigest,
+}
+
+pub struct TurnIdentity {
+    story_id: StoryId,
+    turn_id: TurnId,
+    idempotency_key: IdempotencyKey,
+    started_at_ms: i64,
+}
+
+pub struct TurnControl {
+    deadline: Instant,
+    cancellation: TurnCancellation,
+}
+```
+
+`TurnExecutionContext::new` 的概念签名：
+
+```rust
+pub fn new(
+    identity: TurnIdentity,
+    request: TurnRequest,
+    budget: TurnBudget,
+    control: TurnControl,
+    trace: TurnTraceRecorder,
+) -> Result<Self, AiseError>;
+```
+
+构造规则：
+
+- Engine 先通过 `TurnRequest::try_new` 完成输入规范化、长度检查和稳定 request digest，再创建 Context。
+- `StoryId`、`TurnId`、`IdempotencyKey` 和玩家输入不得为空；ID newtype 不得再实现可产生空值的 `Default`。
+- `TurnBudget` 必须来自 `TurnConfig`，不得在 Context 或 Pipeline 中再次使用另一份 Default。
+- deadline 必须是绝对单调时钟时间点；Cancellation 必须能同时响应请求取消和服务 shutdown。
+- `TurnId` 由 Engine 注入的 ID 依赖生成，Pipeline 不得直接调用 `Uuid::new_v4` 或 `SystemTime::now`。
+
+必须提供具有业务语义的阶段化读写方法，不提供通用字段写接口：
+
+```text
+complete_initialization
+set_prepared_context
+set_writer_plan
+set_retrieved_context
+set_character_thoughts
+set_story_proposal
+set_validation_result
+replace_story_proposal
+set_committed_result
+llm_call_scope
+```
+
+每个写方法必须：验证当前 Phase；验证集合、字符串和 token 上限；只更新该阶段拥有的输出；清除已经失效的下游数据；推进到唯一允许的下一 Phase；在违反不变量时返回 typed error，不得 panic。Repair 替换 Proposal 时必须清除旧 Validation 和旧 `ValidatedChangeSet`，并增加 `proposal_revision`。
 
 ### 8.3 阶段契约
 
-| 阶段 | 必要输入 | 唯一业务输出 |
+| 阶段 | 只读输入 | 唯一业务输出 |
 | --- | --- | --- |
-| Initializer | request | identity、运行参数、初始预算 |
-| Baseline Builder | identity、request | snapshot、baseline |
-| Writer Planner | baseline、request | plan |
-| Retrieval | plan、baseline | retrieved context items |
-| Character Think | plan、snapshot、retrieved | character thoughts |
-| Story Generator | baseline、plan、retrieved、thoughts | story proposal |
-| Validation | snapshot、proposal | validation result、validated change set |
-| Story Repairer | proposal、validation issues | revised proposal |
-| Turn Committer | snapshot、validated change set | committed revision/result |
+| Initializer | Identity、已规范化 Request、Budget、Control | Turn 临时状态、`Initialized` Phase |
+| Baseline Builder | Identity、Request、Budget | `StoryReadSnapshot`、`BaselineContext` |
+| Writer Planner | Baseline、Request | `WriterPlan` |
+| Retrieval | Plan、Baseline、Budget | `ContextItem[]` |
+| Character Think | Plan、Snapshot、Retrieved、Budget | `CharacterThought[]` |
+| Story Generator | Baseline、Plan、Retrieved、Thoughts | `StoryProposal` |
+| Validation | Snapshot、Proposal | `ValidationResult`；仅 Pass 时产生 `ValidatedChangeSet` |
+| Story Repairer | Proposal、Validation Issues | 新版本 `StoryProposal` |
+| Turn Committer | Identity、Snapshot、`ValidatedChangeSet` | `CommittedTurnResult` |
 
-Initializer 不再初始化一个已经被 Runtime 半构造的 Context。`TurnExecutionContext::new` 必须生成满足基础不变量的对象；Initializer 只准备需要外部运行时能力才能确定的数据。
+`TurnInitializer` 的输入是已经有效的 Context，只负责初始化本 Turn 的临时槽位和执行状态，并将 Phase 从 `Created` 推进为 `Initialized`。它不得生成 `turn_id`、不得创建或覆盖 Budget/Deadline/Cancellation/Trace、不得调用 Store/LLM/Retriever/其他 Pipeline、不得加载 World/Character/Memory/History/Summary 或 Narrative Graph。请求规范化由 `TurnRequest::try_new` 在 Context 构造前完成。
+
+`TurnPhase` 最低包含：`Created`、`Initialized`、`Prepared`、`Planned`、`ContextReady`、`ProposalReady`、`RepairRequired`、`ReadyToCommit`、`Committed`、`Failed`、`Cancelled`、`Conflict`。允许转换固定为：`Created -> Initialized -> Prepared -> Planned -> ContextReady -> ProposalReady`；Validation Pass 时 `ProposalReady -> ReadyToCommit -> Committed`；Validation Repair 时 `ProposalReady -> RepairRequired -> ProposalReady`；Reject 不得进入 `ReadyToCommit`；任意非终态可因失败、取消或冲突进入对应终态。
 
 ---
 
 ## 9. 预算、超时与取消
 
-`TurnBudget` 是整个 Turn 的统一资源预算，至少覆盖：
+`TurnBudget` 是整个 Turn 的统一资源预算，分为 immutable limits 和 mutable usage，字段私有，至少覆盖：
 
-- 最大修复轮数。
-- 最大 LLM 调用次数。
-- 最大生成 token 数和总 token 数。
-- 最大检索条目数。
-- 最大参与思考的角色数。
-- 最大上下文字节数或 token 数。
-- Turn 总 deadline。
-- 单次外部调用 timeout。
+- `max_repair_rounds`。
+- `max_llm_calls`。
+- `max_input_tokens`。
+- `max_output_tokens`。
+- `max_total_tokens`。
+- `max_retrieved_items`。
+- `max_context_tokens`。
+- `max_character_thoughts`。
+- `max_validation_issues`。
+- `max_trace_spans`。
+
+配置必须只有一个权威来源：`TurnConfig` 定义 limits，Engine 将其转换为当前 Turn 的 `TurnBudget`，Pipeline 不保存重复的 `max_tokens`、`max_repair_rounds` 或 `max_retrieved_items`。Story Generator 从 Gateway reservation 获得本次允许的最大输出 token，不从自己的字段读取另一份配置。
+
+`TurnControl` 携带绝对单调时钟 deadline 和 `TurnCancellation`。Cancellation 必须同时响应请求取消和服务 shutdown，建议使用 `tokio_util::sync::CancellationToken`。
 
 预算由 Runtime 拥有并由各阶段显式消费。预算不得在 Pipeline 内复制成互不一致的计数器。
 
@@ -438,7 +515,18 @@ Baseline Context 包含：
 - Active Constraints。
 - Player Input。
 
-Baseline Builder 必须从同一个带 revision 的 `StorySnapshot` 构建上下文，不负责剧情生成，也不能更新持久化状态。
+`StoryReadSnapshot` 是一次 Turn 从 Store 原子读取的不可变视图，最低包含：`story_id`、`base_revision`、story instructions/configuration、player character id、world state、current scene、relevant characters、bounded recent turns、story summary、active constraints、required memories。
+
+规则：
+
+- Snapshot 由一次一致性读事务获得。
+- Baseline 只能从该 Snapshot 构建，不再分别读取互相可能错版的数据。
+- Recent Turns 从 Store 返回给业务层时必须是时间正序。
+- Player Character 通过稳定 ID 指定，不得取 SQL 无序结果的第一项。
+- `WorldState` 不再内嵌 Character 权威副本；Character 表是 Character 当前状态的唯一权威来源。
+- `WorldFact` 使用稳定 `FactId`，删除操作不得使用数组下标。
+
+Baseline Builder 从 Snapshot 构建上下文，不负责剧情生成，也不能更新持久化状态。
 
 ### 10.2 上下文分类
 
@@ -513,15 +601,24 @@ Character Thought 是临时推理产物，只存在于当前 Turn。它不是权
 
 ## 12. Story Proposal 与领域状态边界
 
-Story Generator 的输出是 `StoryDraft`，其语义是待验证的 Proposal，而不是可以直接提交的领域状态。
+Story Generator 的输出是 `StoryProposal`（替代 `StoryDraft`），其语义是不可信的模型 Proposal，而不是可以直接提交的领域状态。
 
 Proposal 可以包含：
 
 - Story Text。
-- Proposed Events。
-- Proposed Character Changes。
-- Proposed World Changes。
-- Proposed Memory Changes。
+- Proposed Event DTO。
+- Proposed Character Change DTO。
+- Proposed World Change DTO。
+- Proposed Memory Change DTO。
+- Proposed Summary Delta。
+
+Proposal 不得包含：
+
+- `EventId`、Canonical Event 或已授权 Command。
+- 完整 `CharacterState`、`WorldState` 或其他可直接覆盖权威状态的对象。
+- 数据库字段、revision 更新或 Outbox Record。
+
+Generator 和 Repairer 不得注入 Store、Unit of Work、ID Generator 或 Clock。
 
 任何由 LLM 产生的 Patch 都是不可信输入。它必须经过解析、Schema 校验、权限校验和领域不变量校验，才能转换成 `ValidatedChangeSet`。
 
@@ -559,7 +656,7 @@ Validation 分为两个信任等级：
 - Knowledge Boundary。
 - Player Control Boundary 中可确定判断的部分。
 
-确定性校验是提交的硬门槛，LLM Validator 不能覆盖其结论。
+确定性校验是提交的硬门槛，LLM Validator 不能覆盖其结论。确定性失败不得被 Narrative Validator 覆盖。
 
 ### 13.2 Narrative Validation
 
@@ -568,6 +665,8 @@ Validation 分为两个信任等级：
 - 风格和语气约束。
 - 需要语义判断的 Knowledge Boundary。
 - 需要语义判断的 Player Control Boundary。
+
+Narrative Validator 的所有 LLM 调用也必须经过 `LlmGateway`。
 
 Validation Issue 至少具有：
 
@@ -579,14 +678,31 @@ repairability
 location
 ```
 
+`ValidationIssue` 数量和单条 message 长度必须受 Budget 限制。
+
+Validation 的数据结构：
+
+```rust
+pub enum ValidationDecision {
+    Pass,
+    Repair,
+    Reject,
+}
+
+pub struct ValidationResult {
+    decision: ValidationDecision,
+    issues: Vec<ValidationIssue>,
+}
+```
+
 Validation 的决策为：
 
-- `Pass`：生成 `ValidatedChangeSet`，允许进入 Commit。
+- `Pass`：生成 `ValidatedChangeSet`，允许进入 Commit。只有 Pass 可以与 `ValidatedChangeSet` 同时存在。
 - `Repair`：存在可修复问题且仍有修复预算。
-- `Reject`：存在不可修复问题，立即失败。
-- `BudgetExhausted`：修复预算耗尽，立即失败。
+- `Reject`：存在不可修复问题，立即失败，不得进入 `ReadyToCommit`。
+- 修复预算耗尽返回 `ValidationBudgetExhausted`，不得调用 Committer。
 
-每次 Repair 后必须重新执行完整验证。修复轮数在调用 Repairer 之前消费，任何路径都不能绕过预算检查。
+每次 Repair 后必须重新执行完整验证。修复轮数在调用 Repairer 之前消费，任何路径都不能绕过预算检查。`max_repair_rounds = 0` 表示不允许 Repair。
 
 ---
 
@@ -594,7 +710,7 @@ Validation 的决策为：
 
 ### 14.1 Turn Committer 定位
 
-Turn Committer 是应用层的提交协调者。它依赖 Store / Unit of Work port，不包含具体数据库实现，也不接受未验证的 StoryDraft。
+Turn Committer 是应用层的提交协调者。它只读取 `ValidatedChangeSet`，不读取或提交 `StoryProposal`，不再次解释 LLM 输出。它依赖 Store / Unit of Work port，不包含具体数据库实现。
 
 提交输入至少包含：
 
@@ -606,7 +722,22 @@ Turn Committer 是应用层的提交协调者。它依赖 Store / Unit of Work p
 - Validated Character / World / Memory Changes。
 - 需要投递的 Outbox Records。
 
+`ValidatedChangeSet` 字段私有，至少包含：`story_text`、`canonical_events`、`character_changes`、`world_change`、`memory_changes`、`summary_change`。可选变更不使用含义模糊的 `Option<T>`，使用显式枚举：
+
+```rust
+pub enum StateChange<T> {
+    Unchanged,
+    Replace(T),
+}
+```
+
+需要 Patch 时使用经过验证的 Domain Command，不得重新使用 LLM Proposal Patch。只有 `ValidationDecision::Pass` 可以与 `ValidatedChangeSet` 同时存在；Context 进入 `ReadyToCommit` 前必须检查该不变量。
+
+即使 Runtime 出现编排错误，Committer 在 Context 不是 `ReadyToCommit` 或缺少 `ValidatedChangeSet` 时也必须拒绝执行。这是第二道安全门。
+
 ### 14.2 权威状态与派生状态
+
+状态表是当前权威状态，Canonical Events 是不可变审计记录；本阶段不实现完整 Event Sourcing。
 
 以下内容必须在同一数据库事务内原子提交：
 
@@ -616,6 +747,8 @@ Turn Committer 是应用层的提交协调者。它依赖 Store / Unit of Work p
 - Story revision。
 - Outbox Records。
 
+同一事务内顺序：查询同幂等键是否已有已提交结果（有则返回原结果）-> 校验 `stored_revision == base_revision` -> 写 Turn Record -> 写 Canonical Events -> 应用经过验证的 World/Character/Memory/Scene/Constraint/Summary 变更 -> 将 Story revision 原子推进一位 -> 写 Outbox Records -> Commit transaction。revision 更新必须使用 compare-and-swap 并检查 affected rows；失败返回 `RevisionConflict`，不得覆盖较新状态。
+
 以下内容属于可重建的派生状态，不要求与外部系统进行分布式事务：
 
 - Embedding。
@@ -624,7 +757,9 @@ Turn Committer 是应用层的提交协调者。它依赖 Store / Unit of Work p
 - 可重新生成的 Summary Projection。
 - 分析和通知事件。
 
-派生状态通过 transactional outbox 在事务提交后更新。消费者必须幂等，失败可以重试和重建。
+派生状态通过 transactional outbox 在事务提交后更新。消费者必须幂等，失败可以重试和重建。Outbox 与权威变更同事务写入，至少保存 `outbox_id`、`story_id`、`turn_id`、`event_type`、`payload`、`created_at`、`attempt_count`、`published_at`、`last_error`。
+
+`StateChange::Unchanged` 必须完全跳过 World state update，禁止把 No-Change 转换为空 `WorldState` 后 upsert。
 
 ### 14.3 提交保证
 
@@ -632,11 +767,11 @@ Turn Committer 必须保证：
 
 - 原子性：权威变更全部成功或全部失败。
 - 一致性：`base_revision` 与当前 revision 一致才能提交。
-- 幂等性：同一个 `turn_id` 或幂等键重复提交不会重复应用变更。
+- 幂等性：`(story_id, idempotency_key)` 重复提交不会重复应用变更；相同 key 与相同请求摘要返回原 `CommittedTurnResult`，相同 key 与不同请求摘要返回 `IdempotencyConflict`。
 - 可恢复性：进程在提交前、中、后崩溃时都能判断 Turn 是否已经提交。
 - 可诊断性：冲突、约束失败和存储错误具有不同错误类型。
 
-数据库事务提交成功是不可逆边界。事务成功但响应丢失时，客户端重试必须查询并返回原 Turn 结果，不能生成新 Turn。
+数据库事务提交成功是不可逆边界。事务成功但响应丢失时，客户端重试必须查询并返回原 Turn 结果，不能生成新 Turn、不再次调用 LLM。
 
 ---
 
@@ -648,12 +783,18 @@ Turn Committer 必须保证：
 
 ```text
 Commit Success
-    -> Publish Finished Event
+    -> Publish Committed Event
     -> Return Turn Result
     -> Release Story Execution Ownership
 ```
 
-对外成功结果必须包含稳定的 `turn_id` 和已提交的 `story_revision`。
+对外成功结果必须包含稳定的 `turn_id`、已提交的 `story_revision` 和持久化的聚合 LLM usage。只有数据库 Commit 成功后才发送 `Committed` 事件。
+
+Observer / SSE 不是权威结果存储。Observer 事件允许 best-effort，但失败必须产生 structured warning，不得静默丢弃。SSE channel 必须有界；客户端断开时触发 Cancellation；取消不得撤销已成功的数据库事务，客户端可用 idempotency key 查询结果。
+
+最低事件：`StageStarted`、`ValidationCompleted`、`Committed`、`Failed`、`Cancelled`、`Conflict`、`TraceCompleted`。
+
+Turn 终态只有：`Committed`、`Failed`、`Cancelled`、`Conflict`。
 
 若未来支持提交前流式预览，事件必须明确标记为 provisional，并在失败时发送撤销/失败终态；客户端不得把 provisional 内容当作已提交历史。该能力不改变“只有提交后才成功”的语义。
 
@@ -661,34 +802,39 @@ Commit Success
 
 ## 16. 分层与依赖方向
 
-逻辑依赖方向为：
+目标依赖方向为：
 
 ```text
-aise-server API / Session / Composition Root
-                    |
-                    v
-              Engine / Runtime
-                    |
-          +---------+----------+
-          |                    |
-          v                    v
-Context / Planning /      Store and LLM Ports
-Character / Story /             ^
-Validation                       |
-          |                Concrete Adapters
-          v
-        Domain
+aise-server transport / composition
+                |
+                v
+        engine / runtime
+          |          |
+          v          v
+      pipelines    llm gateway
+          |          |
+          +----+-----+
+               v
+          core contracts
+               |
+               v
+             domain
+
+persistence adapter -> persistence port -> core contracts / domain
 ```
 
-规则：
+强制规则：
 
-- Domain 不依赖 Runtime、API、LLM 或 Persistence adapter。
-- Pipeline 模块可以依赖 Domain 和抽象 port，不依赖 API concrete type。
-- Runtime 负责编排，不依赖具体数据库或供应商 SDK。
-- Persistence adapter 实现 Store port；具体实现只在组合根装配。
-- LLM adapter 实现 LLM Provider port；所有调用经过同一个注入的限制器。
+- `core` 可以依赖 `domain` 和基础错误类型，不得依赖 `runtime`、任何 Pipeline、`llm`、`persistence`、`aise-server`。`core` 是唯一 Turn Contract 定义层。
+- `runtime` 只负责编排，不定义被业务模块反向引用的数据模型。
+- Pipeline 之间不得互相导入、持有或调用。
+- Pipeline 可以依赖 `core`、`domain` 以及被注入的 Port/Gateway。
+- `llm` 可以依赖 `core` 中受限的 Turn LLM Scope，不得依赖 Runtime 或具体 Pipeline。
+- Provider Adapter 不得依赖 Turn Context；它只处理供应商协议。
+- Store Adapter 不得被 Core 或 Domain 导入；具体实现只在组合根装配。
 - 反向通知通过注入的 trait 完成，内层模块不得导入外层具体类型。
-- Pipeline 之间不得直接依赖和调用。
+
+禁止出现反向依赖：`core -> runtime`、`core -> planning/story/validation/character/context`、`llm -> runtime`、`pipeline A -> pipeline B`、`domain -> core/runtime/adapter`。
 
 `TurnCommitter` 虽位于 `persistence` 目录，但其角色是提交协调者；数据库连接、SQL 和事务实现属于 Store adapter。
 
@@ -702,17 +848,24 @@ Validation                       |
 crates/
 ├── aise/
 │   └── src/
+│       ├── core/
+│       │   ├── turn_contract.rs
+│       │   ├── turn_budget.rs
+│       │   ├── turn_context.rs
+│       │   ├── turn_data.rs
+│       │   ├── story_proposal.rs
+│       │   ├── turn_validation.rs
+│       │   ├── turn_pipeline.rs
+│       │   ├── turn_event.rs
+│       │   └── turn_trace.rs
 │       ├── engine.rs
 │       ├── config.rs
 │       ├── error.rs
 │       ├── runtime/
-│       │   ├── turn_runtime.rs
-│       │   ├── turn_execution_ctx.rs
-│       │   ├── turn_budget.rs
-│       │   ├── pipeline.rs
 │       │   ├── initializer.rs
-│       │   ├── event.rs
-│       │   └── trace/
+│       │   ├── story_turn_coordinator.rs
+│       │   ├── turn_pipeline_set.rs
+│       │   └── turn_runtime.rs
 │       ├── context/
 │       ├── planning/
 │       ├── character/
@@ -724,8 +877,12 @@ crates/
 │       │   ├── sqlite_store.rs
 │       │   └── turn_committer.rs
 │       ├── llm/
-│       │   ├── provider.rs
+│       │   ├── accounting.rs
+│       │   ├── error.rs
+│       │   ├── gateway.rs
 │       │   ├── limiter.rs
+│       │   ├── message.rs
+│       │   ├── provider.rs
 │       │   └── openai_compat.rs
 │       └── domain/
 └── aise-server/
@@ -741,15 +898,90 @@ crates/
             └── registry.rs
 ```
 
-目录只表示职责归属，真正的架构边界以依赖规则和 trait port 为准。
+`mod.rs` 和 `lib.rs` 只能声明模块和 re-export，不得放置类型或逻辑。目录只表示职责归属，真正的架构边界以依赖规则和 trait port 为准。
 
 ---
 
 ## 18. LLM 调用与并发
 
-`aise-server::app::build_engine` 是 LLM 依赖的组合根，负责创建共享 `LlmLimiter` 并注入 `LlmProvider`。所有 completion、streaming 和未来的 embedding 调用都必须经过该共享限制能力，不得创建绕过限制器的 Provider 或调用点。
+所有 completion、streaming、embedding 和未来 Agent Loop 中的模型调用都必须经过同一个 `LlmGateway`。所有业务 Pipeline 只能持有 `Arc<LlmGateway>`，不得持有或导入底层 `LlmProvider`。
 
-LLM 调用必须同时受 Turn budget、deadline、单次 timeout 和取消信号约束。并发 permit 的等待也必须受 deadline 限制，并在调用结束或取消时释放。
+```rust
+pub struct StoryGenerator {
+    llm: Arc<LlmGateway>,
+}
+```
+
+Gateway 的概念接口：
+
+```rust
+impl LlmGateway {
+    pub async fn complete(
+        &self,
+        scope: TurnLlmCallScope<'_>,
+        spec: CompletionSpec,
+    ) -> Result<LlmCompletion, LlmError>;
+
+    pub async fn complete_stream(
+        &self,
+        scope: TurnLlmCallScope<'_>,
+        spec: CompletionSpec,
+        sink: BoundedDeltaSink,
+    ) -> Result<LlmCompletion, LlmError>;
+
+    pub async fn embed(
+        &self,
+        scope: TurnLlmCallScope<'_>,
+        spec: EmbeddingSpec,
+    ) -> Result<EmbeddingOutput, LlmError>;
+}
+```
+
+Pipeline 通过 `ctx.llm_call_scope(stage)` 获得受限 Scope。Scope 只暴露 story_id、turn_id、Stage、trace correlation、Turn absolute deadline、cancellation token、LLM Budget reservation/settlement 能力和 Turn Trace 中的 LLM Call transaction；不暴露 Baseline、Proposal、Validation 或其他 Pipeline 数据。
+
+`OpenAiCompatProvider` 只负责构建供应商 HTTP 请求、认证 Header、解析响应/SSE Delta/finish reason/原始 token usage，并将供应商错误转换为 `LlmProviderError`。Provider 不得持有 Limiter、Turn Budget、Cancellation、Turn Trace 或业务 Context。
+
+Gateway 是每次 LLM 调用的固定事务所有者，按以下顺序执行，每条退出路径都要完整结算：
+
+1. 检查 Turn cancellation 和 absolute deadline。
+2. 估算输入 token，并预留 Turn 的 LLM call、输入 token 和最大输出 token 预算。
+3. 根据输入和 `max_output_tokens` 预留全局 RPM/TPM 配额。
+4. 创建标准 `tracing` span 和 Turn Trace LLM span。
+5. 在 cancellation、deadline 和 queue timeout 共同约束下等待并发 permit。
+6. 使用 `min(turn_deadline, now + provider_timeout)` 约束 Provider 请求。
+7. 收集 response、finish reason、provider usage 和 latency。
+8. 由 Token Accountant 结算实际 usage、释放多余预留并计算 charge。
+9. 记录结构化 trace/metrics。
+10. 释放 permit，返回结果或 typed error。
+
+任何 Pipeline 不得自行执行上述任一步骤。
+
+限流最低支持：全局 `max_concurrent`、有界 `queue_timeout_ms`、可配置 `requests_per_minute`、可配置 `tokens_per_minute`、Provider/Model 维度限额键。`0` 不得被解释为无限并发，无效配置必须在启动时失败。Limiter 由 Gateway 单一拥有。
+
+有效调用截止时间为 `min(turn_absolute_deadline, call_started_at + provider_timeout)`。Cancellation 必须覆盖 limiter 等待、HTTP 请求、SSE response stream、embedding 和 Gateway 内有限重试。本版本默认不自动重试。
+
+错误必须区分：`Cancelled`、`TurnDeadlineExceeded`、`ProviderTimeout`、`QueueTimeout`、`RateLimited`、`TokenBudgetExceeded`、`ProviderRejected`、`Transport`、`Protocol`。
+
+Token usage 优先使用 Provider 返回值；Provider 不返回时由 Gateway 的 Token Estimator 估算并标记 `Estimated`，不得伪装为精确值。实际 usage 超过剩余 Turn Budget 时仍记录已发生的 usage/charge，但返回 `TokenBudgetExceeded`，本 Turn 不得继续或 Commit。价格使用整数最小货币单位计算；Pricing 未配置时仍记录 token usage，`charge` 为 `None`。单次调用 usage 和 Turn 聚合 usage 都要进入已提交 Turn Result。
+
+Gateway 是 LLM tracing transaction 的唯一所有者。默认 `metadata_only` 内容策略，Prompt 和 Response 正文不得进入普通结构化日志；开发环境显式启用内容追踪时先脱敏再按配置截断。API Key、Authorization Header、Secret Memory 和未经允许的角色私密信息永不记录。成功、Provider 错误、deadline、cancel、queue timeout 和 budget failure 都必须关闭 span 并写入终态。
+
+LLM 配置：
+
+```toml
+[aise.llm]
+provider = "openai_compat"
+base_url = "..."
+model = "..."
+max_concurrent = 4
+queue_timeout_ms = 5000
+provider_timeout_ms = 30000
+requests_per_minute = 120
+tokens_per_minute = 100000
+trace_content = "metadata_only"
+```
+
+`requests_per_minute` 和 `tokens_per_minute` 使用 `Option<NonZeroU32>`；省略表示未配置该 Provider quota。`max_concurrent` 必须存在且为正数。配置语义在 `LlmConfig::validate` 中一次性校验。
 
 ---
 
@@ -792,7 +1024,7 @@ LLM 调用必须同时受 Turn budget、deadline、单次 timeout 和取消信�
 | 资源 | 必要约束 |
 | --- | --- |
 | Story Turn 等待队列 | 每 Story 和全局容量、超时、拒绝策略 |
-| Story 锁或协调记录 | 空闲回收、租约或关闭路径 |
+| StoryTurnCoordinator 协调记录 | 空闲回收、租约或关闭路径 |
 | Recent Story / Summary | 条数或 token 上限、压缩策略 |
 | Retrieved Context | 条数、单项大小、总 token 上限 |
 | Character Thoughts | 角色数和单项大小上限 |
@@ -810,18 +1042,19 @@ LLM 调用必须同时受 Turn budget、deadline、单次 timeout 和取消信�
 
 满足以下条件后，Turn 架构才视为完整：
 
-1. 并发请求无法让同一 Story 同时执行两个 Turn。
+1. 并发请求无法让同一 Story 同时执行两个 Turn，直接调用 `AiseEngine::run_turn` 也无法绕过串行化。
 2. 不同 Story 可以在全局并发预算内并行。
 3. 任一 Pipeline 失败都会停止后续阶段且不会提交。
 4. Repair 次数、上下文大小和所有 LLM 调用均受预算约束。
 5. Pipeline 无法越权修改其他阶段拥有的数据。
 6. Character Thought 无法作为 World Fact 直接提交。
-7. 未通过确定性验证的 Proposal 无法生成 `ValidatedChangeSet`。
+7. 未通过确定性验证的 Proposal 无法生成 `ValidatedChangeSet`，只有 `Pass` 决策可以进入 Commit。
 8. 重复提交同一个 Turn 不会重复应用状态。
 9. revision 不匹配时提交失败而不是覆盖新状态。
 10. Commit 成功但响应丢失后可以通过幂等键恢复原结果。
 11. 外部派生系统失败不会破坏已经提交的权威状态。
-12. API、Runtime、Domain 和 adapter 之间不存在反向依赖。
+12. `core` 是唯一 Turn Contract 定义层，API、Runtime、Domain 和 adapter 之间不存在反向依赖。
+13. 所有 LLM 调用只经过同一个 `LlmGateway`，统一处理限流、deadline、取消、token usage、计费和 tracing。
 
 ---
 
@@ -830,19 +1063,22 @@ LLM 调用必须同时受 Turn budget、deadline、单次 timeout 和取消信�
 AISE 是一个固定 Pipeline 工作流驱动的 Turn-based Narrative Engine：
 
 ```text
-Story-level Serialization
+Story-level Serialization (StoryTurnCoordinator)
           |
           v
 Bounded Turn Runtime
           |
           v
-Controlled TurnExecutionContext
+Valid TurnExecutionContext (Core Contracts)
           |
           v
-Story Proposal
+Story Proposal (untrusted)
           |
           v
 Deterministic and Narrative Validation
+          |
+          v
+ValidatedChangeSet
           |
           v
 Atomic Versioned Commit
