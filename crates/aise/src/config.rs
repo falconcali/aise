@@ -39,6 +39,12 @@ pub struct TurnConfig {
     pub max_tokens: u32,
     #[serde(default)]
     pub max_retrieved_items: usize,
+    #[serde(default = "default_turn_timeout_ms")]
+    pub turn_timeout_ms: u64,
+}
+
+fn default_turn_timeout_ms() -> u64 {
+    60_000
 }
 
 impl Default for LlmConfig {
@@ -67,6 +73,7 @@ impl Default for TurnConfig {
             max_repair_rounds: 3,
             max_tokens: 2048,
             max_retrieved_items: 20,
+            turn_timeout_ms: default_turn_timeout_ms(),
         }
     }
 }

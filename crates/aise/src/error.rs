@@ -3,6 +3,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AiseError {
+    #[error("invalid request: {0}")]
+    InvalidRequest(String),
+
     #[error("story {0} not found")]
     StoryNotFound(String),
 
@@ -23,6 +26,9 @@ pub enum AiseError {
 
     #[error("validation failed after {0} repair rounds; giving up")]
     ValidationBudgetExhausted(u32),
+
+    #[error("invariant violation: {0}")]
+    InvariantViolation(String),
 
     #[error("internal: {0}")]
     Internal(String),

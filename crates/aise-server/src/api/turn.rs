@@ -50,7 +50,7 @@ struct SseSink {
 impl TurnEventSink for SseSink {
     fn emit(&self, event: TurnEvent) {
         let sse = match event {
-            TurnEvent::StageStarted(stage) => Event::default().event("stage").data(stage),
+            TurnEvent::StageStarted(stage) => Event::default().event("stage").data(stage.as_str()),
             TurnEvent::Token(text) => Event::default().event("token").data(text),
             TurnEvent::Validation { pass } => {
                 Event::default().event("validation").data(if pass { "pass" } else { "fail" })

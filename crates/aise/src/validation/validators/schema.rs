@@ -1,22 +1,22 @@
+use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_validation::{ValidationResult, fatal};
 use crate::error::AiseError;
-use crate::runtime::turn_execution_ctx::TurnExecutionContext;
-use crate::validation::validation_model::{ValidationResult, fatal};
 
 #[derive(Default)]
 pub struct SchemaValidator;
 
 impl SchemaValidator {
     pub fn validate(&self, ctx: &TurnExecutionContext) -> Result<ValidationResult, AiseError> {
-        let draft = match &ctx.draft {
-            Some(d) => d,
+        let proposal = match ctx.proposal() {
+            Some(p) => p,
             None => {
                 return Ok(ValidationResult {
                     pass: false,
-                    issues: vec![fatal("missing_draft", "no story draft produced")],
+                    issues: vec![fatal("missing_proposal", "no story proposal produced")],
                 });
             }
         };
-        if draft.story_text.trim().is_empty() {
+        if proposal.story_text.trim().is_empty() {
             return Ok(ValidationResult {
                 pass: false,
                 issues: vec![fatal("empty_story", "story text is empty")],

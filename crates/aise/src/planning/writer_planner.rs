@@ -1,50 +1,25 @@
-use crate::context::ctx_model::ContextSource;
-use crate::domain::ids::CharacterId;
+use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_data::{StoryGoal, WriterPlan};
+use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::error::AiseError;
-use crate::runtime::pipeline::TurnExecutionPipeline;
-use crate::runtime::turn_execution_ctx::TurnExecutionContext;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct WriterPlan {
-    pub need_retrieval: bool,
-    pub need_character_thinking: bool,
-    pub retrieval_requests: Vec<ContextRequest>,
-    pub character_requests: Vec<CharacterId>,
-    pub story_goal: StoryGoal,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContextRequest {
-    pub query: String,
-    pub sources: Vec<ContextSource>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct StoryGoal {
-    pub summary: String,
-}
 
 #[derive(Default)]
 pub struct WriterPlanner;
 
 #[async_trait]
 impl TurnExecutionPipeline for WriterPlanner {
-    fn stage(&self) -> &'static str {
-        "writer_planner"
+    fn stage(&self) -> TurnStage {
+        TurnStage::WriterPlanner
     }
 
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
-        ctx.plan = Some(WriterPlan {
-            need_retrieval: false,
-            need_character_thinking: false,
+        ctx.set_writer_plan(WriterPlan {
             retrieval_requests: Vec::new(),
             character_requests: Vec::new(),
             story_goal: StoryGoal {
-                summary: ctx.player_input.clone(),
+                summary: ctx.player_input().to_string(),
             },
-        });
-        Ok(())
+        })
     }
 }

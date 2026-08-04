@@ -1,53 +1,51 @@
 use crate::config::LlmConfig;
+use crate::core::story_proposal::StoryProposal;
+use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
+use crate::core::turn_trace::{
+    LlmCallData, MAX_LLM_CONTENT_CHARS, MAX_LLM_RESPONSE_CHARS, MessageData, SpanPayload, truncate,
+};
 use crate::domain::ids::EventId;
 use crate::domain::narrative::{EventKind, StoryEvent};
 use crate::error::AiseError;
 use crate::llm::message::{ChatMessage, CompletionRequest, Role};
 use crate::llm::provider::LlmProvider;
-use crate::runtime::pipeline::TurnExecutionPipeline;
-use crate::runtime::trace::{
-    LlmCallData, MAX_LLM_CONTENT_CHARS, MAX_LLM_RESPONSE_CHARS, MessageData, SpanPayload, truncate,
-};
-use crate::runtime::turn_execution_ctx::TurnExecutionContext;
-use crate::story::story_model::StoryDraft;
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::Instrument;
-use uuid::Uuid;
 
 pub struct StoryGenerator {
     llm: Arc<dyn LlmProvider>,
     model: String,
     temperature: f32,
-    max_tokens: u32,
 }
 
 impl StoryGenerator {
-    pub fn new(llm: Arc<dyn LlmProvider>, config: &LlmConfig, max_tokens: u32) -> Self {
+    pub fn new(llm: Arc<dyn LlmProvider>, config: &LlmConfig) -> Self {
         Self {
             llm,
             model: config.model.clone(),
             temperature: config.temperature,
-            max_tokens,
         }
     }
 }
 
 #[async_trait]
 impl TurnExecutionPipeline for StoryGenerator {
-    fn stage(&self) -> &'static str {
-        "story_generator"
+    fn stage(&self) -> TurnStage {
+        TurnStage::StoryGenerator
     }
 
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
+        ctx.complete_context_preparation()?;
         let request = CompletionRequest {
             model: self.model.clone(),
             messages: vec![ChatMessage {
                 role: Role::User,
-                content: ctx.player_input.clone(),
+                content: ctx.player_input().to_string(),
             }],
-            max_tokens: self.max_tokens,
+            max_tokens: ctx.budget().max_tokens(),
             temperature: self.temperature,
             stream: false,
         };
@@ -60,8 +58,8 @@ impl TurnExecutionPipeline for StoryGenerator {
             })
             .collect();
 
-        let span = tracing::info_span!("llm.complete", model = %self.model, turn_id = %ctx.turn_id);
-        let pending = ctx.trace.begin_span("aise.llm_call", "story_generator.llm");
+        let span = tracing::info_span!("llm.complete", model = %self.model, turn_id = %ctx.turn_id());
+        let pending = ctx.trace().begin_span("aise.llm_call", "story_generator.llm");
         let started = Instant::now();
         let outcome = self.llm.complete(&request).instrument(span).await;
         let latency_ms = started.elapsed().as_millis() as u64;
@@ -90,24 +88,24 @@ impl TurnExecutionPipeline for StoryGenerator {
                 latency_ms,
             }),
         };
-        ctx.trace.end_span_with(pending, &payload);
+        ctx.trace().end_span_with(pending, &payload);
 
         let story_text = outcome?;
+        let turn_id = ctx.turn_id().clone();
         let event = StoryEvent {
-            id: EventId::from(Uuid::new_v4().to_string()),
-            turn_id: ctx.turn_id.clone(),
+            id: EventId::from(format!("{turn_id}#0")),
+            turn_id,
             seq: 0,
             kind: EventKind::Action,
             payload: serde_json::json!({ "text": story_text }),
         };
-        ctx.draft = Some(StoryDraft {
+        ctx.set_story_proposal(StoryProposal {
             story_text,
             events: vec![event],
             character_updates: Vec::new(),
             world_updates: Vec::new(),
             memory_updates: Vec::new(),
-        });
-        Ok(())
+        })
     }
 }
 

@@ -5,7 +5,7 @@ use crate::domain::world::WorldPatch;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct StoryDraft {
+pub struct StoryProposal {
     pub story_text: String,
     pub events: Vec<StoryEvent>,
     pub character_updates: Vec<CharacterPatch>,

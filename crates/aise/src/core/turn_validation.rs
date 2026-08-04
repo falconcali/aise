@@ -9,7 +9,6 @@ pub struct ValidationResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationIssue {
     pub severity: Severity,
-
     pub code: String,
     pub message: String,
 }

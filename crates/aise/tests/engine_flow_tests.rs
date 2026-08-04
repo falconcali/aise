@@ -1,17 +1,18 @@
 use aise::AiseConfig;
 use aise::AiseEngine;
+use aise::TurnEvent;
+use aise::TurnEventSink;
 use aise::character::CharacterThinkPipeline;
 use aise::context::BaselineContextBuilder;
 use aise::context::ContextRetrievalPipeline;
+use aise::core::turn_pipeline::TurnStage;
 use aise::domain::ids::StoryId;
-use aise::engine::TurnEvent;
 use aise::llm::error::LlmError;
 use aise::llm::provider::DeltaSink;
 use aise::llm::provider::LlmProvider;
 use aise::persistence::SqliteStore;
 use aise::persistence::TurnCommitter;
 use aise::planning::WriterPlanner;
-use aise::runtime::TurnEventSink;
 use aise::runtime::TurnInitializer;
 use aise::runtime::TurnRuntime;
 use aise::story::StoryGenerator;
@@ -58,7 +59,7 @@ async fn build_engine(db_url: &str) -> Arc<AiseEngine> {
         Box::new(WriterPlanner),
         Box::new(ContextRetrievalPipeline),
         Box::new(CharacterThinkPipeline),
-        Box::new(StoryGenerator::new(llm.clone(), &config.llm, config.turn.max_tokens)),
+        Box::new(StoryGenerator::new(llm.clone(), &config.llm)),
         Box::new(ValidationPipeline::default()),
         Box::new(TurnCommitter::new(store.clone())),
     ]);
@@ -91,18 +92,46 @@ async fn full_flow_returns_hello_world_and_persists() {
     {
         let events = recorder.events.lock().unwrap();
         assert_eq!(events.len(), 12);
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::StageStarted("turn_initializer"))));
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e, TurnEvent::StageStarted("baseline_ctx_builder")))
+                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::TurnInitializer)))
         );
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::StageStarted("writer_planner"))));
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::StageStarted("context_retrieval"))));
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::StageStarted("character_think"))));
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::StageStarted("story_generator"))));
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::StageStarted("validation"))));
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::StageStarted("turn_committer"))));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::BaselineBuilder)))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::WriterPlanner)))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::ContextRetrieval)))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::CharacterThink)))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::StoryGenerator)))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::Validation)))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::TurnCommitter)))
+        );
         assert!(events.iter().any(|e| matches!(e, TurnEvent::Validation { pass: true })));
         assert!(events.iter().any(|e| matches!(e, TurnEvent::Token(t) if t == "Hello World")));
         assert!(events.iter().any(|e| matches!(e, TurnEvent::Finished { .. })));

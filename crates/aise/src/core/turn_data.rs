@@ -1,4 +1,5 @@
 use crate::domain::character::CharacterState;
+use crate::domain::ids::CharacterId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default)]
@@ -34,4 +35,31 @@ pub enum ContextSource {
     NarrativeGraph,
     HistoricalStory,
     LoreBook,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WriterPlan {
+    pub retrieval_requests: Vec<ContextRequest>,
+    pub character_requests: Vec<CharacterId>,
+    pub story_goal: StoryGoal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextRequest {
+    pub query: String,
+    pub sources: Vec<ContextSource>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StoryGoal {
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CharacterThought {
+    pub character_id: CharacterId,
+    pub perception: String,
+    pub emotion: String,
+    pub goal: String,
+    pub possible_action: String,
 }

@@ -2,7 +2,7 @@ use super::character::CharacterState;
 use super::ids::StoryId;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldState {
     pub id: StoryId,
     pub name: String,

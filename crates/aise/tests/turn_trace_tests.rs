@@ -1,6 +1,5 @@
-use super::*;
-use crate::domain::ids::{StoryId, TurnId};
-use crate::runtime::trace::truncate;
+use aise::core::turn_trace::{TraceRecorder, truncate};
+use aise::domain::ids::{StoryId, TurnId};
 
 #[test]
 fn records_nested_span_tree() {

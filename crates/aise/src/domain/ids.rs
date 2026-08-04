@@ -13,12 +13,6 @@ macro_rules! id_type {
             }
         }
 
-        impl Default for $name {
-            fn default() -> Self {
-                Self(Arc::from(""))
-            }
-        }
-
         impl From<&str> for $name {
             fn from(value: &str) -> Self {
                 Self(Arc::from(value))

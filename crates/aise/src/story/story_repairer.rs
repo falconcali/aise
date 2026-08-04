@@ -1,7 +1,7 @@
+use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::error::AiseError;
 use crate::llm::provider::LlmProvider;
-use crate::runtime::pipeline::TurnExecutionPipeline;
-use crate::runtime::turn_execution_ctx::TurnExecutionContext;
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -18,8 +18,8 @@ impl StoryRepairer {
 
 #[async_trait]
 impl TurnExecutionPipeline for StoryRepairer {
-    fn stage(&self) -> &'static str {
-        "story_repairer"
+    fn stage(&self) -> TurnStage {
+        TurnStage::StoryRepairer
     }
 
     async fn execute(&self, _ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {

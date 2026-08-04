@@ -1,7 +1,7 @@
-use crate::character::character_model::CharacterThought;
+use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_data::CharacterThought;
+use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::error::AiseError;
-use crate::runtime::pipeline::TurnExecutionPipeline;
-use crate::runtime::turn_execution_ctx::TurnExecutionContext;
 use async_trait::async_trait;
 
 #[derive(Default)]
@@ -9,27 +9,30 @@ pub struct CharacterThinkPipeline;
 
 #[async_trait]
 impl TurnExecutionPipeline for CharacterThinkPipeline {
-    fn stage(&self) -> &'static str {
-        "character_think"
+    fn stage(&self) -> TurnStage {
+        TurnStage::CharacterThink
     }
 
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
-        let plan = ctx.plan.clone().unwrap_or_default();
-        if !plan.need_character_thinking {
-            ctx.character_thoughts.clear();
-            return Ok(());
+        let plan = ctx
+            .plan()
+            .ok_or_else(|| AiseError::InvariantViolation("writer plan not set before character think".into()))?
+            .clone();
+        if plan.character_requests.is_empty() {
+            return ctx.set_character_thoughts(Vec::new());
         }
-        let requested: Vec<_> = plan.character_requests;
-        ctx.character_thoughts = requested
+        let player_input = ctx.player_input().to_string();
+        let thoughts: Vec<CharacterThought> = plan
+            .character_requests
             .into_iter()
             .map(|character_id| CharacterThought {
                 character_id,
-                perception: ctx.player_input.clone(),
+                perception: player_input.clone(),
                 emotion: String::new(),
                 goal: String::new(),
                 possible_action: String::new(),
             })
             .collect();
-        Ok(())
+        ctx.set_character_thoughts(thoughts)
     }
 }

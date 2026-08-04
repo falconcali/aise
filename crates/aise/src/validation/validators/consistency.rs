@@ -1,6 +1,6 @@
+use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_validation::ValidationResult;
 use crate::error::AiseError;
-use crate::runtime::turn_execution_ctx::TurnExecutionContext;
-use crate::validation::validation_model::ValidationResult;
 
 #[derive(Default)]
 pub struct ConsistencyValidator;

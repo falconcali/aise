@@ -3,6 +3,7 @@
 pub mod character;
 pub mod config;
 pub mod context;
+pub mod core;
 pub mod domain;
 pub mod engine;
 pub mod error;
@@ -15,5 +16,7 @@ pub mod story;
 pub mod validation;
 
 pub use config::{AiseConfig, LlmConfig, StorageConfig, TurnConfig};
-pub use engine::{AiseEngine, TurnEvent, TurnEventSink, TurnResult};
+pub use core::turn_contract::CommittedTurnResult;
+pub use core::turn_event::{TurnEvent, TurnEventSink};
+pub use engine::AiseEngine;
 pub use error::AiseError;

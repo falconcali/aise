@@ -1,5 +1,5 @@
 use super::model::{Session, SessionId, SessionInfo};
-use aise::domain::{StoryId, TurnId};
+use aise::domain::StoryId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -45,10 +45,6 @@ impl SessionRegistry {
 
     pub async fn delete(&self, id: &SessionId) -> bool {
         self.sessions.lock().await.remove(id).is_some()
-    }
-
-    pub async fn new_turn_id(&self) -> TurnId {
-        TurnId::from(Uuid::new_v4().to_string())
     }
 }
 

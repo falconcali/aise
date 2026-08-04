@@ -153,6 +153,12 @@ impl ServerConfig {
                 Err(e) => eprintln!("[aise-server] ignoring AISE_TURN_MAX_RETRIEVED_ITEMS={v}: {e}"),
             }
         }
+        if let Some(v) = get("AISE_TURN_TIMEOUT_MS") {
+            match v.parse() {
+                Ok(n) => self.aise.turn.turn_timeout_ms = n,
+                Err(e) => eprintln!("[aise-server] ignoring AISE_TURN_TIMEOUT_MS={v}: {e}"),
+            }
+        }
     }
 
     fn resolve_llm_api_key(&mut self) {

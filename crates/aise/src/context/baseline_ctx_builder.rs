@@ -1,9 +1,9 @@
-use crate::context::ctx_model::{BaselineContext, StoryConfig};
+use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_data::{BaselineContext, StoryConfig};
+use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
+use crate::core::turn_trace::{SpanPayload, ToolCallData};
 use crate::error::AiseError;
 use crate::persistence::store::Store;
-use crate::runtime::pipeline::TurnExecutionPipeline;
-use crate::runtime::trace::{SpanPayload, ToolCallData};
-use crate::runtime::turn_execution_ctx::TurnExecutionContext;
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Instant;
@@ -20,25 +20,27 @@ impl BaselineContextBuilder {
 
 #[async_trait]
 impl TurnExecutionPipeline for BaselineContextBuilder {
-    fn stage(&self) -> &'static str {
-        "baseline_ctx_builder"
+    fn stage(&self) -> TurnStage {
+        TurnStage::BaselineBuilder
     }
 
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
+        let story_id = ctx.story_id().clone();
+        let limit = ctx.budget().max_retrieved_items();
         let characters = {
-            let pending = ctx.trace.begin_span("aise.tool_call", "store.load_characters");
+            let pending = ctx.trace().begin_span("aise.tool_call", "store.load_characters");
             let started = Instant::now();
-            let outcome = self.store.load_characters(&ctx.story_id).await;
+            let outcome = self.store.load_characters(&story_id).await;
             let latency_ms = started.elapsed().as_millis() as u64;
             let (ok, result) = match &outcome {
                 Ok(items) => (true, serde_json::json!({ "count": items.len() })),
                 Err(error) => (false, serde_json::json!({ "error": error.to_string() })),
             };
-            ctx.trace.end_span_with(
+            ctx.trace().end_span_with(
                 pending,
                 &SpanPayload::ToolCall(ToolCallData {
                     tool: "store.load_characters".into(),
-                    args: serde_json::json!({ "story_id": ctx.story_id.to_string() }),
+                    args: serde_json::json!({ "story_id": story_id.to_string() }),
                     result,
                     ok,
                     latency_ms,
@@ -47,21 +49,21 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
             outcome?
         };
         let recent_story = {
-            let pending = ctx.trace.begin_span("aise.tool_call", "store.load_story");
+            let pending = ctx.trace().begin_span("aise.tool_call", "store.load_story");
             let started = Instant::now();
-            let outcome = self.store.load_story(&ctx.story_id, ctx.budget.max_retrieved_items).await;
+            let outcome = self.store.load_story(&story_id, limit).await;
             let latency_ms = started.elapsed().as_millis() as u64;
             let (ok, result) = match &outcome {
                 Ok(turns) => (true, serde_json::json!({ "count": turns.len() })),
                 Err(error) => (false, serde_json::json!({ "error": error.to_string() })),
             };
-            ctx.trace.end_span_with(
+            ctx.trace().end_span_with(
                 pending,
                 &SpanPayload::ToolCall(ToolCallData {
                     tool: "store.load_story".into(),
                     args: serde_json::json!({
-                        "story_id": ctx.story_id.to_string(),
-                        "limit": ctx.budget.max_retrieved_items,
+                        "story_id": story_id.to_string(),
+                        "limit": limit,
                     }),
                     result,
                     ok,
@@ -70,7 +72,7 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
             );
             outcome?
         };
-        ctx.baseline_ctx = BaselineContext {
+        ctx.set_prepared_context(BaselineContext {
             story_instructions: String::new(),
             story_config: StoryConfig::default(),
             player_character: characters.first().cloned(),
@@ -79,7 +81,6 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
             recent_story: recent_story.iter().map(|t| t.story_text.clone()).collect(),
             story_summary: String::new(),
             active_constraints: Vec::new(),
-        };
-        Ok(())
+        })
     }
 }
