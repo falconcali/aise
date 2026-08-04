@@ -8,10 +8,14 @@ license.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+chrono.workspace = true
 futures.workspace = true
+minijinja.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -20,6 +24,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
+tempfile.workspace = true
 tokio.workspace = true
 
 [lints]

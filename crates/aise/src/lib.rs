@@ -9,6 +9,7 @@ pub mod error;
 pub mod llm;
 pub mod persistence;
 pub mod planning;
+pub mod prompt;
 pub mod runtime;
 pub mod story;
 pub mod validation;
