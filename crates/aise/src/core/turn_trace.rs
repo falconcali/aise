@@ -68,15 +68,30 @@ pub struct PipelineData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmCallData {
+    pub provider: String,
     pub model: String,
-    pub messages: Vec<MessageData>,
-    pub max_tokens: u32,
-    pub temperature: f32,
+    pub purpose: String,
     pub stream: bool,
+    pub attempt: u32,
+    pub queue_wait_ms: u64,
+    pub provider_latency_ms: u64,
+    pub total_latency_ms: u64,
+    pub input_tokens: u64,
+    pub cached_input_tokens: Option<u64>,
+    pub output_tokens: u64,
+    pub usage_accuracy: String,
+    pub finish_reason: Option<String>,
+    pub charge: Option<serde_json::Value>,
     pub status: String,
-    pub response: Option<String>,
-    pub error: Option<String>,
-    pub latency_ms: u64,
+    pub error_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<LlmCallContent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmCallContent {
+    pub messages: Vec<MessageData>,
+    pub response: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

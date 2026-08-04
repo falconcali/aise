@@ -1,11 +1,14 @@
 use crate::core::story_proposal::StoryProposal;
-use crate::core::turn_budget::TurnBudget;
+use crate::core::turn_budget::{LlmReservation, TurnBudget};
 use crate::core::turn_contract::{CommittedTurnResult, TurnControl, TurnIdentity, TurnPhase, TurnRequest};
 use crate::core::turn_data::{BaselineContext, CharacterThought, ContextItem, WriterPlan};
-use crate::core::turn_trace::TraceRecorder;
+use crate::core::turn_pipeline::TurnStage;
+use crate::core::turn_trace::{PendingSpan, TraceRecorder};
 use crate::core::turn_validation::ValidationResult;
 use crate::domain::ids::{StoryId, TurnId};
 use crate::error::AiseError;
+use serde::Serialize;
+use std::time::Instant;
 
 pub struct TurnExecutionContext {
     identity: TurnIdentity,
@@ -31,8 +34,10 @@ impl TurnExecutionContext {
         control: TurnControl,
         trace: TraceRecorder,
     ) -> Result<Self, AiseError> {
-        if budget.max_tokens() == 0 {
-            return Err(AiseError::InvalidRequest("turn budget max_tokens must be positive".into()));
+        if budget.remaining_output_tokens() == 0 {
+            return Err(AiseError::InvalidRequest(
+                "turn budget max_output_tokens must be positive".into(),
+            ));
         }
         Ok(Self {
             identity,
@@ -194,5 +199,61 @@ impl TurnExecutionContext {
             )));
         }
         Ok(())
+    }
+
+    pub fn llm_call_scope(&mut self, stage: TurnStage) -> TurnLlmCallScope<'_> {
+        TurnLlmCallScope {
+            identity: &self.identity,
+            control: &self.control,
+            budget: &mut self.budget,
+            trace: &mut self.trace,
+            stage,
+        }
+    }
+}
+
+pub struct TurnLlmCallScope<'a> {
+    identity: &'a TurnIdentity,
+    control: &'a TurnControl,
+    budget: &'a mut TurnBudget,
+    trace: &'a mut TraceRecorder,
+    stage: TurnStage,
+}
+
+impl<'a> TurnLlmCallScope<'a> {
+    pub fn story_id(&self) -> &StoryId {
+        self.identity.story_id()
+    }
+
+    pub fn turn_id(&self) -> &TurnId {
+        self.identity.turn_id()
+    }
+
+    pub fn stage(&self) -> TurnStage {
+        self.stage
+    }
+
+    pub fn deadline(&self) -> Instant {
+        self.control.deadline()
+    }
+
+    pub fn cancellation(&self) -> &crate::core::turn_contract::TurnCancellation {
+        self.control.cancellation()
+    }
+
+    pub fn reserve_llm(&mut self, estimated_input: u64, requested_output: u64) -> Result<LlmReservation, AiseError> {
+        self.budget.reserve_llm_call(estimated_input, requested_output)
+    }
+
+    pub fn settle_llm(&mut self, actual_input: u64, actual_output: u64) -> Result<(), AiseError> {
+        self.budget.settle_llm_call(actual_input, actual_output)
+    }
+
+    pub fn begin_llm_span(&mut self) -> PendingSpan {
+        self.trace.begin_span("aise.llm_call", "llm.call")
+    }
+
+    pub fn end_llm_span<S: Serialize>(&mut self, span: PendingSpan, payload: &S) {
+        self.trace.end_span_with(span, payload);
     }
 }

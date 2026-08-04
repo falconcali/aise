@@ -7,6 +7,14 @@ use tokio_util::sync::CancellationToken;
 
 pub const MAX_PLAYER_INPUT_CHARS: usize = 4096;
 
+#[derive(Debug, Clone)]
+pub struct ExecuteTurnSpec {
+    pub story_id: StoryId,
+    pub idempotency_key: IdempotencyKey,
+    pub player_input: String,
+    pub cancellation: TurnCancellation,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IdempotencyKey(String);
 
@@ -157,6 +165,10 @@ impl TurnCancellation {
 
     pub fn is_cancelled(&self) -> bool {
         self.token.is_cancelled()
+    }
+
+    pub fn token(&self) -> &CancellationToken {
+        &self.token
     }
 
     pub fn child(&self) -> Self {

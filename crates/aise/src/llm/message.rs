@@ -20,5 +20,22 @@ pub struct CompletionRequest {
     pub messages: Vec<ChatMessage>,
     pub max_tokens: u32,
     pub temperature: f32,
-    pub stream: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompletionSpec {
+    pub messages: Vec<ChatMessage>,
+    pub max_output_tokens: u32,
+    pub purpose: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmbeddingRequest {
+    pub model: String,
+    pub input: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmbeddingOutput {
+    pub embedding: Vec<f32>,
 }

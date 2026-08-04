@@ -130,6 +130,30 @@ impl ServerConfig {
                 Err(e) => eprintln!("[aise-server] ignoring AISE_LLM_TEMPERATURE={v}: {e}"),
             }
         }
+        if let Some(v) = get("AISE_LLM_QUEUE_TIMEOUT_MS") {
+            match v.parse() {
+                Ok(n) => self.aise.llm.queue_timeout_ms = n,
+                Err(e) => eprintln!("[aise-server] ignoring AISE_LLM_QUEUE_TIMEOUT_MS={v}: {e}"),
+            }
+        }
+        if let Some(v) = get("AISE_LLM_PROVIDER_TIMEOUT_MS") {
+            match v.parse() {
+                Ok(n) => self.aise.llm.provider_timeout_ms = n,
+                Err(e) => eprintln!("[aise-server] ignoring AISE_LLM_PROVIDER_TIMEOUT_MS={v}: {e}"),
+            }
+        }
+        if let Some(v) = get("AISE_LLM_REQUESTS_PER_MINUTE") {
+            match v.parse() {
+                Ok(n) => self.aise.llm.requests_per_minute = std::num::NonZeroU32::new(n),
+                Err(e) => eprintln!("[aise-server] ignoring AISE_LLM_REQUESTS_PER_MINUTE={v}: {e}"),
+            }
+        }
+        if let Some(v) = get("AISE_LLM_TOKENS_PER_MINUTE") {
+            match v.parse() {
+                Ok(n) => self.aise.llm.tokens_per_minute = std::num::NonZeroU32::new(n),
+                Err(e) => eprintln!("[aise-server] ignoring AISE_LLM_TOKENS_PER_MINUTE={v}: {e}"),
+            }
+        }
 
         if let Some(v) = get("AISE_DB_URL") {
             self.aise.storage.database_url = v;
@@ -143,8 +167,26 @@ impl ServerConfig {
         }
         if let Some(v) = get("AISE_TURN_MAX_TOKENS") {
             match v.parse() {
-                Ok(n) => self.aise.turn.max_tokens = n,
+                Ok(n) => self.aise.turn.max_output_tokens = n,
                 Err(e) => eprintln!("[aise-server] ignoring AISE_TURN_MAX_TOKENS={v}: {e}"),
+            }
+        }
+        if let Some(v) = get("AISE_TURN_MAX_LLM_CALLS") {
+            match v.parse() {
+                Ok(n) => self.aise.turn.max_llm_calls = n,
+                Err(e) => eprintln!("[aise-server] ignoring AISE_TURN_MAX_LLM_CALLS={v}: {e}"),
+            }
+        }
+        if let Some(v) = get("AISE_TURN_MAX_INPUT_TOKENS") {
+            match v.parse() {
+                Ok(n) => self.aise.turn.max_input_tokens = n,
+                Err(e) => eprintln!("[aise-server] ignoring AISE_TURN_MAX_INPUT_TOKENS={v}: {e}"),
+            }
+        }
+        if let Some(v) = get("AISE_TURN_MAX_TOTAL_TOKENS") {
+            match v.parse() {
+                Ok(n) => self.aise.turn.max_total_tokens = n,
+                Err(e) => eprintln!("[aise-server] ignoring AISE_TURN_MAX_TOTAL_TOKENS={v}: {e}"),
             }
         }
         if let Some(v) = get("AISE_TURN_MAX_RETRIEVED_ITEMS") {

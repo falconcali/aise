@@ -1,7 +1,7 @@
 use crate::config::LlmConfig;
+use crate::llm::accounting::{FinishReason, LlmCompletion, LlmTokenUsage, UsageAccuracy};
 use crate::llm::error::LlmError;
-use crate::llm::limiter::LlmLimiter;
-use crate::llm::message::{ChatMessage, CompletionRequest};
+use crate::llm::message::{ChatMessage, CompletionRequest, EmbeddingOutput, EmbeddingRequest};
 use crate::llm::provider::{DeltaSink, LlmProvider};
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -11,16 +11,14 @@ pub struct OpenAiCompatProvider {
     base_url: String,
     api_key: Option<String>,
     client: reqwest::Client,
-    limiter: LlmLimiter,
 }
 
 impl OpenAiCompatProvider {
-    pub fn new(config: LlmConfig, limiter: LlmLimiter) -> Self {
+    pub fn new(config: LlmConfig) -> Self {
         Self {
             base_url: config.base_url.trim_end_matches('/').to_string(),
             api_key: config.api_key,
             client: reqwest::Client::new(),
-            limiter,
         }
     }
 
@@ -45,17 +43,29 @@ struct ChatCompletionRequest<'a> {
 #[derive(Deserialize)]
 struct ChatCompletionResponse {
     choices: Vec<ChatChoice>,
+    usage: Option<ResponseUsage>,
 }
 
 #[derive(Deserialize)]
 struct ChatChoice {
     message: ChatMessage,
+    finish_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ResponseUsage {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    total_tokens: Option<u64>,
 }
 
 #[async_trait]
 impl LlmProvider for OpenAiCompatProvider {
-    async fn complete(&self, req: &CompletionRequest) -> Result<String, LlmError> {
-        let _permit = self.limiter.acquire().await.map_err(|e| LlmError::Protocol(e.to_string()))?;
+    fn provider_name(&self) -> &'static str {
+        "openai_compat"
+    }
+
+    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmError> {
         let body = ChatCompletionRequest {
             model: &req.model,
             messages: &req.messages,
@@ -63,22 +73,39 @@ impl LlmProvider for OpenAiCompatProvider {
             temperature: req.temperature,
             stream: false,
         };
-
-        let mut builder = self.client.post(self.endpoint()).json(&body);
+        let mut request = self.client.post(self.endpoint()).json(&body);
         if let Some(key) = &self.api_key {
-            builder = builder.bearer_auth(key);
+            request = request.bearer_auth(key);
         }
-
-        let resp: ChatCompletionResponse = builder.send().await?.error_for_status()?.json().await?;
-        resp.choices
+        let resp: ChatCompletionResponse = request.send().await?.error_for_status()?.json().await?;
+        let choice = resp
+            .choices
             .into_iter()
             .next()
-            .map(|c| c.message.content)
-            .ok_or_else(|| LlmError::Protocol("empty choices".into()))
+            .ok_or_else(|| LlmError::Protocol("empty choices".into()))?;
+        let finish_reason = choice.finish_reason.as_deref().map(parse_finish_reason);
+        let usage = resp.usage.map(|u| LlmTokenUsage {
+            input_tokens: u.prompt_tokens,
+            cached_input_tokens: None,
+            output_tokens: u.completion_tokens,
+            total_tokens: u
+                .total_tokens
+                .unwrap_or_else(|| u.prompt_tokens.saturating_add(u.completion_tokens)),
+            accuracy: UsageAccuracy::Exact,
+        });
+        Ok(LlmCompletion {
+            text: choice.message.content,
+            finish_reason,
+            usage,
+            charge: None,
+        })
     }
 
-    async fn complete_stream(&self, req: &CompletionRequest, mut on_delta: DeltaSink) -> Result<(), LlmError> {
-        let _permit = self.limiter.acquire().await.map_err(|e| LlmError::Protocol(e.to_string()))?;
+    async fn complete_stream(
+        &self,
+        req: &CompletionRequest,
+        mut on_delta: DeltaSink,
+    ) -> Result<LlmCompletion, LlmError> {
         let body = ChatCompletionRequest {
             model: &req.model,
             messages: &req.messages,
@@ -86,29 +113,53 @@ impl LlmProvider for OpenAiCompatProvider {
             temperature: req.temperature,
             stream: true,
         };
-
-        let mut builder = self.client.post(self.endpoint()).json(&body);
+        let mut request = self.client.post(self.endpoint()).json(&body);
         if let Some(key) = &self.api_key {
-            builder = builder.bearer_auth(key);
+            request = request.bearer_auth(key);
         }
-
-        let mut stream = builder.send().await?.error_for_status()?.bytes_stream();
+        let mut stream = request.send().await?.error_for_status()?.bytes_stream();
         let mut buf = Vec::new();
+        let mut text = String::new();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
             buf.extend_from_slice(&chunk);
             for line in extract_sse_lines(&mut buf)? {
                 if let Some(data) = line.strip_prefix("data: ").map(str::trim) {
                     if data == "[DONE]" {
-                        return Ok(());
+                        return Ok(LlmCompletion {
+                            text,
+                            finish_reason: Some(FinishReason::Stop),
+                            usage: None,
+                            charge: None,
+                        });
                     }
                     if let Some(delta) = parse_delta(data)? {
-                        on_delta(delta);
+                        on_delta(delta.clone());
+                        text.push_str(&delta);
                     }
                 }
             }
         }
-        Ok(())
+        Ok(LlmCompletion {
+            text,
+            finish_reason: Some(FinishReason::Stop),
+            usage: None,
+            charge: None,
+        })
+    }
+
+    async fn embed(&self, _req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmError> {
+        Err(LlmError::EmbeddingUnsupported)
+    }
+}
+
+fn parse_finish_reason(value: &str) -> FinishReason {
+    match value {
+        "stop" => FinishReason::Stop,
+        "length" => FinishReason::Length,
+        "content_filter" => FinishReason::ContentFilter,
+        "tool_calls" => FinishReason::ToolCalls,
+        other => FinishReason::Other(other.to_owned()),
     }
 }
 

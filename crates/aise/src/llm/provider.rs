@@ -1,12 +1,17 @@
+use crate::llm::accounting::LlmCompletion;
 use crate::llm::error::LlmError;
-use crate::llm::message::CompletionRequest;
+use crate::llm::message::{CompletionRequest, EmbeddingOutput, EmbeddingRequest};
 use async_trait::async_trait;
 
 pub type DeltaSink = Box<dyn FnMut(String) + Send>;
 
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
-    async fn complete(&self, req: &CompletionRequest) -> Result<String, LlmError>;
+    fn provider_name(&self) -> &'static str;
 
-    async fn complete_stream(&self, req: &CompletionRequest, on_delta: DeltaSink) -> Result<(), LlmError>;
+    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmError>;
+
+    async fn complete_stream(&self, req: &CompletionRequest, on_delta: DeltaSink) -> Result<LlmCompletion, LlmError>;
+
+    async fn embed(&self, req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmError>;
 }

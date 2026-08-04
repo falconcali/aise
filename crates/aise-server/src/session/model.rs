@@ -34,8 +34,6 @@ pub struct Session {
     pub name: String,
     pub story_id: aise::domain::StoryId,
     pub created_at: i64,
-
-    turn_lock: tokio::sync::Mutex<()>,
 }
 
 impl Session {
@@ -45,12 +43,7 @@ impl Session {
             name,
             story_id,
             created_at,
-            turn_lock: tokio::sync::Mutex::new(()),
         })
-    }
-
-    pub async fn lock_turn(&self) -> tokio::sync::MutexGuard<'_, ()> {
-        self.turn_lock.lock().await
     }
 
     pub fn info(&self) -> SessionInfo {

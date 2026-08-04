@@ -1,15 +1,13 @@
 use crate::config::AiseConfig;
 use crate::core::turn_budget::TurnBudget;
 use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_contract::{
-    CommittedTurnResult, IdempotencyKey, TurnCancellation, TurnControl, TurnIdentity, TurnRequest,
-};
+use crate::core::turn_contract::{CommittedTurnResult, ExecuteTurnSpec, TurnControl, TurnIdentity, TurnRequest};
 use crate::core::turn_event::{TurnEvent, TurnEventSink};
 use crate::core::turn_trace::{MAX_LLM_CONTENT_CHARS, SpanPayload, TraceRecorder, TurnData, truncate};
-use crate::domain::ids::{StoryId, TurnId};
+use crate::domain::ids::TurnId;
 use crate::error::AiseError;
-use crate::llm::provider::LlmProvider;
 use crate::persistence::store::Store;
+use crate::runtime::story_turn_coordinator::StoryTurnCoordinator;
 use crate::runtime::turn_runtime::TurnRuntime;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -18,16 +16,21 @@ use uuid::Uuid;
 pub struct AiseEngine {
     runtime: TurnRuntime,
     store: Arc<dyn Store>,
-    llm: Arc<dyn LlmProvider>,
+    coordinator: Arc<StoryTurnCoordinator>,
     config: AiseConfig,
 }
 
 impl AiseEngine {
-    pub fn new(runtime: TurnRuntime, store: Arc<dyn Store>, llm: Arc<dyn LlmProvider>, config: AiseConfig) -> Self {
+    pub fn new(
+        runtime: TurnRuntime,
+        store: Arc<dyn Store>,
+        coordinator: Arc<StoryTurnCoordinator>,
+        config: AiseConfig,
+    ) -> Self {
         Self {
             runtime,
             store,
-            llm,
+            coordinator,
             config,
         }
     }
@@ -36,8 +39,8 @@ impl AiseEngine {
         &self.store
     }
 
-    pub fn llm(&self) -> &Arc<dyn LlmProvider> {
-        &self.llm
+    pub fn coordinator(&self) -> &Arc<StoryTurnCoordinator> {
+        &self.coordinator
     }
 
     pub fn config(&self) -> &AiseConfig {
@@ -46,26 +49,20 @@ impl AiseEngine {
 
     pub async fn run_turn(
         &self,
-        story_id: &StoryId,
-        player_input: String,
+        spec: ExecuteTurnSpec,
         sink: &dyn TurnEventSink,
     ) -> Result<CommittedTurnResult, AiseError> {
-        let request = TurnRequest::try_new(player_input)?;
+        let request = TurnRequest::try_new(spec.player_input)?;
+        let deadline = Instant::now() + Duration::from_millis(self.config.turn.turn_timeout_ms);
+        let _permit = self.coordinator.acquire(&spec.story_id, deadline, &spec.cancellation).await?;
         let identity = TurnIdentity::new(
-            story_id.clone(),
+            spec.story_id.clone(),
             TurnId::from(Uuid::new_v4().to_string()),
-            IdempotencyKey::try_new(Uuid::new_v4().to_string())?,
+            spec.idempotency_key,
             now_millis(),
         )?;
-        let budget = TurnBudget::new(
-            self.config.turn.max_repair_rounds,
-            self.config.turn.max_tokens,
-            self.config.turn.max_retrieved_items,
-        );
-        let control = TurnControl::new(
-            Instant::now() + Duration::from_millis(self.config.turn.turn_timeout_ms),
-            TurnCancellation::new(),
-        );
+        let budget = TurnBudget::from_config(&self.config.turn)?;
+        let control = TurnControl::new(deadline, spec.cancellation);
         let mut ctx = TurnExecutionContext::new(identity, request, budget, control, TraceRecorder::new())?;
 
         let root = ctx.trace().begin_span("aise.turn", "aise.turn");

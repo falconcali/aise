@@ -12,6 +12,30 @@ pub enum AiseError {
     #[error("llm error: {0}")]
     Llm(#[from] LlmError),
 
+    #[error("validation rejected: {0}")]
+    ValidationRejected(String),
+
+    #[error("validation failed after {0} repair rounds; giving up")]
+    ValidationBudgetExhausted(u32),
+
+    #[error("turn deadline exceeded")]
+    TurnDeadlineExceeded,
+
+    #[error("cancelled")]
+    Cancelled,
+
+    #[error("revision conflict")]
+    RevisionConflict,
+
+    #[error("idempotency conflict")]
+    IdempotencyConflict,
+
+    #[error("backpressure: {0}")]
+    Backpressure(String),
+
+    #[error("token budget exceeded: {0}")]
+    TokenBudgetExceeded(String),
+
     #[error("store error: {0}")]
     Store(#[from] sqlx::Error),
 
@@ -23,9 +47,6 @@ pub enum AiseError {
 
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
-
-    #[error("validation failed after {0} repair rounds; giving up")]
-    ValidationBudgetExhausted(u32),
 
     #[error("invariant violation: {0}")]
     InvariantViolation(String),

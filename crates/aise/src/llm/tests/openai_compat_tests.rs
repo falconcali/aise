@@ -1,16 +1,14 @@
 use super::*;
 
 fn provider_with(base_url: &str) -> OpenAiCompatProvider {
-    OpenAiCompatProvider::new(
-        LlmConfig {
-            base_url: base_url.into(),
-            api_key: None,
-            model: "test".into(),
-            max_concurrent: 1,
-            temperature: 0.0,
-        },
-        LlmLimiter::new(1),
-    )
+    OpenAiCompatProvider::new(LlmConfig {
+        base_url: base_url.into(),
+        api_key: None,
+        model: "test".into(),
+        max_concurrent: 1,
+        temperature: 0.0,
+        ..LlmConfig::default()
+    })
 }
 
 #[test]

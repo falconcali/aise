@@ -2,7 +2,8 @@ use crate::api::dto::TurnRequest;
 use crate::api::state::AppState;
 use crate::error::ApiError;
 use crate::session::SessionId;
-use aise::{TurnEvent, TurnEventSink};
+use aise::core::turn_contract::{IdempotencyKey, TurnCancellation};
+use aise::{ExecuteTurnSpec, TurnEvent, TurnEventSink};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -10,6 +11,7 @@ use futures::channel::mpsc::UnboundedSender;
 use futures::stream::{Stream, StreamExt};
 use std::convert::Infallible;
 use std::sync::Arc;
+use uuid::Uuid;
 
 pub async fn run_turn(
     State(state): State<Arc<AppState>>,
@@ -28,11 +30,18 @@ pub async fn run_turn(
     let (tx, rx) = futures::channel::mpsc::unbounded();
     let sink = SseSink { tx, include_trace };
 
+    let idempotency_key =
+        IdempotencyKey::try_new(Uuid::new_v4().to_string()).map_err(|e| ApiError::Engine(anyhow::Error::new(e)))?;
+    let spec = ExecuteTurnSpec {
+        story_id,
+        idempotency_key,
+        player_input,
+        cancellation: TurnCancellation::new(),
+    };
+
     let engine = state.engine.clone();
-    let session_for_task = session.clone();
     tokio::spawn(async move {
-        let _guard = session_for_task.lock_turn().await;
-        match engine.run_turn(&story_id, player_input, &sink).await {
+        match engine.run_turn(spec, &sink).await {
             Ok(_) => {}
             Err(e) => tracing::error!(error = %e, "turn failed"),
         }

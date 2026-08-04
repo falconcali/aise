@@ -1,6 +1,6 @@
 use aise::AiseError;
 use aise::core::story_proposal::StoryProposal;
-use aise::core::turn_budget::TurnBudget;
+use aise::core::turn_budget::{TurnBudget, TurnBudgetLimits};
 use aise::core::turn_context::TurnExecutionContext;
 use aise::core::turn_contract::{
     CommittedTurnResult, IdempotencyKey, TurnCancellation, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
@@ -11,6 +11,17 @@ use aise::core::turn_trace::TraceRecorder;
 use aise::core::turn_validation::ValidationResult;
 use aise::domain::ids::{StoryId, TurnId};
 use std::time::{Duration, Instant};
+
+fn budget() -> TurnBudget {
+    TurnBudget::new(TurnBudgetLimits {
+        max_repair_rounds: 3,
+        max_llm_calls: 8,
+        max_input_tokens: 8_192,
+        max_output_tokens: 2_048,
+        max_total_tokens: 10_240,
+        max_retrieved_items: 5,
+    })
+}
 
 fn identity() -> TurnIdentity {
     TurnIdentity::new(
@@ -26,7 +37,7 @@ fn new_ctx() -> TurnExecutionContext {
     TurnExecutionContext::new(
         identity(),
         TurnRequest::try_new("开始吧".to_string()).unwrap(),
-        TurnBudget::new(3, 2048, 5),
+        budget(),
         TurnControl::new(Instant::now() + Duration::from_secs(60), TurnCancellation::new()),
         TraceRecorder::new(),
     )
