@@ -1,7 +1,7 @@
 use crate::core::story_proposal::StoryProposal;
 use crate::core::turn_budget::{LlmReservation, TurnBudget};
 use crate::core::turn_contract::{CommittedTurnResult, TurnControl, TurnIdentity, TurnPhase, TurnRequest};
-use crate::core::turn_data::{BaselineContext, CharacterThought, ContextItem, WriterPlan};
+use crate::core::turn_data::{BaselineContext, CharacterThought, ContextItem, StoryReadSnapshot, WriterPlan};
 use crate::core::turn_pipeline::TurnStage;
 use crate::core::turn_trace::{PendingSpan, TraceRecorder};
 use crate::core::turn_validation::{ValidatedChangeSet, ValidationDecision, ValidationResult};
@@ -17,6 +17,7 @@ pub struct TurnExecutionContext {
     control: TurnControl,
     budget: TurnBudget,
     trace: TraceRecorder,
+    snapshot: Option<StoryReadSnapshot>,
     baseline: Option<BaselineContext>,
     plan: Option<WriterPlan>,
     retrieved: Vec<ContextItem>,
@@ -48,6 +49,7 @@ impl TurnExecutionContext {
             control,
             budget,
             trace,
+            snapshot: None,
             baseline: None,
             plan: None,
             retrieved: Vec::new(),
@@ -100,6 +102,10 @@ impl TurnExecutionContext {
         self.baseline.as_ref()
     }
 
+    pub fn snapshot(&self) -> Option<&StoryReadSnapshot> {
+        self.snapshot.as_ref()
+    }
+
     pub fn plan(&self) -> Option<&WriterPlan> {
         self.plan.as_ref()
     }
@@ -130,8 +136,13 @@ impl TurnExecutionContext {
         Ok(())
     }
 
-    pub fn set_prepared_context(&mut self, baseline: BaselineContext) -> Result<(), AiseError> {
+    pub fn set_prepared_context(
+        &mut self,
+        snapshot: StoryReadSnapshot,
+        baseline: BaselineContext,
+    ) -> Result<(), AiseError> {
         self.expect_phase(TurnPhase::Initialized)?;
+        self.snapshot = Some(snapshot);
         self.baseline = Some(baseline);
         self.phase = TurnPhase::Prepared;
         Ok(())

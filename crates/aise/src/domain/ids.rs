@@ -56,3 +56,4 @@ id_type!(CharacterId);
 id_type!(TurnId);
 id_type!(EventId);
 id_type!(MemoryId);
+id_type!(FactId);

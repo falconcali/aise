@@ -1,5 +1,6 @@
 use crate::domain::ids::{StoryId, TurnId};
 use crate::error::AiseError;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::time::Instant;
@@ -48,8 +49,25 @@ impl RequestDigest {
         Self(hex)
     }
 
+    pub fn from_stored(hex: String) -> Self {
+        Self(hex)
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StoryRevision(u64);
+
+impl StoryRevision {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn get(&self) -> u64 {
+        self.0
     }
 }
 
@@ -208,8 +226,18 @@ impl TurnControl {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommittedTurnResult {
     pub turn_id: TurnId,
+    pub story_revision: StoryRevision,
     pub story_text: String,
+    pub llm_usage: LlmUsageAggregate,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LlmUsageAggregate {
+    pub llm_calls: u32,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
 }

@@ -1,5 +1,4 @@
-use super::character::CharacterState;
-use super::ids::StoryId;
+use super::ids::{FactId, StoryId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8,11 +7,11 @@ pub struct WorldState {
     pub name: String,
 
     pub facts: Vec<WorldFact>,
-    pub characters: Vec<CharacterState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldFact {
+    pub id: FactId,
     pub text: String,
     pub source: FactSource,
 }

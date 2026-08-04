@@ -28,6 +28,17 @@ pub enum EventKind {
     Chapter,
 }
 
+impl EventKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EventKind::Dialogue => "dialogue",
+            EventKind::Action => "action",
+            EventKind::WorldChange => "world_change",
+            EventKind::Chapter => "chapter",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StorySummary {
     pub text: String,

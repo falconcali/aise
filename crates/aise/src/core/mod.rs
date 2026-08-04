@@ -15,11 +15,12 @@ pub use story_proposal::{
 pub use turn_budget::{LlmReservation, TurnBudget, TurnBudgetLimits};
 pub use turn_context::{TurnExecutionContext, TurnLlmCallScope};
 pub use turn_contract::{
-    CommittedTurnResult, ExecuteTurnSpec, IdempotencyKey, RequestDigest, TurnCancellation, TurnControl, TurnIdentity,
-    TurnPhase, TurnRequest,
+    CommittedTurnResult, ExecuteTurnSpec, IdempotencyKey, LlmUsageAggregate, RequestDigest, StoryRevision,
+    TurnCancellation, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
 };
 pub use turn_data::{
-    BaselineContext, CharacterThought, ContextItem, ContextRequest, ContextSource, StoryConfig, StoryGoal, WriterPlan,
+    BaselineContext, CharacterThought, ContextItem, ContextRequest, ContextSource, SnapshotLimits, StoryConfig,
+    StoryGoal, StoryReadSnapshot, WriterPlan,
 };
 pub use turn_event::{TurnEvent, TurnEventSink};
 pub use turn_pipeline::{TurnExecutionPipeline, TurnStage};

@@ -124,10 +124,14 @@ async fn same_story_turns_never_overlap_through_engine_api() {
 
     let engine1 = test.engine.clone();
     let r1 = recorder1.clone();
-    let first = tokio::spawn(async move { engine1.run_turn(spec_for("story-same", "第一回合"), &*r1).await });
+    let mut first_spec = spec_for("story-same", "第一回合");
+    first_spec.idempotency_key = IdempotencyKey::try_new("key-1".to_string()).unwrap();
+    let first = tokio::spawn(async move { engine1.run_turn(first_spec, &*r1).await });
     let engine2 = test.engine.clone();
     let r2 = recorder2.clone();
-    let second = tokio::spawn(async move { engine2.run_turn(spec_for("story-same", "第二回合"), &*r2).await });
+    let mut second_spec = spec_for("story-same", "第二回合");
+    second_spec.idempotency_key = IdempotencyKey::try_new("key-2".to_string()).unwrap();
+    let second = tokio::spawn(async move { engine2.run_turn(second_spec, &*r2).await });
 
     let start = Instant::now();
     first.await.unwrap().expect("turn 1");

@@ -3,9 +3,10 @@ use aise::core::story_proposal::{ProposedWorldChange, StoryProposal};
 use aise::core::turn_budget::{TurnBudget, TurnBudgetLimits};
 use aise::core::turn_context::TurnExecutionContext;
 use aise::core::turn_contract::{
-    CommittedTurnResult, IdempotencyKey, TurnCancellation, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
+    CommittedTurnResult, IdempotencyKey, LlmUsageAggregate, StoryRevision, TurnCancellation, TurnControl, TurnIdentity,
+    TurnPhase, TurnRequest,
 };
-use aise::core::turn_data::{BaselineContext, ContextItem, ContextSource, WriterPlan};
+use aise::core::turn_data::{BaselineContext, ContextItem, ContextSource, StoryReadSnapshot, WriterPlan};
 use aise::core::turn_pipeline::TurnExecutionPipeline;
 use aise::core::turn_trace::TraceRecorder;
 use aise::core::turn_validation::{StateChange, ValidatedChangeSet, ValidationDecision, ValidationResult};
@@ -66,12 +67,33 @@ fn change_set(text: &str) -> ValidatedChangeSet {
     )
 }
 
+fn empty_snapshot() -> StoryReadSnapshot {
+    StoryReadSnapshot::new(
+        StoryId::from("story-1"),
+        StoryRevision::new(0),
+        None,
+        None,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
 fn advance_to_proposal(ctx: &mut TurnExecutionContext) {
     ctx.complete_initialization().unwrap();
-    ctx.set_prepared_context(BaselineContext::default()).unwrap();
+    ctx.set_prepared_context(empty_snapshot(), BaselineContext::default()).unwrap();
     ctx.set_writer_plan(WriterPlan::default()).unwrap();
     ctx.complete_context_preparation().unwrap();
     ctx.set_story_proposal(proposal("text")).unwrap();
+}
+
+fn committed(turn_id: &str) -> CommittedTurnResult {
+    CommittedTurnResult {
+        turn_id: TurnId::from(turn_id),
+        story_revision: StoryRevision::new(1),
+        story_text: "text".into(),
+        llm_usage: LlmUsageAggregate::default(),
+    }
 }
 
 #[test]
@@ -118,13 +140,7 @@ fn context_rejects_invalid_phase_transition() {
         ctx.set_validation_result(ValidationResult::reject("bad", "rejected"), None)
             .is_err()
     );
-    assert!(
-        ctx.set_committed_result(CommittedTurnResult {
-            turn_id: TurnId::from("turn-1"),
-            story_text: "text".into(),
-        })
-        .is_err()
-    );
+    assert!(ctx.set_committed_result(committed("turn-1")).is_err());
 }
 
 #[tokio::test]
@@ -139,7 +155,7 @@ async fn initializer_does_not_access_external_services() {
 fn bounded_outputs_reject_over_limit_values() {
     let mut ctx = new_ctx();
     ctx.complete_initialization().unwrap();
-    ctx.set_prepared_context(BaselineContext::default()).unwrap();
+    ctx.set_prepared_context(empty_snapshot(), BaselineContext::default()).unwrap();
     ctx.set_writer_plan(WriterPlan::default()).unwrap();
 
     let item = |i: usize| ContextItem {
@@ -162,7 +178,7 @@ fn context_advances_through_phases() {
     ctx.complete_initialization().unwrap();
     assert_eq!(ctx.phase(), TurnPhase::Initialized);
 
-    ctx.set_prepared_context(BaselineContext::default()).unwrap();
+    ctx.set_prepared_context(empty_snapshot(), BaselineContext::default()).unwrap();
     assert_eq!(ctx.phase(), TurnPhase::Prepared);
 
     ctx.set_writer_plan(WriterPlan::default()).unwrap();
@@ -178,11 +194,7 @@ fn context_advances_through_phases() {
         .unwrap();
     assert_eq!(ctx.phase(), TurnPhase::ReadyToCommit);
 
-    ctx.set_committed_result(CommittedTurnResult {
-        turn_id: TurnId::from("turn-1"),
-        story_text: "text".into(),
-    })
-    .unwrap();
+    ctx.set_committed_result(committed("turn-1")).unwrap();
     assert_eq!(ctx.phase(), TurnPhase::Committed);
 }
 
@@ -196,13 +208,7 @@ fn failed_validation_never_reaches_ready_to_commit() {
     assert_eq!(ctx.phase(), TurnPhase::Failed);
     assert_eq!(ctx.validation_decision().unwrap(), ValidationDecision::Reject);
     assert!(ctx.change_set().is_none());
-    assert!(
-        ctx.set_committed_result(CommittedTurnResult {
-            turn_id: TurnId::from("turn-1"),
-            story_text: "text".into(),
-        })
-        .is_err()
-    );
+    assert!(ctx.set_committed_result(committed("turn-1")).is_err());
 }
 
 #[test]

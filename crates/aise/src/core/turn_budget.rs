@@ -75,6 +75,18 @@ impl TurnBudget {
         self.usage.llm_calls
     }
 
+    pub fn input_tokens(&self) -> u64 {
+        self.usage.input_tokens
+    }
+
+    pub fn output_tokens(&self) -> u64 {
+        self.usage.output_tokens
+    }
+
+    pub fn total_tokens(&self) -> u64 {
+        self.usage.total_tokens
+    }
+
     pub fn reserve_llm_call(
         &mut self,
         estimated_input: u64,

@@ -1,6 +1,77 @@
+use crate::core::turn_contract::StoryRevision;
 use crate::domain::character::CharacterState;
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::{CharacterId, StoryId};
+use crate::domain::memory::MemoryEntry;
+use crate::domain::narrative::StoryTurn;
+use crate::domain::world::WorldState;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy)]
+pub struct SnapshotLimits {
+    pub max_recent_turns: usize,
+    pub max_memories: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoryReadSnapshot {
+    story_id: StoryId,
+    base_revision: StoryRevision,
+    player_character_id: Option<CharacterId>,
+    world: Option<WorldState>,
+    characters: Vec<CharacterState>,
+    recent_turns: Vec<StoryTurn>,
+    player_memories: Vec<MemoryEntry>,
+}
+
+impl StoryReadSnapshot {
+    pub fn new(
+        story_id: StoryId,
+        base_revision: StoryRevision,
+        player_character_id: Option<CharacterId>,
+        world: Option<WorldState>,
+        characters: Vec<CharacterState>,
+        recent_turns: Vec<StoryTurn>,
+        player_memories: Vec<MemoryEntry>,
+    ) -> Self {
+        Self {
+            story_id,
+            base_revision,
+            player_character_id,
+            world,
+            characters,
+            recent_turns,
+            player_memories,
+        }
+    }
+
+    pub fn story_id(&self) -> &StoryId {
+        &self.story_id
+    }
+
+    pub fn base_revision(&self) -> StoryRevision {
+        self.base_revision
+    }
+
+    pub fn player_character_id(&self) -> Option<&CharacterId> {
+        self.player_character_id.as_ref()
+    }
+
+    pub fn world(&self) -> Option<&WorldState> {
+        self.world.as_ref()
+    }
+
+    pub fn characters(&self) -> &[CharacterState] {
+        &self.characters
+    }
+
+    pub fn recent_turns(&self) -> &[StoryTurn] {
+        &self.recent_turns
+    }
+
+    pub fn player_memories(&self) -> &[MemoryEntry] {
+        &self.player_memories
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct BaselineContext {

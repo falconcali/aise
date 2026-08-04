@@ -6,16 +6,17 @@ use aise::core::turn_contract::{IdempotencyKey, TurnCancellation};
 use aise::{ExecuteTurnSpec, TurnEvent, TurnEventSink};
 use axum::Json;
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use futures::channel::mpsc::UnboundedSender;
 use futures::stream::{Stream, StreamExt};
 use std::convert::Infallible;
 use std::sync::Arc;
-use uuid::Uuid;
 
 pub async fn run_turn(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    headers: HeaderMap,
     Json(req): Json<TurnRequest>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let session = state
@@ -30,8 +31,12 @@ pub async fn run_turn(
     let (tx, rx) = futures::channel::mpsc::unbounded();
     let sink = SseSink { tx, include_trace };
 
-    let idempotency_key =
-        IdempotencyKey::try_new(Uuid::new_v4().to_string()).map_err(|e| ApiError::Engine(anyhow::Error::new(e)))?;
+    let idempotency_key = headers
+        .get("Idempotency-Key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+        .ok_or_else(|| ApiError::BadRequest("missing Idempotency-Key header".into()))
+        .and_then(|value| IdempotencyKey::try_new(value).map_err(|e| ApiError::BadRequest(e.to_string())))?;
     let spec = ExecuteTurnSpec {
         story_id,
         idempotency_key,

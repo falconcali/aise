@@ -2,17 +2,19 @@ use aise::AiseError;
 use aise::core::story_proposal::{ProposedEvent, ProposedWorldChange, StoryProposal};
 use aise::core::turn_budget::{TurnBudget, TurnBudgetLimits};
 use aise::core::turn_context::TurnExecutionContext;
-use aise::core::turn_contract::{IdempotencyKey, TurnCancellation, TurnControl, TurnIdentity, TurnPhase, TurnRequest};
-use aise::core::turn_data::{BaselineContext, CharacterThought, WriterPlan};
+use aise::core::turn_contract::{
+    CommittedTurnResult, IdempotencyKey, LlmUsageAggregate, RequestDigest, StoryRevision, TurnCancellation,
+    TurnControl, TurnIdentity, TurnPhase, TurnRequest,
+};
+use aise::core::turn_data::{BaselineContext, CharacterThought, SnapshotLimits, StoryReadSnapshot, WriterPlan};
 use aise::core::turn_pipeline::TurnExecutionPipeline;
 use aise::core::turn_trace::TraceRecorder;
 use aise::core::turn_validation::{StateChange, ValidatedChangeSet, ValidationDecision};
-use aise::domain::character::CharacterState;
-use aise::domain::ids::{CharacterId, MemoryId, StoryId, TurnId};
+use aise::domain::ids::{CharacterId, FactId, MemoryId, StoryId, TurnId};
 use aise::domain::memory::{MemoryEntry, MemoryKind};
 use aise::domain::narrative::{EventKind, StoryTurn};
 use aise::domain::world::{FactSource, WorldFact, WorldState};
-use aise::persistence::{SqliteStore, Store, TurnCommit, TurnCommitter};
+use aise::persistence::{SqliteStore, Store, StoredTurnOutcome, TurnCommit, TurnCommitter};
 use aise::validation::ValidationPipeline;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -22,23 +24,32 @@ struct NoCommitStore;
 
 #[async_trait]
 impl Store for NoCommitStore {
-    async fn load_world(&self, _story_id: &StoryId) -> Result<Option<WorldState>, AiseError> {
+    async fn load_story_snapshot(
+        &self,
+        _story_id: &StoryId,
+        _limits: SnapshotLimits,
+    ) -> Result<Option<StoryReadSnapshot>, AiseError> {
         Ok(None)
     }
 
-    async fn load_characters(&self, _story_id: &StoryId) -> Result<Vec<CharacterState>, AiseError> {
-        Ok(Vec::new())
+    async fn create_story(
+        &self,
+        _story_id: &StoryId,
+        _player_character_id: Option<&CharacterId>,
+        _created_at: i64,
+    ) -> Result<(), AiseError> {
+        Ok(())
     }
 
-    async fn load_memory(&self, _character_id: &CharacterId, _limit: usize) -> Result<Vec<MemoryEntry>, AiseError> {
-        Ok(Vec::new())
+    async fn find_committed_turn(
+        &self,
+        _story_id: &StoryId,
+        _idempotency_key: &IdempotencyKey,
+    ) -> Result<Option<StoredTurnOutcome>, AiseError> {
+        Ok(None)
     }
 
-    async fn load_story(&self, _story_id: &StoryId, _limit: usize) -> Result<Vec<StoryTurn>, AiseError> {
-        Ok(Vec::new())
-    }
-
-    async fn commit_turn(&self, _commit: &TurnCommit) -> Result<(), AiseError> {
+    async fn commit_turn(&self, _commit: &TurnCommit) -> Result<CommittedTurnResult, AiseError> {
         panic!("commit_turn must not be called")
     }
 }
@@ -71,6 +82,18 @@ fn new_ctx() -> TurnExecutionContext {
     .unwrap()
 }
 
+fn empty_snapshot() -> StoryReadSnapshot {
+    StoryReadSnapshot::new(
+        StoryId::from("story-1"),
+        StoryRevision::new(0),
+        None,
+        None,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
 fn proposal_with(text: &str, events: Vec<ProposedEvent>) -> StoryProposal {
     StoryProposal {
         story_text: text.to_string(),
@@ -84,7 +107,7 @@ fn proposal_with(text: &str, events: Vec<ProposedEvent>) -> StoryProposal {
 
 fn advance_to_proposal(ctx: &mut TurnExecutionContext) {
     ctx.complete_initialization().unwrap();
-    ctx.set_prepared_context(BaselineContext::default()).unwrap();
+    ctx.set_prepared_context(empty_snapshot(), BaselineContext::default()).unwrap();
     ctx.set_writer_plan(WriterPlan::default()).unwrap();
     ctx.complete_context_preparation().unwrap();
 }
@@ -95,6 +118,43 @@ fn temp_db_path(label: &str) -> String {
         .join(format!("aise_vc_{label}_{now}.db"))
         .to_string_lossy()
         .into_owned()
+}
+
+fn commit(
+    story_id: &StoryId,
+    base: StoryRevision,
+    key: &str,
+    turn_id: &str,
+    text: &str,
+    world: StateChange<WorldState>,
+) -> TurnCommit {
+    TurnCommit {
+        story_id: story_id.clone(),
+        turn: StoryTurn {
+            id: TurnId::from(turn_id),
+            player_input: "input".into(),
+            story_text: text.into(),
+            summary_delta: None,
+            created_at: 1000,
+        },
+        events: Vec::new(),
+        characters: Vec::new(),
+        world,
+        memory: Vec::new(),
+        base_revision: base,
+        idempotency_key: IdempotencyKey::try_new(key.to_string()).unwrap(),
+        request_digest: RequestDigest::from_stored(format!("digest-{key}")),
+        player_character_id: None,
+        outbox: Vec::new(),
+        llm_usage: LlmUsageAggregate::default(),
+    }
+}
+
+fn limits() -> SnapshotLimits {
+    SnapshotLimits {
+        max_recent_turns: 20,
+        max_memories: 20,
+    }
 }
 
 #[tokio::test]
@@ -168,7 +228,7 @@ async fn character_thought_cannot_become_world_fact() {
     let pipeline = ValidationPipeline::default();
     let mut ctx = new_ctx();
     ctx.complete_initialization().unwrap();
-    ctx.set_prepared_context(BaselineContext::default()).unwrap();
+    ctx.set_prepared_context(empty_snapshot(), BaselineContext::default()).unwrap();
     ctx.set_writer_plan(WriterPlan::default()).unwrap();
     ctx.set_character_thoughts(vec![CharacterThought {
         character_id: CharacterId::from("c-1"),
@@ -198,47 +258,53 @@ async fn world_unchanged_does_not_overwrite_existing_world() {
     let db = temp_db_path("world");
     let store = SqliteStore::connect(&db).await.expect("connect store");
     let story_id = StoryId::from("story-w");
+    store.create_story(&story_id, None, 1000).await.expect("create story");
     let world = WorldState {
         id: story_id.clone(),
         name: "the realm".into(),
         facts: vec![WorldFact {
+            id: FactId::from("fact-1"),
             text: "the capital is airon".into(),
             source: FactSource::Seed,
         }],
-        characters: Vec::new(),
-    };
-    let turn = |id: &str, text: &str, world_change: StateChange<WorldState>| TurnCommit {
-        story_id: story_id.clone(),
-        turn: StoryTurn {
-            id: TurnId::from(id),
-            player_input: "input".into(),
-            story_text: text.into(),
-            summary_delta: None,
-            created_at: 1000,
-        },
-        events: Vec::new(),
-        characters: Vec::new(),
-        world: world_change,
-        memory: Vec::new(),
     };
 
-    store
-        .commit_turn(&turn("turn-1", "first", StateChange::Replace(world.clone())))
+    let first = store
+        .commit_turn(&commit(
+            &story_id,
+            StoryRevision::new(0),
+            "key-1",
+            "turn-1",
+            "first",
+            StateChange::Replace(world.clone()),
+        ))
         .await
         .expect("commit with world");
+    assert_eq!(first.story_revision, StoryRevision::new(1));
 
-    store
-        .commit_turn(&turn("turn-2", "second", StateChange::Unchanged))
+    let second = store
+        .commit_turn(&commit(
+            &story_id,
+            StoryRevision::new(1),
+            "key-2",
+            "turn-2",
+            "second",
+            StateChange::Unchanged,
+        ))
         .await
         .expect("commit without world change");
+    assert_eq!(second.story_revision, StoryRevision::new(2));
 
-    let loaded = store.load_world(&story_id).await.expect("load world").expect("world exists");
+    let snapshot = store
+        .load_story_snapshot(&story_id, limits())
+        .await
+        .expect("load snapshot")
+        .expect("story exists");
+    let loaded = snapshot.world().expect("world exists");
     assert_eq!(loaded.facts.len(), 1);
     assert_eq!(loaded.facts[0].text, "the capital is airon");
     assert_eq!(loaded.name, "the realm");
-
-    let turns = store.load_story(&story_id, 10).await.expect("load story");
-    assert_eq!(turns.len(), 2);
+    assert_eq!(snapshot.recent_turns().len(), 2);
 
     let _ = std::fs::remove_file(&db);
 }

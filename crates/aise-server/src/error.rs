@@ -4,6 +4,7 @@ use axum::response::{IntoResponse, Response};
 
 #[derive(Debug)]
 pub enum ApiError {
+    BadRequest(String),
     NotFound(String),
     Conflict(String),
     Engine(anyhow::Error),
@@ -13,6 +14,7 @@ pub enum ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
+            ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             ApiError::Conflict(msg) => (StatusCode::CONFLICT, msg),
             ApiError::Engine(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),

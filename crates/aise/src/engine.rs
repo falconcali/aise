@@ -2,6 +2,7 @@ use crate::config::AiseConfig;
 use crate::core::turn_budget::TurnBudget;
 use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_contract::{CommittedTurnResult, ExecuteTurnSpec, TurnControl, TurnIdentity, TurnRequest};
+use crate::core::turn_data::SnapshotLimits;
 use crate::core::turn_event::{TurnEvent, TurnEventSink};
 use crate::core::turn_trace::{MAX_LLM_CONTENT_CHARS, SpanPayload, TraceRecorder, TurnData, truncate};
 use crate::domain::ids::TurnId;
@@ -55,13 +56,26 @@ impl AiseEngine {
         let request = TurnRequest::try_new(spec.player_input)?;
         let deadline = Instant::now() + Duration::from_millis(self.config.turn.turn_timeout_ms);
         let _permit = self.coordinator.acquire(&spec.story_id, deadline, &spec.cancellation).await?;
+        if let Some(outcome) = self.store.find_committed_turn(&spec.story_id, &spec.idempotency_key).await? {
+            if outcome.request_digest == *request.request_digest() {
+                return Ok(outcome.result);
+            }
+            return Err(AiseError::IdempotencyConflict);
+        }
+        let budget = TurnBudget::from_config(&self.config.turn)?;
+        let limits = SnapshotLimits {
+            max_recent_turns: budget.max_retrieved_items(),
+            max_memories: budget.max_retrieved_items(),
+        };
+        if self.store.load_story_snapshot(&spec.story_id, limits).await?.is_none() {
+            self.store.create_story(&spec.story_id, None, now_millis()).await?;
+        }
         let identity = TurnIdentity::new(
             spec.story_id.clone(),
             TurnId::from(Uuid::new_v4().to_string()),
             spec.idempotency_key,
             now_millis(),
         )?;
-        let budget = TurnBudget::from_config(&self.config.turn)?;
         let control = TurnControl::new(deadline, spec.cancellation);
         let mut ctx = TurnExecutionContext::new(identity, request, budget, control, TraceRecorder::new())?;
 

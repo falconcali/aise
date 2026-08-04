@@ -112,7 +112,10 @@ turnForm.onsubmit = async (e) => {
   try {
     const res = await api(`/api/sessions/${currentSessionId}/turns`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": crypto.randomUUID(),
+      },
       body: JSON.stringify({ player_input: input, include_trace: traceToggle.checked }),
     });
     await consumeSse(res.body, {
