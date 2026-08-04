@@ -115,41 +115,41 @@ fn change_set(text: &str) -> ValidatedChangeSet {
 }
 
 fn init_stub() -> Box<dyn TurnExecutionPipeline> {
-    Stub::new(TurnStage::TurnInitializer, |ctx| ctx.complete_initialization())
+    Stub::boxed(TurnStage::TurnInitializer, |ctx| ctx.complete_initialization())
 }
 
 fn baseline_stub() -> Box<dyn TurnExecutionPipeline> {
-    Stub::new(TurnStage::BaselineBuilder, |ctx| {
+    Stub::boxed(TurnStage::BaselineBuilder, |ctx| {
         ctx.set_prepared_context(empty_snapshot(), BaselineContext::default())
     })
 }
 
 fn planner_stub(plan: WriterPlan) -> Box<dyn TurnExecutionPipeline> {
-    Stub::new(TurnStage::WriterPlanner, move |ctx| ctx.set_writer_plan(plan.clone()))
+    Stub::boxed(TurnStage::WriterPlanner, move |ctx| ctx.set_writer_plan(plan.clone()))
 }
 
 fn retrieval_stub(calls: Arc<AtomicUsize>) -> Box<dyn TurnExecutionPipeline> {
-    Stub::new(TurnStage::ContextRetrieval, move |ctx| {
+    Stub::boxed(TurnStage::ContextRetrieval, move |ctx| {
         calls.fetch_add(1, Ordering::SeqCst);
         ctx.set_retrieved_context(Vec::new())
     })
 }
 
 fn think_stub(calls: Arc<AtomicUsize>) -> Box<dyn TurnExecutionPipeline> {
-    Stub::new(TurnStage::CharacterThink, move |ctx| {
+    Stub::boxed(TurnStage::CharacterThink, move |ctx| {
         calls.fetch_add(1, Ordering::SeqCst);
         ctx.set_character_thoughts(Vec::new())
     })
 }
 
 fn generate_stub(proposal: StoryProposal) -> Box<dyn TurnExecutionPipeline> {
-    Stub::new(TurnStage::StoryGenerator, move |ctx| ctx.set_story_proposal(proposal.clone()))
+    Stub::boxed(TurnStage::StoryGenerator, move |ctx| ctx.set_story_proposal(proposal.clone()))
 }
 
 fn validation_stub(decisions: Vec<ValidationDecision>) -> (Box<dyn TurnExecutionPipeline>, Arc<AtomicUsize>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let decision_calls = calls.clone();
-    let pipeline = Stub::new(TurnStage::Validation, move |ctx| {
+    let pipeline = Stub::boxed(TurnStage::Validation, move |ctx| {
         let round = decision_calls.fetch_add(1, Ordering::SeqCst);
         let decision = decisions.get(round).copied().unwrap_or(ValidationDecision::Reject);
         let (result, change_set) = match decision {
@@ -163,14 +163,14 @@ fn validation_stub(decisions: Vec<ValidationDecision>) -> (Box<dyn TurnExecution
 }
 
 fn repair_stub(calls: Arc<AtomicUsize>) -> Box<dyn TurnExecutionPipeline> {
-    Stub::new(TurnStage::StoryRepairer, move |ctx| {
+    Stub::boxed(TurnStage::StoryRepairer, move |ctx| {
         calls.fetch_add(1, Ordering::SeqCst);
         ctx.replace_story_proposal(proposal())
     })
 }
 
 fn commit_stub(calls: Arc<AtomicUsize>) -> Box<dyn TurnExecutionPipeline> {
-    Stub::new(TurnStage::TurnCommitter, move |ctx| {
+    Stub::boxed(TurnStage::TurnCommitter, move |ctx| {
         calls.fetch_add(1, Ordering::SeqCst);
         ctx.set_committed_result(CommittedTurnResult {
             turn_id: ctx.turn_id().clone(),
@@ -194,7 +194,7 @@ impl TurnEventSink for Recorder {
 
 #[test]
 fn pipeline_set_rejects_wrong_stage_binding() {
-    let misplaced = Stub::new(TurnStage::StoryGenerator, |ctx| ctx.set_story_proposal(proposal()));
+    let misplaced = Stub::boxed(TurnStage::StoryGenerator, |ctx| ctx.set_story_proposal(proposal()));
     let error = TurnPipelineSet::builder()
         .initializer(misplaced)
         .baseline_builder(baseline_stub())
@@ -216,7 +216,7 @@ async fn pipeline_error_stops_following_stages() {
     let generator_calls = Arc::new(AtomicUsize::new(0));
     let validation_calls = Arc::new(AtomicUsize::new(0));
     let committer_calls = Arc::new(AtomicUsize::new(0));
-    let failing_planner = Stub::new(TurnStage::WriterPlanner, |_| {
+    let failing_planner = Stub::boxed(TurnStage::WriterPlanner, |_| {
         Err(AiseError::Internal("planner exploded".into()))
     });
     let (validation, _) = validation_stub(vec![ValidationDecision::Pass]);
@@ -227,7 +227,7 @@ async fn pipeline_error_stops_following_stages() {
         .writer_planner(failing_planner)
         .retrieval(retrieval_stub(Arc::new(AtomicUsize::new(0))))
         .character_think(think_stub(Arc::new(AtomicUsize::new(0))))
-        .story_generator(Stub::new(TurnStage::StoryGenerator, move |_| {
+        .story_generator(Stub::boxed(TurnStage::StoryGenerator, move |_| {
             generator_observed.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }))
@@ -388,7 +388,7 @@ async fn repair_budget_is_consumed_before_repair_call() {
     let observed_rounds = Arc::new(Mutex::new(Vec::<u32>::new()));
     let observed = observed_rounds.clone();
     let repairer_count = repairer_calls.clone();
-    let repairer = Stub::new(TurnStage::StoryRepairer, move |ctx| {
+    let repairer = Stub::boxed(TurnStage::StoryRepairer, move |ctx| {
         repairer_count.fetch_add(1, Ordering::SeqCst);
         observed.lock().unwrap().push(ctx.budget().repair_rounds());
         ctx.replace_story_proposal(proposal())
