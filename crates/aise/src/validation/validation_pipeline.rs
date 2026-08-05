@@ -147,20 +147,19 @@ fn apply_world_change(
     if change.add_facts.is_empty() {
         return Ok(StateChange::Unchanged);
     }
-    let mut world = snapshot
-        .world()
-        .cloned()
-        .ok_or_else(|| fatal("missing_world", "world change requires an existing world state to extend"))?;
-    let next_seq = snapshot
-        .world()
-        .map(|existing| {
-            existing
-                .facts
-                .iter()
-                .filter_map(|fact| fact.id.as_str().rsplit('-').next()?.parse::<usize>().ok())
-                .max()
-                .unwrap_or(0)
-        })
+    let mut world = match snapshot.world() {
+        Some(existing) => existing.clone(),
+        None => WorldState {
+            id: snapshot.story_id().clone(),
+            name: String::new(),
+            facts: Vec::new(),
+        },
+    };
+    let next_seq = world
+        .facts
+        .iter()
+        .filter_map(|fact| fact.id.as_str().rsplit('-').next()?.parse::<usize>().ok())
+        .max()
         .unwrap_or(0);
     world
         .facts

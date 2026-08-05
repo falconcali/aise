@@ -121,7 +121,12 @@ turnForm.onsubmit = async (e) => {
     await consumeSse(res.body, {
       onToken: (text) => appendText(text),
       onStage: (stage) => console.debug("[stage]", stage),
-      onDone: () => appendText("\n"),
+      onCommitted: (result) => {
+        appendText("\n\n" + result.story_text + "\n");
+      },
+      onFailed: (payload) => appendText(`\n[失败] ${payload}\n`),
+      onCancelled: (payload) => appendText(`\n[已取消] ${payload}\n`),
+      onConflict: (payload) => appendText(`\n[冲突] ${payload}\n`),
       onTrace: (trace) => renderTrace(trace),
     });
   } catch (err) {
@@ -170,6 +175,15 @@ function parseSseEvent(raw, handlers) {
   else if (event === "stage") handlers.onStage?.(data);
   else if (event === "validation") handlers.onStage?.(`validation:${data}`);
   else if (event === "done") handlers.onDone?.(data);
+  else if (event === "committed") {
+    try {
+      handlers.onCommitted?.(JSON.parse(data));
+    } catch (_) {
+      /* ignore malformed committed payload */
+    }
+  } else if (event === "failed") handlers.onFailed?.(data);
+  else if (event === "cancelled") handlers.onCancelled?.(data);
+  else if (event === "conflict") handlers.onConflict?.(data);
   else if (event === "trace") {
     try {
       handlers.onTrace?.(JSON.parse(data));

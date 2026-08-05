@@ -225,6 +225,41 @@ async fn deterministic_failure_cannot_be_overridden_by_narrative_validator() {
 }
 
 #[tokio::test]
+async fn first_turn_world_facts_create_world_from_missing_state() {
+    let pipeline = ValidationPipeline::default();
+    let mut ctx = new_ctx();
+    advance_to_proposal(&mut ctx);
+    let mut proposal = proposal_with(
+        "story text",
+        vec![ProposedEvent {
+            kind: EventKind::Action,
+            summary: "story text".into(),
+        }],
+    );
+    proposal.world_change = ProposedWorldChange {
+        add_facts: vec![
+            "the inn is near the port".into(),
+            "the king rules from the capital".into(),
+        ],
+    };
+    ctx.set_story_proposal(proposal).unwrap();
+    pipeline.execute(&mut ctx).await.expect("validation must run");
+    assert_eq!(ctx.validation_decision().unwrap(), ValidationDecision::Pass);
+    match ctx.change_set().unwrap().world_change() {
+        StateChange::Replace(world) => {
+            assert_eq!(world.id, StoryId::from("story-1"));
+            assert_eq!(world.facts.len(), 2);
+            assert_eq!(world.facts[0].text, "the inn is near the port");
+            assert_eq!(world.facts[1].text, "the king rules from the capital");
+            assert_eq!(world.facts[0].source, FactSource::CommittedTurn);
+            assert_eq!(world.facts[0].id.as_str(), "story-1-fact-1");
+            assert_eq!(world.facts[1].id.as_str(), "story-1-fact-2");
+        }
+        other => panic!("expected world Replace, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn character_thought_cannot_become_world_fact() {
     let pipeline = ValidationPipeline::default();
     let mut ctx = new_ctx();
