@@ -1,4 +1,5 @@
 use aise_server::session::SessionRegistry;
+use aise_server::tasks;
 use aise_server::{AppState, ServerConfig, build_engine, router};
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
@@ -21,7 +22,8 @@ async fn main() -> anyhow::Result<()> {
 
     let engine = build_engine(&config).await?;
     let registry = SessionRegistry::new(config.max_sessions);
-    let state = Arc::new(AppState::new(engine, registry, config.clone()));
+    let tasks = Arc::new(tasks::TurnTaskManager::new(config.max_concurrent_turns)?);
+    let state = Arc::new(AppState::new(engine, registry, tasks, config.clone()));
     let app = router(state, &config);
 
     let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;

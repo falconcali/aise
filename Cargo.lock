@@ -39,6 +39,7 @@ version = "0.1.0"
 dependencies = [
  "aise",
  "anyhow",
+ "async-trait",
  "axum",
  "dotenvy",
  "futures",
@@ -46,7 +47,9 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tokio-util",
  "toml",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-appender",

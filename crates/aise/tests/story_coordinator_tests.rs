@@ -1,5 +1,7 @@
 use aise::AiseConfig;
 use aise::AiseEngine;
+use aise::AiseError;
+use aise::CoordinatorConfig;
 use aise::TurnEvent;
 use aise::TurnEventSink;
 use aise::character::CharacterThinkPipeline;
@@ -154,6 +156,42 @@ async fn same_story_turns_never_overlap_through_engine_api() {
 }
 
 #[tokio::test]
+async fn direct_engine_call_cannot_bypass_coordination() {
+    let db = temp_db_path("coord_direct");
+    let test = build_engine(&db, Duration::from_millis(300)).await;
+    let coordinator = test.engine.coordinator();
+
+    let engine1 = test.engine.clone();
+    let recorder1 = Arc::new(Recorder::default());
+    let mut spec1 = spec_for("story-direct", "回合甲");
+    spec1.idempotency_key = IdempotencyKey::try_new("key-1".to_string()).unwrap();
+    let first = tokio::spawn(async move { engine1.run_turn(spec1, &*recorder1).await });
+
+    let engine2 = test.engine.clone();
+    let recorder2 = Arc::new(Recorder::default());
+    let mut spec2 = spec_for("story-direct", "回合乙");
+    spec2.idempotency_key = IdempotencyKey::try_new("key-2".to_string()).unwrap();
+    let second = tokio::spawn(async move { engine2.run_turn(spec2, &*recorder2).await });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(coordinator.active_permits(), 1, "the first direct call holds the story permit");
+    assert_eq!(
+        coordinator.total_waiters(),
+        1,
+        "the second direct call must queue on the coordinator"
+    );
+
+    first.await.unwrap().expect("turn 1");
+    second.await.unwrap().expect("turn 2");
+    assert_eq!(
+        test.max_active.load(Ordering::SeqCst),
+        1,
+        "direct engine calls must never run the same story concurrently"
+    );
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
 async fn different_story_turns_can_overlap() {
     let db = temp_db_path("coord_parallel");
     let test = build_engine(&db, Duration::from_millis(200)).await;
@@ -178,4 +216,150 @@ async fn different_story_turns_can_overlap() {
     );
     assert_eq!(test.max_active.load(Ordering::SeqCst), 2);
     let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn story_wait_queue_rejects_over_capacity() {
+    let config = CoordinatorConfig {
+        max_waiters_per_story: 1,
+        max_total_waiters: 4,
+        ..CoordinatorConfig::default()
+    };
+    let coordinator = StoryTurnCoordinator::new(&config);
+    let story = StoryId::from("story-cap");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let cancellation = TurnCancellation::new();
+
+    let holder = coordinator
+        .acquire(&story, deadline, &cancellation)
+        .await
+        .expect("holder permit");
+    let co = coordinator.clone();
+    let s = story.clone();
+    let waiter_cancellation = cancellation.clone();
+    let waiter = tokio::spawn(async move { co.acquire(&s, deadline, &waiter_cancellation).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(coordinator.total_waiters(), 1, "one waiter queued");
+
+    let error = coordinator
+        .acquire(&story, deadline, &cancellation)
+        .await
+        .expect_err("per-story waiter cap must reject");
+    assert!(matches!(error, AiseError::Backpressure(_)));
+
+    drop(holder);
+    waiter.await.unwrap().expect("queued waiter proceeds after release");
+    assert_eq!(coordinator.total_waiters(), 0);
+}
+
+#[tokio::test]
+async fn story_wait_queue_rejects_global_capacity() {
+    let config = CoordinatorConfig {
+        max_waiters_per_story: 8,
+        max_total_waiters: 2,
+        ..CoordinatorConfig::default()
+    };
+    let coordinator = StoryTurnCoordinator::new(&config);
+    let story_a = StoryId::from("story-a");
+    let story_b = StoryId::from("story-b");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let cancellation = TurnCancellation::new();
+
+    let holder_a = coordinator.acquire(&story_a, deadline, &cancellation).await.expect("holder a");
+    let holder_b = coordinator.acquire(&story_b, deadline, &cancellation).await.expect("holder b");
+    let co = coordinator.clone();
+    let cancellation_a = cancellation.clone();
+    let waiter_a = tokio::spawn(async move { co.acquire(&story_a, deadline, &cancellation_a).await });
+    let co = coordinator.clone();
+    let cancellation_b = cancellation.clone();
+    let waiter_b = tokio::spawn(async move { co.acquire(&story_b, deadline, &cancellation_b).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(coordinator.total_waiters(), 2, "two waiters queued");
+
+    let error = coordinator
+        .acquire(&StoryId::from("story-c"), deadline, &cancellation)
+        .await
+        .expect_err("global waiter cap must reject");
+    assert!(matches!(error, AiseError::Backpressure(_)));
+
+    drop(holder_a);
+    drop(holder_b);
+    waiter_a.await.unwrap().expect("waiter a proceeds");
+    waiter_b.await.unwrap().expect("waiter b proceeds");
+    assert_eq!(coordinator.total_waiters(), 0);
+}
+
+#[tokio::test]
+async fn coordinator_reclaims_idle_story_entries() {
+    let config = CoordinatorConfig {
+        idle_timeout_secs: 1,
+        ..CoordinatorConfig::default()
+    };
+    let coordinator = StoryTurnCoordinator::new(&config);
+    let story = StoryId::from("story-idle");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let cancellation = TurnCancellation::new();
+
+    let permit = coordinator.acquire(&story, deadline, &cancellation).await.expect("permit");
+    drop(permit);
+    assert_eq!(coordinator.entry_count(), 1, "entry retained while within idle timeout");
+
+    tokio::time::sleep(Duration::from_millis(1_200)).await;
+    coordinator.reclaim_idle();
+    assert_eq!(coordinator.entry_count(), 0, "idle entry reclaimed after timeout");
+
+    let _permit = coordinator
+        .acquire(&story, deadline, &cancellation)
+        .await
+        .expect("entry recreated");
+    assert_eq!(coordinator.entry_count(), 1);
+}
+
+#[tokio::test]
+async fn coordinator_shutdown_rejects_new_acquires_and_cancels_waiters() {
+    let coordinator = StoryTurnCoordinator::new(&CoordinatorConfig::default());
+    let story = StoryId::from("story-sd");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let cancellation = TurnCancellation::new();
+
+    let holder = coordinator.acquire(&story, deadline, &cancellation).await.expect("holder");
+    let co = coordinator.clone();
+    let s = story.clone();
+    let waiter_cancellation = cancellation.clone();
+    let waiter = tokio::spawn(async move { co.acquire(&s, deadline, &waiter_cancellation).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    coordinator.shutdown();
+
+    let error = coordinator
+        .acquire(&StoryId::from("story-sd2"), deadline, &cancellation)
+        .await
+        .expect_err("new acquire after shutdown must be rejected");
+    assert!(matches!(error, AiseError::Backpressure(_)));
+
+    let waiter_error = waiter.await.unwrap().expect_err("queued waiter cancelled by shutdown");
+    assert!(matches!(waiter_error, AiseError::Backpressure(_)));
+    drop(holder);
+    assert_eq!(coordinator.active_permits(), 0);
+}
+
+#[tokio::test]
+async fn coordinator_shutdown_waits_for_active_turns_within_grace() {
+    let coordinator = StoryTurnCoordinator::new(&CoordinatorConfig::default());
+    let story = StoryId::from("story-grace");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let cancellation = TurnCancellation::new();
+    let holder = coordinator.acquire(&story, deadline, &cancellation).await.expect("holder");
+
+    let co = coordinator.clone();
+    let shutdown = tokio::spawn(async move { co.shutdown_with_grace(Duration::from_millis(500)).await });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(coordinator.active_permits(), 1, "active turn keeps running during grace");
+
+    drop(holder);
+    tokio::time::timeout(Duration::from_secs(2), shutdown)
+        .await
+        .expect("shutdown completes once active turn finishes")
+        .unwrap();
+    assert_eq!(coordinator.active_permits(), 0);
 }

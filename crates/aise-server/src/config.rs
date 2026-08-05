@@ -14,6 +14,9 @@ pub struct ServerConfig {
     #[serde(default = "default_max_sessions")]
     pub max_sessions: usize,
 
+    #[serde(default = "default_max_concurrent_turns")]
+    pub max_concurrent_turns: usize,
+
     #[serde(default = "default_trace_dir")]
     pub trace_dir: PathBuf,
     #[serde(default)]
@@ -26,6 +29,10 @@ fn default_listen_addr() -> SocketAddr {
 
 fn default_max_sessions() -> usize {
     64
+}
+
+fn default_max_concurrent_turns() -> usize {
+    8
 }
 
 fn default_trace_dir() -> PathBuf {
@@ -42,6 +49,7 @@ impl Default for ServerConfig {
             listen_addr: default_listen_addr(),
             assets_dir: None,
             max_sessions: default_max_sessions(),
+            max_concurrent_turns: default_max_concurrent_turns(),
             trace_dir: default_trace_dir(),
             aise: AiseConfig::default(),
         }
@@ -62,16 +70,16 @@ impl ServerConfig {
         let mut config = match std::fs::read_to_string(&path) {
             Ok(text) => match toml::from_str::<ServerConfig>(&text) {
                 Ok(c) => {
-                    eprintln!("[aise-server] loaded config from {}", path.display());
+                    tracing::info!(path = %path.display(), "loaded config");
                     c
                 }
                 Err(e) => {
-                    eprintln!("[aise-server] invalid config {}: {e}; using defaults", path.display());
+                    tracing::warn!(path = %path.display(), error = %e, "invalid config; using defaults");
                     ServerConfig::default()
                 }
             },
             Err(e) => {
-                eprintln!("[aise-server] no config at {} ({e}); using defaults", path.display());
+                tracing::warn!(path = %path.display(), error = %e, "no config file; using defaults");
                 ServerConfig::default()
             }
         };
@@ -93,7 +101,9 @@ impl ServerConfig {
         if let Some(v) = get("AISE_LISTEN_ADDR") {
             match v.parse() {
                 Ok(addr) => self.listen_addr = addr,
-                Err(e) => eprintln!("[aise-server] ignoring AISE_LISTEN_ADDR={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_LISTEN_ADDR", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
         if let Some(v) = get("AISE_ASSETS_DIR") {
@@ -102,7 +112,17 @@ impl ServerConfig {
         if let Some(v) = get("AISE_MAX_SESSIONS") {
             match v.parse() {
                 Ok(n) => self.max_sessions = n,
-                Err(e) => eprintln!("[aise-server] ignoring AISE_MAX_SESSIONS={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_MAX_SESSIONS", value = %v, error = %e, "ignoring invalid env override")
+                }
+            }
+        }
+        if let Some(v) = get("AISE_MAX_CONCURRENT_TURNS") {
+            match v.parse() {
+                Ok(n) => self.max_concurrent_turns = n,
+                Err(e) => {
+                    tracing::warn!(env = "AISE_MAX_CONCURRENT_TURNS", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
         if let Some(v) = get("AISE_TRACE_DIR") {
@@ -121,37 +141,49 @@ impl ServerConfig {
         if let Some(v) = get("AISE_LLM_MAX_CONCURRENT") {
             match v.parse() {
                 Ok(n) => self.aise.llm.max_concurrent = n,
-                Err(e) => eprintln!("[aise-server] ignoring AISE_LLM_MAX_CONCURRENT={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_LLM_MAX_CONCURRENT", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
         if let Some(v) = get("AISE_LLM_TEMPERATURE") {
             match v.parse() {
                 Ok(f) => self.aise.llm.temperature = f,
-                Err(e) => eprintln!("[aise-server] ignoring AISE_LLM_TEMPERATURE={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_LLM_TEMPERATURE", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
         if let Some(v) = get("AISE_LLM_QUEUE_TIMEOUT_MS") {
             match v.parse() {
                 Ok(n) => self.aise.llm.queue_timeout_ms = n,
-                Err(e) => eprintln!("[aise-server] ignoring AISE_LLM_QUEUE_TIMEOUT_MS={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_LLM_QUEUE_TIMEOUT_MS", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
         if let Some(v) = get("AISE_LLM_PROVIDER_TIMEOUT_MS") {
             match v.parse() {
                 Ok(n) => self.aise.llm.provider_timeout_ms = n,
-                Err(e) => eprintln!("[aise-server] ignoring AISE_LLM_PROVIDER_TIMEOUT_MS={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_LLM_PROVIDER_TIMEOUT_MS", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
         if let Some(v) = get("AISE_LLM_REQUESTS_PER_MINUTE") {
             match v.parse() {
                 Ok(n) => self.aise.llm.requests_per_minute = std::num::NonZeroU32::new(n),
-                Err(e) => eprintln!("[aise-server] ignoring AISE_LLM_REQUESTS_PER_MINUTE={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_LLM_REQUESTS_PER_MINUTE", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
         if let Some(v) = get("AISE_LLM_TOKENS_PER_MINUTE") {
             match v.parse() {
                 Ok(n) => self.aise.llm.tokens_per_minute = std::num::NonZeroU32::new(n),
-                Err(e) => eprintln!("[aise-server] ignoring AISE_LLM_TOKENS_PER_MINUTE={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_LLM_TOKENS_PER_MINUTE", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
 
@@ -162,43 +194,57 @@ impl ServerConfig {
         if let Some(v) = get("AISE_TURN_MAX_REPAIR_ROUNDS") {
             match v.parse() {
                 Ok(n) => self.aise.turn.max_repair_rounds = n,
-                Err(e) => eprintln!("[aise-server] ignoring AISE_TURN_MAX_REPAIR_ROUNDS={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_TURN_MAX_REPAIR_ROUNDS", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
         if let Some(v) = get("AISE_TURN_MAX_TOKENS") {
             match v.parse() {
                 Ok(n) => self.aise.turn.max_output_tokens = n,
-                Err(e) => eprintln!("[aise-server] ignoring AISE_TURN_MAX_TOKENS={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_TURN_MAX_TOKENS", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
         if let Some(v) = get("AISE_TURN_MAX_LLM_CALLS") {
             match v.parse() {
                 Ok(n) => self.aise.turn.max_llm_calls = n,
-                Err(e) => eprintln!("[aise-server] ignoring AISE_TURN_MAX_LLM_CALLS={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_TURN_MAX_LLM_CALLS", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
         if let Some(v) = get("AISE_TURN_MAX_INPUT_TOKENS") {
             match v.parse() {
                 Ok(n) => self.aise.turn.max_input_tokens = n,
-                Err(e) => eprintln!("[aise-server] ignoring AISE_TURN_MAX_INPUT_TOKENS={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_TURN_MAX_INPUT_TOKENS", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
         if let Some(v) = get("AISE_TURN_MAX_TOTAL_TOKENS") {
             match v.parse() {
                 Ok(n) => self.aise.turn.max_total_tokens = n,
-                Err(e) => eprintln!("[aise-server] ignoring AISE_TURN_MAX_TOTAL_TOKENS={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_TURN_MAX_TOTAL_TOKENS", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
         if let Some(v) = get("AISE_TURN_MAX_RETRIEVED_ITEMS") {
             match v.parse() {
                 Ok(n) => self.aise.turn.max_retrieved_items = n,
-                Err(e) => eprintln!("[aise-server] ignoring AISE_TURN_MAX_RETRIEVED_ITEMS={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_TURN_MAX_RETRIEVED_ITEMS", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
         if let Some(v) = get("AISE_TURN_TIMEOUT_MS") {
             match v.parse() {
                 Ok(n) => self.aise.turn.turn_timeout_ms = n,
-                Err(e) => eprintln!("[aise-server] ignoring AISE_TURN_TIMEOUT_MS={v}: {e}"),
+                Err(e) => {
+                    tracing::warn!(env = "AISE_TURN_TIMEOUT_MS", value = %v, error = %e, "ignoring invalid env override")
+                }
             }
         }
     }

@@ -382,6 +382,42 @@ async fn outbox_is_atomic_with_turn_commit() {
 }
 
 #[tokio::test]
+async fn crash_recovery_returns_original_result_without_second_write() {
+    let db = temp_db_path("crash");
+    let story_id = StoryId::from("story-crash");
+    {
+        let store = SqliteStore::connect(&db).await.expect("connect store");
+        store.create_story(&story_id, None, 1000).await.expect("create story");
+        store
+            .commit_turn(&base_commit(&story_id, StoryRevision::new(0), "key", "digest-a", "t1"))
+            .await
+            .expect("first commit");
+    }
+
+    let store = SqliteStore::connect(&db).await.expect("reconnect store after crash");
+    let snapshot = store
+        .load_story_snapshot(&story_id, limits())
+        .await
+        .expect("load snapshot")
+        .expect("story exists");
+    let replayed = store
+        .commit_turn(&base_commit(&story_id, snapshot.base_revision(), "key", "digest-a", "t2"))
+        .await
+        .expect("replay after crash returns original result");
+    assert_eq!(replayed.turn_id, TurnId::from("t1"));
+    assert_eq!(replayed.story_revision, StoryRevision::new(1));
+    let snapshot = store
+        .load_story_snapshot(&story_id, limits())
+        .await
+        .expect("load snapshot")
+        .expect("story exists");
+    assert_eq!(snapshot.recent_turns().len(), 1, "crash recovery must not write a second turn");
+    assert_eq!(story_revision(&db, "story-crash").await, 1);
+
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
 async fn transaction_failure_persists_nothing() {
     let db = temp_db_path("rollback");
     let store = SqliteStore::connect(&db).await.expect("connect store");

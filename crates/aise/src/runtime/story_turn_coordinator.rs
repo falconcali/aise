@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
+#[derive(Debug)]
 pub struct StoryTurnCoordinator {
     stories: Mutex<HashMap<StoryId, StoryEntry>>,
     max_waiters_per_story: usize,
@@ -19,6 +20,7 @@ pub struct StoryTurnCoordinator {
     active_permits: AtomicUsize,
 }
 
+#[derive(Debug)]
 struct StoryEntry {
     semaphore: Arc<Semaphore>,
     waiters: usize,
@@ -35,6 +37,7 @@ impl StoryEntry {
     }
 }
 
+#[derive(Debug)]
 pub struct StoryPermit {
     inner: Option<OwnedSemaphorePermit>,
     story_id: StoryId,
@@ -63,6 +66,23 @@ impl StoryTurnCoordinator {
 
     pub fn shutdown(&self) {
         self.shutdown.cancel();
+    }
+
+    pub fn active_permits(&self) -> usize {
+        self.active_permits.load(Ordering::Relaxed)
+    }
+
+    pub fn entry_count(&self) -> usize {
+        self.stories.lock().unwrap().len()
+    }
+
+    pub fn total_waiters(&self) -> usize {
+        self.total_waiters.load(Ordering::Relaxed)
+    }
+
+    pub fn reclaim_idle(&self) {
+        let mut map = self.stories.lock().unwrap();
+        self.reclaim(&mut map, Instant::now());
     }
 
     pub async fn shutdown_with_grace(&self, grace: Duration) {

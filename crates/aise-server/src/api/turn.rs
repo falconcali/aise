@@ -1,15 +1,15 @@
 use crate::api::dto::TurnRequest;
+use crate::api::sse::{ClientDisconnectGuard, SSE_CHANNEL_CAPACITY, SseSink, sse_stream};
 use crate::api::state::AppState;
 use crate::error::ApiError;
 use crate::session::SessionId;
+use aise::ExecuteTurnSpec;
 use aise::core::turn_contract::{IdempotencyKey, TurnCancellation};
-use aise::{ExecuteTurnSpec, TurnEvent, TurnEventSink};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
-use futures::channel::mpsc::UnboundedSender;
-use futures::stream::{Stream, StreamExt};
+use futures::stream::Stream;
 use std::convert::Infallible;
 use std::sync::Arc;
 
@@ -28,8 +28,8 @@ pub async fn run_turn(
     let player_input = req.player_input;
     let include_trace = req.include_trace;
 
-    let (tx, rx) = futures::channel::mpsc::unbounded();
-    let sink = SseSink { tx, include_trace };
+    let (tx, rx) = futures::channel::mpsc::channel(SSE_CHANNEL_CAPACITY);
+    let sink = SseSink::new(tx, include_trace);
 
     let idempotency_key = headers
         .get("Idempotency-Key")
@@ -37,49 +37,26 @@ pub async fn run_turn(
         .map(str::to_string)
         .ok_or_else(|| ApiError::BadRequest("missing Idempotency-Key header".into()))
         .and_then(|value| IdempotencyKey::try_new(value).map_err(|e| ApiError::BadRequest(e.to_string())))?;
+    let cancellation = TurnCancellation::new();
     let spec = ExecuteTurnSpec {
         story_id,
         idempotency_key,
         player_input,
-        cancellation: TurnCancellation::new(),
+        cancellation: cancellation.clone(),
     };
 
     let engine = state.engine.clone();
-    tokio::spawn(async move {
-        match engine.run_turn(spec, &sink).await {
-            Ok(_) => {}
-            Err(e) => tracing::error!(error = %e, "turn failed"),
-        }
-    });
+    state
+        .tasks
+        .spawn(async move {
+            let result = engine.run_turn(spec, &sink).await;
+            if let Err(error) = result {
+                tracing::error!(%error, "turn task failed");
+            }
+        })
+        .await
+        .map_err(|e| ApiError::Backpressure(e.to_string()))?;
 
-    let stream = rx.map(Ok::<_, Infallible>);
+    let stream = sse_stream(rx, ClientDisconnectGuard::new(cancellation));
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
-}
-
-struct SseSink {
-    tx: UnboundedSender<Event>,
-    include_trace: bool,
-}
-
-impl TurnEventSink for SseSink {
-    fn emit(&self, event: TurnEvent) {
-        let sse = match event {
-            TurnEvent::StageStarted(stage) => Event::default().event("stage").data(stage.as_str()),
-            TurnEvent::Token(text) => Event::default().event("token").data(text),
-            TurnEvent::Validation { pass } => {
-                Event::default().event("validation").data(if pass { "pass" } else { "fail" })
-            }
-            TurnEvent::Finished { turn_id } => Event::default().event("done").data(turn_id.to_string()),
-            TurnEvent::Trace(trace) => {
-                if !self.include_trace {
-                    return;
-                }
-                match serde_json::to_string(&trace) {
-                    Ok(json) => Event::default().event("trace").data(json),
-                    Err(_) => return,
-                }
-            }
-        };
-        let _ = self.tx.unbounded_send(sse);
-    }
 }
