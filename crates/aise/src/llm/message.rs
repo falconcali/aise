@@ -20,6 +20,7 @@ pub struct CompletionRequest {
     pub messages: Vec<ChatMessage>,
     pub max_tokens: u32,
     pub temperature: f32,
+    pub purpose: &'static str,
 }
 
 #[derive(Debug, Clone)]

@@ -28,15 +28,29 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 struct StubLlm;
 
+fn stub_completion_text(purpose: &str) -> String {
+    match purpose {
+        "writer_plan" => r#"{"retrieval_requests":[],"character_requests":[],"story_goal":{"summary":""}}"#.to_string(),
+        "story_generation" | "story_repair" => story_proposal_json("Hello World"),
+        _ => "Hello World".to_string(),
+    }
+}
+
+fn story_proposal_json(story: &str) -> String {
+    format!(
+        r#"{{"story_text":"{story}","events":[{{"kind":"action","summary":"{story}"}}],"character_changes":[],"world_change":{{"add_facts":[]}},"memory_changes":[],"summary_delta":null}}"#
+    )
+}
+
 #[async_trait::async_trait]
 impl LlmProvider for StubLlm {
     fn provider_name(&self) -> &'static str {
         "stub"
     }
 
-    async fn complete(&self, _req: &CompletionRequest) -> Result<LlmCompletion, LlmError> {
+    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmError> {
         Ok(LlmCompletion {
-            text: "Hello World".to_string(),
+            text: stub_completion_text(req.purpose),
             finish_reason: Some(FinishReason::Stop),
             usage: Some(LlmTokenUsage {
                 input_tokens: 10,
@@ -83,9 +97,9 @@ async fn build_engine(db_url: &str) -> Arc<AiseEngine> {
     let pipeline_set = TurnPipelineSet::builder()
         .initializer(Box::<TurnInitializer>::default())
         .baseline_builder(Box::new(BaselineContextBuilder::new(store.clone())))
-        .writer_planner(Box::new(WriterPlanner))
+        .writer_planner(Box::new(WriterPlanner::new(gateway.clone())))
         .retrieval(Box::new(ContextRetrievalPipeline))
-        .character_think(Box::new(CharacterThinkPipeline))
+        .character_think(Box::new(CharacterThinkPipeline::new(gateway.clone())))
         .story_generator(Box::new(StoryGenerator::new(gateway.clone())))
         .validation(Box::new(ValidationPipeline::default()))
         .story_repairer(Box::new(StoryRepairer::new(gateway.clone())))
@@ -280,9 +294,9 @@ async fn response_loss_retry_does_not_call_llm_again() {
     let pipeline_set = TurnPipelineSet::builder()
         .initializer(Box::<TurnInitializer>::default())
         .baseline_builder(Box::new(BaselineContextBuilder::new(store.clone())))
-        .writer_planner(Box::new(WriterPlanner))
+        .writer_planner(Box::new(WriterPlanner::new(gateway.clone())))
         .retrieval(Box::new(ContextRetrievalPipeline))
-        .character_think(Box::new(CharacterThinkPipeline))
+        .character_think(Box::new(CharacterThinkPipeline::new(gateway.clone())))
         .story_generator(Box::new(StoryGenerator::new(gateway.clone())))
         .validation(Box::new(ValidationPipeline::default()))
         .story_repairer(Box::new(StoryRepairer::new(gateway.clone())))
@@ -304,7 +318,7 @@ async fn response_loss_retry_does_not_call_llm_again() {
     assert_eq!(first.turn_id, retry.turn_id);
     assert_eq!(first.story_text, retry.story_text);
     assert_eq!(first.story_revision, retry.story_revision);
-    assert_eq!(calls.load(Ordering::SeqCst), 1, "retry must not call the LLM again");
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "retry must not call the LLM again");
 
     let _ = std::fs::remove_file(&db);
 }
@@ -347,10 +361,10 @@ impl LlmProvider for CountingLlm {
         "counting"
     }
 
-    async fn complete(&self, _req: &CompletionRequest) -> Result<LlmCompletion, LlmError> {
+    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(LlmCompletion {
-            text: "Hello World".to_string(),
+            text: stub_completion_text(req.purpose),
             finish_reason: Some(FinishReason::Stop),
             usage: Some(LlmTokenUsage {
                 input_tokens: 10,

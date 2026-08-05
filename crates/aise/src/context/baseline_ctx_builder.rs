@@ -56,16 +56,23 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
         let player_character = snapshot
             .player_character_id()
             .and_then(|player_id| snapshot.characters().iter().find(|c| c.id == *player_id).cloned());
+        let current_scene = snapshot.recent_turns().last().map(|turn| turn.story_text.clone());
+        let story_summary = snapshot
+            .recent_turns()
+            .iter()
+            .rev()
+            .find_map(|turn| turn.summary_delta.clone())
+            .unwrap_or_default();
         ctx.set_prepared_context(
             snapshot.clone(),
             BaselineContext {
                 story_instructions: String::new(),
                 story_config: StoryConfig::default(),
                 player_character,
-                current_scene: None,
+                current_scene,
                 relevant_characters: snapshot.characters().to_vec(),
                 recent_story: snapshot.recent_turns().iter().map(|t| t.story_text.clone()).collect(),
-                story_summary: String::new(),
+                story_summary,
                 active_constraints: Vec::new(),
             },
         )

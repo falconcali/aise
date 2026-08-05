@@ -1,20 +1,26 @@
-use crate::core::story_proposal::{ProposedEvent, ProposedWorldChange, StoryProposal};
+use crate::core::StoryProposal;
 use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::domain::narrative::EventKind;
 use crate::error::AiseError;
 use crate::llm::gateway::LlmGateway;
-use crate::llm::message::{ChatMessage, CompletionSpec, Role};
+use crate::llm::message::CompletionSpec;
+use crate::prompt::{ContextMerger, GenerationInput};
 use async_trait::async_trait;
 use std::sync::Arc;
 
+const MAX_STORY_OUTPUT_TOKENS: u32 = 4096;
+
 pub struct StoryGenerator {
     gateway: Arc<LlmGateway>,
+    merger: ContextMerger,
 }
 
 impl StoryGenerator {
     pub fn new(gateway: Arc<LlmGateway>) -> Self {
-        Self { gateway }
+        Self {
+            gateway,
+            merger: ContextMerger,
+        }
     }
 }
 
@@ -25,28 +31,40 @@ impl TurnExecutionPipeline for StoryGenerator {
     }
 
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
-        let max_output = ctx.budget().remaining_output_tokens().min(u32::MAX as u64) as u32;
+        let baseline = ctx
+            .baseline()
+            .ok_or_else(|| AiseError::InvariantViolation("baseline context not set before story generation".into()))?
+            .clone();
+        let plan = ctx
+            .plan()
+            .ok_or_else(|| AiseError::InvariantViolation("writer plan not set before story generation".into()))?
+            .clone();
+        let retrieved = ctx.retrieved().to_vec();
+        let thoughts = ctx.thoughts().to_vec();
+        let issues: Vec<String> = ctx
+            .validation()
+            .map(|validation| validation.issues().iter().map(|issue| issue.message.clone()).collect())
+            .unwrap_or_default();
+        let player_input = ctx.player_input().to_string();
+        let messages = self.merger.generation_messages(GenerationInput {
+            baseline: &baseline,
+            plan: &plan,
+            retrieved: &retrieved,
+            thoughts: &thoughts,
+            player_input: &player_input,
+            issues: &issues,
+            previous_story: ctx.proposal().map(|proposal| proposal.story_text.as_str()),
+        });
+        let max_output = ctx.budget().remaining_output_tokens().min(u64::from(MAX_STORY_OUTPUT_TOKENS)) as u32;
         let spec = CompletionSpec {
-            messages: vec![ChatMessage {
-                role: Role::User,
-                content: ctx.player_input().to_string(),
-            }],
+            messages,
             max_output_tokens: max_output,
-            purpose: "story_generate",
+            purpose: "story_generation",
         };
         let scope = ctx.llm_call_scope(TurnStage::StoryGenerator);
         let completion = self.gateway.complete(scope, spec).await?;
-        let story_text = completion.text;
-        ctx.set_story_proposal(StoryProposal {
-            story_text: story_text.clone(),
-            events: vec![ProposedEvent {
-                kind: EventKind::Action,
-                summary: story_text,
-            }],
-            character_changes: Vec::new(),
-            world_change: ProposedWorldChange::default(),
-            memory_changes: Vec::new(),
-            summary_delta: None,
-        })
+        let proposal: StoryProposal = serde_json::from_str(&completion.text)
+            .map_err(|error| AiseError::Internal(format!("story proposal output is not valid JSON: {error}")))?;
+        ctx.set_story_proposal(proposal)
     }
 }

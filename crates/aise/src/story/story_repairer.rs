@@ -1,20 +1,26 @@
-use crate::core::story_proposal::{ProposedEvent, ProposedWorldChange, StoryProposal};
 use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::domain::narrative::EventKind;
+use crate::core::turn_validation::{ValidationDecision, ValidationIssue};
 use crate::error::AiseError;
 use crate::llm::gateway::LlmGateway;
-use crate::llm::message::{ChatMessage, CompletionSpec, Role};
+use crate::llm::message::CompletionSpec;
+use crate::prompt::{ContextMerger, GenerationInput};
 use async_trait::async_trait;
 use std::sync::Arc;
 
+const MAX_REPAIR_OUTPUT_TOKENS: u32 = 4096;
+
 pub struct StoryRepairer {
     gateway: Arc<LlmGateway>,
+    merger: ContextMerger,
 }
 
 impl StoryRepairer {
     pub fn new(gateway: Arc<LlmGateway>) -> Self {
-        Self { gateway }
+        Self {
+            gateway,
+            merger: ContextMerger,
+        }
     }
 
     pub fn gateway(&self) -> &Arc<LlmGateway> {
@@ -29,43 +35,50 @@ impl TurnExecutionPipeline for StoryRepairer {
     }
 
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
+        let validation = ctx
+            .validation()
+            .ok_or_else(|| AiseError::InvariantViolation("no validation result before repair".into()))?;
+        if validation.decision() != ValidationDecision::Repair {
+            return Err(AiseError::InvariantViolation(
+                "repairer only runs when validation requires repair".into(),
+            ));
+        }
+        let issues: Vec<String> = validation.issues().iter().map(repair_issue_message).collect();
+        let baseline = ctx
+            .baseline()
+            .ok_or_else(|| AiseError::InvariantViolation("baseline context not set before repair".into()))?
+            .clone();
+        let plan = ctx
+            .plan()
+            .ok_or_else(|| AiseError::InvariantViolation("writer plan not set before repair".into()))?
+            .clone();
+        let retrieved = ctx.retrieved().to_vec();
+        let thoughts = ctx.thoughts().to_vec();
+        let previous_story = ctx.proposal().map(|proposal| proposal.story_text.as_str());
         let player_input = ctx.player_input().to_string();
-        let issues_detail = {
-            let issues = ctx.validation().map(|result| result.issues()).unwrap_or_default();
-            issues
-                .iter()
-                .map(|issue| format!("{}: {}", issue.code, issue.message))
-                .collect::<Vec<_>>()
-                .join("; ")
-        };
-        let instruction = if issues_detail.is_empty() {
-            format!("player input: {player_input}")
-        } else {
-            format!("player input: {player_input}; fix these validation issues: {issues_detail}")
-        };
-        let max_output = ctx.budget().remaining_output_tokens().min(u32::MAX as u64) as u32;
+        let messages = self.merger.generation_messages(GenerationInput {
+            baseline: &baseline,
+            plan: &plan,
+            retrieved: &retrieved,
+            thoughts: &thoughts,
+            player_input: &player_input,
+            issues: &issues,
+            previous_story,
+        });
+        let max_output = ctx.budget().remaining_output_tokens().min(u64::from(MAX_REPAIR_OUTPUT_TOKENS)) as u32;
         let spec = CompletionSpec {
-            messages: vec![ChatMessage {
-                role: Role::User,
-                content: instruction,
-            }],
+            messages,
             max_output_tokens: max_output,
             purpose: "story_repair",
         };
         let scope = ctx.llm_call_scope(TurnStage::StoryRepairer);
         let completion = self.gateway.complete(scope, spec).await?;
-        let text = completion.text;
-        let summary_delta = ctx.proposal().and_then(|proposal| proposal.summary_delta.clone());
-        ctx.replace_story_proposal(StoryProposal {
-            story_text: text.clone(),
-            events: vec![ProposedEvent {
-                kind: EventKind::Action,
-                summary: text,
-            }],
-            character_changes: Vec::new(),
-            world_change: ProposedWorldChange::default(),
-            memory_changes: Vec::new(),
-            summary_delta,
-        })
+        let proposal = serde_json::from_str(&completion.text)
+            .map_err(|error| AiseError::Internal(format!("story proposal output is not valid JSON: {error}")))?;
+        ctx.replace_story_proposal(proposal)
     }
+}
+
+fn repair_issue_message(issue: &ValidationIssue) -> String {
+    format!("{}: {}", issue.code, issue.message)
 }

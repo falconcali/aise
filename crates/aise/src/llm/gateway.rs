@@ -39,6 +39,7 @@ impl LlmGateway {
             messages: spec.messages,
             max_tokens: spec.max_output_tokens,
             temperature: self.config.temperature,
+            purpose: spec.purpose,
         };
         self.execute_call(scope, request, spec.purpose, false, None).await
     }
@@ -54,6 +55,7 @@ impl LlmGateway {
             messages: spec.messages,
             max_tokens: spec.max_output_tokens,
             temperature: self.config.temperature,
+            purpose: spec.purpose,
         };
         self.execute_call(scope, request, spec.purpose, true, Some(sink)).await
     }

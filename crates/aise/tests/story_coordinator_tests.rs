@@ -35,13 +35,20 @@ impl LlmProvider for SlowProvider {
         "slow"
     }
 
-    async fn complete(&self, _req: &CompletionRequest) -> Result<LlmCompletion, LlmError> {
+    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmError> {
         let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.max_active.fetch_max(active, Ordering::SeqCst);
         tokio::time::sleep(self.delay).await;
         self.active.fetch_sub(1, Ordering::SeqCst);
+        let text = match req.purpose {
+            "writer_plan" => {
+                r#"{"retrieval_requests":[],"character_requests":[],"story_goal":{"summary":""}}"#.to_string()
+            }
+            "story_generation" | "story_repair" => r#"{"story_text":"story text","events":[{"kind":"action","summary":"story text"}],"character_changes":[],"world_change":{"add_facts":[]},"memory_changes":[],"summary_delta":null}"#.to_string(),
+            _ => "story text".to_string(),
+        };
         Ok(LlmCompletion {
-            text: "story text".into(),
+            text,
             finish_reason: Some(FinishReason::Stop),
             usage: None,
             charge: None,
@@ -87,9 +94,9 @@ async fn build_engine(db_url: &str, delay: Duration) -> TestEngine {
     let pipeline_set = TurnPipelineSet::builder()
         .initializer(Box::<TurnInitializer>::default())
         .baseline_builder(Box::new(BaselineContextBuilder::new(store.clone())))
-        .writer_planner(Box::new(WriterPlanner))
+        .writer_planner(Box::new(WriterPlanner::new(gateway.clone())))
         .retrieval(Box::new(ContextRetrievalPipeline))
-        .character_think(Box::new(CharacterThinkPipeline))
+        .character_think(Box::new(CharacterThinkPipeline::new(gateway.clone())))
         .story_generator(Box::new(StoryGenerator::new(gateway.clone())))
         .validation(Box::new(ValidationPipeline::default()))
         .story_repairer(Box::new(StoryRepairer::new(gateway.clone())))
@@ -194,7 +201,7 @@ async fn direct_engine_call_cannot_bypass_coordination() {
 #[tokio::test]
 async fn different_story_turns_can_overlap() {
     let db = temp_db_path("coord_parallel");
-    let test = build_engine(&db, Duration::from_millis(200)).await;
+    let test = build_engine(&db, Duration::from_millis(100)).await;
     let recorder1 = Arc::new(Recorder::default());
     let recorder2 = Arc::new(Recorder::default());
 

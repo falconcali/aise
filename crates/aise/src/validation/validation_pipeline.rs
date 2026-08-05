@@ -1,11 +1,16 @@
+use crate::core::story_proposal::{ProposedCharacterChange, ProposedWorldChange};
 use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_data::StoryReadSnapshot;
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::core::turn_trace::{SpanPayload, ValidationData};
 use crate::core::turn_validation::{
     StateChange, ValidatedChangeSet, ValidationDecision, ValidationIssue, ValidationResult, fatal,
 };
-use crate::domain::ids::EventId;
+use crate::domain::character::{CharacterState, Relation};
+use crate::domain::ids::{EventId, FactId, MemoryId};
+use crate::domain::memory::MemoryEntry;
 use crate::domain::narrative::StoryEvent;
+use crate::domain::world::{FactSource, WorldFact, WorldState};
 use crate::error::AiseError;
 use crate::validation::validators::consistency::ConsistencyValidator;
 use crate::validation::validators::schema::SchemaValidator;
@@ -56,15 +61,9 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Va
     let proposal = ctx
         .proposal()
         .ok_or_else(|| fatal("missing_proposal", "no story proposal produced"))?;
-    if !proposal.character_changes.is_empty()
-        || !proposal.world_change.add_facts.is_empty()
-        || !proposal.memory_changes.is_empty()
-    {
-        return Err(fatal(
-            "unsupported_change_kind",
-            "character, world, and memory changes are not supported yet",
-        ));
-    }
+    let snapshot = ctx
+        .snapshot()
+        .ok_or_else(|| fatal("missing_snapshot", "no story snapshot available"))?;
     let turn_id = ctx.turn_id().clone();
     let events = proposal
         .events
@@ -78,14 +77,88 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Va
             payload: serde_json::json!({ "text": event.summary }),
         })
         .collect();
+    let characters = apply_character_changes(snapshot, &proposal.character_changes)?;
+    let world_change = apply_world_change(snapshot, &proposal.world_change)?;
+    let memory_changes = proposal
+        .memory_changes
+        .iter()
+        .map(|memory| MemoryEntry {
+            id: MemoryId::from(format!("{turn_id}#memory#{}", memory.owner.as_str())),
+            owner: memory.owner.clone(),
+            kind: memory.kind,
+            content: memory.content.clone(),
+            created_at: ctx.identity().started_at_ms(),
+        })
+        .collect();
     Ok(ValidatedChangeSet::new(
         proposal.story_text.clone(),
         events,
-        Vec::new(),
-        StateChange::Unchanged,
-        Vec::new(),
+        characters,
+        world_change,
+        memory_changes,
         proposal.summary_delta.clone(),
     ))
+}
+
+fn apply_character_changes(
+    snapshot: &StoryReadSnapshot,
+    changes: &[ProposedCharacterChange],
+) -> Result<Vec<CharacterState>, ValidationIssue> {
+    let mut characters = snapshot.characters().to_vec();
+    for change in changes {
+        let target = characters
+            .iter_mut()
+            .find(|character| character.id == change.character_id)
+            .ok_or_else(|| {
+                fatal(
+                    "unknown_character",
+                    format!("character change references unknown character {}", change.character_id.as_str()),
+                )
+            })?;
+        if !change.goal_updates.is_empty() {
+            target.internal_state.goals = change.goal_updates.clone();
+        }
+        if let Some(delta) = change.health_delta {
+            target.internal_state.health = target.internal_state.health.saturating_add(delta);
+        }
+        for affinity in &change.affinity_deltas {
+            match target
+                .internal_state
+                .relationships
+                .iter_mut()
+                .find(|relation| relation.other == affinity.other)
+            {
+                Some(relation) => relation.affinity = relation.affinity.saturating_add(affinity.delta),
+                None => target.internal_state.relationships.push(Relation {
+                    other: affinity.other.clone(),
+                    affinity: affinity.delta,
+                }),
+            }
+        }
+    }
+    Ok(characters)
+}
+
+fn apply_world_change(
+    snapshot: &StoryReadSnapshot,
+    change: &ProposedWorldChange,
+) -> Result<StateChange<WorldState>, ValidationIssue> {
+    if change.add_facts.is_empty() {
+        return Ok(StateChange::Unchanged);
+    }
+    let mut world = snapshot
+        .world()
+        .cloned()
+        .ok_or_else(|| fatal("missing_world", "world change requires an existing world state to extend"))?;
+    let next_seq = world.facts.len();
+    world
+        .facts
+        .extend(change.add_facts.iter().enumerate().map(|(offset, text)| WorldFact {
+            id: FactId::from(format!("{}-fact-{}", world.id.as_str(), next_seq + offset)),
+            text: text.clone(),
+            source: FactSource::CommittedTurn,
+        }));
+    Ok(StateChange::Replace(world))
 }
 
 fn validation_payload(outcome: &Result<ValidationResult, AiseError>) -> SpanPayload {

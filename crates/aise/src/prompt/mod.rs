@@ -1,5 +1,6 @@
 mod asset;
 mod catalog;
+mod context_merger;
 mod error;
 mod loader;
 mod metadata;
@@ -15,6 +16,7 @@ mod validator;
 
 pub use asset::{CompiledPromptAsset, PromptAssetManifest, compute_asset_hash};
 pub use catalog::PromptCatalog;
+pub use context_merger::{ContextMerger, GenerationInput};
 pub use error::PromptError;
 pub use loader::load_catalog;
 pub use metadata::PromptMetadata;
