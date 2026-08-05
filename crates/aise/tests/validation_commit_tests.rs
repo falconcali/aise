@@ -14,7 +14,7 @@ use aise::domain::ids::{CharacterId, FactId, MemoryId, StoryId, TurnId};
 use aise::domain::memory::{MemoryEntry, MemoryKind};
 use aise::domain::narrative::{EventKind, StoryTurn};
 use aise::domain::world::{FactSource, WorldFact, WorldState};
-use aise::persistence::{SqliteStore, Store, StoredTurnOutcome, TurnCommit, TurnCommitter};
+use aise::persistence::{SqliteStore, Store, StoreError, StoredTurnOutcome, TurnCommit, TurnCommitter};
 use aise::validation::ValidationPipeline;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -28,7 +28,7 @@ impl Store for NoCommitStore {
         &self,
         _story_id: &StoryId,
         _limits: SnapshotLimits,
-    ) -> Result<Option<StoryReadSnapshot>, AiseError> {
+    ) -> Result<Option<StoryReadSnapshot>, StoreError> {
         Ok(None)
     }
 
@@ -37,7 +37,7 @@ impl Store for NoCommitStore {
         _story_id: &StoryId,
         _player_character_id: Option<&CharacterId>,
         _created_at: i64,
-    ) -> Result<(), AiseError> {
+    ) -> Result<(), StoreError> {
         Ok(())
     }
 
@@ -45,11 +45,11 @@ impl Store for NoCommitStore {
         &self,
         _story_id: &StoryId,
         _idempotency_key: &IdempotencyKey,
-    ) -> Result<Option<StoredTurnOutcome>, AiseError> {
+    ) -> Result<Option<StoredTurnOutcome>, StoreError> {
         Ok(None)
     }
 
-    async fn commit_turn(&self, _commit: &TurnCommit) -> Result<CommittedTurnResult, AiseError> {
+    async fn commit_turn(&self, _commit: &TurnCommit) -> Result<CommittedTurnResult, StoreError> {
         panic!("commit_turn must not be called")
     }
 }
@@ -62,6 +62,7 @@ fn budget() -> TurnBudget {
         max_output_tokens: 2_048,
         max_total_tokens: 10_240,
         max_retrieved_items: 5,
+        ..Default::default()
     })
 }
 

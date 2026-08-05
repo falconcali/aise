@@ -1,6 +1,8 @@
 use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_contract::TurnPhase;
 use crate::core::turn_event::{TurnEvent, TurnEventSink};
 use crate::core::turn_pipeline::TurnExecutionPipeline;
+use crate::core::turn_pipeline::TurnStage;
 use crate::core::turn_trace::{PipelineData, SpanPayload};
 use crate::core::turn_validation::ValidationDecision;
 use crate::error::AiseError;
@@ -61,6 +63,15 @@ impl TurnRuntime {
         sink: &dyn TurnEventSink,
     ) -> Result<(), AiseError> {
         let stage = pipeline.stage();
+        if let Some(entry) = stage_entry_phase(stage) {
+            if ctx.phase() != entry {
+                return Err(AiseError::InvariantViolation(format!(
+                    "pipeline {} entered with unexpected phase {:?}, expected {entry:?}",
+                    stage.as_str(),
+                    ctx.phase()
+                )));
+            }
+        }
         if ctx.control().cancellation().is_cancelled() {
             return Err(AiseError::Cancelled);
         }
@@ -83,6 +94,45 @@ impl TurnRuntime {
             }),
         };
         ctx.trace().end_span_with(pending, &payload);
+        if outcome.is_ok() {
+            if let Some(exits) = stage_exit_phases(stage) {
+                if !exits.contains(&ctx.phase()) {
+                    return Err(AiseError::InvariantViolation(format!(
+                        "pipeline {} completed with unexpected phase {:?}, expected one of {exits:?}",
+                        stage.as_str(),
+                        ctx.phase()
+                    )));
+                }
+            }
+        }
         outcome
+    }
+}
+
+fn stage_entry_phase(stage: TurnStage) -> Option<TurnPhase> {
+    match stage {
+        TurnStage::TurnInitializer => Some(TurnPhase::Created),
+        TurnStage::BaselineBuilder => Some(TurnPhase::Initialized),
+        TurnStage::WriterPlanner => Some(TurnPhase::Prepared),
+        TurnStage::ContextRetrieval => Some(TurnPhase::Planned),
+        TurnStage::CharacterThink => Some(TurnPhase::Planned),
+        TurnStage::StoryGenerator => Some(TurnPhase::ContextReady),
+        TurnStage::Validation => Some(TurnPhase::ProposalReady),
+        TurnStage::StoryRepairer => Some(TurnPhase::RepairRequired),
+        TurnStage::TurnCommitter => Some(TurnPhase::ReadyToCommit),
+    }
+}
+
+fn stage_exit_phases(stage: TurnStage) -> Option<&'static [TurnPhase]> {
+    match stage {
+        TurnStage::TurnInitializer => Some(&[TurnPhase::Initialized]),
+        TurnStage::BaselineBuilder => Some(&[TurnPhase::Prepared]),
+        TurnStage::WriterPlanner => Some(&[TurnPhase::Planned]),
+        TurnStage::ContextRetrieval => None,
+        TurnStage::CharacterThink => None,
+        TurnStage::StoryGenerator => Some(&[TurnPhase::ProposalReady]),
+        TurnStage::Validation => Some(&[TurnPhase::RepairRequired, TurnPhase::ReadyToCommit, TurnPhase::Failed]),
+        TurnStage::StoryRepairer => Some(&[TurnPhase::ProposalReady]),
+        TurnStage::TurnCommitter => Some(&[TurnPhase::Committed]),
     }
 }

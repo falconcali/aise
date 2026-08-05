@@ -1,4 +1,3 @@
-use aise::AiseError;
 use aise::context::BaselineContextBuilder;
 use aise::core::turn_budget::{TurnBudget, TurnBudgetLimits};
 use aise::core::turn_context::TurnExecutionContext;
@@ -13,7 +12,7 @@ use aise::core::turn_validation::StateChange;
 use aise::domain::character::{CharacterState, InternalState};
 use aise::domain::ids::{CharacterId, EventId, StoryId, TurnId};
 use aise::domain::narrative::{EventKind, StoryEvent, StoryTurn};
-use aise::persistence::{OutboxRecord, SqliteStore, Store, TurnCommit};
+use aise::persistence::{OutboxRecord, SqliteStore, Store, StoreError, TurnCommit};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -230,6 +229,7 @@ async fn player_character_is_selected_by_stable_id() {
             max_output_tokens: 2_048,
             max_total_tokens: 10_240,
             max_retrieved_items: 5,
+            ..Default::default()
         }),
         TurnControl::new(Instant::now() + Duration::from_secs(60), TurnCancellation::new()),
         TraceRecorder::new(),
@@ -263,7 +263,7 @@ async fn revision_conflict_rolls_back_every_change() {
         .commit_turn(&base_commit(&story_id, StoryRevision::new(0), "k2", "d2", "t2"))
         .await
         .expect_err("stale base revision must conflict");
-    assert!(matches!(error, AiseError::RevisionConflict));
+    assert!(matches!(error, StoreError::RevisionConflict));
 
     assert_eq!(story_revision(&db, "story-rev").await, 1);
     let snapshot = store
@@ -337,7 +337,7 @@ async fn same_key_with_different_request_returns_conflict() {
         .commit_turn(&base_commit(&story_id, snapshot.base_revision(), "key", "digest-b", "t2"))
         .await
         .expect_err("different digest with same key must conflict");
-    assert!(matches!(error, AiseError::IdempotencyConflict));
+    assert!(matches!(error, StoreError::IdempotencyConflict));
     let snapshot = store
         .load_story_snapshot(&story_id, limits())
         .await
@@ -370,7 +370,7 @@ async fn outbox_is_atomic_with_turn_commit() {
     failing.events = vec![event("t1", 1, EventKind::Action)];
     failing.outbox = vec![outbox_record(&story_id, "t1", "o2")];
     let error = store.commit_turn(&failing).await.expect_err("duplicate turn id must fail");
-    assert!(matches!(error, AiseError::Store(_)));
+    assert!(matches!(error, StoreError::Database(_)));
     assert_eq!(
         count_outbox(&db, "story-outbox").await,
         1,
@@ -438,7 +438,7 @@ async fn transaction_failure_persists_nothing() {
     failing.events = vec![event("t-dup", 1, EventKind::Action)];
     failing.outbox = vec![outbox_record(&story_id, "t-dup", "o2")];
     let error = store.commit_turn(&failing).await.expect_err("duplicate turn id must fail");
-    assert!(matches!(error, AiseError::Store(_)));
+    assert!(matches!(error, StoreError::Database(_)));
 
     assert_eq!(story_revision(&db, "story-rollback").await, 1, "revision bump must roll back");
     assert_eq!(count_outbox(&db, "story-rollback").await, 1);

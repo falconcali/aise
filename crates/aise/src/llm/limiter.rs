@@ -93,11 +93,10 @@ impl RateGate {
             let wait = {
                 let mut w = self.window.lock().unwrap();
                 let now = Instant::now();
-                let used: u64 = w
-                    .iter()
-                    .take_while(|(at, _)| now.duration_since(*at) < WINDOW)
-                    .map(|(_, t)| t)
-                    .sum();
+                while w.front().is_some_and(|(at, _)| now.duration_since(*at) >= WINDOW) {
+                    w.pop_front();
+                }
+                let used: u64 = w.iter().map(|(_, t)| t).sum();
                 if used.saturating_add(tokens) <= self.limit {
                     w.push_back((now, tokens));
                     None

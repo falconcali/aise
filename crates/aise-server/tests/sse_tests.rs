@@ -7,6 +7,7 @@ use aise::context::{BaselineContextBuilder, ContextRetrievalPipeline};
 use aise::core::turn_contract::TurnCancellation;
 use aise::core::turn_data::SnapshotLimits;
 use aise::core::turn_pipeline::TurnStage;
+use aise::engine::{SystemClock, UuidIdGenerator};
 use aise::llm::LlmGateway;
 use aise::llm::accounting::{FinishReason, LlmCompletion};
 use aise::llm::error::LlmError;
@@ -98,6 +99,7 @@ impl LlmProvider for BlockingProvider {
         Ok(LlmCompletion {
             text: "story".into(),
             finish_reason: Some(FinishReason::Stop),
+            reasoning_content: None,
             usage: None,
             charge: None,
         })
@@ -130,7 +132,14 @@ async fn build_engine(db_url: &str, provider: Arc<dyn LlmProvider>) -> Arc<AiseE
         .build()
         .expect("pipeline set");
     let runtime = TurnRuntime::new(pipeline_set);
-    Arc::new(AiseEngine::new(runtime, store, coordinator, config))
+    Arc::new(AiseEngine::new(
+        runtime,
+        store,
+        coordinator,
+        config,
+        Arc::new(UuidIdGenerator),
+        Arc::new(SystemClock),
+    ))
 }
 
 fn snapshot_limits() -> SnapshotLimits {

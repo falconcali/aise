@@ -1,3 +1,4 @@
+use crate::core::turn_contract::CommittedTurnResult;
 use crate::core::turn_pipeline::TurnStage;
 use crate::core::turn_trace::TurnTrace;
 use crate::domain::ids::TurnId;
@@ -6,13 +7,17 @@ use crate::domain::ids::TurnId;
 pub enum TurnEvent {
     StageStarted(TurnStage),
 
-    Token(String),
+    ValidationCompleted { pass: bool },
 
-    Validation { pass: bool },
+    Committed(CommittedTurnResult),
 
-    Finished { turn_id: TurnId },
+    Failed { turn_id: TurnId, error: String },
 
-    Trace(TurnTrace),
+    Cancelled { turn_id: TurnId },
+
+    Conflict { turn_id: TurnId },
+
+    TraceCompleted(TurnTrace),
 }
 
 pub trait TurnEventSink: Send + Sync {

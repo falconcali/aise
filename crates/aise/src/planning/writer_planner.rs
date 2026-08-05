@@ -1,6 +1,7 @@
 use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_data::{ContextRequest, ContextSource, StoryGoal, WriterPlan};
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
+use crate::core::turn_trace::truncate;
 use crate::domain::ids::CharacterId;
 use crate::error::AiseError;
 use crate::llm::gateway::LlmGateway;
@@ -14,7 +15,7 @@ const MAX_RETRIEVAL_REQUESTS: usize = 4;
 const MAX_CHARACTER_REQUESTS: usize = 4;
 const MAX_QUERY_CHARS: usize = 200;
 const MAX_GOAL_CHARS: usize = 300;
-const MAX_PLAN_OUTPUT_TOKENS: u32 = 1024;
+const MAX_PARSE_ERROR_PREVIEW_CHARS: usize = 200;
 
 pub struct WriterPlanner {
     gateway: Arc<LlmGateway>,
@@ -65,7 +66,7 @@ impl TurnExecutionPipeline for WriterPlanner {
             .baseline()
             .ok_or_else(|| AiseError::InvariantViolation("baseline context not set before planning".into()))?;
         let messages = self.merger.plan_messages(baseline, ctx.player_input());
-        let max_output = ctx.budget().remaining_output_tokens().min(u64::from(MAX_PLAN_OUTPUT_TOKENS)) as u32;
+        let max_output = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
         let spec = CompletionSpec {
             messages,
             max_output_tokens: max_output,
@@ -79,8 +80,12 @@ impl TurnExecutionPipeline for WriterPlanner {
 }
 
 fn parse_plan(text: &str) -> Result<WriterPlan, AiseError> {
-    let output: PlanOutput = serde_json::from_str(text)
-        .map_err(|error| AiseError::Internal(format!("writer plan output is not valid JSON: {error}")))?;
+    let output: PlanOutput = serde_json::from_str(text).map_err(|error| {
+        AiseError::Internal(format!(
+            "writer plan output is not valid JSON: {error}; raw_output={}",
+            truncate(text, MAX_PARSE_ERROR_PREVIEW_CHARS)
+        ))
+    })?;
     let mut retrieval_requests = Vec::new();
     for request in output.retrieval_requests.into_iter().take(MAX_RETRIEVAL_REQUESTS) {
         if request.query.trim().is_empty() {

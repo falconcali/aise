@@ -1,4 +1,4 @@
-use crate::config::LlmConfig;
+use crate::config::{LlmConfig, ThinkingMode};
 use crate::llm::accounting::{FinishReason, LlmCompletion, LlmTokenUsage, UsageAccuracy};
 use crate::llm::error::LlmError;
 use crate::llm::message::{ChatMessage, CompletionRequest, EmbeddingOutput, EmbeddingRequest};
@@ -11,6 +11,7 @@ pub struct OpenAiCompatProvider {
     base_url: String,
     api_key: Option<String>,
     client: reqwest::Client,
+    thinking: Option<ThinkingMode>,
 }
 
 impl OpenAiCompatProvider {
@@ -19,6 +20,7 @@ impl OpenAiCompatProvider {
             base_url: config.base_url.trim_end_matches('/').to_string(),
             api_key: config.api_key,
             client: reqwest::Client::new(),
+            thinking: config.thinking,
         }
     }
 
@@ -29,6 +31,21 @@ impl OpenAiCompatProvider {
             format!("{}/chat/completions", self.base_url)
         }
     }
+
+    fn thinking_toggle(&self) -> Option<ThinkingToggle<'_>> {
+        self.thinking.map(|mode| ThinkingToggle {
+            kind: match mode {
+                ThinkingMode::Enabled => "enabled",
+                ThinkingMode::Disabled => "disabled",
+            },
+        })
+    }
+}
+
+#[derive(Serialize)]
+struct ThinkingToggle<'a> {
+    #[serde(rename = "type")]
+    kind: &'a str,
 }
 
 #[derive(Serialize)]
@@ -38,6 +55,8 @@ struct ChatCompletionRequest<'a> {
     max_tokens: u32,
     temperature: f32,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<ThinkingToggle<'a>>,
 }
 
 #[derive(Deserialize)]
@@ -48,8 +67,16 @@ struct ChatCompletionResponse {
 
 #[derive(Deserialize)]
 struct ChatChoice {
-    message: ChatMessage,
+    message: ResponseMessage,
     finish_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ResponseMessage {
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    reasoning_content: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -57,6 +84,14 @@ struct ResponseUsage {
     prompt_tokens: u64,
     completion_tokens: u64,
     total_tokens: Option<u64>,
+    #[serde(default)]
+    completion_tokens_details: Option<CompletionTokensDetails>,
+}
+
+#[derive(Deserialize)]
+struct CompletionTokensDetails {
+    #[serde(default)]
+    reasoning_tokens: Option<u64>,
 }
 
 #[async_trait]
@@ -72,6 +107,7 @@ impl LlmProvider for OpenAiCompatProvider {
             max_tokens: req.max_tokens,
             temperature: req.temperature,
             stream: false,
+            thinking: self.thinking_toggle(),
         };
         let mut request = self.client.post(self.endpoint()).json(&body);
         if let Some(key) = &self.api_key {
@@ -84,18 +120,21 @@ impl LlmProvider for OpenAiCompatProvider {
             .next()
             .ok_or_else(|| LlmError::Protocol("empty choices".into()))?;
         let finish_reason = choice.finish_reason.as_deref().map(parse_finish_reason);
+        let message = choice.message;
         let usage = resp.usage.map(|u| LlmTokenUsage {
             input_tokens: u.prompt_tokens,
             cached_input_tokens: None,
             output_tokens: u.completion_tokens,
+            reasoning_tokens: u.completion_tokens_details.and_then(|d| d.reasoning_tokens),
             total_tokens: u
                 .total_tokens
                 .unwrap_or_else(|| u.prompt_tokens.saturating_add(u.completion_tokens)),
             accuracy: UsageAccuracy::Exact,
         });
         Ok(LlmCompletion {
-            text: choice.message.content,
+            text: message.content,
             finish_reason,
+            reasoning_content: message.reasoning_content,
             usage,
             charge: None,
         })
@@ -112,6 +151,7 @@ impl LlmProvider for OpenAiCompatProvider {
             max_tokens: req.max_tokens,
             temperature: req.temperature,
             stream: true,
+            thinking: self.thinking_toggle(),
         };
         let mut request = self.client.post(self.endpoint()).json(&body);
         if let Some(key) = &self.api_key {
@@ -120,32 +160,28 @@ impl LlmProvider for OpenAiCompatProvider {
         let mut stream = request.send().await?.error_for_status()?.bytes_stream();
         let mut buf = Vec::new();
         let mut text = String::new();
+        let mut reasoning = String::new();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
             buf.extend_from_slice(&chunk);
             for line in extract_sse_lines(&mut buf)? {
                 if let Some(data) = line.strip_prefix("data: ").map(str::trim) {
                     if data == "[DONE]" {
-                        return Ok(LlmCompletion {
-                            text,
-                            finish_reason: Some(FinishReason::Stop),
-                            usage: None,
-                            charge: None,
-                        });
+                        return Ok(stream_completion(text, reasoning));
                     }
                     if let Some(delta) = parse_delta(data)? {
-                        on_delta(delta.clone());
-                        text.push_str(&delta);
+                        if let Some(content) = delta.content {
+                            on_delta(content.clone());
+                            text.push_str(&content);
+                        }
+                        if let Some(reasoning_delta) = delta.reasoning_content {
+                            reasoning.push_str(&reasoning_delta);
+                        }
                     }
                 }
             }
         }
-        Ok(LlmCompletion {
-            text,
-            finish_reason: Some(FinishReason::Stop),
-            usage: None,
-            charge: None,
-        })
+        Ok(stream_completion(text, reasoning))
     }
 
     async fn embed(&self, _req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmError> {
@@ -180,7 +216,15 @@ fn extract_sse_lines(buf: &mut Vec<u8>) -> Result<Vec<String>, LlmError> {
     Ok(lines)
 }
 
-fn parse_delta(data: &str) -> Result<Option<String>, LlmError> {
+#[derive(Deserialize)]
+struct StreamDelta {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
+}
+
+fn parse_delta(data: &str) -> Result<Option<StreamDelta>, LlmError> {
     #[derive(Deserialize)]
     struct StreamChunk {
         choices: Vec<StreamChoice>,
@@ -189,13 +233,24 @@ fn parse_delta(data: &str) -> Result<Option<String>, LlmError> {
     struct StreamChoice {
         delta: StreamDelta,
     }
-    #[derive(Deserialize)]
-    struct StreamDelta {
-        content: Option<String>,
-    }
 
     let chunk: StreamChunk = serde_json::from_str(data).map_err(|e| LlmError::Protocol(format!("bad chunk: {e}")))?;
-    Ok(chunk.choices.into_iter().next().and_then(|c| c.delta.content))
+    Ok(chunk.choices.into_iter().next().map(|c| c.delta))
+}
+
+fn stream_completion(content: String, reasoning: String) -> LlmCompletion {
+    let reasoning = if reasoning.trim().is_empty() {
+        None
+    } else {
+        Some(reasoning)
+    };
+    LlmCompletion {
+        text: content,
+        finish_reason: Some(FinishReason::Stop),
+        reasoning_content: reasoning,
+        usage: None,
+        charge: None,
+    }
 }
 
 #[cfg(test)]

@@ -82,8 +82,9 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Va
     let memory_changes = proposal
         .memory_changes
         .iter()
-        .map(|memory| MemoryEntry {
-            id: MemoryId::from(format!("{turn_id}#memory#{}", memory.owner.as_str())),
+        .enumerate()
+        .map(|(seq, memory)| MemoryEntry {
+            id: MemoryId::from(format!("{turn_id}#memory#{}#{}", memory.owner.as_str(), seq)),
             owner: memory.owner.clone(),
             kind: memory.kind,
             content: memory.content.clone(),
@@ -150,11 +151,21 @@ fn apply_world_change(
         .world()
         .cloned()
         .ok_or_else(|| fatal("missing_world", "world change requires an existing world state to extend"))?;
-    let next_seq = world.facts.len();
+    let next_seq = snapshot
+        .world()
+        .map(|existing| {
+            existing
+                .facts
+                .iter()
+                .filter_map(|fact| fact.id.as_str().rsplit('-').next()?.parse::<usize>().ok())
+                .max()
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
     world
         .facts
         .extend(change.add_facts.iter().enumerate().map(|(offset, text)| WorldFact {
-            id: FactId::from(format!("{}-fact-{}", world.id.as_str(), next_seq + offset)),
+            id: FactId::from(format!("{}-fact-{}", world.id.as_str(), next_seq + offset + 1)),
             text: text.clone(),
             source: FactSource::CommittedTurn,
         }));

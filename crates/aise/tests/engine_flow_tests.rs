@@ -10,6 +10,7 @@ use aise::core::turn_contract::{ExecuteTurnSpec, IdempotencyKey, TurnCancellatio
 use aise::core::turn_data::SnapshotLimits;
 use aise::core::turn_pipeline::TurnStage;
 use aise::domain::ids::StoryId;
+use aise::engine::{SystemClock, UuidIdGenerator};
 use aise::llm::LlmGateway;
 use aise::llm::accounting::{FinishReason, LlmCompletion, LlmTokenUsage, UsageAccuracy};
 use aise::llm::error::LlmError;
@@ -52,10 +53,12 @@ impl LlmProvider for StubLlm {
         Ok(LlmCompletion {
             text: stub_completion_text(req.purpose),
             finish_reason: Some(FinishReason::Stop),
+            reasoning_content: None,
             usage: Some(LlmTokenUsage {
                 input_tokens: 10,
                 cached_input_tokens: None,
                 output_tokens: 20,
+                reasoning_tokens: None,
                 total_tokens: 30,
                 accuracy: UsageAccuracy::Exact,
             }),
@@ -67,6 +70,7 @@ impl LlmProvider for StubLlm {
         Ok(LlmCompletion {
             text: String::new(),
             finish_reason: None,
+            reasoning_content: None,
             usage: None,
             charge: None,
         })
@@ -107,7 +111,14 @@ async fn build_engine(db_url: &str) -> Arc<AiseEngine> {
         .build()
         .expect("pipeline set");
     let runtime = TurnRuntime::new(pipeline_set);
-    Arc::new(AiseEngine::new(runtime, store, coordinator, config))
+    Arc::new(AiseEngine::new(
+        runtime,
+        store,
+        coordinator,
+        config,
+        Arc::new(UuidIdGenerator),
+        Arc::new(SystemClock),
+    ))
 }
 
 fn spec_for(story_id: &str, player_input: &str) -> ExecuteTurnSpec {
@@ -143,7 +154,7 @@ async fn full_flow_returns_hello_world_and_persists() {
 
     {
         let events = recorder.events.lock().unwrap();
-        assert_eq!(events.len(), 10);
+        assert_eq!(events.len(), 9);
         assert!(
             events
                 .iter()
@@ -184,10 +195,18 @@ async fn full_flow_returns_hello_world_and_persists() {
                 .iter()
                 .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::CharacterThink)))
         );
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::Validation { pass: true })));
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::Token(t) if t == "Hello World")));
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::Finished { .. })));
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::Trace(_))));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, TurnEvent::ValidationCompleted { pass: true }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, TurnEvent::Committed(result) if result.story_text == "Hello World"))
+        );
+        assert!(events.iter().any(|e| matches!(e, TurnEvent::Committed(_))));
+        assert!(events.iter().any(|e| matches!(e, TurnEvent::TraceCompleted(_))));
     }
 
     let store = engine.store();
@@ -219,7 +238,7 @@ async fn turn_trace_records_metadata_only_llm_usage() {
     let trace = events
         .iter()
         .find_map(|e| match e {
-            TurnEvent::Trace(t) => Some(t.clone()),
+            TurnEvent::TraceCompleted(t) => Some(t.clone()),
             _ => None,
         })
         .expect("trace event");
@@ -304,7 +323,14 @@ async fn response_loss_retry_does_not_call_llm_again() {
         .build()
         .expect("pipeline set");
     let runtime = TurnRuntime::new(pipeline_set);
-    let engine = Arc::new(AiseEngine::new(runtime, store, coordinator, config));
+    let engine = Arc::new(AiseEngine::new(
+        runtime,
+        store,
+        coordinator,
+        config,
+        Arc::new(UuidIdGenerator),
+        Arc::new(SystemClock),
+    ));
     let recorder = Recorder::default();
 
     let mut first_spec = spec_for("story-idem", "同一个请求");
@@ -366,10 +392,12 @@ impl LlmProvider for CountingLlm {
         Ok(LlmCompletion {
             text: stub_completion_text(req.purpose),
             finish_reason: Some(FinishReason::Stop),
+            reasoning_content: None,
             usage: Some(LlmTokenUsage {
                 input_tokens: 10,
                 cached_input_tokens: None,
                 output_tokens: 20,
+                reasoning_tokens: None,
                 total_tokens: 30,
                 accuracy: UsageAccuracy::Exact,
             }),
@@ -381,6 +409,7 @@ impl LlmProvider for CountingLlm {
         Ok(LlmCompletion {
             text: String::new(),
             finish_reason: None,
+            reasoning_content: None,
             usage: None,
             charge: None,
         })

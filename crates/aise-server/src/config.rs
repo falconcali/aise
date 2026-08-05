@@ -1,4 +1,5 @@
 use aise::AiseConfig;
+use aise::config::ThinkingMode;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -93,11 +94,13 @@ impl ServerConfig {
     }
 
     fn apply_env_overrides(&mut self) {
-        fn get(name: &str) -> Option<String> {
+        self.apply_env_overrides_with(|name| {
             let v = std::env::var(name).ok()?;
             if v.is_empty() { None } else { Some(v) }
-        }
+        });
+    }
 
+    fn apply_env_overrides_with(&mut self, get: impl Fn(&str) -> Option<String>) {
         if let Some(v) = get("AISE_LISTEN_ADDR") {
             match v.parse() {
                 Ok(addr) => self.listen_addr = addr,
@@ -184,6 +187,13 @@ impl ServerConfig {
                 Err(e) => {
                     tracing::warn!(env = "AISE_LLM_TOKENS_PER_MINUTE", value = %v, error = %e, "ignoring invalid env override")
                 }
+            }
+        }
+        if let Some(v) = get("AISE_LLM_THINKING") {
+            match v.as_str() {
+                "enabled" => self.aise.llm.thinking = Some(ThinkingMode::Enabled),
+                "disabled" => self.aise.llm.thinking = Some(ThinkingMode::Disabled),
+                other => tracing::warn!(env = "AISE_LLM_THINKING", value = other, "ignoring invalid env override"),
             }
         }
 

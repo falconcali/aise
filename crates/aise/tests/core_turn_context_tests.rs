@@ -21,6 +21,7 @@ fn budget() -> TurnBudget {
         max_output_tokens: 2_048,
         max_total_tokens: 10_240,
         max_retrieved_items: 5,
+        ..Default::default()
     })
 }
 

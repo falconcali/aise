@@ -22,6 +22,8 @@ struct MockProvider {
     calls: Arc<AtomicUsize>,
     block: Arc<Mutex<Option<oneshot::Receiver<()>>>>,
     fail: Arc<AtomicUsize>,
+    empty: Arc<AtomicUsize>,
+    reasoning_only: Arc<AtomicUsize>,
     usage: Arc<Mutex<Option<LlmTokenUsage>>>,
     delay: Arc<Mutex<Option<Duration>>>,
 }
@@ -34,6 +36,8 @@ impl MockProvider {
             calls: Arc::new(AtomicUsize::new(0)),
             block: Arc::new(Mutex::new(None)),
             fail: Arc::new(AtomicUsize::new(0)),
+            empty: Arc::new(AtomicUsize::new(0)),
+            reasoning_only: Arc::new(AtomicUsize::new(0)),
             usage: Arc::new(Mutex::new(None)),
             delay: Arc::new(Mutex::new(None)),
         }
@@ -45,6 +49,14 @@ impl MockProvider {
 
     fn set_fail(&self) {
         self.fail.store(1, Ordering::SeqCst);
+    }
+
+    fn set_empty(&self) {
+        self.empty.store(1, Ordering::SeqCst);
+    }
+
+    fn set_reasoning_only(&self) {
+        self.reasoning_only.store(1, Ordering::SeqCst);
     }
 
     fn set_usage(&self, usage: LlmTokenUsage) {
@@ -88,9 +100,26 @@ impl LlmProvider for MockProvider {
             return Err(LlmError::ProviderRejected("mock rejected".into()));
         }
         let usage = self.usage.lock().unwrap().clone();
+        let reasoning_only = self.reasoning_only.load(Ordering::SeqCst) == 1;
+        let text = if self.empty.load(Ordering::SeqCst) == 1 || reasoning_only {
+            String::new()
+        } else {
+            "response text".to_string()
+        };
+        let reasoning = if reasoning_only {
+            Some("reasoning draft".to_string())
+        } else {
+            None
+        };
+        let finish_reason = if reasoning_only {
+            Some(FinishReason::Length)
+        } else {
+            Some(FinishReason::Stop)
+        };
         Ok(LlmCompletion {
-            text: "response text".to_string(),
-            finish_reason: Some(FinishReason::Stop),
+            text,
+            finish_reason,
+            reasoning_content: reasoning,
             usage,
             charge: None,
         })
@@ -99,9 +128,15 @@ impl LlmProvider for MockProvider {
     async fn complete_stream(&self, _req: &CompletionRequest, _on_delta: DeltaSink) -> Result<LlmCompletion, LlmError> {
         self.enter().await.map_err(|_| LlmError::Cancelled)?;
         let usage = self.usage.lock().unwrap().clone();
+        let text = if self.empty.load(Ordering::SeqCst) == 1 {
+            String::new()
+        } else {
+            "response text".to_string()
+        };
         Ok(LlmCompletion {
-            text: "response text".to_string(),
+            text,
             finish_reason: Some(FinishReason::Stop),
+            reasoning_content: None,
             usage,
             charge: None,
         })
@@ -120,6 +155,7 @@ fn budget() -> TurnBudget {
         max_output_tokens: 2_048,
         max_total_tokens: 200_000,
         max_retrieved_items: 5,
+        ..Default::default()
     })
 }
 
@@ -337,6 +373,7 @@ async fn budget_is_reserved_before_provider_dispatch() {
         max_output_tokens: 2_048,
         max_total_tokens: 10,
         max_retrieved_items: 5,
+        ..Default::default()
     });
     let mut ctx = TurnExecutionContext::new(
         TurnIdentity::new(
@@ -365,6 +402,7 @@ async fn actual_usage_settles_reserved_tokens() {
         input_tokens: 100,
         cached_input_tokens: None,
         output_tokens: 50,
+        reasoning_tokens: None,
         total_tokens: 150,
         accuracy: UsageAccuracy::Exact,
     });
@@ -398,6 +436,7 @@ async fn pricing_uses_integer_units() {
         input_tokens: 1_000,
         cached_input_tokens: None,
         output_tokens: 2_000,
+        reasoning_tokens: Some(1_500),
         total_tokens: 3_000,
         accuracy: UsageAccuracy::Exact,
     });
@@ -443,6 +482,61 @@ async fn llm_trace_closes_on_provider_error() {
     let llm = trace.spans.iter().find(|s| s.kind == "aise.llm_call").expect("llm span");
     assert_eq!(llm.payload["status"], "error");
     assert_eq!(llm.payload["error_kind"], "provider_rejected");
+}
+
+#[tokio::test]
+async fn empty_completion_returns_typed_protocol_error() {
+    let provider = MockProvider::new();
+    provider.set_empty();
+    let gateway = gateway(Arc::new(provider.clone()), LlmConfig::default());
+
+    let mut ctx = new_ctx(far_deadline());
+    let scope = ctx.llm_call_scope(TurnStage::StoryGenerator);
+    let error = gateway.complete(scope, spec()).await.unwrap_err();
+    assert!(
+        matches!(&error, LlmError::Protocol(message) if message.contains("empty completion")),
+        "unexpected error: {error}"
+    );
+    let trace = ctx.trace().build(&StoryId::from("story-1"), &TurnId::from("turn-1"));
+    let llm = trace.spans.iter().find(|s| s.kind == "aise.llm_call").expect("llm span");
+    assert_eq!(llm.payload["status"], "error");
+    assert_eq!(llm.payload["error_kind"], "protocol");
+}
+
+#[tokio::test]
+async fn reasoning_only_completion_is_still_treated_as_empty() {
+    let provider = MockProvider::new();
+    provider.set_reasoning_only();
+    let gateway = gateway(Arc::new(provider.clone()), LlmConfig::default());
+
+    let mut ctx = new_ctx(far_deadline());
+    let scope = ctx.llm_call_scope(TurnStage::StoryGenerator);
+    let error = gateway.complete(scope, spec()).await.unwrap_err();
+    assert!(
+        matches!(&error, LlmError::Protocol(message) if message.contains("empty completion")),
+        "reasoning-only content must not be used as output: {error}"
+    );
+}
+
+#[tokio::test]
+async fn reasoning_tokens_are_recorded_in_trace() {
+    let provider = MockProvider::new();
+    provider.set_usage(LlmTokenUsage {
+        input_tokens: 100,
+        cached_input_tokens: None,
+        output_tokens: 512,
+        reasoning_tokens: Some(512),
+        total_tokens: 612,
+        accuracy: UsageAccuracy::Exact,
+    });
+    let gateway = gateway(Arc::new(provider.clone()), LlmConfig::default());
+
+    let mut ctx = new_ctx(far_deadline());
+    let scope = ctx.llm_call_scope(TurnStage::StoryGenerator);
+    gateway.complete(scope, spec()).await.unwrap();
+    let trace = ctx.trace().build(&StoryId::from("story-1"), &TurnId::from("turn-1"));
+    let llm = trace.spans.iter().find(|s| s.kind == "aise.llm_call").expect("llm span");
+    assert_eq!(llm.payload["reasoning_tokens"], 512);
 }
 
 #[tokio::test]

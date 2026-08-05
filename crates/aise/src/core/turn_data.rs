@@ -85,6 +85,34 @@ pub struct BaselineContext {
     pub active_constraints: Vec<String>,
 }
 
+impl BaselineContext {
+    pub fn estimate_tokens(&self) -> u64 {
+        let mut chars = 0usize;
+        chars = chars.saturating_add(self.story_instructions.len());
+        chars = chars.saturating_add(self.story_config.genre.len());
+        chars = chars.saturating_add(self.story_config.tone.len());
+        chars = chars.saturating_add(self.story_config.language.len());
+        if let Some(scene) = &self.current_scene {
+            chars = chars.saturating_add(scene.len());
+        }
+        for character in &self.relevant_characters {
+            chars = chars.saturating_add(character.name.len());
+            chars = chars.saturating_add(character.bio.len());
+            for goal in &character.internal_state.goals {
+                chars = chars.saturating_add(goal.len());
+            }
+        }
+        for story in &self.recent_story {
+            chars = chars.saturating_add(story.len());
+        }
+        chars = chars.saturating_add(self.story_summary.len());
+        for constraint in &self.active_constraints {
+            chars = chars.saturating_add(constraint.len());
+        }
+        (chars as u64).saturating_add(3).checked_div(4).unwrap_or(1).max(1)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct StoryConfig {
     pub genre: String,

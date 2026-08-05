@@ -9,6 +9,7 @@ use aise::context::BaselineContextBuilder;
 use aise::context::ContextRetrievalPipeline;
 use aise::core::turn_contract::{ExecuteTurnSpec, IdempotencyKey, TurnCancellation};
 use aise::domain::ids::StoryId;
+use aise::engine::{SystemClock, UuidIdGenerator};
 use aise::llm::LlmGateway;
 use aise::llm::accounting::{FinishReason, LlmCompletion};
 use aise::llm::error::LlmError;
@@ -50,6 +51,7 @@ impl LlmProvider for SlowProvider {
         Ok(LlmCompletion {
             text,
             finish_reason: Some(FinishReason::Stop),
+            reasoning_content: None,
             usage: None,
             charge: None,
         })
@@ -105,7 +107,14 @@ async fn build_engine(db_url: &str, delay: Duration) -> TestEngine {
         .expect("pipeline set");
     let runtime = TurnRuntime::new(pipeline_set);
     TestEngine {
-        engine: Arc::new(AiseEngine::new(runtime, store, coordinator, config)),
+        engine: Arc::new(AiseEngine::new(
+            runtime,
+            store,
+            coordinator,
+            config,
+            Arc::new(UuidIdGenerator),
+            Arc::new(SystemClock),
+        )),
         max_active,
     }
 }

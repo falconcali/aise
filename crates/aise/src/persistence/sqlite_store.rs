@@ -7,12 +7,13 @@ use crate::domain::memory::{MemoryEntry, MemoryKind};
 use crate::domain::narrative::StoryTurn;
 use crate::domain::world::WorldState;
 use crate::error::AiseError;
-use crate::persistence::store::{OutboxRecord, Store, StoredTurnOutcome, TurnCommit};
+use crate::persistence::store::{OutboxRecord, Store, StoreError, StoredTurnOutcome, TurnCommit};
 use async_trait::async_trait;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 pub struct SqliteStore {
     pool: SqlitePool,
@@ -22,9 +23,21 @@ impl SqliteStore {
     pub async fn connect(url: &str) -> Result<Arc<Self>, AiseError> {
         ensure_database_dir(url)?;
 
-        let options = SqliteConnectOptions::from_str(url)?.create_if_missing(true);
-        let pool = SqlitePoolOptions::new().max_connections(5).connect_with(options).await?;
-        sqlx::migrate!("./assets/persistence/mig").run(&pool).await?;
+        let options = SqliteConnectOptions::from_str(url)
+            .map_err(|error| AiseError::Store(StoreError::from(error)))?
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .busy_timeout(Duration::from_secs(5))
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .connect_with(options)
+            .await
+            .map_err(|error| AiseError::Store(StoreError::from(error)))?;
+        sqlx::migrate!("./assets/persistence/mig")
+            .run(&pool)
+            .await
+            .map_err(|error| AiseError::Store(StoreError::from(error)))?;
         Ok(Arc::new(Self { pool }))
     }
 }
@@ -64,7 +77,7 @@ impl Store for SqliteStore {
         &self,
         story_id: &StoryId,
         limits: SnapshotLimits,
-    ) -> Result<Option<StoryReadSnapshot>, AiseError> {
+    ) -> Result<Option<StoryReadSnapshot>, StoreError> {
         let mut tx = self.pool.begin().await?;
         let story: Option<(i64, Option<String>)> =
             sqlx::query_as("SELECT revision, player_character_id FROM stories WHERE id = ?")
@@ -92,7 +105,7 @@ impl Store for SqliteStore {
                 .fetch_all(&mut *tx)
                 .await?
                 .into_iter()
-                .map(|(state,)| serde_json::from_str(&state).map_err(AiseError::from))
+                .map(|(state,)| serde_json::from_str(&state).map_err(StoreError::from))
                 .collect::<Result<_, _>>()?;
 
         let recent_turns: Vec<StoryTurn> = sqlx::query_as::<_, (String, String, String, Option<String>, i64)>(
@@ -116,7 +129,7 @@ impl Store for SqliteStore {
                 created_at,
             })
         })
-        .collect::<Result<_, AiseError>>()?;
+        .collect::<Result<_, StoreError>>()?;
 
         let player_memories: Vec<MemoryEntry> = match &player_character_id {
             Some(character_id) => load_memories(&mut tx, character_id, limits.max_memories).await?,
@@ -140,7 +153,7 @@ impl Store for SqliteStore {
         story_id: &StoryId,
         player_character_id: Option<&CharacterId>,
         created_at: i64,
-    ) -> Result<(), AiseError> {
+    ) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO stories (id, revision, player_character_id, created_at) VALUES (?, 0, ?, ?) \
              ON CONFLICT(id) DO UPDATE SET \
@@ -158,7 +171,7 @@ impl Store for SqliteStore {
         &self,
         story_id: &StoryId,
         idempotency_key: &IdempotencyKey,
-    ) -> Result<Option<StoredTurnOutcome>, AiseError> {
+    ) -> Result<Option<StoredTurnOutcome>, StoreError> {
         let row: Option<(String, String)> = sqlx::query_as(
             "SELECT request_digest, result_json FROM story_turns WHERE world_id = ? AND idempotency_key = ?",
         )
@@ -175,8 +188,18 @@ impl Store for SqliteStore {
         }
     }
 
-    async fn commit_turn(&self, commit: &TurnCommit) -> Result<CommittedTurnResult, AiseError> {
+    async fn commit_turn(&self, commit: &TurnCommit) -> Result<CommittedTurnResult, StoreError> {
         let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            "INSERT INTO stories (id, revision, player_character_id, created_at) VALUES (?, 0, ?, ?) \
+             ON CONFLICT(id) DO UPDATE SET revision = stories.revision",
+        )
+        .bind(commit.story_id.as_str())
+        .bind(commit.player_character_id.as_ref().map(|id| id.as_str()))
+        .bind(commit.turn.created_at)
+        .execute(&mut *tx)
+        .await?;
 
         let existing: Option<(String, String)> = sqlx::query_as(
             "SELECT request_digest, result_json FROM story_turns WHERE world_id = ? AND idempotency_key = ?",
@@ -188,9 +211,9 @@ impl Store for SqliteStore {
         if let Some((digest, result_json)) = existing {
             tx.rollback().await?;
             if digest == commit.request_digest.as_str() {
-                return serde_json::from_str(&result_json).map_err(AiseError::from);
+                return serde_json::from_str(&result_json).map_err(StoreError::from);
             }
-            return Err(AiseError::IdempotencyConflict);
+            return Err(StoreError::IdempotencyConflict);
         }
 
         let base = commit.base_revision.get();
@@ -203,7 +226,7 @@ impl Store for SqliteStore {
         if updated == 0 {
             if base > 0 {
                 tx.rollback().await?;
-                return Err(AiseError::RevisionConflict);
+                return Err(StoreError::RevisionConflict);
             }
             let inserted = sqlx::query(
                 "INSERT OR IGNORE INTO stories (id, revision, player_character_id, created_at) VALUES (?, 1, ?, ?)",
@@ -216,7 +239,7 @@ impl Store for SqliteStore {
             .rows_affected();
             if inserted == 0 {
                 tx.rollback().await?;
-                return Err(AiseError::RevisionConflict);
+                return Err(StoreError::RevisionConflict);
             }
         }
 
@@ -313,7 +336,7 @@ async fn load_memories(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     character_id: &CharacterId,
     limit: usize,
-) -> Result<Vec<MemoryEntry>, AiseError> {
+) -> Result<Vec<MemoryEntry>, StoreError> {
     let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
         "SELECT id, kind, content, created_at FROM memory WHERE character_id = ? ORDER BY created_at DESC LIMIT ?",
     )
@@ -334,7 +357,7 @@ async fn load_memories(
         .collect()
 }
 
-async fn write_outbox(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, record: &OutboxRecord) -> Result<(), AiseError> {
+async fn write_outbox(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, record: &OutboxRecord) -> Result<(), StoreError> {
     let payload = serde_json::to_string(&record.payload)?;
     sqlx::query(
         "INSERT INTO outbox (id, story_id, turn_id, event_type, payload, created_at, attempt_count, published_at, last_error) \

@@ -5,11 +5,17 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StoryProposal {
+    #[serde(default)]
     pub story_text: String,
+    #[serde(default)]
     pub events: Vec<ProposedEvent>,
+    #[serde(default)]
     pub character_changes: Vec<ProposedCharacterChange>,
+    #[serde(default)]
     pub world_change: ProposedWorldChange,
+    #[serde(default)]
     pub memory_changes: Vec<ProposedMemoryChange>,
+    #[serde(default)]
     pub summary_delta: Option<String>,
 }
 
@@ -22,8 +28,11 @@ pub struct ProposedEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposedCharacterChange {
     pub character_id: CharacterId,
+    #[serde(default)]
     pub goal_updates: Vec<String>,
+    #[serde(default)]
     pub health_delta: Option<i32>,
+    #[serde(default)]
     pub affinity_deltas: Vec<ProposedAffinityDelta>,
 }
 
@@ -35,6 +44,7 @@ pub struct ProposedAffinityDelta {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProposedWorldChange {
+    #[serde(default)]
     pub add_facts: Vec<String>,
 }
 

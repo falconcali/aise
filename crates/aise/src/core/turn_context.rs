@@ -10,6 +10,8 @@ use crate::error::AiseError;
 use serde::Serialize;
 use std::time::Instant;
 
+const MAX_VALIDATION_ISSUE_MESSAGE_CHARS: usize = 500;
+
 pub struct TurnExecutionContext {
     identity: TurnIdentity,
     phase: TurnPhase,
@@ -142,6 +144,14 @@ impl TurnExecutionContext {
         baseline: BaselineContext,
     ) -> Result<(), AiseError> {
         self.expect_phase(TurnPhase::Initialized)?;
+        let estimated = baseline.estimate_tokens();
+        if estimated > self.budget.max_context_tokens() {
+            return Err(AiseError::InvariantViolation(format!(
+                "prepared context {} tokens exceeds budget {}",
+                estimated,
+                self.budget.max_context_tokens()
+            )));
+        }
         self.snapshot = Some(snapshot);
         self.baseline = Some(baseline);
         self.phase = TurnPhase::Prepared;
@@ -170,6 +180,13 @@ impl TurnExecutionContext {
 
     pub fn set_character_thoughts(&mut self, thoughts: Vec<CharacterThought>) -> Result<(), AiseError> {
         self.expect_phase(TurnPhase::Planned)?;
+        if thoughts.len() > self.budget.max_character_thoughts() {
+            return Err(AiseError::InvariantViolation(format!(
+                "character thoughts {} exceeds budget {}",
+                thoughts.len(),
+                self.budget.max_character_thoughts()
+            )));
+        }
         self.thoughts = thoughts;
         Ok(())
     }
@@ -221,6 +238,23 @@ impl TurnExecutionContext {
         change_set: Option<ValidatedChangeSet>,
     ) -> Result<(), AiseError> {
         self.expect_phase(TurnPhase::ProposalReady)?;
+        let issues = result.issues();
+        if issues.len() > self.budget.max_validation_issues() {
+            return Err(AiseError::InvariantViolation(format!(
+                "validation issues {} exceeds budget {}",
+                issues.len(),
+                self.budget.max_validation_issues()
+            )));
+        }
+        for issue in issues {
+            if issue.message.chars().count() > MAX_VALIDATION_ISSUE_MESSAGE_CHARS {
+                return Err(AiseError::InvariantViolation(format!(
+                    "validation issue message {} chars exceeds budget {}",
+                    issue.message.chars().count(),
+                    MAX_VALIDATION_ISSUE_MESSAGE_CHARS
+                )));
+            }
+        }
         match result.decision() {
             ValidationDecision::Pass => {
                 let change_set = change_set

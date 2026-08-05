@@ -48,6 +48,17 @@ impl TurnExecutionPipeline for TurnCommitter {
         let story_id = ctx.story_id().clone();
         let created_at = ctx.identity().started_at_ms();
         let budget = ctx.budget();
+        let mut outbox = Vec::new();
+        for (seq, event) in change_set.events().iter().enumerate() {
+            outbox.push(OutboxRecord {
+                id: format!("{turn_id}#outbox#{seq}"),
+                story_id: story_id.clone(),
+                turn_id: turn_id.clone(),
+                event_type: format!("story_event.{}", event.kind.as_str()),
+                payload: serde_json::to_value(event)?,
+                created_at,
+            });
+        }
         let commit = TurnCommit {
             story_id: story_id.clone(),
             turn: StoryTurn {
@@ -65,19 +76,7 @@ impl TurnExecutionPipeline for TurnCommitter {
             idempotency_key: ctx.identity().idempotency_key().clone(),
             request_digest: ctx.request().request_digest().clone(),
             player_character_id: snapshot.player_character_id().cloned(),
-            outbox: change_set
-                .events()
-                .iter()
-                .enumerate()
-                .map(|(seq, event)| OutboxRecord {
-                    id: format!("{turn_id}#outbox#{seq}"),
-                    story_id: story_id.clone(),
-                    turn_id: turn_id.clone(),
-                    event_type: format!("story_event.{}", event.kind.as_str()),
-                    payload: serde_json::to_value(event).unwrap_or(serde_json::Value::Null),
-                    created_at,
-                })
-                .collect(),
+            outbox,
             llm_usage: LlmUsageAggregate {
                 llm_calls: budget.llm_calls(),
                 input_tokens: budget.input_tokens(),

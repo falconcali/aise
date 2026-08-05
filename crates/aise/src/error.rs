@@ -1,4 +1,5 @@
 use crate::llm::LlmError;
+use crate::persistence::StoreError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -37,10 +38,7 @@ pub enum AiseError {
     TokenBudgetExceeded(String),
 
     #[error("store error: {0}")]
-    Store(#[from] sqlx::Error),
-
-    #[error("store migration error: {0}")]
-    Migration(#[from] sqlx::migrate::MigrateError),
+    Store(#[from] StoreError),
 
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),

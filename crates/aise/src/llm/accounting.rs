@@ -21,6 +21,7 @@ pub struct LlmTokenUsage {
     pub input_tokens: u64,
     pub cached_input_tokens: Option<u64>,
     pub output_tokens: u64,
+    pub reasoning_tokens: Option<u64>,
     pub total_tokens: u64,
     pub accuracy: UsageAccuracy,
 }
@@ -61,6 +62,7 @@ pub struct LlmCharge {
 pub struct LlmCompletion {
     pub text: String,
     pub finish_reason: Option<FinishReason>,
+    pub reasoning_content: Option<String>,
     pub usage: Option<LlmTokenUsage>,
     pub charge: Option<LlmCharge>,
 }

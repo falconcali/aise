@@ -8,8 +8,24 @@ use crate::domain::ids::{CharacterId, StoryId, TurnId};
 use crate::domain::memory::MemoryEntry;
 use crate::domain::narrative::{StoryEvent, StoryTurn};
 use crate::domain::world::WorldState;
-use crate::error::AiseError;
 use async_trait::async_trait;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum StoreError {
+    #[error("database error: {0}")]
+    Database(#[from] sqlx::Error),
+    #[error("migration error: {0}")]
+    Migration(#[from] sqlx::migrate::MigrateError),
+    #[error("serialization error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("revision conflict")]
+    RevisionConflict,
+    #[error("idempotency conflict")]
+    IdempotencyConflict,
+}
 
 #[async_trait]
 pub trait Store: Send + Sync {
@@ -17,22 +33,22 @@ pub trait Store: Send + Sync {
         &self,
         story_id: &StoryId,
         limits: SnapshotLimits,
-    ) -> Result<Option<StoryReadSnapshot>, AiseError>;
+    ) -> Result<Option<StoryReadSnapshot>, StoreError>;
 
     async fn create_story(
         &self,
         story_id: &StoryId,
         player_character_id: Option<&CharacterId>,
         created_at: i64,
-    ) -> Result<(), AiseError>;
+    ) -> Result<(), StoreError>;
 
     async fn find_committed_turn(
         &self,
         story_id: &StoryId,
         idempotency_key: &IdempotencyKey,
-    ) -> Result<Option<StoredTurnOutcome>, AiseError>;
+    ) -> Result<Option<StoredTurnOutcome>, StoreError>;
 
-    async fn commit_turn(&self, commit: &TurnCommit) -> Result<CommittedTurnResult, AiseError>;
+    async fn commit_turn(&self, commit: &TurnCommit) -> Result<CommittedTurnResult, StoreError>;
 }
 
 #[derive(Debug, Clone)]

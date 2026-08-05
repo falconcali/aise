@@ -1,5 +1,20 @@
-use aise::core::turn_trace::{TraceRecorder, truncate};
+use aise::core::turn_trace::{TraceRecorder, TraceSpan, TraceSpanSink, TurnTrace, truncate};
 use aise::domain::ids::{StoryId, TurnId};
+use std::sync::Arc;
+use std::sync::Mutex;
+
+#[derive(Default)]
+struct RecordingSink {
+    spans: Mutex<Vec<(String, TraceSpan)>>,
+}
+
+impl TraceSpanSink for RecordingSink {
+    fn write_span(&self, trace_id: &str, span: &TraceSpan) {
+        self.spans.lock().unwrap().push((trace_id.to_owned(), span.clone()));
+    }
+
+    fn write_trace(&self, _trace: &TurnTrace) {}
+}
 
 #[test]
 fn records_nested_span_tree() {
@@ -29,6 +44,22 @@ fn record_span_attaches_to_current_parent() {
     let trace = recorder.build(&StoryId::from("story-1"), &TurnId::from("turn-1"));
     assert_eq!(trace.spans.len(), 2);
     assert_eq!(trace.spans[0].parent_span_id.as_deref(), Some(trace.spans[1].span_id.as_str()));
+}
+
+#[test]
+fn sink_receives_every_span_in_order() {
+    let sink = Arc::new(RecordingSink::default());
+    let mut recorder = TraceRecorder::new().with_sink(sink.clone());
+    let root = recorder.begin_span("aise.turn", "aise.turn");
+    recorder.record_span("aise.validation", "validation", &serde_json::json!({ "pass": true }));
+    recorder.end_span_with(root, &serde_json::json!({ "status": "ok" }));
+
+    let recorded = sink.spans.lock().unwrap();
+    assert_eq!(recorded.len(), 2);
+    assert!(recorded.iter().all(|(id, _)| id == recorder.trace_id()));
+    assert_eq!(recorded[0].1.kind, "aise.validation");
+    assert_eq!(recorded[1].1.kind, "aise.turn");
+    assert_eq!(recorded[0].1.payload["pass"], true);
 }
 
 #[test]

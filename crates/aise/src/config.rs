@@ -21,6 +21,13 @@ pub enum TraceContent {
     Content,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingMode {
+    Enabled,
+    Disabled,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
     #[serde(default)]
@@ -45,6 +52,8 @@ pub struct LlmConfig {
     #[serde(default)]
     pub trace_content: TraceContent,
     #[serde(default)]
+    pub thinking: Option<ThinkingMode>,
+    #[serde(default)]
     pub price_input_per_1k_tokens: Option<i64>,
     #[serde(default)]
     pub price_cached_input_per_1k_tokens: Option<i64>,
@@ -66,12 +75,20 @@ pub struct TurnConfig {
     pub max_llm_calls: u32,
     #[serde(default = "default_max_input_tokens")]
     pub max_input_tokens: u64,
-    #[serde(default = "default_max_output_tokens")]
+    #[serde(default = "default_max_output_tokens", alias = "max_tokens")]
     pub max_output_tokens: u64,
     #[serde(default = "default_max_total_tokens")]
     pub max_total_tokens: u64,
     #[serde(default)]
     pub max_retrieved_items: usize,
+    #[serde(default = "default_max_context_tokens")]
+    pub max_context_tokens: u64,
+    #[serde(default = "default_max_character_thoughts")]
+    pub max_character_thoughts: usize,
+    #[serde(default = "default_max_validation_issues")]
+    pub max_validation_issues: usize,
+    #[serde(default = "default_max_trace_spans")]
+    pub max_trace_spans: usize,
     #[serde(default = "default_turn_timeout_ms")]
     pub turn_timeout_ms: u64,
 }
@@ -103,11 +120,27 @@ fn default_max_input_tokens() -> u64 {
 }
 
 fn default_max_output_tokens() -> u64 {
-    2_048
+    4_096
 }
 
 fn default_max_total_tokens() -> u64 {
-    10_240
+    12_288
+}
+
+fn default_max_context_tokens() -> u64 {
+    8_192
+}
+
+fn default_max_character_thoughts() -> usize {
+    8
+}
+
+fn default_max_validation_issues() -> usize {
+    32
+}
+
+fn default_max_trace_spans() -> usize {
+    64
 }
 
 fn default_turn_timeout_ms() -> u64 {
@@ -139,6 +172,7 @@ impl Default for LlmConfig {
             requests_per_minute: None,
             tokens_per_minute: None,
             trace_content: TraceContent::MetadataOnly,
+            thinking: None,
             price_input_per_1k_tokens: None,
             price_cached_input_per_1k_tokens: None,
             price_output_per_1k_tokens: None,
@@ -163,6 +197,10 @@ impl Default for TurnConfig {
             max_output_tokens: default_max_output_tokens(),
             max_total_tokens: default_max_total_tokens(),
             max_retrieved_items: 20,
+            max_context_tokens: default_max_context_tokens(),
+            max_character_thoughts: default_max_character_thoughts(),
+            max_validation_issues: default_max_validation_issues(),
+            max_trace_spans: default_max_trace_spans(),
             turn_timeout_ms: default_turn_timeout_ms(),
         }
     }
@@ -215,6 +253,11 @@ impl TurnConfig {
         if self.max_total_tokens < self.max_output_tokens {
             return Err(crate::error::AiseError::InvalidRequest(
                 "turn.max_total_tokens must be >= turn.max_output_tokens".into(),
+            ));
+        }
+        if self.max_context_tokens == 0 {
+            return Err(crate::error::AiseError::InvalidRequest(
+                "turn.max_context_tokens must be positive".into(),
             ));
         }
         Ok(())

@@ -34,18 +34,30 @@ impl TurnEventSink for SseSink {
     fn emit(&self, event: TurnEvent) {
         let sse = match event {
             TurnEvent::StageStarted(stage) => Event::default().event("stage").data(stage.as_str()),
-            TurnEvent::Token(text) => Event::default().event("token").data(text),
-            TurnEvent::Validation { pass } => {
+            TurnEvent::ValidationCompleted { pass } => {
                 Event::default().event("validation").data(if pass { "pass" } else { "fail" })
             }
-            TurnEvent::Finished { turn_id } => Event::default().event("done").data(turn_id.to_string()),
-            TurnEvent::Trace(trace) => {
+            TurnEvent::Committed(result) => match serde_json::to_string(&result) {
+                Ok(json) => Event::default().event("committed").data(json),
+                Err(error) => {
+                    self.dropped.fetch_add(1, Ordering::Relaxed);
+                    tracing::warn!(error = %error, "failed to serialize committed result for sse");
+                    return;
+                }
+            },
+            TurnEvent::Failed { turn_id, error } => Event::default().event("failed").data(format!("{turn_id}:{error}")),
+            TurnEvent::Cancelled { turn_id } => Event::default().event("cancelled").data(turn_id.to_string()),
+            TurnEvent::Conflict { turn_id } => Event::default().event("conflict").data(turn_id.to_string()),
+            TurnEvent::TraceCompleted(trace) => {
                 if !self.include_trace {
                     return;
                 }
                 match serde_json::to_string(&trace) {
                     Ok(json) => Event::default().event("trace").data(json),
-                    Err(_) => return,
+                    Err(error) => {
+                        tracing::warn!(error = %error, "failed to serialize trace for sse");
+                        return;
+                    }
                 }
             }
         };

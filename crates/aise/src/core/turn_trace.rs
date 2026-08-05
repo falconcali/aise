@@ -1,5 +1,6 @@
 use crate::domain::ids::{StoryId, TurnId};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -44,7 +45,7 @@ pub struct TraceSpan {
 pub enum SpanPayload {
     Turn(TurnData),
     Pipeline(PipelineData),
-    LlmCall(LlmCallData),
+    LlmCall(Box<LlmCallData>),
     ToolCall(ToolCallData),
     Validation(ValidationData),
     Persist(PersistData),
@@ -79,6 +80,7 @@ pub struct LlmCallData {
     pub input_tokens: u64,
     pub cached_input_tokens: Option<u64>,
     pub output_tokens: u64,
+    pub reasoning_tokens: Option<u64>,
     pub usage_accuracy: String,
     pub finish_reason: Option<String>,
     pub charge: Option<serde_json::Value>,
@@ -123,6 +125,11 @@ pub struct PersistData {
     pub latency_ms: u64,
 }
 
+pub trait TraceSpanSink: Send + Sync {
+    fn write_span(&self, trace_id: &str, span: &TraceSpan);
+    fn write_trace(&self, trace: &TurnTrace);
+}
+
 const DEFAULT_MAX_SPANS: usize = 64;
 
 pub struct TraceRecorder {
@@ -132,6 +139,7 @@ pub struct TraceRecorder {
     current_parent: Option<String>,
     max_spans: usize,
     dropped: u32,
+    span_sink: Option<Arc<dyn TraceSpanSink>>,
 }
 
 impl TraceRecorder {
@@ -147,7 +155,13 @@ impl TraceRecorder {
             current_parent: None,
             max_spans,
             dropped: 0,
+            span_sink: None,
         }
+    }
+
+    pub fn with_sink(mut self, sink: Arc<dyn TraceSpanSink>) -> Self {
+        self.span_sink = Some(sink);
+        self
     }
 
     pub fn trace_id(&self) -> &str {
@@ -182,6 +196,9 @@ impl TraceRecorder {
             duration_ms: ended_at_ms.saturating_sub(span.started_at_ms),
             payload: to_value(payload),
         };
+        if let Some(sink) = &self.span_sink {
+            sink.write_span(self.trace_id.as_str(), &trace_span);
+        }
         tracing::info!(
             trace_id = self.trace_id.as_str(),
             kind = trace_span.kind.as_str(),
@@ -204,6 +221,9 @@ impl TraceRecorder {
             duration_ms: 0,
             payload: to_value(payload),
         };
+        if let Some(sink) = &self.span_sink {
+            sink.write_span(self.trace_id.as_str(), &trace_span);
+        }
         tracing::info!(
             trace_id = self.trace_id.as_str(),
             kind = trace_span.kind.as_str(),

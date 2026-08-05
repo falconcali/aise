@@ -28,3 +28,21 @@ fn endpoint_keeps_existing_chat_completions_path() {
     let provider = provider_with("https://api.deepseek.com/chat/completions");
     assert_eq!(provider.endpoint(), "https://api.deepseek.com/chat/completions");
 }
+
+#[test]
+fn thinking_toggle_serializes_when_configured() {
+    let provider = OpenAiCompatProvider::new(LlmConfig {
+        base_url: "https://api.deepseek.com".into(),
+        thinking: Some(ThinkingMode::Disabled),
+        ..LlmConfig::default()
+    });
+    let toggle = provider.thinking_toggle().expect("toggle configured");
+    let value = serde_json::to_value(toggle).expect("serialize toggle");
+    assert_eq!(value, serde_json::json!({"type": "disabled"}));
+}
+
+#[test]
+fn thinking_toggle_omitted_when_not_configured() {
+    let provider = provider_with("https://api.deepseek.com");
+    assert!(provider.thinking_toggle().is_none());
+}

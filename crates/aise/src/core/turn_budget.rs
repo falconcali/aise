@@ -15,6 +15,27 @@ pub struct TurnBudgetLimits {
     pub max_output_tokens: u64,
     pub max_total_tokens: u64,
     pub max_retrieved_items: usize,
+    pub max_context_tokens: u64,
+    pub max_character_thoughts: usize,
+    pub max_validation_issues: usize,
+    pub max_trace_spans: usize,
+}
+
+impl Default for TurnBudgetLimits {
+    fn default() -> Self {
+        Self {
+            max_repair_rounds: 3,
+            max_llm_calls: 8,
+            max_input_tokens: 8_192,
+            max_output_tokens: 2_048,
+            max_total_tokens: 10_240,
+            max_retrieved_items: 5,
+            max_context_tokens: 8_192,
+            max_character_thoughts: 8,
+            max_validation_issues: 32,
+            max_trace_spans: 64,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -48,6 +69,10 @@ impl TurnBudget {
                 max_output_tokens: config.max_output_tokens,
                 max_total_tokens: config.max_total_tokens,
                 max_retrieved_items: config.max_retrieved_items,
+                max_context_tokens: config.max_context_tokens,
+                max_character_thoughts: config.max_character_thoughts,
+                max_validation_issues: config.max_validation_issues,
+                max_trace_spans: config.max_trace_spans,
             },
             usage: TurnBudgetUsage::default(),
         })
@@ -66,6 +91,22 @@ impl TurnBudget {
 
     pub fn max_retrieved_items(&self) -> usize {
         self.limits.max_retrieved_items
+    }
+
+    pub fn max_context_tokens(&self) -> u64 {
+        self.limits.max_context_tokens
+    }
+
+    pub fn max_character_thoughts(&self) -> usize {
+        self.limits.max_character_thoughts
+    }
+
+    pub fn max_validation_issues(&self) -> usize {
+        self.limits.max_validation_issues
+    }
+
+    pub fn max_trace_spans(&self) -> usize {
+        self.limits.max_trace_spans
     }
 
     pub fn remaining_output_tokens(&self) -> u64 {

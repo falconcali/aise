@@ -1,5 +1,6 @@
 use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
+use crate::core::turn_trace::truncate;
 use crate::core::turn_validation::{ValidationDecision, ValidationIssue};
 use crate::error::AiseError;
 use crate::llm::gateway::LlmGateway;
@@ -8,7 +9,7 @@ use crate::prompt::{ContextMerger, GenerationInput};
 use async_trait::async_trait;
 use std::sync::Arc;
 
-const MAX_REPAIR_OUTPUT_TOKENS: u32 = 4096;
+const MAX_PARSE_ERROR_PREVIEW_CHARS: usize = 200;
 
 pub struct StoryRepairer {
     gateway: Arc<LlmGateway>,
@@ -65,7 +66,7 @@ impl TurnExecutionPipeline for StoryRepairer {
             issues: &issues,
             previous_story,
         });
-        let max_output = ctx.budget().remaining_output_tokens().min(u64::from(MAX_REPAIR_OUTPUT_TOKENS)) as u32;
+        let max_output = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
         let spec = CompletionSpec {
             messages,
             max_output_tokens: max_output,
@@ -73,8 +74,12 @@ impl TurnExecutionPipeline for StoryRepairer {
         };
         let scope = ctx.llm_call_scope(TurnStage::StoryRepairer);
         let completion = self.gateway.complete(scope, spec).await?;
-        let proposal = serde_json::from_str(&completion.text)
-            .map_err(|error| AiseError::Internal(format!("story proposal output is not valid JSON: {error}")))?;
+        let proposal = serde_json::from_str(&completion.text).map_err(|error| {
+            AiseError::Internal(format!(
+                "story proposal output is not valid JSON: {error}; raw_output={}",
+                truncate(&completion.text, MAX_PARSE_ERROR_PREVIEW_CHARS)
+            ))
+        })?;
         ctx.replace_story_proposal(proposal)
     }
 }

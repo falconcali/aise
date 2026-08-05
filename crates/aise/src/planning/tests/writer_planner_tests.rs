@@ -47,3 +47,11 @@ fn parse_plan_bounds_output_sizes() {
 fn parse_plan_rejects_invalid_json() {
     assert!(parse_plan("not json").is_err());
 }
+
+#[test]
+fn parse_plan_error_includes_raw_output_preview() {
+    let error = parse_plan("```json\n{\"story_goal\":{\"summary\":\"x\"}\n```").unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("raw_output="), "error must preview raw output: {message}");
+    assert!(message.contains("```json"), "raw output must appear in the error: {message}");
+}

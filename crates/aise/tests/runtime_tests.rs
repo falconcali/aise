@@ -56,6 +56,7 @@ fn budget() -> TurnBudget {
         max_output_tokens: 2_048,
         max_total_tokens: 10_240,
         max_retrieved_items: 5,
+        ..Default::default()
     })
 }
 
@@ -401,6 +402,7 @@ async fn repair_budget_is_consumed_before_repair_call() {
         max_output_tokens: 2_048,
         max_total_tokens: 10_240,
         max_retrieved_items: 5,
+        ..Default::default()
     });
     let set = TurnPipelineSet::builder()
         .initializer(init_stub())
@@ -445,6 +447,7 @@ async fn repair_budget_exhaustion_never_commits() {
         max_output_tokens: 2_048,
         max_total_tokens: 10_240,
         max_retrieved_items: 5,
+        ..Default::default()
     });
     let set = TurnPipelineSet::builder()
         .initializer(init_stub())

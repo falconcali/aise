@@ -6,6 +6,7 @@ pub mod config;
 pub mod error;
 pub mod session;
 pub mod tasks;
+pub mod trace;
 
 pub use api::{AppState, router};
 pub use app::build_engine;

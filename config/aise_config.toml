@@ -22,11 +22,16 @@ api_key = "env:DEEPSEEK_API_KEY"
 model = "deepseek-v4-flash"
 max_concurrent = 4
 temperature = 0.8
+# deepseek-v4 系列默认开启 thinking 模式：思维链与最终答案共享 max_tokens
+# 预算，且对 JSON 结构化输出不友好。显式禁用后直接返回 JSON，更稳定省钱。
+thinking = "disabled"
 
 [aise.storage]
 database_url = "data/aise.db"
 
 [aise.turn]
 max_repair_rounds = 3
-max_tokens = 2048
+# thinking 模式（deepseek-v4 系列默认开启）下，reasoning 与最终答案共享
+# max_tokens 预算，预算太小会在 content 返回前被截断（finish_reason=length）。
+max_tokens = 4096
 max_retrieved_items = 20

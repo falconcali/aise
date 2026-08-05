@@ -1,6 +1,7 @@
 use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_data::CharacterThought;
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
+use crate::core::turn_trace::truncate;
 use crate::domain::ids::CharacterId;
 use crate::error::AiseError;
 use crate::llm::gateway::LlmGateway;
@@ -11,7 +12,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 
 const MAX_THOUGHT_FIELD_CHARS: usize = 300;
-const MAX_THOUGHT_OUTPUT_TOKENS: u32 = 512;
+const MAX_PARSE_ERROR_PREVIEW_CHARS: usize = 200;
 
 pub struct CharacterThinkPipeline {
     gateway: Arc<LlmGateway>,
@@ -71,7 +72,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
             let messages = self
                 .merger
                 .thought_messages(&character, &player_input, baseline.current_scene.as_deref());
-            let max_output = ctx.budget().remaining_output_tokens().min(u64::from(MAX_THOUGHT_OUTPUT_TOKENS)) as u32;
+            let max_output = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
             let spec = CompletionSpec {
                 messages,
                 max_output_tokens: max_output,
@@ -86,8 +87,12 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
 }
 
 fn parse_thought(text: &str, character_id: CharacterId) -> Result<CharacterThought, AiseError> {
-    let output: ThoughtOutput = serde_json::from_str(text)
-        .map_err(|error| AiseError::Internal(format!("character thought output is not valid JSON: {error}")))?;
+    let output: ThoughtOutput = serde_json::from_str(text).map_err(|error| {
+        AiseError::Internal(format!(
+            "character thought output is not valid JSON: {error}; raw_output={}",
+            truncate(text, MAX_PARSE_ERROR_PREVIEW_CHARS)
+        ))
+    })?;
     Ok(CharacterThought {
         character_id,
         perception: bound_field(&output.perception),

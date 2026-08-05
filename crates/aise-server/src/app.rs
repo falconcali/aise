@@ -1,7 +1,10 @@
 use crate::config::ServerConfig;
+use crate::trace::FileTraceSpanSink;
 use aise::AiseEngine;
 use aise::character::CharacterThinkPipeline;
 use aise::context::{BaselineContextBuilder, ContextRetrievalPipeline};
+use aise::core::turn_trace::TraceSpanSink;
+use aise::engine::{SystemClock, UuidIdGenerator};
 use aise::llm::{LlmGateway, LlmProvider, OpenAiCompatProvider};
 use aise::persistence::{SqliteStore, Store, TurnCommitter};
 use aise::planning::WriterPlanner;
@@ -31,5 +34,16 @@ pub async fn build_engine(config: &ServerConfig) -> Result<Arc<AiseEngine>, anyh
         .build()?;
     let runtime = TurnRuntime::new(pipeline_set);
 
-    Ok(Arc::new(AiseEngine::new(runtime, store, coordinator, config.aise.clone())))
+    let trace_sink: Arc<dyn TraceSpanSink> = Arc::new(FileTraceSpanSink::new(config.trace_dir.clone()));
+    let engine = AiseEngine::new(
+        runtime,
+        store,
+        coordinator,
+        config.aise.clone(),
+        Arc::new(UuidIdGenerator),
+        Arc::new(SystemClock),
+    )
+    .with_trace_sink(trace_sink);
+
+    Ok(Arc::new(engine))
 }

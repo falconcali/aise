@@ -38,3 +38,16 @@ fn api_key_ignores_empty_environment_value() {
         Some("DEEPSEEK_API_KEY".into())
     );
 }
+
+#[test]
+fn thinking_env_override_parses_modes() {
+    use aise::config::ThinkingMode;
+    let mut config = ServerConfig::default();
+    assert_eq!(config.aise.llm.thinking, None);
+    let get_env = |name: &str| match name {
+        "AISE_LLM_THINKING" => Some("disabled".to_string()),
+        _ => None,
+    };
+    config.apply_env_overrides_with(get_env);
+    assert_eq!(config.aise.llm.thinking, Some(ThinkingMode::Disabled));
+}
