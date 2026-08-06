@@ -1,5 +1,4 @@
 use aise::AiseError;
-use futures::FutureExt;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -60,7 +59,7 @@ impl TurnTaskManager {
 
     pub async fn active_turns(&self) -> usize {
         let mut tasks = self.tasks.lock().await;
-        while tasks.join_next().now_or_never().flatten().is_some() {}
+        while tasks.try_join_next().is_some() {}
         tasks.len()
     }
 

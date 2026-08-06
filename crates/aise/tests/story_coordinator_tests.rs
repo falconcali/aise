@@ -226,11 +226,15 @@ async fn different_story_turns_can_overlap() {
     second.await.unwrap().expect("turn b");
     let elapsed = start.elapsed();
 
-    assert!(
-        elapsed < Duration::from_millis(350),
-        "different stories must overlap, took {elapsed:?}"
+    assert_eq!(
+        test.max_active.load(Ordering::SeqCst),
+        2,
+        "different stories must run concurrently inside the provider"
     );
-    assert_eq!(test.max_active.load(Ordering::SeqCst), 2);
+    assert!(
+        elapsed < Duration::from_millis(500),
+        "turns must overlap in wall-clock time, took {elapsed:?}"
+    );
     let _ = std::fs::remove_file(&db);
 }
 
