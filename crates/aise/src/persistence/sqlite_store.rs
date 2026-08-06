@@ -1,13 +1,12 @@
 use crate::core::turn_contract::{CommittedTurnResult, IdempotencyKey, StoryRevision};
-use crate::core::turn_data::{SnapshotLimits, StoryReadSnapshot};
+use crate::core::turn_data::SnapshotLimits;
 use crate::core::turn_validation::StateChange;
-use crate::domain::character::CharacterState;
-use crate::domain::ids::{CharacterId, StoryId, TurnId};
+use crate::domain::ids::{CharacterId, FactId, MemoryId, StoryId, TurnId};
 use crate::domain::memory::{MemoryEntry, MemoryKind};
 use crate::domain::narrative::StoryTurn;
-use crate::domain::world::WorldState;
-use crate::error::AiseError;
-use crate::persistence::store::{OutboxRecord, Store, StoreError, StoredTurnOutcome, TurnCommit};
+use crate::domain::story_state::{StoryCreateSpec, StoryInfo, StoryReadSnapshot};
+use crate::persistence::sqlite_error::SqliteStoreError;
+use crate::persistence::store::{OutboxRecord, Store, StoreError, StoredTurnOutcome, TurnCommitSpec};
 use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use std::path::Path;
@@ -20,11 +19,10 @@ pub struct SqliteStore {
 }
 
 impl SqliteStore {
-    pub async fn connect(url: &str) -> Result<Arc<Self>, AiseError> {
+    pub async fn connect(url: &str) -> Result<Arc<Self>, StoreError> {
         ensure_database_dir(url)?;
-
         let options = SqliteConnectOptions::from_str(url)
-            .map_err(|error| AiseError::Store(StoreError::from(error)))?
+            .map_err(|_| StoreError::Unavailable)?
             .create_if_missing(true)
             .journal_mode(SqliteJournalMode::Wal)
             .busy_timeout(Duration::from_secs(5))
@@ -33,23 +31,60 @@ impl SqliteStore {
             .max_connections(5)
             .connect_with(options)
             .await
-            .map_err(|error| AiseError::Store(StoreError::from(error)))?;
+            .map_err(SqliteStoreError::from)?;
         sqlx::migrate!("./assets/persistence/mig")
             .run(&pool)
             .await
-            .map_err(|error| AiseError::Store(StoreError::from(error)))?;
+            .map_err(SqliteStoreError::from)?;
         Ok(Arc::new(Self { pool }))
     }
 }
 
-fn ensure_database_dir(url: &str) -> Result<(), AiseError> {
+impl SqliteStore {
+    pub fn pool_for_tests(&self) -> &SqlitePool {
+        &self.pool
+    }
+}
+
+#[async_trait]
+impl Store for Arc<SqliteStore> {
+    async fn create_story(&self, spec: &StoryCreateSpec) -> Result<StoryInfo, StoreError> {
+        Store::create_story(&**self, spec).await
+    }
+
+    async fn get_story(&self, story_id: &StoryId) -> Result<Option<StoryInfo>, StoreError> {
+        Store::get_story(&**self, story_id).await
+    }
+
+    async fn load_story_snapshot(
+        &self,
+        story_id: &StoryId,
+        limits: SnapshotLimits,
+    ) -> Result<StoryReadSnapshot, StoreError> {
+        Store::load_story_snapshot(&**self, story_id, limits).await
+    }
+
+    async fn find_committed_turn(
+        &self,
+        story_id: &StoryId,
+        idempotency_key: &IdempotencyKey,
+    ) -> Result<Option<crate::persistence::store::StoredTurnOutcome>, StoreError> {
+        Store::find_committed_turn(&**self, story_id, idempotency_key).await
+    }
+
+    async fn commit_turn(&self, spec: &TurnCommitSpec) -> Result<CommittedTurnResult, StoreError> {
+        Store::commit_turn(&**self, spec).await
+    }
+}
+
+fn ensure_database_dir(url: &str) -> Result<(), StoreError> {
     if url.starts_with(':') {
         return Ok(());
     }
     let path = Path::new(url);
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent).map_err(|_| StoreError::Unavailable)?;
         }
     }
     Ok(())
@@ -73,98 +108,190 @@ fn memory_kind_from_str(s: &str) -> MemoryKind {
 
 #[async_trait]
 impl Store for SqliteStore {
+    async fn create_story(&self, spec: &StoryCreateSpec) -> Result<StoryInfo, StoreError> {
+        let story_config = serde_json::to_string(&spec.story_config).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        })?;
+        let current_scene = serde_json::to_string(&spec.current_scene).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        })?;
+        let story_summary = serde_json::to_string(&spec.story_summary).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        })?;
+        let active_constraints =
+            serde_json::to_string(&spec.active_constraints).map_err(|_| StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+            })?;
+        let initial_world = match &spec.initial_world {
+            Some(world) => {
+                let state = serde_json::to_string(world).map_err(|_| StoreError::Serialization {
+                    kind: crate::persistence::store::StoreSerializationErrorKind::InvalidWorldState,
+                })?;
+                sqlx::query("INSERT INTO worlds (id, name, state, created_at) VALUES (?, ?, ?, ?)")
+                    .bind(world.id.as_str())
+                    .bind(&world.name)
+                    .bind(&state)
+                    .bind(spec.created_at_ms)
+                    .execute(&self.pool)
+                    .await
+                    .map_err(SqliteStoreError::from)?;
+                world.id.as_str().to_owned()
+            }
+            None => spec.story_id.as_str().to_owned(),
+        };
+        sqlx::query(
+            "INSERT INTO stories (id, revision, player_character_id, created_at, story_instructions, story_config, \
+             current_scene, story_summary, active_constraints) \
+             VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(spec.story_id.as_str())
+        .bind(spec.player_character_id.as_ref().map(|id| id.as_str()))
+        .bind(spec.created_at_ms)
+        .bind(&spec.story_instructions)
+        .bind(&story_config)
+        .bind(&current_scene)
+        .bind(&story_summary)
+        .bind(&active_constraints)
+        .execute(&self.pool)
+        .await
+        .map_err(SqliteStoreError::from)?;
+        let _ = initial_world;
+        Ok(StoryInfo {
+            story_id: spec.story_id.clone(),
+            created_at_ms: spec.created_at_ms,
+            base_revision: StoryRevision::new(0),
+        })
+    }
+
+    async fn get_story(&self, story_id: &StoryId) -> Result<Option<StoryInfo>, StoreError> {
+        let row: Option<(i64, i64)> = sqlx::query_as("SELECT revision, created_at FROM stories WHERE id = ?")
+            .bind(story_id.as_str())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(SqliteStoreError::from)?;
+        Ok(row.map(|(revision, created_at)| StoryInfo {
+            story_id: story_id.clone(),
+            created_at_ms: created_at,
+            base_revision: StoryRevision::new(revision as u64),
+        }))
+    }
+
     async fn load_story_snapshot(
         &self,
         story_id: &StoryId,
         limits: SnapshotLimits,
-    ) -> Result<Option<StoryReadSnapshot>, StoreError> {
-        let mut tx = self.pool.begin().await?;
-        let story: Option<(i64, Option<String>)> =
-            sqlx::query_as("SELECT revision, player_character_id FROM stories WHERE id = ?")
-                .bind(story_id.as_str())
-                .fetch_optional(&mut *tx)
-                .await?;
-        let Some((revision, player_character_id)) = story else {
-            tx.rollback().await?;
-            return Ok(None);
+    ) -> Result<StoryReadSnapshot, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(SqliteStoreError::from)?;
+        let story: Option<(i64, Option<String>, String, String, String, String, String)> = sqlx::query_as(
+            "SELECT revision, player_character_id, story_instructions, story_config, \
+             current_scene, story_summary, active_constraints \
+             FROM stories WHERE id = ?",
+        )
+        .bind(story_id.as_str())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(SqliteStoreError::from)?;
+        let Some((
+            revision,
+            player_character_id,
+            story_instructions,
+            story_config,
+            current_scene,
+            story_summary,
+            active_constraints,
+        )) = story
+        else {
+            tx.rollback().await.map_err(SqliteStoreError::from)?;
+            return Err(StoreError::NotFound);
         };
         let player_character_id = player_character_id.map(CharacterId::from);
 
-        let world: Option<WorldState> = match sqlx::query_as::<_, (String,)>("SELECT state FROM worlds WHERE id = ?")
-            .bind(story_id.as_str())
-            .fetch_optional(&mut *tx)
-            .await?
-        {
-            Some((state,)) => Some(serde_json::from_str(&state)?),
-            None => None,
-        };
-
-        let characters: Vec<CharacterState> =
-            sqlx::query_as::<_, (String,)>("SELECT state FROM characters WHERE world_id = ? ORDER BY rowid")
+        let world: Option<crate::domain::world::WorldState> =
+            match sqlx::query_as::<_, (String,)>("SELECT state FROM worlds WHERE id = ?")
                 .bind(story_id.as_str())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(SqliteStoreError::from)?
+            {
+                Some((state,)) => serde_json::from_str(&state).map_err(|_| StoreError::Serialization {
+                    kind: crate::persistence::store::StoreSerializationErrorKind::InvalidWorldState,
+                })?,
+                None => None,
+            };
+
+        let characters: Vec<crate::domain::character::CharacterState> =
+            sqlx::query_as::<_, (String,)>("SELECT state FROM characters WHERE world_id = ? ORDER BY rowid LIMIT ?")
+                .bind(story_id.as_str())
+                .bind(limits.max_characters() as i64)
                 .fetch_all(&mut *tx)
-                .await?
+                .await
+                .map_err(SqliteStoreError::from)?
                 .into_iter()
-                .map(|(state,)| serde_json::from_str(&state).map_err(StoreError::from))
+                .map(|(state,)| {
+                    serde_json::from_str(&state).map_err(|_| StoreError::Serialization {
+                        kind: crate::persistence::store::StoreSerializationErrorKind::InvalidCharacterState,
+                    })
+                })
                 .collect::<Result<_, _>>()?;
 
-        let recent_turns: Vec<StoryTurn> = sqlx::query_as::<_, (String, String, String, Option<String>, i64)>(
-            "SELECT id, player_input, story_text, summary_delta, created_at FROM (\
-             SELECT id, player_input, story_text, summary_delta, created_at, rowid AS _row \
+        let recent_turns: Vec<StoryTurn> = sqlx::query_as::<_, (String, String, String, i64)>(
+            "SELECT id, player_input, story_text, created_at FROM (\
+             SELECT id, player_input, story_text, created_at, rowid AS _row \
              FROM story_turns \
              WHERE world_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?\
              ) ORDER BY created_at ASC, _row ASC",
         )
         .bind(story_id.as_str())
-        .bind(limits.max_recent_turns as i64)
+        .bind(limits.max_recent_turns() as i64)
         .fetch_all(&mut *tx)
-        .await?
+        .await
+        .map_err(SqliteStoreError::from)?
         .into_iter()
-        .map(|(id, player_input, story_text, summary_delta, created_at)| {
+        .map(|(id, player_input, story_text, created_at)| {
+            let id = TurnId::try_new(id).map_err(|_| StoreError::Unavailable)?;
             Ok(StoryTurn {
-                id: TurnId::from(id),
+                id,
                 player_input,
                 story_text,
-                summary_delta,
                 created_at,
             })
         })
-        .collect::<Result<_, StoreError>>()?;
+        .collect::<Result<Vec<_>, StoreError>>()?;
 
         let player_memories: Vec<MemoryEntry> = match &player_character_id {
-            Some(character_id) => load_memories(&mut tx, character_id, limits.max_memories).await?,
+            Some(character_id) => load_memories(&mut tx, character_id, limits.max_memories()).await?,
             None => Vec::new(),
         };
 
-        tx.commit().await?;
-        Ok(Some(StoryReadSnapshot::new(
+        tx.commit().await.map_err(SqliteStoreError::from)?;
+        Ok(StoryReadSnapshot::new(
             story_id.clone(),
             StoryRevision::new(revision as u64),
-            player_character_id,
+            crate::domain::story_state::AuthoritativeStoryState {
+                story_instructions,
+                story_config: serde_json::from_str(&story_config).map_err(|_| StoreError::Serialization {
+                    kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+                })?,
+                current_scene: serde_json::from_str(&current_scene).map_err(|_| StoreError::Serialization {
+                    kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+                })?,
+                story_summary: serde_json::from_str(&story_summary).map_err(|_| StoreError::Serialization {
+                    kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+                })?,
+                active_constraints: serde_json::from_str(&active_constraints).map_err(|_| {
+                    StoreError::Serialization {
+                        kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+                    }
+                })?,
+            },
+            crate::domain::story_state::PlayerStoryState {
+                player_character_id,
+                player_memories,
+            },
             world,
             characters,
             recent_turns,
-            player_memories,
-        )))
-    }
-
-    async fn create_story(
-        &self,
-        story_id: &StoryId,
-        player_character_id: Option<&CharacterId>,
-        created_at: i64,
-    ) -> Result<(), StoreError> {
-        sqlx::query(
-            "INSERT INTO stories (id, revision, player_character_id, created_at) VALUES (?, 0, ?, ?) \
-             ON CONFLICT(id) DO UPDATE SET \
-             player_character_id = COALESCE(stories.player_character_id, excluded.player_character_id)",
-        )
-        .bind(story_id.as_str())
-        .bind(player_character_id.map(|id| id.as_str()))
-        .bind(created_at)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
+        ))
     }
 
     async fn find_committed_turn(
@@ -178,28 +305,26 @@ impl Store for SqliteStore {
         .bind(story_id.as_str())
         .bind(idempotency_key.as_str())
         .fetch_optional(&self.pool)
-        .await?;
+        .await
+        .map_err(SqliteStoreError::from)?;
         match row {
             Some((digest, result_json)) => Ok(Some(StoredTurnOutcome {
                 request_digest: crate::core::turn_contract::RequestDigest::from_stored(digest),
-                result: serde_json::from_str(&result_json)?,
+                result: serde_json::from_str(&result_json).map_err(|_| StoreError::Serialization {
+                    kind: crate::persistence::store::StoreSerializationErrorKind::InvalidTurnResult,
+                })?,
             })),
             None => Ok(None),
         }
     }
 
-    async fn commit_turn(&self, commit: &TurnCommit) -> Result<CommittedTurnResult, StoreError> {
-        let mut tx = self.pool.begin().await?;
-
-        sqlx::query(
-            "INSERT INTO stories (id, revision, player_character_id, created_at) VALUES (?, 0, ?, ?) \
-             ON CONFLICT(id) DO UPDATE SET revision = stories.revision",
-        )
-        .bind(commit.story_id.as_str())
-        .bind(commit.player_character_id.as_ref().map(|id| id.as_str()))
-        .bind(commit.turn.created_at)
-        .execute(&mut *tx)
-        .await?;
+    async fn commit_turn(&self, commit: &TurnCommitSpec) -> Result<CommittedTurnResult, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(SqliteStoreError::from)?;
+        sqlx::query("UPDATE stories SET revision = revision WHERE id = ?")
+            .bind(commit.story_id.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(SqliteStoreError::from)?;
 
         let existing: Option<(String, String)> = sqlx::query_as(
             "SELECT request_digest, result_json FROM story_turns WHERE world_id = ? AND idempotency_key = ?",
@@ -207,11 +332,14 @@ impl Store for SqliteStore {
         .bind(commit.story_id.as_str())
         .bind(commit.idempotency_key.as_str())
         .fetch_optional(&mut *tx)
-        .await?;
+        .await
+        .map_err(SqliteStoreError::from)?;
         if let Some((digest, result_json)) = existing {
-            tx.rollback().await?;
+            tx.rollback().await.map_err(SqliteStoreError::from)?;
             if digest == commit.request_digest.as_str() {
-                return serde_json::from_str(&result_json).map_err(StoreError::from);
+                return serde_json::from_str(&result_json).map_err(|_| StoreError::Serialization {
+                    kind: crate::persistence::store::StoreSerializationErrorKind::InvalidTurnResult,
+                });
             }
             return Err(StoreError::IdempotencyConflict);
         }
@@ -221,39 +349,45 @@ impl Store for SqliteStore {
             .bind(commit.story_id.as_str())
             .bind(base as i64)
             .execute(&mut *tx)
-            .await?
+            .await
+            .map_err(SqliteStoreError::from)?
             .rows_affected();
         if updated == 0 {
-            if base > 0 {
-                tx.rollback().await?;
-                return Err(StoreError::RevisionConflict);
-            }
-            let inserted = sqlx::query(
-                "INSERT OR IGNORE INTO stories (id, revision, player_character_id, created_at) VALUES (?, 1, ?, ?)",
-            )
-            .bind(commit.story_id.as_str())
-            .bind(commit.player_character_id.as_ref().map(|id| id.as_str()))
-            .bind(commit.turn.created_at)
-            .execute(&mut *tx)
-            .await?
-            .rows_affected();
-            if inserted == 0 {
-                tx.rollback().await?;
-                return Err(StoreError::RevisionConflict);
-            }
+            tx.rollback().await.map_err(SqliteStoreError::from)?;
+            return Err(StoreError::RevisionConflict);
         }
 
         let committed_revision = base.saturating_add(1);
+        let aggregate = commit.llm_calls.iter().fold(
+            crate::core::turn_contract::LlmUsageAggregate {
+                llm_calls: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+            },
+            |mut aggregate, call| {
+                aggregate.llm_calls = aggregate.llm_calls.saturating_add(1);
+                aggregate.input_tokens = aggregate.input_tokens.saturating_add(call.input_tokens);
+                aggregate.output_tokens = aggregate.output_tokens.saturating_add(call.output_tokens);
+                aggregate.total_tokens = aggregate.total_tokens.saturating_add(call.total_tokens);
+                aggregate
+            },
+        );
         let result = CommittedTurnResult {
             turn_id: commit.turn.id.clone(),
             story_revision: StoryRevision::new(committed_revision),
             story_text: commit.turn.story_text.clone(),
-            llm_usage: commit.llm_usage,
+            llm_usage: aggregate,
+            llm_calls: commit.llm_calls.clone(),
         };
-        let result_json = serde_json::to_string(&result)?;
+        let result_json = serde_json::to_string(&result).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidTurnResult,
+        })?;
 
-        if let StateChange::Replace(world) = &commit.world {
-            let world_state = serde_json::to_string(world)?;
+        if let StateChange::Replace(world) = &commit.world_change {
+            let world_state = serde_json::to_string(world).map_err(|_| StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidWorldState,
+            })?;
             sqlx::query(
                 "INSERT INTO worlds (id, name, state, created_at) VALUES (?, ?, ?, ?) \
                  ON CONFLICT(id) DO UPDATE SET name = excluded.name, state = excluded.state",
@@ -263,19 +397,19 @@ impl Store for SqliteStore {
             .bind(&world_state)
             .bind(commit.turn.created_at)
             .execute(&mut *tx)
-            .await?;
+            .await
+            .map_err(SqliteStoreError::from)?;
         }
 
         sqlx::query(
-            "INSERT INTO story_turns (id, world_id, player_input, story_text, summary_delta, status, created_at, \
+            "INSERT INTO story_turns (id, world_id, player_input, story_text, status, created_at, \
              idempotency_key, request_digest, base_revision, committed_revision, result_json) \
-             VALUES (?, ?, ?, ?, ?, 'ok', ?, ?, ?, ?, ?, ?)",
+             VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?, ?, ?)",
         )
         .bind(commit.turn.id.as_str())
         .bind(commit.story_id.as_str())
         .bind(&commit.turn.player_input)
         .bind(&commit.turn.story_text)
-        .bind(&commit.turn.summary_delta)
         .bind(commit.turn.created_at)
         .bind(commit.idempotency_key.as_str())
         .bind(commit.request_digest.as_str())
@@ -283,10 +417,13 @@ impl Store for SqliteStore {
         .bind(committed_revision as i64)
         .bind(&result_json)
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(SqliteStoreError::from)?;
 
         for (seq, event) in commit.events.iter().enumerate() {
-            let payload = serde_json::to_string(&event.payload)?;
+            let payload = serde_json::to_string(&event.payload).map_err(|_| StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidEventPayload,
+            })?;
             sqlx::query("INSERT INTO story_events (id, turn_id, seq, kind, payload) VALUES (?, ?, ?, ?, ?)")
                 .bind(event.id.as_str())
                 .bind(event.turn_id.as_str())
@@ -294,40 +431,81 @@ impl Store for SqliteStore {
                 .bind(event.kind.as_str())
                 .bind(&payload)
                 .execute(&mut *tx)
-                .await?;
+                .await
+                .map_err(SqliteStoreError::from)?;
         }
 
-        for character in &commit.characters {
-            let state = serde_json::to_string(character)?;
+        for change in &commit.character_changes {
+            let state = serde_json::to_string(&change.new_state).map_err(|_| StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidCharacterState,
+            })?;
             sqlx::query(
                 "INSERT INTO characters (id, world_id, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?) \
                  ON CONFLICT(id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at",
             )
-            .bind(character.id.as_str())
+            .bind(change.character_id.as_str())
             .bind(commit.story_id.as_str())
             .bind(&state)
             .bind(commit.turn.created_at)
             .bind(commit.turn.created_at)
             .execute(&mut *tx)
-            .await?;
+            .await
+            .map_err(SqliteStoreError::from)?;
         }
 
-        for memory in &commit.memory {
+        for change in &commit.memory_changes {
             sqlx::query("INSERT INTO memory (id, character_id, kind, content, created_at) VALUES (?, ?, ?, ?, ?)")
-                .bind(memory.id.as_str())
-                .bind(memory.owner.as_str())
-                .bind(memory_kind_str(memory.kind))
-                .bind(&memory.content)
-                .bind(memory.created_at)
+                .bind(change.entry.id.as_str())
+                .bind(change.entry.owner.as_str())
+                .bind(memory_kind_str(change.entry.kind))
+                .bind(&change.entry.content)
+                .bind(change.entry.created_at)
                 .execute(&mut *tx)
-                .await?;
+                .await
+                .map_err(SqliteStoreError::from)?;
+        }
+
+        if let StateChange::Replace(scene) = &commit.scene_change {
+            let scene_json = serde_json::to_string(scene).map_err(|_| StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+            })?;
+            sqlx::query("UPDATE stories SET current_scene = ? WHERE id = ?")
+                .bind(&scene_json)
+                .bind(commit.story_id.as_str())
+                .execute(&mut *tx)
+                .await
+                .map_err(SqliteStoreError::from)?;
+        }
+
+        if let StateChange::Replace(constraints) = &commit.constraint_change {
+            let constraints_json = serde_json::to_string(constraints).map_err(|_| StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+            })?;
+            sqlx::query("UPDATE stories SET active_constraints = ? WHERE id = ?")
+                .bind(&constraints_json)
+                .bind(commit.story_id.as_str())
+                .execute(&mut *tx)
+                .await
+                .map_err(SqliteStoreError::from)?;
+        }
+
+        if let StateChange::Replace(summary) = &commit.summary_change {
+            let summary_json = serde_json::to_string(summary).map_err(|_| StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+            })?;
+            sqlx::query("UPDATE stories SET story_summary = ? WHERE id = ?")
+                .bind(&summary_json)
+                .bind(commit.story_id.as_str())
+                .execute(&mut *tx)
+                .await
+                .map_err(SqliteStoreError::from)?;
         }
 
         for record in &commit.outbox {
             write_outbox(&mut tx, record).await?;
         }
 
-        tx.commit().await?;
+        tx.commit().await.map_err(SqliteStoreError::from)?;
         Ok(result)
     }
 }
@@ -343,11 +521,12 @@ async fn load_memories(
     .bind(character_id.as_str())
     .bind(limit as i64)
     .fetch_all(&mut **tx)
-    .await?;
+    .await
+    .map_err(SqliteStoreError::from)?;
     rows.into_iter()
         .map(|(id, kind, content, created_at)| {
             Ok(MemoryEntry {
-                id: crate::domain::ids::MemoryId::from(id),
+                id: MemoryId::from(id),
                 owner: character_id.clone(),
                 kind: memory_kind_from_str(&kind),
                 content,
@@ -358,7 +537,9 @@ async fn load_memories(
 }
 
 async fn write_outbox(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, record: &OutboxRecord) -> Result<(), StoreError> {
-    let payload = serde_json::to_string(&record.payload)?;
+    let payload = serde_json::to_string(&record.payload).map_err(|_| StoreError::Serialization {
+        kind: crate::persistence::store::StoreSerializationErrorKind::InvalidEventPayload,
+    })?;
     sqlx::query(
         "INSERT INTO outbox (id, story_id, turn_id, event_type, payload, created_at, attempt_count, published_at, last_error) \
          VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL)",
@@ -370,6 +551,10 @@ async fn write_outbox(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, record: &Out
     .bind(&payload)
     .bind(record.created_at)
     .execute(&mut **tx)
-    .await?;
+    .await
+    .map_err(SqliteStoreError::from)?;
     Ok(())
 }
+
+#[allow(dead_code)]
+fn _fact_id(_value: FactId) {}

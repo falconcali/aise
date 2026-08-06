@@ -1,9 +1,8 @@
 use super::*;
-use crate::core::turn_data::{
-    BaselineContext, CharacterThought, ContextItem, ContextSource, StoryConfig, StoryGoal, WriterPlan,
-};
+use crate::core::turn_data::{BaselineContext, CharacterThought, ContextItem, ContextSource, StoryGoal, WriterPlan};
 use crate::domain::character::{CharacterState, InternalState};
 use crate::domain::ids::CharacterId;
+use crate::domain::story_state::StoryConfig;
 use crate::llm::message::Role;
 
 fn character(id: &str, name: &str) -> CharacterState {
@@ -19,9 +18,9 @@ fn baseline() -> BaselineContext {
     BaselineContext {
         story_instructions: "keep it short".into(),
         story_config: StoryConfig {
-            genre: "fantasy".into(),
-            tone: "warm".into(),
-            language: "english".into(),
+            style: Some("fantasy".into()),
+            point_of_view: Some("warm".into()),
+            tense: Some("english".into()),
         },
         player_character: None,
         current_scene: Some("in the market".into()),

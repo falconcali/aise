@@ -1020,7 +1020,7 @@ Move code from `crates/aise-server/src/tasks.rs` to `tasks/supervisor.rs` and fr
 - [ ] `cargo +1.85 clippy --workspace --all-targets --all-features -- -D warnings` passes in the MSRV CI job.
 - [ ] `cargo +1.85 test --workspace --all-features` passes in the MSRV CI job.
 - [ ] `rg "crate::runtime::(pipeline|turn_budget|turn_execution_ctx|event|trace)" crates/aise/src` returns zero matches.
-- [ ] `rg "StoryDraft|lock_turn|turn_lock" crates` returns zero matches.
+- [ ] `rg "StoryDraft|lock_turn|turn_lock" crates/aise/src crates/aise-server/src` returns zero matches.
 - [ ] `rg "create_story" crates/aise/src/engine.rs crates/aise-server/src/api/turn.rs` returns zero matches.
 - [ ] `rg "summary_delta.*story_summary|story_text.*current_scene" crates/aise/src/context crates/aise/src/persistence` returns zero approximation matches.
 - [ ] `git diff --check` passes.

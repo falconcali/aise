@@ -1,8 +1,9 @@
 use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_contract::LlmCallPurpose;
+use crate::core::turn_error::TurnExecutionError;
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::core::turn_trace::truncate;
 use crate::core::turn_validation::{ValidationDecision, ValidationIssue};
-use crate::error::AiseError;
 use crate::llm::gateway::LlmGateway;
 use crate::llm::message::CompletionSpec;
 use crate::prompt::{ContextMerger, GenerationInput};
@@ -35,23 +36,21 @@ impl TurnExecutionPipeline for StoryRepairer {
         TurnStage::StoryRepairer
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
+    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let validation = ctx
             .validation()
-            .ok_or_else(|| AiseError::InvariantViolation("no validation result before repair".into()))?;
+            .ok_or_else(|| invariant("no validation result before repair"))?;
         if validation.decision() != ValidationDecision::Repair {
-            return Err(AiseError::InvariantViolation(
-                "repairer only runs when validation requires repair".into(),
-            ));
+            return Err(invariant("repairer only runs when validation requires repair"));
         }
         let issues: Vec<String> = validation.issues().iter().map(repair_issue_message).collect();
         let baseline = ctx
             .baseline()
-            .ok_or_else(|| AiseError::InvariantViolation("baseline context not set before repair".into()))?
+            .ok_or_else(|| invariant("baseline context not set before repair"))?
             .clone();
         let plan = ctx
             .plan()
-            .ok_or_else(|| AiseError::InvariantViolation("writer plan not set before repair".into()))?
+            .ok_or_else(|| invariant("writer plan not set before repair"))?
             .clone();
         let retrieved = ctx.retrieved().to_vec();
         let thoughts = ctx.thoughts().to_vec();
@@ -70,12 +69,14 @@ impl TurnExecutionPipeline for StoryRepairer {
         let spec = CompletionSpec {
             messages,
             max_output_tokens: max_output,
-            purpose: "story_repair",
+            purpose: LlmCallPurpose::StoryRepair,
         };
-        let scope = ctx.llm_call_scope(TurnStage::StoryRepairer);
-        let completion = self.gateway.complete(scope, spec).await?;
+        let mut scope = ctx.llm_call_scope(TurnStage::StoryRepairer);
+        let estimated_input = crate::llm::accounting::TokenAccountant::estimate_input_tokens(&spec.messages);
+        let reservation = scope.reserve_llm(estimated_input, u64::from(max_output))?;
+        let completion = self.gateway.complete(scope, spec, reservation).await?;
         let proposal = serde_json::from_str(&completion.text).map_err(|error| {
-            AiseError::Internal(format!(
+            TurnExecutionError::invariant(format!(
                 "story proposal output is not valid JSON: {error}; raw_output={}",
                 truncate(&completion.text, MAX_PARSE_ERROR_PREVIEW_CHARS)
             ))
@@ -86,4 +87,8 @@ impl TurnExecutionPipeline for StoryRepairer {
 
 fn repair_issue_message(issue: &ValidationIssue) -> String {
     format!("{}: {}", issue.code, issue.message)
+}
+
+fn invariant(message: impl Into<String>) -> TurnExecutionError {
+    TurnExecutionError::invariant(message)
 }

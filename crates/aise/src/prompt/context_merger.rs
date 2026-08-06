@@ -164,14 +164,20 @@ fn instructions_block(baseline: &BaselineContext) -> String {
     if !baseline.story_instructions.trim().is_empty() {
         let _ = writeln!(out, "Story instructions:\n{}", truncate(&baseline.story_instructions, 4000));
     }
-    if !baseline.story_config.genre.trim().is_empty() {
-        let _ = writeln!(out, "Genre: {}", baseline.story_config.genre.trim());
+    if let Some(style) = &baseline.story_config.style {
+        if !style.trim().is_empty() {
+            let _ = writeln!(out, "Style: {}", style.trim());
+        }
     }
-    if !baseline.story_config.tone.trim().is_empty() {
-        let _ = writeln!(out, "Tone: {}", baseline.story_config.tone.trim());
+    if let Some(point_of_view) = &baseline.story_config.point_of_view {
+        if !point_of_view.trim().is_empty() {
+            let _ = writeln!(out, "Point of view: {}", point_of_view.trim());
+        }
     }
-    if !baseline.story_config.language.trim().is_empty() {
-        let _ = writeln!(out, "Language: {}", baseline.story_config.language.trim());
+    if let Some(tense) = &baseline.story_config.tense {
+        if !tense.trim().is_empty() {
+            let _ = writeln!(out, "Tense: {}", tense.trim());
+        }
     }
     out
 }

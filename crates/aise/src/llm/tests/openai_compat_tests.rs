@@ -1,4 +1,10 @@
 use super::*;
+use crate::core::turn_contract::LlmCallPurpose;
+use crate::llm::accounting::FinishReason;
+use crate::llm::error::{LlmProviderError, LlmResponseLimit, LlmTransportErrorKind};
+use crate::llm::message::{ChatMessage, CompletionRequest, Role};
+use crate::llm::provider::DeltaSink;
+use std::sync::{Arc, Mutex};
 
 fn provider_with(base_url: &str) -> OpenAiCompatProvider {
     OpenAiCompatProvider::new(LlmConfig {
@@ -9,6 +15,206 @@ fn provider_with(base_url: &str) -> OpenAiCompatProvider {
         temperature: 0.0,
         ..LlmConfig::default()
     })
+}
+
+fn provider_with_limits(base_url: &str, protocol: LlmProtocolLimitsConfig) -> OpenAiCompatProvider {
+    OpenAiCompatProvider::new(LlmConfig {
+        base_url: base_url.into(),
+        api_key: None,
+        model: "test".into(),
+        max_concurrent: 1,
+        temperature: 0.0,
+        protocol,
+        ..LlmConfig::default()
+    })
+}
+
+fn request() -> CompletionRequest {
+    CompletionRequest {
+        model: "test".into(),
+        messages: vec![ChatMessage {
+            role: Role::User,
+            content: "hello".into(),
+        }],
+        max_tokens: 64,
+        temperature: 0.0,
+        purpose: LlmCallPurpose::StoryGeneration,
+    }
+}
+
+async fn serve(status: u16, headers: &[(&str, &str)], body: &str) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind test server");
+    let addr = listener.local_addr().expect("local addr");
+    let body = body.to_string();
+    let headers: Vec<(String, String)> = headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("accept test connection");
+        let mut buf = vec![0u8; 8192];
+        let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buf).await;
+        let mut head = format!("HTTP/1.1 {status} {}\r\n", if status == 200 { "OK" } else { "Error" });
+        head.push_str(&format!("Content-Length: {}\r\n", body.len()));
+        for (key, value) in headers {
+            head.push_str(&format!("{key}: {value}\r\n"));
+        }
+        let mut response = head.into_bytes();
+        response.extend_from_slice(b"\r\n");
+        response.extend_from_slice(body.as_bytes());
+        let _ = tokio::io::AsyncWriteExt::write_all(&mut socket, &response).await;
+    });
+    format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn stream_parses_finish_reason_and_usage() {
+    let body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"},\"finish_reason\":null}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":30,\"completion_tokens\":12,\"total_tokens\":42,\"prompt_tokens_details\":{\"cached_tokens\":7},\"completion_tokens_details\":{\"reasoning_tokens\":5}}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let base_url = serve(200, &[], body).await;
+    let provider = provider_with(&base_url);
+
+    let deltas: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let collected = deltas.clone();
+    let sink: DeltaSink = Box::new(move |delta| collected.lock().expect("lock deltas").push(delta));
+    let completion = provider.complete_stream(&request(), sink).await.expect("stream completes");
+    assert_eq!(completion.text, "Hello");
+    assert_eq!(completion.finish_reason, Some(FinishReason::Length));
+    let usage = completion.usage.expect("stream usage parsed");
+    assert_eq!(usage.input_tokens, 30);
+    assert_eq!(usage.cached_input_tokens, Some(7));
+    assert_eq!(usage.output_tokens, 12);
+    assert_eq!(usage.reasoning_tokens, Some(5));
+    let deltas = deltas.lock().expect("lock deltas");
+    assert_eq!(*deltas, vec!["Hel".to_string(), "lo".to_string()]);
+}
+
+#[tokio::test]
+async fn stream_rejects_line_buffer_content_and_reasoning_overflow() {
+    let default_protocol = LlmProtocolLimitsConfig::default();
+
+    let line_url = serve(200, &[], "data: \"a very long line that exceeds the sse line limit\"\n\n").await;
+    let provider = provider_with_limits(
+        &line_url,
+        LlmProtocolLimitsConfig {
+            max_sse_line_bytes: 16,
+            ..default_protocol.clone()
+        },
+    );
+    let error = provider.complete_stream(&request(), Box::new(|_| {})).await.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            LlmProviderError::ResponseLimitExceeded {
+                limit: LlmResponseLimit::SseLine
+            }
+        ),
+        "unexpected error: {error}"
+    );
+
+    let buffer_url = serve(200, &[], &"x".repeat(4 * 1024)).await;
+    let provider = provider_with_limits(
+        &buffer_url,
+        LlmProtocolLimitsConfig {
+            max_stream_buffer_bytes: 256,
+            ..default_protocol.clone()
+        },
+    );
+    let error = provider.complete_stream(&request(), Box::new(|_| {})).await.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            LlmProviderError::ResponseLimitExceeded {
+                limit: LlmResponseLimit::StreamBuffer
+            }
+        ),
+        "unexpected error: {error}"
+    );
+
+    let content_url = serve(
+        200,
+        &[],
+        "data: {\"choices\":[{\"delta\":{\"content\":\"abcdefghij\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n",
+    )
+    .await;
+    let provider = provider_with_limits(
+        &content_url,
+        LlmProtocolLimitsConfig {
+            max_content_bytes: 8,
+            ..default_protocol.clone()
+        },
+    );
+    let error = provider.complete_stream(&request(), Box::new(|_| {})).await.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            LlmProviderError::ResponseLimitExceeded {
+                limit: LlmResponseLimit::Content
+            }
+        ),
+        "unexpected error: {error}"
+    );
+
+    let reasoning_url = serve(
+        200,
+        &[],
+        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"abcdefghij\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n",
+    )
+    .await;
+    let provider = provider_with_limits(
+        &reasoning_url,
+        LlmProtocolLimitsConfig {
+            max_reasoning_bytes: 8,
+            ..default_protocol.clone()
+        },
+    );
+    let error = provider.complete_stream(&request(), Box::new(|_| {})).await.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            LlmProviderError::ResponseLimitExceeded {
+                limit: LlmResponseLimit::Reasoning
+            }
+        ),
+        "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn provider_classifies_429_4xx_and_5xx() {
+    let rate_limit_url = serve(429, &[("Retry-After", "2")], "").await;
+    let provider = provider_with(&rate_limit_url);
+    let error = provider.complete(&request()).await.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            LlmProviderError::RateLimited {
+                retry_after_ms: Some(2000)
+            }
+        ),
+        "429 must parse Retry-After seconds: {error}"
+    );
+
+    let rejected_url = serve(400, &[], "").await;
+    let provider = provider_with(&rejected_url);
+    let error = provider.complete(&request()).await.unwrap_err();
+    assert!(
+        matches!(error, LlmProviderError::Rejected { status: 400, .. }),
+        "4xx maps to Rejected: {error}"
+    );
+
+    let server_url = serve(500, &[], "").await;
+    let provider = provider_with(&server_url);
+    let error = provider.complete(&request()).await.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            LlmProviderError::Transport {
+                kind: LlmTransportErrorKind::Server
+            }
+        ),
+        "5xx maps to Server transport: {error}"
+    );
 }
 
 #[test]

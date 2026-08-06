@@ -2,6 +2,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::sync::Arc;
 
+pub use crate::core::turn_contract::{SessionId, StoryId, TurnId};
+
 macro_rules! id_type {
     ($name:ident) => {
         #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -51,9 +53,7 @@ macro_rules! id_type {
     };
 }
 
-id_type!(StoryId);
 id_type!(CharacterId);
-id_type!(TurnId);
 id_type!(EventId);
 id_type!(MemoryId);
 id_type!(FactId);

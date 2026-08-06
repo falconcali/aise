@@ -6,7 +6,6 @@ pub struct StoryTurn {
     pub id: TurnId,
     pub player_input: String,
     pub story_text: String,
-    pub summary_delta: Option<String>,
 
     pub created_at: i64,
 }

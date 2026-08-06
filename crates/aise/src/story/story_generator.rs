@@ -1,8 +1,9 @@
 use crate::core::StoryProposal;
 use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_contract::LlmCallPurpose;
+use crate::core::turn_error::TurnExecutionError;
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::core::turn_trace::truncate;
-use crate::error::AiseError;
 use crate::llm::gateway::LlmGateway;
 use crate::llm::message::CompletionSpec;
 use crate::prompt::{ContextMerger, GenerationInput};
@@ -31,14 +32,14 @@ impl TurnExecutionPipeline for StoryGenerator {
         TurnStage::StoryGenerator
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
+    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let baseline = ctx
             .baseline()
-            .ok_or_else(|| AiseError::InvariantViolation("baseline context not set before story generation".into()))?
+            .ok_or_else(|| invariant("baseline context not set before story generation"))?
             .clone();
         let plan = ctx
             .plan()
-            .ok_or_else(|| AiseError::InvariantViolation("writer plan not set before story generation".into()))?
+            .ok_or_else(|| invariant("writer plan not set before story generation"))?
             .clone();
         let retrieved = ctx.retrieved().to_vec();
         let thoughts = ctx.thoughts().to_vec();
@@ -60,16 +61,22 @@ impl TurnExecutionPipeline for StoryGenerator {
         let spec = CompletionSpec {
             messages,
             max_output_tokens: max_output,
-            purpose: "story_generation",
+            purpose: LlmCallPurpose::StoryGeneration,
         };
-        let scope = ctx.llm_call_scope(TurnStage::StoryGenerator);
-        let completion = self.gateway.complete(scope, spec).await?;
+        let mut scope = ctx.llm_call_scope(TurnStage::StoryGenerator);
+        let estimated_input = crate::llm::accounting::TokenAccountant::estimate_input_tokens(&spec.messages);
+        let reservation = scope.reserve_llm(estimated_input, u64::from(max_output))?;
+        let completion = self.gateway.complete(scope, spec, reservation).await?;
         let proposal: StoryProposal = serde_json::from_str(&completion.text).map_err(|error| {
-            AiseError::Internal(format!(
+            TurnExecutionError::invariant(format!(
                 "story proposal output is not valid JSON: {error}; raw_output={}",
                 truncate(&completion.text, MAX_PARSE_ERROR_PREVIEW_CHARS)
             ))
         })?;
         ctx.set_story_proposal(proposal)
     }
+}
+
+fn invariant(message: impl Into<String>) -> TurnExecutionError {
+    TurnExecutionError::invariant(message)
 }

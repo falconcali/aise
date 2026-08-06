@@ -1,18 +1,19 @@
 use aise::AiseConfig;
 use aise::AiseEngine;
-use aise::AiseError;
 use aise::CoordinatorConfig;
 use aise::TurnEvent;
 use aise::TurnEventSink;
 use aise::character::CharacterThinkPipeline;
 use aise::context::BaselineContextBuilder;
 use aise::context::ContextRetrievalPipeline;
-use aise::core::turn_contract::{ExecuteTurnSpec, IdempotencyKey, TurnCancellation};
+use aise::core::turn_contract::{ExecuteTurnSpec, IdempotencyKey, LlmCallPurpose, TurnCancellation};
+use aise::core::turn_error::TurnFailureKind;
+use aise::core::turn_event::TurnEventDeliveryError;
 use aise::domain::ids::StoryId;
 use aise::engine::{SystemClock, UuidIdGenerator};
 use aise::llm::LlmGateway;
 use aise::llm::accounting::{FinishReason, LlmCompletion};
-use aise::llm::error::LlmError;
+use aise::llm::error::{LlmProtocolErrorKind, LlmProviderError};
 use aise::llm::message::{CompletionRequest, EmbeddingOutput, EmbeddingRequest};
 use aise::llm::provider::{DeltaSink, LlmProvider};
 use aise::persistence::{SqliteStore, TurnCommitter};
@@ -36,16 +37,18 @@ impl LlmProvider for SlowProvider {
         "slow"
     }
 
-    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmError> {
+    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmProviderError> {
         let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.max_active.fetch_max(active, Ordering::SeqCst);
         tokio::time::sleep(self.delay).await;
         self.active.fetch_sub(1, Ordering::SeqCst);
         let text = match req.purpose {
-            "writer_plan" => {
+            LlmCallPurpose::WriterPlan => {
                 r#"{"retrieval_requests":[],"character_requests":[],"story_goal":{"summary":""}}"#.to_string()
             }
-            "story_generation" | "story_repair" => r#"{"story_text":"story text","events":[{"kind":"action","summary":"story text"}],"character_changes":[],"world_change":{"add_facts":[]},"memory_changes":[],"summary_delta":null}"#.to_string(),
+            LlmCallPurpose::StoryGeneration | LlmCallPurpose::StoryRepair => {
+                r#"{"story_text":"story text","events":[{"kind":"action","summary":"story text"}],"character_changes":[],"world_change":{"add_facts":[]},"memory_changes":[],"summary_change":null}"#.to_string()
+            }
             _ => "story text".to_string(),
         };
         Ok(LlmCompletion {
@@ -57,12 +60,18 @@ impl LlmProvider for SlowProvider {
         })
     }
 
-    async fn complete_stream(&self, _req: &CompletionRequest, _on_delta: DeltaSink) -> Result<LlmCompletion, LlmError> {
+    async fn complete_stream(
+        &self,
+        _req: &CompletionRequest,
+        _on_delta: DeltaSink,
+    ) -> Result<LlmCompletion, LlmProviderError> {
         self.complete(_req).await
     }
 
-    async fn embed(&self, _req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmError> {
-        Err(LlmError::EmbeddingUnsupported)
+    async fn embed(&self, _req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmProviderError> {
+        Err(LlmProviderError::Protocol {
+            kind: LlmProtocolErrorKind::Unsupported,
+        })
     }
 }
 
@@ -72,8 +81,9 @@ struct Recorder {
 }
 
 impl TurnEventSink for Recorder {
-    fn emit(&self, event: TurnEvent) {
+    fn emit(&self, event: TurnEvent) -> Result<(), TurnEventDeliveryError> {
         self.events.lock().unwrap().push(event);
+        Ok(())
     }
 }
 
@@ -93,23 +103,24 @@ async fn build_engine(db_url: &str, delay: Duration) -> TestEngine {
     });
     let gateway = Arc::new(LlmGateway::new(provider, config.llm.clone()).expect("gateway"));
     let coordinator = StoryTurnCoordinator::new(&config.coordinator);
+    let store_arc: Arc<dyn aise::persistence::Store> = store;
     let pipeline_set = TurnPipelineSet::builder()
         .initializer(Box::<TurnInitializer>::default())
-        .baseline_builder(Box::new(BaselineContextBuilder::new(store.clone())))
+        .baseline_builder(Box::new(BaselineContextBuilder::new(store_arc.clone(), config.content.clone())))
         .writer_planner(Box::new(WriterPlanner::new(gateway.clone())))
         .retrieval(Box::new(ContextRetrievalPipeline))
         .character_think(Box::new(CharacterThinkPipeline::new(gateway.clone())))
         .story_generator(Box::new(StoryGenerator::new(gateway.clone())))
         .validation(Box::new(ValidationPipeline::default()))
         .story_repairer(Box::new(StoryRepairer::new(gateway.clone())))
-        .committer(Box::new(TurnCommitter::new(store.clone())))
+        .committer(Box::new(TurnCommitter::new(store_arc.clone())))
         .build()
         .expect("pipeline set");
     let runtime = TurnRuntime::new(pipeline_set);
     TestEngine {
         engine: Arc::new(AiseEngine::new(
             runtime,
-            store,
+            store_arc,
             coordinator,
             config,
             Arc::new(UuidIdGenerator),
@@ -121,7 +132,7 @@ async fn build_engine(db_url: &str, delay: Duration) -> TestEngine {
 
 fn spec_for(story_id: &str, player_input: &str) -> ExecuteTurnSpec {
     ExecuteTurnSpec {
-        story_id: StoryId::from(story_id),
+        story_id: StoryId::try_new(story_id).unwrap(),
         idempotency_key: IdempotencyKey::try_new("test-key".to_string()).unwrap(),
         player_input: player_input.to_string(),
         cancellation: TurnCancellation::new(),
@@ -136,10 +147,27 @@ fn temp_db_path(label: &str) -> String {
         .into_owned()
 }
 
+async fn ensure_story(engine: &Arc<AiseEngine>, story_id: &str) {
+    let story_id = StoryId::try_new(story_id).unwrap();
+    let spec = aise::domain::StoryCreateSpec {
+        story_id: story_id.clone(),
+        story_instructions: String::new(),
+        story_config: aise::domain::StoryConfig::default(),
+        player_character_id: None,
+        initial_world: None,
+        current_scene: aise::domain::CurrentScene { text: String::new() },
+        story_summary: aise::domain::StorySummary { text: String::new() },
+        active_constraints: Vec::new(),
+        created_at_ms: 1000,
+    };
+    engine.store().create_story(&spec).await.expect("create story");
+}
+
 #[tokio::test]
 async fn same_story_turns_never_overlap_through_engine_api() {
     let db = temp_db_path("coord_same");
     let test = build_engine(&db, Duration::from_millis(200)).await;
+    ensure_story(&test.engine, "story-same").await;
     let recorder1 = Arc::new(Recorder::default());
     let recorder2 = Arc::new(Recorder::default());
 
@@ -175,6 +203,7 @@ async fn same_story_turns_never_overlap_through_engine_api() {
 async fn direct_engine_call_cannot_bypass_coordination() {
     let db = temp_db_path("coord_direct");
     let test = build_engine(&db, Duration::from_millis(300)).await;
+    ensure_story(&test.engine, "story-direct").await;
     let coordinator = test.engine.coordinator();
 
     let engine1 = test.engine.clone();
@@ -211,6 +240,8 @@ async fn direct_engine_call_cannot_bypass_coordination() {
 async fn different_story_turns_can_overlap() {
     let db = temp_db_path("coord_parallel");
     let test = build_engine(&db, Duration::from_millis(100)).await;
+    ensure_story(&test.engine, "story-a").await;
+    ensure_story(&test.engine, "story-b").await;
     let recorder1 = Arc::new(Recorder::default());
     let recorder2 = Arc::new(Recorder::default());
 
@@ -246,7 +277,7 @@ async fn story_wait_queue_rejects_over_capacity() {
         ..CoordinatorConfig::default()
     };
     let coordinator = StoryTurnCoordinator::new(&config);
-    let story = StoryId::from("story-cap");
+    let story = StoryId::try_new("story-cap").unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     let cancellation = TurnCancellation::new();
 
@@ -265,7 +296,7 @@ async fn story_wait_queue_rejects_over_capacity() {
         .acquire(&story, deadline, &cancellation)
         .await
         .expect_err("per-story waiter cap must reject");
-    assert!(matches!(error, AiseError::Backpressure(_)));
+    assert!(matches!(error.kind(), TurnFailureKind::Backpressure));
 
     drop(holder);
     waiter.await.unwrap().expect("queued waiter proceeds after release");
@@ -280,8 +311,8 @@ async fn story_wait_queue_rejects_global_capacity() {
         ..CoordinatorConfig::default()
     };
     let coordinator = StoryTurnCoordinator::new(&config);
-    let story_a = StoryId::from("story-a");
-    let story_b = StoryId::from("story-b");
+    let story_a = StoryId::try_new("story-a").unwrap();
+    let story_b = StoryId::try_new("story-b").unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     let cancellation = TurnCancellation::new();
 
@@ -297,10 +328,10 @@ async fn story_wait_queue_rejects_global_capacity() {
     assert_eq!(coordinator.total_waiters(), 2, "two waiters queued");
 
     let error = coordinator
-        .acquire(&StoryId::from("story-c"), deadline, &cancellation)
+        .acquire(&StoryId::try_new("story-c").unwrap(), deadline, &cancellation)
         .await
         .expect_err("global waiter cap must reject");
-    assert!(matches!(error, AiseError::Backpressure(_)));
+    assert!(matches!(error.kind(), TurnFailureKind::Backpressure));
 
     drop(holder_a);
     drop(holder_b);
@@ -316,7 +347,7 @@ async fn coordinator_reclaims_idle_story_entries() {
         ..CoordinatorConfig::default()
     };
     let coordinator = StoryTurnCoordinator::new(&config);
-    let story = StoryId::from("story-idle");
+    let story = StoryId::try_new("story-idle").unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     let cancellation = TurnCancellation::new();
 
@@ -338,7 +369,7 @@ async fn coordinator_reclaims_idle_story_entries() {
 #[tokio::test]
 async fn coordinator_shutdown_rejects_new_acquires_and_cancels_waiters() {
     let coordinator = StoryTurnCoordinator::new(&CoordinatorConfig::default());
-    let story = StoryId::from("story-sd");
+    let story = StoryId::try_new("story-sd").unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     let cancellation = TurnCancellation::new();
 
@@ -352,13 +383,13 @@ async fn coordinator_shutdown_rejects_new_acquires_and_cancels_waiters() {
     coordinator.shutdown();
 
     let error = coordinator
-        .acquire(&StoryId::from("story-sd2"), deadline, &cancellation)
+        .acquire(&StoryId::try_new("story-sd2").unwrap(), deadline, &cancellation)
         .await
         .expect_err("new acquire after shutdown must be rejected");
-    assert!(matches!(error, AiseError::Backpressure(_)));
+    assert!(matches!(error.kind(), TurnFailureKind::Backpressure));
 
     let waiter_error = waiter.await.unwrap().expect_err("queued waiter cancelled by shutdown");
-    assert!(matches!(waiter_error, AiseError::Backpressure(_)));
+    assert!(matches!(waiter_error.kind(), TurnFailureKind::Backpressure));
     drop(holder);
     assert_eq!(coordinator.active_permits(), 0);
 }
@@ -366,7 +397,7 @@ async fn coordinator_shutdown_rejects_new_acquires_and_cancels_waiters() {
 #[tokio::test]
 async fn coordinator_shutdown_waits_for_active_turns_within_grace() {
     let coordinator = StoryTurnCoordinator::new(&CoordinatorConfig::default());
-    let story = StoryId::from("story-grace");
+    let story = StoryId::try_new("story-grace").unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     let cancellation = TurnCancellation::new();
     let holder = coordinator.acquire(&story, deadline, &cancellation).await.expect("holder");

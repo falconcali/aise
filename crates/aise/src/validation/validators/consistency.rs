@@ -1,53 +1,71 @@
 use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_validation::{ValidationResult, repairable};
-use crate::domain::ids::CharacterId;
-use crate::error::AiseError;
+use crate::core::turn_error::TurnExecutionError;
+use crate::core::turn_validation::{Repairability, ValidationIssue, ValidationIssueCode, ValidationLocation};
+use crate::validation::validators::DeterministicValidator;
 
 #[derive(Default)]
 pub struct ConsistencyValidator;
 
-impl ConsistencyValidator {
-    pub async fn validate(&self, ctx: &TurnExecutionContext) -> Result<ValidationResult, AiseError> {
-        let proposal = ctx
-            .proposal()
-            .ok_or_else(|| AiseError::InvariantViolation("no story proposal before consistency validation".into()))?;
-        let baseline = ctx
-            .baseline()
-            .ok_or_else(|| AiseError::InvariantViolation("no baseline context before consistency validation".into()))?;
-        let known: Vec<&CharacterId> = baseline.relevant_characters.iter().map(|character| &character.id).collect();
+impl DeterministicValidator for ConsistencyValidator {
+    fn code(&self) -> ValidationIssueCode {
+        ValidationIssueCode::ReferenceMissing
+    }
+
+    fn validate(&self, ctx: &TurnExecutionContext) -> Result<Vec<ValidationIssue>, TurnExecutionError> {
         let mut issues = Vec::new();
-        for change in &proposal.character_changes {
+        let Some(proposal) = ctx.proposal() else {
+            return Ok(issues);
+        };
+        let Some(baseline) = ctx.baseline() else {
+            return Ok(issues);
+        };
+        let known: Vec<&crate::domain::ids::CharacterId> =
+            baseline.relevant_characters.iter().map(|character| &character.id).collect();
+        for (index, change) in proposal.character_changes.iter().enumerate() {
             if !known.contains(&&change.character_id) {
-                issues.push(repairable(
+                issues.push(issue(
                     "unknown_character",
                     format!("character change references unknown character {}", change.character_id.as_str()),
+                    Some(ValidationLocation {
+                        path: format!("character_changes[{index}].character_id"),
+                        item_index: Some(index as u32),
+                    }),
                 ));
             }
             for affinity in &change.affinity_deltas {
                 if !known.contains(&&affinity.other) {
-                    issues.push(repairable(
+                    issues.push(issue(
                         "unknown_affinity_target",
                         format!("affinity delta references unknown character {}", affinity.other.as_str()),
+                        Some(ValidationLocation {
+                            path: format!("character_changes[{index}].affinity_deltas"),
+                            item_index: Some(index as u32),
+                        }),
                     ));
                 }
             }
         }
-        for memory in &proposal.memory_changes {
+        for (index, memory) in proposal.memory_changes.iter().enumerate() {
             if !known.contains(&&memory.owner) {
-                issues.push(repairable(
+                issues.push(issue(
                     "unknown_memory_owner",
                     format!("memory change references unknown owner {}", memory.owner.as_str()),
+                    Some(ValidationLocation {
+                        path: format!("memory_changes[{index}].owner"),
+                        item_index: Some(index as u32),
+                    }),
                 ));
             }
         }
-        if issues.is_empty() {
-            return Ok(ValidationResult::pass());
-        }
-        let first = issues.remove(0);
-        let mut result = ValidationResult::repair(&first.code, first.message);
-        for issue in issues {
-            result = result.with_issue(issue);
-        }
-        Ok(result)
+        Ok(issues)
+    }
+}
+
+fn issue(code: &'static str, message: String, location: Option<ValidationLocation>) -> ValidationIssue {
+    ValidationIssue {
+        code: ValidationIssueCode::ReferenceMissing,
+        message: format!("{code}: {message}"),
+        repairability: Repairability::Repairable,
+        location,
     }
 }

@@ -1,9 +1,10 @@
 use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_contract::LlmCallPurpose;
 use crate::core::turn_data::{ContextRequest, ContextSource, StoryGoal, WriterPlan};
+use crate::core::turn_error::TurnExecutionError;
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::core::turn_trace::truncate;
 use crate::domain::ids::CharacterId;
-use crate::error::AiseError;
 use crate::llm::gateway::LlmGateway;
 use crate::llm::message::CompletionSpec;
 use crate::prompt::ContextMerger;
@@ -61,27 +62,33 @@ impl TurnExecutionPipeline for WriterPlanner {
         TurnStage::WriterPlanner
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
+    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let baseline = ctx
             .baseline()
-            .ok_or_else(|| AiseError::InvariantViolation("baseline context not set before planning".into()))?;
+            .ok_or_else(|| invariant("baseline context not set before planning"))?;
         let messages = self.merger.plan_messages(baseline, ctx.player_input());
         let max_output = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
+        let estimated_input = crate::llm::accounting::TokenAccountant::estimate_input_tokens(&messages);
         let spec = CompletionSpec {
             messages,
             max_output_tokens: max_output,
-            purpose: "writer_plan",
+            purpose: LlmCallPurpose::WriterPlan,
         };
-        let scope = ctx.llm_call_scope(TurnStage::WriterPlanner);
-        let completion = self.gateway.complete(scope, spec).await?;
+        let mut scope = ctx.llm_call_scope(TurnStage::WriterPlanner);
+        let reservation = scope.reserve_llm(estimated_input, u64::from(max_output))?;
+        let completion = self.gateway.complete(scope, spec, reservation).await?;
         let plan = parse_plan(&completion.text)?;
         ctx.set_writer_plan(plan)
     }
 }
 
-fn parse_plan(text: &str) -> Result<WriterPlan, AiseError> {
+fn invariant(message: impl Into<String>) -> TurnExecutionError {
+    TurnExecutionError::invariant(message)
+}
+
+fn parse_plan(text: &str) -> Result<WriterPlan, TurnExecutionError> {
     let output: PlanOutput = serde_json::from_str(text).map_err(|error| {
-        AiseError::Internal(format!(
+        TurnExecutionError::invariant(format!(
             "writer plan output is not valid JSON: {error}; raw_output={}",
             truncate(text, MAX_PARSE_ERROR_PREVIEW_CHARS)
         ))

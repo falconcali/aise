@@ -1,5 +1,5 @@
 use crate::config::ServerConfig;
-use crate::trace::FileTraceSpanSink;
+use crate::trace::{NoopRedactor, TraceRedactor, TraceSinkError, TraceWriter, TraceWriterConfig};
 use aise::AiseEngine;
 use aise::character::CharacterThinkPipeline;
 use aise::context::{BaselineContextBuilder, ContextRetrievalPipeline};
@@ -13,7 +13,16 @@ use aise::story::{StoryGenerator, StoryRepairer};
 use aise::validation::ValidationPipeline;
 use std::sync::Arc;
 
-pub async fn build_engine(config: &ServerConfig) -> Result<Arc<AiseEngine>, anyhow::Error> {
+pub fn new_trace_writer(config: &ServerConfig) -> Result<Arc<TraceWriter>, TraceSinkError> {
+    let writer_config: TraceWriterConfig = config.trace_writer_config();
+    let redactor: Arc<dyn TraceRedactor> = Arc::new(NoopRedactor);
+    TraceWriter::new(writer_config, config.trace_dir.clone(), redactor)
+}
+
+pub async fn build_engine(
+    config: &ServerConfig,
+    trace_sink: Arc<dyn TraceSpanSink>,
+) -> Result<Arc<AiseEngine>, anyhow::Error> {
     let provider: Arc<dyn LlmProvider> = Arc::new(OpenAiCompatProvider::new(config.aise.llm.clone()));
     let gateway = Arc::new(LlmGateway::new(provider, config.aise.llm.clone())?);
 
@@ -23,7 +32,10 @@ pub async fn build_engine(config: &ServerConfig) -> Result<Arc<AiseEngine>, anyh
 
     let pipeline_set = TurnPipelineSet::builder()
         .initializer(Box::<TurnInitializer>::default())
-        .baseline_builder(Box::new(BaselineContextBuilder::new(store.clone())))
+        .baseline_builder(Box::new(BaselineContextBuilder::new(
+            store.clone(),
+            config.aise.content.clone(),
+        )))
         .writer_planner(Box::new(WriterPlanner::new(gateway.clone())))
         .retrieval(Box::new(ContextRetrievalPipeline))
         .character_think(Box::new(CharacterThinkPipeline::new(gateway.clone())))
@@ -34,7 +46,6 @@ pub async fn build_engine(config: &ServerConfig) -> Result<Arc<AiseEngine>, anyh
         .build()?;
     let runtime = TurnRuntime::new(pipeline_set);
 
-    let trace_sink: Arc<dyn TraceSpanSink> = Arc::new(FileTraceSpanSink::new(config.trace_dir.clone()));
     let engine = AiseEngine::new(
         runtime,
         store,

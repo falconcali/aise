@@ -1,24 +1,28 @@
-use aise::AiseError;
-use aise::core::story_proposal::{ProposedWorldChange, StoryProposal};
-use aise::core::turn_budget::{TurnBudget, TurnBudgetLimits};
+use aise::config::TurnConfig;
+use aise::core::story_proposal::{ProposedEvent, ProposedWorldChange, StoryProposal};
+use aise::core::turn_budget::TurnBudget;
 use aise::core::turn_context::TurnExecutionContext;
 use aise::core::turn_contract::{
     CommittedTurnResult, IdempotencyKey, LlmUsageAggregate, StoryRevision, TurnCancellation, TurnControl, TurnIdentity,
     TurnRequest,
 };
-use aise::core::turn_data::{BaselineContext, ContextRequest, StoryGoal, StoryReadSnapshot, WriterPlan};
-use aise::core::turn_event::{TurnEvent, TurnEventSink};
+use aise::core::turn_data::{BaselineContext, ContextRequest, StoryGoal, WriterPlan};
+use aise::core::turn_error::{TurnExecutionError, TurnFailureKind};
+use aise::core::turn_event::{TurnEvent, TurnEventDeliveryError, TurnEventSink};
 use aise::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use aise::core::turn_trace::TraceRecorder;
-use aise::core::turn_validation::{StateChange, ValidatedChangeSet, ValidationDecision, ValidationResult};
+use aise::core::turn_validation::ValidationDecision;
 use aise::domain::ids::{StoryId, TurnId};
+use aise::domain::narrative::EventKind;
+use aise::domain::story_state::{AuthoritativeStoryState, PlayerStoryState, StoryReadSnapshot};
 use aise::runtime::{TurnPipelineSet, TurnRuntime};
+use aise::validation::ValidationPipeline;
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-type StubAction = Box<dyn Fn(&mut TurnExecutionContext) -> Result<(), AiseError> + Send + Sync>;
+type StubAction = Box<dyn Fn(&mut TurnExecutionContext) -> Result<(), TurnExecutionError> + Send + Sync>;
 
 struct Stub {
     stage: TurnStage,
@@ -28,7 +32,7 @@ struct Stub {
 impl Stub {
     fn boxed(
         stage: TurnStage,
-        action: impl Fn(&mut TurnExecutionContext) -> Result<(), AiseError> + Send + Sync + 'static,
+        action: impl Fn(&mut TurnExecutionContext) -> Result<(), TurnExecutionError> + Send + Sync + 'static,
     ) -> Box<dyn TurnExecutionPipeline> {
         Box::new(Self {
             stage,
@@ -43,28 +47,29 @@ impl TurnExecutionPipeline for Stub {
         self.stage
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
+    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         (self.action)(ctx)
     }
 }
 
 fn budget() -> TurnBudget {
-    TurnBudget::new(TurnBudgetLimits {
+    let config = TurnConfig {
         max_repair_rounds: 3,
         max_llm_calls: 8,
         max_input_tokens: 8_192,
         max_output_tokens: 2_048,
         max_total_tokens: 10_240,
         max_retrieved_items: 5,
-        ..Default::default()
-    })
+        ..TurnConfig::default()
+    };
+    TurnBudget::from_config(&config, &aise::config::TurnContentLimitsConfig::default()).unwrap()
 }
 
 fn ctx_with_budget(budget: TurnBudget) -> TurnExecutionContext {
     TurnExecutionContext::new(
         TurnIdentity::new(
-            StoryId::from("story-1"),
-            TurnId::from("turn-1"),
+            StoryId::try_new("story-1").unwrap(),
+            TurnId::try_new("turn-1").unwrap(),
             IdempotencyKey::try_new("key-1".to_string()).unwrap(),
             1000,
         )
@@ -83,36 +88,59 @@ fn new_ctx() -> TurnExecutionContext {
 
 fn empty_snapshot() -> StoryReadSnapshot {
     StoryReadSnapshot::new(
-        StoryId::from("story-1"),
+        StoryId::try_new("story-1").unwrap(),
         StoryRevision::new(0),
+        AuthoritativeStoryState::default(),
+        PlayerStoryState::default(),
         None,
-        None,
-        Vec::new(),
         Vec::new(),
         Vec::new(),
     )
 }
 
-fn proposal() -> StoryProposal {
+fn valid_proposal() -> StoryProposal {
     StoryProposal {
         story_text: "story text".into(),
+        events: vec![ProposedEvent {
+            kind: EventKind::Action,
+            summary: "story text".into(),
+        }],
+        character_changes: Vec::new(),
+        world_change: ProposedWorldChange::default(),
+        memory_changes: Vec::new(),
+        scene_change: None,
+        constraint_changes: Vec::new(),
+        summary_change: None,
+    }
+}
+
+fn repairable_proposal() -> StoryProposal {
+    StoryProposal {
+        story_text: "story text".into(),
+        events: vec![ProposedEvent {
+            kind: EventKind::Action,
+            summary: String::new(),
+        }],
+        character_changes: Vec::new(),
+        world_change: ProposedWorldChange::default(),
+        memory_changes: Vec::new(),
+        scene_change: None,
+        constraint_changes: Vec::new(),
+        summary_change: None,
+    }
+}
+
+fn invalid_proposal() -> StoryProposal {
+    StoryProposal {
+        story_text: String::new(),
         events: Vec::new(),
         character_changes: Vec::new(),
         world_change: ProposedWorldChange::default(),
         memory_changes: Vec::new(),
-        summary_delta: None,
+        scene_change: None,
+        constraint_changes: Vec::new(),
+        summary_change: None,
     }
-}
-
-fn change_set(text: &str) -> ValidatedChangeSet {
-    ValidatedChangeSet::new(
-        text.to_string(),
-        Vec::new(),
-        Vec::new(),
-        StateChange::Unchanged,
-        Vec::new(),
-        None,
-    )
 }
 
 fn init_stub() -> Box<dyn TurnExecutionPipeline> {
@@ -147,26 +175,10 @@ fn generate_stub(proposal: StoryProposal) -> Box<dyn TurnExecutionPipeline> {
     Stub::boxed(TurnStage::StoryGenerator, move |ctx| ctx.set_story_proposal(proposal.clone()))
 }
 
-fn validation_stub(decisions: Vec<ValidationDecision>) -> (Box<dyn TurnExecutionPipeline>, Arc<AtomicUsize>) {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let decision_calls = calls.clone();
-    let pipeline = Stub::boxed(TurnStage::Validation, move |ctx| {
-        let round = decision_calls.fetch_add(1, Ordering::SeqCst);
-        let decision = decisions.get(round).copied().unwrap_or(ValidationDecision::Reject);
-        let (result, change_set) = match decision {
-            ValidationDecision::Pass => (ValidationResult::pass(), Some(change_set("story text"))),
-            ValidationDecision::Repair => (ValidationResult::repair("fixable", "fix me"), None),
-            ValidationDecision::Reject => (ValidationResult::reject("fatal", "rejected"), None),
-        };
-        ctx.set_validation_result(result, change_set)
-    });
-    (pipeline, calls)
-}
-
-fn repair_stub(calls: Arc<AtomicUsize>) -> Box<dyn TurnExecutionPipeline> {
+fn repair_stub(calls: Arc<AtomicUsize>, proposal: StoryProposal) -> Box<dyn TurnExecutionPipeline> {
     Stub::boxed(TurnStage::StoryRepairer, move |ctx| {
         calls.fetch_add(1, Ordering::SeqCst);
-        ctx.replace_story_proposal(proposal())
+        ctx.replace_story_proposal(proposal.clone())
     })
 }
 
@@ -178,6 +190,7 @@ fn commit_stub(calls: Arc<AtomicUsize>) -> Box<dyn TurnExecutionPipeline> {
             story_revision: StoryRevision::new(1),
             story_text: "story text".into(),
             llm_usage: LlmUsageAggregate::default(),
+            llm_calls: Vec::new(),
         })
     })
 }
@@ -188,39 +201,38 @@ struct Recorder {
 }
 
 impl TurnEventSink for Recorder {
-    fn emit(&self, event: TurnEvent) {
+    fn emit(&self, event: TurnEvent) -> Result<(), TurnEventDeliveryError> {
         self.events.lock().unwrap().push(event);
+        Ok(())
     }
 }
 
 #[test]
 fn pipeline_set_rejects_wrong_stage_binding() {
-    let misplaced = Stub::boxed(TurnStage::StoryGenerator, |ctx| ctx.set_story_proposal(proposal()));
+    let misplaced = Stub::boxed(TurnStage::StoryGenerator, |ctx| ctx.set_story_proposal(valid_proposal()));
     let error = TurnPipelineSet::builder()
         .initializer(misplaced)
         .baseline_builder(baseline_stub())
         .writer_planner(planner_stub(WriterPlan::default()))
         .retrieval(retrieval_stub(Arc::new(AtomicUsize::new(0))))
         .character_think(think_stub(Arc::new(AtomicUsize::new(0))))
-        .story_generator(generate_stub(proposal()))
-        .validation(validation_stub(vec![ValidationDecision::Pass]).0)
-        .story_repairer(repair_stub(Arc::new(AtomicUsize::new(0))))
+        .story_generator(generate_stub(valid_proposal()))
+        .validation(Box::new(ValidationPipeline::default()))
+        .story_repairer(repair_stub(Arc::new(AtomicUsize::new(0)), valid_proposal()))
         .committer(commit_stub(Arc::new(AtomicUsize::new(0))))
         .build()
         .err()
         .expect("wrong stage binding must be rejected");
-    assert!(matches!(error, AiseError::InvariantViolation(_)));
+    assert!(matches!(error.kind(), TurnFailureKind::InvariantViolation));
 }
 
 #[tokio::test]
 async fn pipeline_error_stops_following_stages() {
     let generator_calls = Arc::new(AtomicUsize::new(0));
-    let validation_calls = Arc::new(AtomicUsize::new(0));
     let committer_calls = Arc::new(AtomicUsize::new(0));
     let failing_planner = Stub::boxed(TurnStage::WriterPlanner, |_| {
-        Err(AiseError::Internal("planner exploded".into()))
+        Err(TurnExecutionError::invariant("planner exploded"))
     });
-    let (validation, _) = validation_stub(vec![ValidationDecision::Pass]);
     let generator_observed = generator_calls.clone();
     let set = TurnPipelineSet::builder()
         .initializer(init_stub())
@@ -232,8 +244,8 @@ async fn pipeline_error_stops_following_stages() {
             generator_observed.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }))
-        .validation(validation)
-        .story_repairer(repair_stub(Arc::new(AtomicUsize::new(0))))
+        .validation(Box::new(ValidationPipeline::default()))
+        .story_repairer(repair_stub(Arc::new(AtomicUsize::new(0)), valid_proposal()))
         .committer(commit_stub(committer_calls.clone()))
         .build()
         .expect("pipeline set");
@@ -243,9 +255,8 @@ async fn pipeline_error_stops_following_stages() {
         .run(&mut ctx, &Recorder::default())
         .await
         .expect_err("planner failure must stop the turn");
-    assert!(matches!(error, AiseError::Internal(_)));
+    assert!(matches!(error.kind(), TurnFailureKind::InvariantViolation));
     assert_eq!(generator_calls.load(Ordering::SeqCst), 0);
-    assert_eq!(validation_calls.load(Ordering::SeqCst), 0);
     assert_eq!(committer_calls.load(Ordering::SeqCst), 0);
 }
 
@@ -260,9 +271,9 @@ async fn runtime_skips_empty_retrieval_without_stage_event() {
         .writer_planner(planner_stub(WriterPlan::default()))
         .retrieval(retrieval_stub(retrieval_calls.clone()))
         .character_think(think_stub(think_calls.clone()))
-        .story_generator(generate_stub(proposal()))
-        .validation(validation_stub(vec![ValidationDecision::Pass]).0)
-        .story_repairer(repair_stub(Arc::new(AtomicUsize::new(0))))
+        .story_generator(generate_stub(valid_proposal()))
+        .validation(Box::new(ValidationPipeline::default()))
+        .story_repairer(repair_stub(Arc::new(AtomicUsize::new(0)), valid_proposal()))
         .committer(commit_stub(Arc::new(AtomicUsize::new(0))))
         .build()
         .expect("pipeline set");
@@ -272,16 +283,20 @@ async fn runtime_skips_empty_retrieval_without_stage_event() {
     assert_eq!(retrieval_calls.load(Ordering::SeqCst), 0, "empty retrieval must be skipped");
     assert_eq!(think_calls.load(Ordering::SeqCst), 0, "empty character think must be skipped");
     let events = recorder.events.lock().unwrap();
-    assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::ContextRetrieval)))
-    );
-    assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::CharacterThink)))
-    );
+    assert!(!events.iter().any(|e| matches!(
+        e,
+        TurnEvent::StageStarted {
+            stage: TurnStage::ContextRetrieval,
+            ..
+        }
+    )));
+    assert!(!events.iter().any(|e| matches!(
+        e,
+        TurnEvent::StageStarted {
+            stage: TurnStage::CharacterThink,
+            ..
+        }
+    )));
 }
 
 #[tokio::test]
@@ -303,9 +318,9 @@ async fn runtime_skips_empty_character_think_without_stage_event() {
         .writer_planner(planner_stub(plan))
         .retrieval(retrieval_stub(retrieval_calls.clone()))
         .character_think(think_stub(think_calls.clone()))
-        .story_generator(generate_stub(proposal()))
-        .validation(validation_stub(vec![ValidationDecision::Pass]).0)
-        .story_repairer(repair_stub(Arc::new(AtomicUsize::new(0))))
+        .story_generator(generate_stub(valid_proposal()))
+        .validation(Box::new(ValidationPipeline::default()))
+        .story_repairer(repair_stub(Arc::new(AtomicUsize::new(0)), valid_proposal()))
         .committer(commit_stub(Arc::new(AtomicUsize::new(0))))
         .build()
         .expect("pipeline set");
@@ -315,16 +330,20 @@ async fn runtime_skips_empty_character_think_without_stage_event() {
     assert_eq!(retrieval_calls.load(Ordering::SeqCst), 1, "non-empty retrieval must run");
     assert_eq!(think_calls.load(Ordering::SeqCst), 0, "empty character think must be skipped");
     let events = recorder.events.lock().unwrap();
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::ContextRetrieval)))
-    );
-    assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::CharacterThink)))
-    );
+    assert!(events.iter().any(|e| matches!(
+        e,
+        TurnEvent::StageStarted {
+            stage: TurnStage::ContextRetrieval,
+            ..
+        }
+    )));
+    assert!(!events.iter().any(|e| matches!(
+        e,
+        TurnEvent::StageStarted {
+            stage: TurnStage::CharacterThink,
+            ..
+        }
+    )));
 }
 
 #[tokio::test]
@@ -336,9 +355,9 @@ async fn validation_reject_never_invokes_committer() {
         .writer_planner(planner_stub(WriterPlan::default()))
         .retrieval(retrieval_stub(Arc::new(AtomicUsize::new(0))))
         .character_think(think_stub(Arc::new(AtomicUsize::new(0))))
-        .story_generator(generate_stub(proposal()))
-        .validation(validation_stub(vec![ValidationDecision::Reject]).0)
-        .story_repairer(repair_stub(Arc::new(AtomicUsize::new(0))))
+        .story_generator(generate_stub(invalid_proposal()))
+        .validation(Box::new(ValidationPipeline::default()))
+        .story_repairer(repair_stub(Arc::new(AtomicUsize::new(0)), valid_proposal()))
         .committer(commit_stub(committer_calls.clone()))
         .build()
         .expect("pipeline set");
@@ -348,13 +367,12 @@ async fn validation_reject_never_invokes_committer() {
         .run(&mut ctx, &Recorder::default())
         .await
         .expect_err("reject must fail the turn");
-    assert!(matches!(error, AiseError::ValidationRejected(_)));
+    assert!(matches!(error.kind(), TurnFailureKind::ValidationRejected));
     assert_eq!(committer_calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
 async fn repair_revalidates_full_pipeline() {
-    let (validation, validation_calls) = validation_stub(vec![ValidationDecision::Repair, ValidationDecision::Pass]);
     let repairer_calls = Arc::new(AtomicUsize::new(0));
     let set = TurnPipelineSet::builder()
         .initializer(init_stub())
@@ -362,9 +380,9 @@ async fn repair_revalidates_full_pipeline() {
         .writer_planner(planner_stub(WriterPlan::default()))
         .retrieval(retrieval_stub(Arc::new(AtomicUsize::new(0))))
         .character_think(think_stub(Arc::new(AtomicUsize::new(0))))
-        .story_generator(generate_stub(proposal()))
-        .validation(validation)
-        .story_repairer(repair_stub(repairer_calls.clone()))
+        .story_generator(generate_stub(repairable_proposal()))
+        .validation(Box::new(ValidationPipeline::default()))
+        .story_repairer(repair_stub(repairer_calls.clone(), valid_proposal()))
         .committer(commit_stub(Arc::new(AtomicUsize::new(0))))
         .build()
         .expect("pipeline set");
@@ -374,12 +392,8 @@ async fn repair_revalidates_full_pipeline() {
         .run(&mut ctx, &Recorder::default())
         .await
         .expect("repair then pass commits");
-    assert_eq!(
-        validation_calls.load(Ordering::SeqCst),
-        2,
-        "validation must re-run after repair"
-    );
     assert_eq!(repairer_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(ctx.validation_decision().unwrap(), ValidationDecision::Pass);
     assert!(ctx.committed_result().is_some());
 }
 
@@ -392,26 +406,26 @@ async fn repair_budget_is_consumed_before_repair_call() {
     let repairer = Stub::boxed(TurnStage::StoryRepairer, move |ctx| {
         repairer_count.fetch_add(1, Ordering::SeqCst);
         observed.lock().unwrap().push(ctx.budget().repair_rounds());
-        ctx.replace_story_proposal(proposal())
+        ctx.replace_story_proposal(repairable_proposal())
     });
-    let (validation, _) = validation_stub(vec![ValidationDecision::Repair, ValidationDecision::Repair]);
-    let budget = TurnBudget::new(TurnBudgetLimits {
+    let config = TurnConfig {
         max_repair_rounds: 1,
         max_llm_calls: 8,
         max_input_tokens: 8_192,
         max_output_tokens: 2_048,
         max_total_tokens: 10_240,
         max_retrieved_items: 5,
-        ..Default::default()
-    });
+        ..TurnConfig::default()
+    };
+    let budget = TurnBudget::from_config(&config, &aise::config::TurnContentLimitsConfig::default()).unwrap();
     let set = TurnPipelineSet::builder()
         .initializer(init_stub())
         .baseline_builder(baseline_stub())
         .writer_planner(planner_stub(WriterPlan::default()))
         .retrieval(retrieval_stub(Arc::new(AtomicUsize::new(0))))
         .character_think(think_stub(Arc::new(AtomicUsize::new(0))))
-        .story_generator(generate_stub(proposal()))
-        .validation(validation)
+        .story_generator(generate_stub(repairable_proposal()))
+        .validation(Box::new(ValidationPipeline::default()))
         .story_repairer(repairer)
         .committer(commit_stub(Arc::new(AtomicUsize::new(0))))
         .build()
@@ -422,7 +436,7 @@ async fn repair_budget_is_consumed_before_repair_call() {
         .run(&mut ctx, &Recorder::default())
         .await
         .expect_err("budget must be exhausted");
-    assert!(matches!(error, AiseError::ValidationBudgetExhausted(1)));
+    assert!(matches!(error.kind(), TurnFailureKind::ValidationBudgetExhausted));
     assert_eq!(
         repairer_calls.load(Ordering::SeqCst),
         1,
@@ -439,25 +453,25 @@ async fn repair_budget_is_consumed_before_repair_call() {
 async fn repair_budget_exhaustion_never_commits() {
     let repairer_calls = Arc::new(AtomicUsize::new(0));
     let committer_calls = Arc::new(AtomicUsize::new(0));
-    let (validation, _) = validation_stub(vec![ValidationDecision::Repair]);
-    let budget = TurnBudget::new(TurnBudgetLimits {
+    let config = TurnConfig {
         max_repair_rounds: 0,
         max_llm_calls: 8,
         max_input_tokens: 8_192,
         max_output_tokens: 2_048,
         max_total_tokens: 10_240,
         max_retrieved_items: 5,
-        ..Default::default()
-    });
+        ..TurnConfig::default()
+    };
+    let budget = TurnBudget::from_config(&config, &aise::config::TurnContentLimitsConfig::default()).unwrap();
     let set = TurnPipelineSet::builder()
         .initializer(init_stub())
         .baseline_builder(baseline_stub())
         .writer_planner(planner_stub(WriterPlan::default()))
         .retrieval(retrieval_stub(Arc::new(AtomicUsize::new(0))))
         .character_think(think_stub(Arc::new(AtomicUsize::new(0))))
-        .story_generator(generate_stub(proposal()))
-        .validation(validation)
-        .story_repairer(repair_stub(repairer_calls.clone()))
+        .story_generator(generate_stub(repairable_proposal()))
+        .validation(Box::new(ValidationPipeline::default()))
+        .story_repairer(repair_stub(repairer_calls.clone(), valid_proposal()))
         .committer(commit_stub(committer_calls.clone()))
         .build()
         .expect("pipeline set");
@@ -467,7 +481,7 @@ async fn repair_budget_exhaustion_never_commits() {
         .run(&mut ctx, &Recorder::default())
         .await
         .expect_err("repair must be disallowed");
-    assert!(matches!(error, AiseError::ValidationBudgetExhausted(0)));
+    assert!(matches!(error.kind(), TurnFailureKind::ValidationBudgetExhausted));
     assert_eq!(repairer_calls.load(Ordering::SeqCst), 0);
     assert_eq!(committer_calls.load(Ordering::SeqCst), 0);
 }

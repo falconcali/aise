@@ -3,6 +3,7 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 pub struct CreateSessionRequest {
     pub name: String,
+    pub story_id: String,
 }
 
 #[derive(Debug, Deserialize)]

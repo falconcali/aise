@@ -15,7 +15,7 @@ pub mod runtime;
 pub mod story;
 pub mod validation;
 
-pub use config::{AiseConfig, CoordinatorConfig, LlmConfig, StorageConfig, TraceContent, TurnConfig};
+pub use config::{AiseConfig, CoordinatorConfig, LlmConfig, StorageConfig, TraceContentPolicy, TurnConfig};
 pub use core::turn_contract::{CommittedTurnResult, ExecuteTurnSpec};
 pub use core::turn_event::{TurnEvent, TurnEventSink};
 pub use engine::AiseEngine;

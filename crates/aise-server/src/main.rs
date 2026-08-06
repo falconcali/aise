@@ -1,13 +1,17 @@
+use aise::core::turn_trace::TraceSpanSink;
 use aise_server::session::SessionRegistry;
+use aise_server::shutdown::wait_for_shutdown_signal;
 use aise_server::tasks;
-use aise_server::{AppState, ServerConfig, build_engine, router};
+use aise_server::{AppState, ServerConfig, build_engine, new_trace_writer, router};
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let config = ServerConfig::load();
+    let config = ServerConfig::load()?;
+    config.validate()?;
 
     std::fs::create_dir_all(&config.trace_dir)?;
     let file_appender = tracing_appender::rolling::daily(&config.trace_dir, "aise.log");
@@ -20,10 +24,12 @@ async fn main() -> anyhow::Result<()> {
         .with(filter)
         .init();
 
-    let engine = build_engine(&config).await?;
+    let trace_writer = new_trace_writer(&config)?;
+    let trace_sink: Arc<dyn TraceSpanSink> = trace_writer.clone();
+    let engine = build_engine(&config, trace_sink).await?;
     let registry = SessionRegistry::new(config.max_sessions);
-    let tasks = Arc::new(tasks::TurnTaskManager::new(config.max_concurrent_turns)?);
-    let state = Arc::new(AppState::new(engine, registry, tasks, config.clone()));
+    let task_supervisor = tasks::TurnTaskSupervisor::new(config.turn_tasks())?;
+    let state = Arc::new(AppState::new(engine, registry, task_supervisor.clone(), config.clone()));
     let app = router(state, &config);
 
     let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;
@@ -32,6 +38,29 @@ async fn main() -> anyhow::Result<()> {
         trace_dir = %config.trace_dir.display(),
         "aise-server listening"
     );
-    axum::serve(listener, app).await?;
+    let server_shutdown = CancellationToken::new();
+    let shutdown_signal = {
+        let token = server_shutdown.clone();
+        async move { token.cancelled().await }
+    };
+    let server = tokio::spawn(axum::serve(listener, app).with_graceful_shutdown(shutdown_signal).into_future());
+    tokio::select! {
+        result = server => {
+            match result {
+                Ok(Ok(())) => tracing::info!("http server stopped"),
+                Ok(Err(error)) => tracing::error!(error = %error, "http server failed"),
+                Err(error) => tracing::error!(error = %error, "http server task failed"),
+            }
+        }
+        _ = wait_for_shutdown_signal() => {
+            tracing::info!("shutdown signal received; draining turn tasks");
+            if let Err(error) = task_supervisor.shutdown_with_grace().await {
+                tracing::warn!(error = %error, "turn task supervisor shutdown reported an error");
+            }
+            trace_writer.shutdown_with_grace().await;
+            server_shutdown.cancel();
+            let _ = server_shutdown.cancelled().await;
+        }
+    }
     Ok(())
 }

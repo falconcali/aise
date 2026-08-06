@@ -1,6 +1,6 @@
 use crate::config::LlmConfig;
 use crate::core::turn_contract::TurnCancellation;
-use crate::error::AiseError;
+use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::llm::error::LlmError;
 use std::collections::VecDeque;
 use std::num::NonZeroU32;
@@ -23,8 +23,10 @@ struct RateGate {
 }
 
 impl LlmLimiter {
-    pub fn new(config: &LlmConfig) -> Result<Self, AiseError> {
-        config.validate()?;
+    pub fn new(config: &LlmConfig) -> Result<Self, TurnExecutionError> {
+        config.validate().map_err(|error| {
+            TurnExecutionError::new(TurnFailureKind::InvalidRequest, "invalid_llm_config", None, error.to_string())
+        })?;
         Ok(Self {
             permits: Arc::new(Semaphore::new(config.max_concurrent)),
             queue_timeout: Duration::from_millis(config.queue_timeout_ms),
@@ -66,7 +68,7 @@ impl LlmLimiter {
         let wait_until = turn_deadline.min(queue_end);
         tokio::select! {
             permit = self.permits.clone().acquire_owned() => {
-                permit.map_err(|_| LlmError::Protocol("llm limiter closed".into()))
+                permit.map_err(|_| LlmError::Protocol { kind: crate::llm::error::LlmProtocolErrorKind::InvalidSseLine })
             }
             _ = cancellation.token().cancelled() => Err(LlmError::Cancelled),
             _ = tokio::time::sleep_until(wait_until.into()) => {

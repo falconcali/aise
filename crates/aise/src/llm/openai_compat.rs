@@ -1,6 +1,6 @@
-use crate::config::{LlmConfig, ThinkingMode};
+use crate::config::{LlmConfig, LlmProtocolLimitsConfig, ThinkingMode};
 use crate::llm::accounting::{FinishReason, LlmCompletion, LlmTokenUsage, UsageAccuracy};
-use crate::llm::error::LlmError;
+use crate::llm::error::{LlmProtocolErrorKind, LlmProviderError, LlmResponseLimit, LlmTransportErrorKind};
 use crate::llm::message::{ChatMessage, CompletionRequest, EmbeddingOutput, EmbeddingRequest};
 use crate::llm::provider::{DeltaSink, LlmProvider};
 use async_trait::async_trait;
@@ -12,15 +12,18 @@ pub struct OpenAiCompatProvider {
     api_key: Option<String>,
     client: reqwest::Client,
     thinking: Option<ThinkingMode>,
+    protocol: LlmProtocolLimitsConfig,
 }
 
 impl OpenAiCompatProvider {
     pub fn new(config: LlmConfig) -> Self {
+        let protocol = config.protocol.clone();
         Self {
             base_url: config.base_url.trim_end_matches('/').to_string(),
             api_key: config.api_key,
             client: reqwest::Client::new(),
             thinking: config.thinking,
+            protocol,
         }
     }
 
@@ -55,8 +58,14 @@ struct ChatCompletionRequest<'a> {
     max_tokens: u32,
     temperature: f32,
     stream: bool,
+    stream_options: StreamOptions,
     #[serde(skip_serializing_if = "Option::is_none")]
     thinking: Option<ThinkingToggle<'a>>,
+}
+
+#[derive(Serialize)]
+struct StreamOptions {
+    include_usage: bool,
 }
 
 #[derive(Deserialize)]
@@ -85,7 +94,15 @@ struct ResponseUsage {
     completion_tokens: u64,
     total_tokens: Option<u64>,
     #[serde(default)]
+    prompt_tokens_details: Option<PromptTokensDetails>,
+    #[serde(default)]
     completion_tokens_details: Option<CompletionTokensDetails>,
+}
+
+#[derive(Deserialize)]
+struct PromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -100,30 +117,44 @@ impl LlmProvider for OpenAiCompatProvider {
         "openai_compat"
     }
 
-    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmError> {
+    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmProviderError> {
         let body = ChatCompletionRequest {
             model: &req.model,
             messages: &req.messages,
             max_tokens: req.max_tokens,
             temperature: req.temperature,
             stream: false,
+            stream_options: StreamOptions { include_usage: true },
             thinking: self.thinking_toggle(),
         };
         let mut request = self.client.post(self.endpoint()).json(&body);
         if let Some(key) = &self.api_key {
             request = request.bearer_auth(key);
         }
-        let resp: ChatCompletionResponse = request.send().await?.error_for_status()?.json().await?;
+        let response = request.send().await.map_err(transport_error)?;
+        let status = response.status();
+        if !status.is_success() {
+            let retry_after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned);
+            return Err(http_to_provider_error(Some(status), retry_after));
+        }
+        let resp: ChatCompletionResponse = response
+            .json()
+            .await
+            .map_err(|_| protocol_error(LlmProtocolErrorKind::InvalidJson))?;
         let choice = resp
             .choices
             .into_iter()
             .next()
-            .ok_or_else(|| LlmError::Protocol("empty choices".into()))?;
-        let finish_reason = choice.finish_reason.as_deref().map(parse_finish_reason);
+            .ok_or_else(|| protocol_error(LlmProtocolErrorKind::EmptyChoices))?;
+        let finish_reason = choice.finish_reason.as_deref().map(parse_finish_reason).transpose()?;
         let message = choice.message;
         let usage = resp.usage.map(|u| LlmTokenUsage {
             input_tokens: u.prompt_tokens,
-            cached_input_tokens: None,
+            cached_input_tokens: u.prompt_tokens_details.and_then(|d| d.cached_tokens),
             output_tokens: u.completion_tokens,
             reasoning_tokens: u.completion_tokens_details.and_then(|d| d.reasoning_tokens),
             total_tokens: u
@@ -144,76 +175,116 @@ impl LlmProvider for OpenAiCompatProvider {
         &self,
         req: &CompletionRequest,
         mut on_delta: DeltaSink,
-    ) -> Result<LlmCompletion, LlmError> {
+    ) -> Result<LlmCompletion, LlmProviderError> {
         let body = ChatCompletionRequest {
             model: &req.model,
             messages: &req.messages,
             max_tokens: req.max_tokens,
             temperature: req.temperature,
             stream: true,
+            stream_options: StreamOptions { include_usage: true },
             thinking: self.thinking_toggle(),
         };
         let mut request = self.client.post(self.endpoint()).json(&body);
         if let Some(key) = &self.api_key {
             request = request.bearer_auth(key);
         }
-        let mut stream = request.send().await?.error_for_status()?.bytes_stream();
-        let mut buf = Vec::new();
+        let response = request.send().await.map_err(transport_error)?;
+        let status = response.status();
+        if !status.is_success() {
+            let retry_after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned);
+            return Err(http_to_provider_error(Some(status), retry_after));
+        }
+        let mut stream = response.bytes_stream();
+        let mut buf: Vec<u8> = Vec::new();
         let mut text = String::new();
         let mut reasoning = String::new();
+        let mut finish_reason: Option<FinishReason> = None;
+        let mut usage: Option<LlmTokenUsage> = None;
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
+            let chunk = chunk.map_err(transport_error)?;
+            if buf.len().saturating_add(chunk.len()) > self.protocol.max_stream_buffer_bytes {
+                return Err(LlmProviderError::ResponseLimitExceeded {
+                    limit: LlmResponseLimit::StreamBuffer,
+                });
+            }
             buf.extend_from_slice(&chunk);
-            for line in extract_sse_lines(&mut buf)? {
+            let lines = extract_sse_lines(&mut buf, self.protocol.max_sse_line_bytes)?;
+            for line in lines {
                 if let Some(data) = line.strip_prefix("data: ").map(str::trim) {
                     if data == "[DONE]" {
-                        return Ok(stream_completion(text, reasoning));
+                        return Ok(stream_completion(text, reasoning, finish_reason, usage));
                     }
-                    if let Some(delta) = parse_delta(data)? {
-                        if let Some(content) = delta.content {
+                    if let Some(chunk) = parse_stream_chunk(data)? {
+                        let Some(choice) = chunk.choices.first() else {
+                            if let Some(chunk_usage) = chunk.usage {
+                                usage = Some(response_usage_to_token_usage(chunk_usage));
+                            }
+                            continue;
+                        };
+                        if let Some(content) = &choice.delta.content {
+                            if text.len().saturating_add(content.len()) > self.protocol.max_content_bytes {
+                                return Err(LlmProviderError::ResponseLimitExceeded {
+                                    limit: LlmResponseLimit::Content,
+                                });
+                            }
                             on_delta(content.clone());
-                            text.push_str(&content);
+                            text.push_str(content);
                         }
-                        if let Some(reasoning_delta) = delta.reasoning_content {
-                            reasoning.push_str(&reasoning_delta);
+                        if let Some(reasoning_delta) = &choice.delta.reasoning_content {
+                            if reasoning.len().saturating_add(reasoning_delta.len()) > self.protocol.max_reasoning_bytes
+                            {
+                                return Err(LlmProviderError::ResponseLimitExceeded {
+                                    limit: LlmResponseLimit::Reasoning,
+                                });
+                            }
+                            reasoning.push_str(reasoning_delta);
+                        }
+                        if let Some(reason) = &choice.finish_reason {
+                            finish_reason = Some(parse_finish_reason(reason)?);
+                        }
+                        if let Some(chunk_usage) = chunk.usage {
+                            usage = Some(response_usage_to_token_usage(chunk_usage));
                         }
                     }
                 }
             }
         }
-        Ok(stream_completion(text, reasoning))
+        Ok(stream_completion(text, reasoning, finish_reason, usage))
     }
 
-    async fn embed(&self, _req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmError> {
-        Err(LlmError::EmbeddingUnsupported)
+    async fn embed(&self, _req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmProviderError> {
+        Err(LlmProviderError::Protocol {
+            kind: LlmProtocolErrorKind::Unsupported,
+        })
     }
 }
 
-fn parse_finish_reason(value: &str) -> FinishReason {
+fn parse_finish_reason(value: &str) -> Result<FinishReason, LlmProviderError> {
     match value {
-        "stop" => FinishReason::Stop,
-        "length" => FinishReason::Length,
-        "content_filter" => FinishReason::ContentFilter,
-        "tool_calls" => FinishReason::ToolCalls,
-        other => FinishReason::Other(other.to_owned()),
+        "stop" => Ok(FinishReason::Stop),
+        "length" => Ok(FinishReason::Length),
+        "content_filter" => Ok(FinishReason::ContentFilter),
+        "tool_calls" => Ok(FinishReason::ToolCalls),
+        _ => Err(protocol_error(LlmProtocolErrorKind::Unsupported)),
     }
 }
 
-fn extract_sse_lines(buf: &mut Vec<u8>) -> Result<Vec<String>, LlmError> {
-    let mut lines = Vec::new();
-    let mut start = 0;
-    let mut consumed = 0;
-    for i in 0..buf.len() {
-        if buf[i] == b'\n' {
-            let line = std::str::from_utf8(&buf[start..i])
-                .map_err(|e| LlmError::Protocol(format!("invalid utf-8 in SSE stream: {e}")))?;
-            lines.push(line.to_string());
-            start = i + 1;
-            consumed = start;
-        }
-    }
-    buf.drain(..consumed);
-    Ok(lines)
+#[derive(Deserialize)]
+struct StreamChunk {
+    choices: Vec<StreamChoice>,
+    usage: Option<ResponseUsage>,
+}
+
+#[derive(Deserialize)]
+struct StreamChoice {
+    delta: StreamDelta,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -224,21 +295,21 @@ struct StreamDelta {
     reasoning_content: Option<String>,
 }
 
-fn parse_delta(data: &str) -> Result<Option<StreamDelta>, LlmError> {
-    #[derive(Deserialize)]
-    struct StreamChunk {
-        choices: Vec<StreamChoice>,
+fn parse_stream_chunk(data: &str) -> Result<Option<StreamChunk>, LlmProviderError> {
+    let chunk: StreamChunk =
+        serde_json::from_str(data).map_err(|_| protocol_error(LlmProtocolErrorKind::InvalidJson))?;
+    if chunk.choices.is_empty() && chunk.usage.is_none() {
+        return Ok(None);
     }
-    #[derive(Deserialize)]
-    struct StreamChoice {
-        delta: StreamDelta,
-    }
-
-    let chunk: StreamChunk = serde_json::from_str(data).map_err(|e| LlmError::Protocol(format!("bad chunk: {e}")))?;
-    Ok(chunk.choices.into_iter().next().map(|c| c.delta))
+    Ok(Some(chunk))
 }
 
-fn stream_completion(content: String, reasoning: String) -> LlmCompletion {
+fn stream_completion(
+    content: String,
+    reasoning: String,
+    finish_reason: Option<FinishReason>,
+    usage: Option<LlmTokenUsage>,
+) -> LlmCompletion {
     let reasoning = if reasoning.trim().is_empty() {
         None
     } else {
@@ -246,11 +317,88 @@ fn stream_completion(content: String, reasoning: String) -> LlmCompletion {
     };
     LlmCompletion {
         text: content,
-        finish_reason: Some(FinishReason::Stop),
+        finish_reason,
         reasoning_content: reasoning,
-        usage: None,
+        usage,
         charge: None,
     }
+}
+
+fn response_usage_to_token_usage(usage: ResponseUsage) -> LlmTokenUsage {
+    LlmTokenUsage {
+        input_tokens: usage.prompt_tokens,
+        cached_input_tokens: usage.prompt_tokens_details.and_then(|d| d.cached_tokens),
+        output_tokens: usage.completion_tokens,
+        reasoning_tokens: usage.completion_tokens_details.and_then(|d| d.reasoning_tokens),
+        total_tokens: usage
+            .total_tokens
+            .unwrap_or_else(|| usage.prompt_tokens.saturating_add(usage.completion_tokens)),
+        accuracy: UsageAccuracy::Exact,
+    }
+}
+
+fn extract_sse_lines(buf: &mut Vec<u8>, max_line_bytes: usize) -> Result<Vec<String>, LlmProviderError> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let mut consumed = 0;
+    for i in 0..buf.len() {
+        if i.saturating_sub(start) > max_line_bytes {
+            return Err(LlmProviderError::ResponseLimitExceeded {
+                limit: LlmResponseLimit::SseLine,
+            });
+        }
+        if buf[i] == b'\n' {
+            let line = std::str::from_utf8(&buf[start..i])
+                .map_err(|_| protocol_error(LlmProtocolErrorKind::InvalidSseLine))?;
+            lines.push(line.to_string());
+            start = i + 1;
+            consumed = start;
+        }
+    }
+    buf.drain(..consumed);
+    Ok(lines)
+}
+
+fn transport_error(error: reqwest::Error) -> LlmProviderError {
+    let kind = if error.is_timeout() {
+        LlmTransportErrorKind::Timeout
+    } else if error.is_connect() {
+        LlmTransportErrorKind::Connect
+    } else {
+        LlmTransportErrorKind::Io
+    };
+    LlmProviderError::Transport { kind }
+}
+
+fn http_to_provider_error(status: Option<reqwest::StatusCode>, retry_after: Option<String>) -> LlmProviderError {
+    let Some(status) = status else {
+        return LlmProviderError::Transport {
+            kind: LlmTransportErrorKind::Io,
+        };
+    };
+    let code = status.as_u16();
+    if code == 429 {
+        let retry_after_ms = retry_after.and_then(|value| value.trim().parse::<u64>().ok().map(|secs| secs * 1_000));
+        return LlmProviderError::RateLimited { retry_after_ms };
+    }
+    if (400..500).contains(&code) {
+        return LlmProviderError::Rejected {
+            status: code,
+            code: None,
+        };
+    }
+    if (500..600).contains(&code) {
+        return LlmProviderError::Transport {
+            kind: LlmTransportErrorKind::Server,
+        };
+    }
+    LlmProviderError::Transport {
+        kind: LlmTransportErrorKind::Io,
+    }
+}
+
+fn protocol_error(kind: LlmProtocolErrorKind) -> LlmProviderError {
+    LlmProviderError::Protocol { kind }
 }
 
 #[cfg(test)]

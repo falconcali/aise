@@ -1,3 +1,4 @@
+use crate::config::TraceContentPolicy;
 use crate::domain::ids::{StoryId, TurnId};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -16,9 +17,36 @@ pub fn truncate(text: &str, max_chars: usize) -> String {
     format!("{prefix}…[+{} chars]", count - max_chars)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TraceId(String);
+
+impl TraceId {
+    pub fn try_new(value: impl Into<String>) -> Result<Self, crate::core::turn_contract::TurnInputError> {
+        let value = value.into();
+        if value.trim().is_empty() {
+            return Err(crate::core::turn_contract::TurnInputError::EmptyStoryId);
+        }
+        Ok(Self(value))
+    }
+
+    pub fn new_id() -> Self {
+        Self(Uuid::new_v4().simple().to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for TraceId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnTrace {
-    pub trace_id: String,
+    pub trace_id: TraceId,
     pub turn_id: String,
     pub story_id: String,
     pub started_at_ms: u64,
@@ -125,21 +153,28 @@ pub struct PersistData {
     pub latency_ms: u64,
 }
 
+#[derive(Debug, Clone)]
+pub enum TraceRecord {
+    Span { trace_id: TraceId, span: TraceSpan },
+    Completed(TurnTrace),
+}
+
 pub trait TraceSpanSink: Send + Sync {
-    fn write_span(&self, trace_id: &str, span: &TraceSpan);
+    fn write_span(&self, trace_id: &TraceId, span: &TraceSpan);
     fn write_trace(&self, trace: &TurnTrace);
 }
 
 const DEFAULT_MAX_SPANS: usize = 64;
 
 pub struct TraceRecorder {
-    trace_id: String,
+    trace_id: TraceId,
     started_at_ms: u64,
     spans: Vec<TraceSpan>,
     current_parent: Option<String>,
     max_spans: usize,
     dropped: u32,
     span_sink: Option<Arc<dyn TraceSpanSink>>,
+    content_policy: TraceContentPolicy,
 }
 
 impl TraceRecorder {
@@ -149,13 +184,14 @@ impl TraceRecorder {
 
     pub fn with_limits(max_spans: usize) -> Self {
         Self {
-            trace_id: new_id(),
+            trace_id: TraceId::new_id(),
             started_at_ms: now_millis(),
             spans: Vec::new(),
             current_parent: None,
             max_spans,
             dropped: 0,
             span_sink: None,
+            content_policy: TraceContentPolicy::MetadataOnly,
         }
     }
 
@@ -164,7 +200,16 @@ impl TraceRecorder {
         self
     }
 
-    pub fn trace_id(&self) -> &str {
+    pub fn with_content_policy(mut self, policy: TraceContentPolicy) -> Self {
+        self.content_policy = policy;
+        self
+    }
+
+    pub fn content_policy(&self) -> TraceContentPolicy {
+        self.content_policy
+    }
+
+    pub fn trace_id(&self) -> &TraceId {
         &self.trace_id
     }
 
@@ -197,7 +242,7 @@ impl TraceRecorder {
             payload: to_value(payload),
         };
         if let Some(sink) = &self.span_sink {
-            sink.write_span(self.trace_id.as_str(), &trace_span);
+            sink.write_span(&self.trace_id, &trace_span);
         }
         tracing::info!(
             trace_id = self.trace_id.as_str(),
@@ -222,7 +267,7 @@ impl TraceRecorder {
             payload: to_value(payload),
         };
         if let Some(sink) = &self.span_sink {
-            sink.write_span(self.trace_id.as_str(), &trace_span);
+            sink.write_span(&self.trace_id, &trace_span);
         }
         tracing::info!(
             trace_id = self.trace_id.as_str(),

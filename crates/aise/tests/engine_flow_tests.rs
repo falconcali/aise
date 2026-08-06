@@ -1,19 +1,23 @@
 use aise::AiseConfig;
 use aise::AiseEngine;
-use aise::AiseError;
 use aise::TurnEvent;
 use aise::TurnEventSink;
 use aise::character::CharacterThinkPipeline;
 use aise::context::BaselineContextBuilder;
 use aise::context::ContextRetrievalPipeline;
-use aise::core::turn_contract::{ExecuteTurnSpec, IdempotencyKey, TurnCancellation};
+use aise::core::turn_contract::{
+    CommittedTurnResult, ExecuteTurnSpec, IdempotencyKey, LlmCallPurpose, TurnCancellation,
+};
 use aise::core::turn_data::SnapshotLimits;
+use aise::core::turn_error::TurnFailureKind;
 use aise::core::turn_pipeline::TurnStage;
+use aise::core::turn_validation::ValidationDecision;
 use aise::domain::ids::StoryId;
+use aise::domain::story_state::StoryReadSnapshot;
 use aise::engine::{SystemClock, UuidIdGenerator};
 use aise::llm::LlmGateway;
 use aise::llm::accounting::{FinishReason, LlmCompletion, LlmTokenUsage, UsageAccuracy};
-use aise::llm::error::LlmError;
+use aise::llm::error::{LlmProtocolErrorKind, LlmProviderError};
 use aise::llm::message::{CompletionRequest, EmbeddingOutput, EmbeddingRequest};
 use aise::llm::provider::{DeltaSink, LlmProvider};
 use aise::persistence::SqliteStore;
@@ -25,21 +29,23 @@ use aise::validation::ValidationPipeline;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 struct StubLlm;
 
-fn stub_completion_text(purpose: &str) -> String {
+fn stub_completion_text(purpose: LlmCallPurpose) -> String {
     match purpose {
-        "writer_plan" => r#"{"retrieval_requests":[],"character_requests":[],"story_goal":{"summary":""}}"#.to_string(),
-        "story_generation" | "story_repair" => story_proposal_json("Hello World"),
+        LlmCallPurpose::WriterPlan => {
+            r#"{"retrieval_requests":[],"character_requests":[],"story_goal":{"summary":""}}"#.to_string()
+        }
+        LlmCallPurpose::StoryGeneration | LlmCallPurpose::StoryRepair => story_proposal_json("Hello World"),
         _ => "Hello World".to_string(),
     }
 }
 
 fn story_proposal_json(story: &str) -> String {
     format!(
-        r#"{{"story_text":"{story}","events":[{{"kind":"action","summary":"{story}"}}],"character_changes":[],"world_change":{{"add_facts":[]}},"memory_changes":[],"summary_delta":null}}"#
+        r#"{{"story_text":"{story}","events":[{{"kind":"action","summary":"{story}"}}],"character_changes":[],"world_change":{{"add_facts":[]}},"memory_changes":[],"summary_change":null}}"#
     )
 }
 
@@ -49,7 +55,7 @@ impl LlmProvider for StubLlm {
         "stub"
     }
 
-    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmError> {
+    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmProviderError> {
         Ok(LlmCompletion {
             text: stub_completion_text(req.purpose),
             finish_reason: Some(FinishReason::Stop),
@@ -66,7 +72,11 @@ impl LlmProvider for StubLlm {
         })
     }
 
-    async fn complete_stream(&self, _req: &CompletionRequest, _on_delta: DeltaSink) -> Result<LlmCompletion, LlmError> {
+    async fn complete_stream(
+        &self,
+        _req: &CompletionRequest,
+        _on_delta: DeltaSink,
+    ) -> Result<LlmCompletion, LlmProviderError> {
         Ok(LlmCompletion {
             text: String::new(),
             finish_reason: None,
@@ -76,8 +86,10 @@ impl LlmProvider for StubLlm {
         })
     }
 
-    async fn embed(&self, _req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmError> {
-        Err(LlmError::EmbeddingUnsupported)
+    async fn embed(&self, _req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmProviderError> {
+        Err(LlmProviderError::Protocol {
+            kind: LlmProtocolErrorKind::Unsupported,
+        })
     }
 }
 
@@ -87,20 +99,28 @@ struct Recorder {
 }
 
 impl TurnEventSink for Recorder {
-    fn emit(&self, event: TurnEvent) {
+    fn emit(&self, event: TurnEvent) -> Result<(), aise::core::turn_event::TurnEventDeliveryError> {
         self.events.lock().unwrap().push(event);
+        Ok(())
     }
 }
 
 async fn build_engine(db_url: &str) -> Arc<AiseEngine> {
-    let store = SqliteStore::connect(db_url).await.expect("connect store");
+    let store: Arc<dyn aise::persistence::Store> = SqliteStore::connect(db_url).await.expect("connect store");
     let provider: Arc<dyn LlmProvider> = Arc::new(StubLlm);
-    let config = AiseConfig::default();
+    build_engine_with(store, provider, AiseConfig::default()).await
+}
+
+async fn build_engine_with(
+    store: Arc<dyn aise::persistence::Store>,
+    provider: Arc<dyn LlmProvider>,
+    config: AiseConfig,
+) -> Arc<AiseEngine> {
     let gateway = Arc::new(LlmGateway::new(provider, config.llm.clone()).expect("gateway"));
     let coordinator = StoryTurnCoordinator::new(&config.coordinator);
     let pipeline_set = TurnPipelineSet::builder()
         .initializer(Box::<TurnInitializer>::default())
-        .baseline_builder(Box::new(BaselineContextBuilder::new(store.clone())))
+        .baseline_builder(Box::new(BaselineContextBuilder::new(store.clone(), config.content.clone())))
         .writer_planner(Box::new(WriterPlanner::new(gateway.clone())))
         .retrieval(Box::new(ContextRetrievalPipeline))
         .character_think(Box::new(CharacterThinkPipeline::new(gateway.clone())))
@@ -121,9 +141,25 @@ async fn build_engine(db_url: &str) -> Arc<AiseEngine> {
     ))
 }
 
+async fn ensure_story(engine: &Arc<AiseEngine>, story_id: &str) {
+    let story_id = StoryId::try_new(story_id).unwrap();
+    let spec = aise::domain::StoryCreateSpec {
+        story_id: story_id.clone(),
+        story_instructions: String::new(),
+        story_config: aise::domain::StoryConfig::default(),
+        player_character_id: None,
+        initial_world: None,
+        current_scene: aise::domain::CurrentScene { text: String::new() },
+        story_summary: aise::domain::StorySummary { text: String::new() },
+        active_constraints: Vec::new(),
+        created_at_ms: 1000,
+    };
+    engine.store().create_story(&spec).await.expect("create story");
+}
+
 fn spec_for(story_id: &str, player_input: &str) -> ExecuteTurnSpec {
     ExecuteTurnSpec {
-        story_id: StoryId::from(story_id),
+        story_id: StoryId::try_new(story_id).unwrap(),
         idempotency_key: IdempotencyKey::try_new("test-key".to_string()).unwrap(),
         player_input: player_input.to_string(),
         cancellation: TurnCancellation::new(),
@@ -142,6 +178,7 @@ fn temp_db_path(label: &str) -> String {
 async fn full_flow_returns_hello_world_and_persists() {
     let db = temp_db_path("flow");
     let engine = build_engine(&db).await;
+    ensure_story(&engine, "story-1").await;
     let recorder = Recorder::default();
 
     let result = engine
@@ -154,67 +191,83 @@ async fn full_flow_returns_hello_world_and_persists() {
 
     {
         let events = recorder.events.lock().unwrap();
-        assert_eq!(events.len(), 9);
+        assert!(events.iter().any(|e| matches!(
+            e,
+            TurnEvent::StageStarted {
+                stage: TurnStage::TurnInitializer,
+                ..
+            }
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            TurnEvent::StageStarted {
+                stage: TurnStage::BaselineBuilder,
+                ..
+            }
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            TurnEvent::StageStarted {
+                stage: TurnStage::WriterPlanner,
+                ..
+            }
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            TurnEvent::StageStarted {
+                stage: TurnStage::StoryGenerator,
+                ..
+            }
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            TurnEvent::StageStarted {
+                stage: TurnStage::Validation,
+                ..
+            }
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            TurnEvent::StageStarted {
+                stage: TurnStage::TurnCommitter,
+                ..
+            }
+        )));
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            TurnEvent::StageStarted {
+                stage: TurnStage::ContextRetrieval,
+                ..
+            }
+        )));
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            TurnEvent::StageStarted {
+                stage: TurnStage::CharacterThink,
+                ..
+            }
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            TurnEvent::ValidationCompleted {
+                decision: ValidationDecision::Pass,
+                ..
+            }
+        )));
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::TurnInitializer)))
+                .any(|e| matches!(e, TurnEvent::Committed { result, .. } if result.story_text == "Hello World"))
         );
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::BaselineBuilder)))
-        );
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::WriterPlanner)))
-        );
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::StoryGenerator)))
-        );
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::Validation)))
-        );
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::TurnCommitter)))
-        );
-        assert!(
-            !events
-                .iter()
-                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::ContextRetrieval)))
-        );
-        assert!(
-            !events
-                .iter()
-                .any(|e| matches!(e, TurnEvent::StageStarted(TurnStage::CharacterThink)))
-        );
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, TurnEvent::ValidationCompleted { pass: true }))
-        );
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, TurnEvent::Committed(result) if result.story_text == "Hello World"))
-        );
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::Committed(_))));
-        assert!(events.iter().any(|e| matches!(e, TurnEvent::TraceCompleted(_))));
+        assert!(events.iter().any(|e| matches!(e, TurnEvent::Committed { .. })));
+        assert!(events.iter().any(|e| matches!(e, TurnEvent::TraceCompleted { .. })));
     }
 
     let store = engine.store();
     let snapshot = store
-        .load_story_snapshot(&StoryId::from("story-1"), snapshot_limits())
+        .load_story_snapshot(&StoryId::try_new("story-1").unwrap(), snapshot_limits())
         .await
-        .expect("load snapshot")
-        .expect("story exists");
+        .expect("load snapshot");
     let turns = snapshot.recent_turns();
     assert_eq!(turns.len(), 1);
     assert_eq!(turns[0].story_text, "Hello World");
@@ -227,6 +280,7 @@ async fn full_flow_returns_hello_world_and_persists() {
 async fn turn_trace_records_metadata_only_llm_usage() {
     let db = temp_db_path("trace");
     let engine = build_engine(&db).await;
+    ensure_story(&engine, "story-trace").await;
     let recorder = Recorder::default();
 
     let result = engine
@@ -235,41 +289,16 @@ async fn turn_trace_records_metadata_only_llm_usage() {
         .expect("run turn");
 
     let events = recorder.events.lock().unwrap();
-    let trace = events
+    let trace_event = events
         .iter()
         .find_map(|e| match e {
-            TurnEvent::TraceCompleted(t) => Some(t.clone()),
+            TurnEvent::TraceCompleted { turn_id, trace_id } => Some((turn_id.clone(), trace_id.clone())),
             _ => None,
         })
         .expect("trace event");
-    assert_eq!(trace.turn_id, result.turn_id.to_string());
-    assert_eq!(trace.story_id, "story-trace");
-    assert!(!trace.trace_id.is_empty());
-    assert!(trace.duration_ms > 0);
-
-    let kinds: Vec<_> = trace.spans.iter().map(|s| s.kind.as_str()).collect();
-    assert!(kinds.contains(&"aise.turn"));
-    assert!(kinds.contains(&"aise.pipeline"));
-    assert!(kinds.contains(&"aise.llm_call"));
-    assert!(kinds.contains(&"aise.tool_call"));
-    assert!(kinds.contains(&"aise.validation"));
-    assert!(kinds.contains(&"aise.persist"));
-
-    let llm = trace.spans.iter().find(|s| s.kind == "aise.llm_call").expect("llm span");
-    let payload = llm.payload.as_object().expect("llm payload object");
-    assert_eq!(payload.get("status").and_then(|v| v.as_str()), Some("ok"));
-    assert_eq!(payload.get("provider").and_then(|v| v.as_str()), Some("stub"));
-    assert_eq!(payload.get("model").and_then(|v| v.as_str()), Some("qwen2.5"));
-    assert_eq!(payload.get("input_tokens").and_then(|v| v.as_u64()), Some(10));
-    assert_eq!(payload.get("output_tokens").and_then(|v| v.as_u64()), Some(20));
-    assert_eq!(payload.get("usage_accuracy").and_then(|v| v.as_str()), Some("exact"));
-    assert!(payload.get("content").is_none());
-
-    let root = trace.spans.iter().find(|s| s.kind == "aise.turn").expect("root span");
-    let root_payload = root.payload.as_object().expect("root payload");
-    assert_eq!(root_payload.get("status").and_then(|v| v.as_str()), Some("ok"));
-    assert_eq!(root_payload.get("player_input").and_then(|v| v.as_str()), Some("请讲一个故事"));
-
+    let (trace_turn_id, trace_id) = trace_event;
+    assert_eq!(trace_turn_id, result.turn_id);
+    assert!(!trace_id.as_str().is_empty());
     let _ = std::fs::remove_file(&db);
 }
 
@@ -277,8 +306,9 @@ async fn turn_trace_records_metadata_only_llm_usage() {
 async fn second_turn_loads_history_from_store_in_chronological_order() {
     let db = temp_db_path("history");
     let engine = build_engine(&db).await;
+    ensure_story(&engine, "story-2").await;
     let recorder = Recorder::default();
-    let story_id = StoryId::from("story-2");
+    let story_id = StoryId::try_new("story-2").unwrap();
 
     let mut turn_one = spec_for("story-2", "第一回合");
     turn_one.idempotency_key = IdempotencyKey::try_new("key-1".to_string()).unwrap();
@@ -291,8 +321,7 @@ async fn second_turn_loads_history_from_store_in_chronological_order() {
     let snapshot = store
         .load_story_snapshot(&story_id, snapshot_limits())
         .await
-        .expect("load snapshot")
-        .expect("story exists");
+        .expect("load snapshot");
     let turns = snapshot.recent_turns();
     assert_eq!(turns.len(), 2);
     assert_eq!(turns[0].player_input, "第一回合");
@@ -305,32 +334,10 @@ async fn second_turn_loads_history_from_store_in_chronological_order() {
 async fn response_loss_retry_does_not_call_llm_again() {
     let db = temp_db_path("idem_retry");
     let calls = Arc::new(AtomicUsize::new(0));
-    let store = SqliteStore::connect(&db).await.expect("connect store");
-    let config = AiseConfig::default();
+    let store: Arc<dyn aise::persistence::Store> = SqliteStore::connect(&db).await.expect("connect store");
     let provider: Arc<dyn LlmProvider> = Arc::new(CountingLlm { calls: calls.clone() });
-    let gateway = Arc::new(LlmGateway::new(provider, config.llm.clone()).expect("gateway"));
-    let coordinator = StoryTurnCoordinator::new(&config.coordinator);
-    let pipeline_set = TurnPipelineSet::builder()
-        .initializer(Box::<TurnInitializer>::default())
-        .baseline_builder(Box::new(BaselineContextBuilder::new(store.clone())))
-        .writer_planner(Box::new(WriterPlanner::new(gateway.clone())))
-        .retrieval(Box::new(ContextRetrievalPipeline))
-        .character_think(Box::new(CharacterThinkPipeline::new(gateway.clone())))
-        .story_generator(Box::new(StoryGenerator::new(gateway.clone())))
-        .validation(Box::new(ValidationPipeline::default()))
-        .story_repairer(Box::new(StoryRepairer::new(gateway.clone())))
-        .committer(Box::new(TurnCommitter::new(store.clone())))
-        .build()
-        .expect("pipeline set");
-    let runtime = TurnRuntime::new(pipeline_set);
-    let engine = Arc::new(AiseEngine::new(
-        runtime,
-        store,
-        coordinator,
-        config,
-        Arc::new(UuidIdGenerator),
-        Arc::new(SystemClock),
-    ));
+    let engine = build_engine_with(store, provider, AiseConfig::default()).await;
+    ensure_story(&engine, "story-idem").await;
     let recorder = Recorder::default();
 
     let mut first_spec = spec_for("story-idem", "同一个请求");
@@ -353,6 +360,7 @@ async fn response_loss_retry_does_not_call_llm_again() {
 async fn same_key_with_different_request_returns_idempotency_conflict() {
     let db = temp_db_path("idem_conflict");
     let engine = build_engine(&db).await;
+    ensure_story(&engine, "story-conf").await;
     let recorder = Recorder::default();
 
     let mut first_spec = spec_for("story-conf", "原始请求");
@@ -365,16 +373,48 @@ async fn same_key_with_different_request_returns_idempotency_conflict() {
         .run_turn(retry_spec, &recorder)
         .await
         .expect_err("different request with same key must conflict");
-    assert!(matches!(error, AiseError::IdempotencyConflict));
+    assert!(matches!(error.kind(), TurnFailureKind::IdempotencyConflict));
 
     let _ = std::fs::remove_file(&db);
 }
 
+#[tokio::test]
+async fn invalid_request_fails_with_invalid_request() {
+    let db = temp_db_path("invalid");
+    let engine = build_engine(&db).await;
+    let recorder = Recorder::default();
+    let mut spec = spec_for("story-invalid", "");
+    spec.idempotency_key = IdempotencyKey::try_new("invalid-key".to_string()).unwrap();
+    let error = engine
+        .run_turn(spec, &recorder)
+        .await
+        .expect_err("empty player input must fail");
+    assert!(matches!(error.kind(), TurnFailureKind::InvalidRequest));
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn turn_execution_never_creates_missing_story() {
+    let db = temp_db_path("no_auto_create");
+    let engine = build_engine(&db).await;
+    let recorder = Recorder::default();
+    let story_id = StoryId::try_new("story-never-created").unwrap();
+    let mut spec = spec_for("story-never-created", "开始吧");
+    spec.idempotency_key = IdempotencyKey::try_new("missing-key".to_string()).unwrap();
+    let error = engine
+        .run_turn(spec, &recorder)
+        .await
+        .expect_err("turn for a missing story must fail");
+    assert!(matches!(error.kind(), TurnFailureKind::StoryNotFound));
+    assert!(
+        engine.store().get_story(&story_id).await.expect("get story").is_none(),
+        "turn execution must never auto-create a story row"
+    );
+    let _ = std::fs::remove_file(&db);
+}
+
 fn snapshot_limits() -> SnapshotLimits {
-    SnapshotLimits {
-        max_recent_turns: 20,
-        max_memories: 20,
-    }
+    SnapshotLimits::from_config(&aise::config::TurnContentLimitsConfig::default())
 }
 
 struct CountingLlm {
@@ -387,7 +427,7 @@ impl LlmProvider for CountingLlm {
         "counting"
     }
 
-    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmError> {
+    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmProviderError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(LlmCompletion {
             text: stub_completion_text(req.purpose),
@@ -405,7 +445,11 @@ impl LlmProvider for CountingLlm {
         })
     }
 
-    async fn complete_stream(&self, _req: &CompletionRequest, _on_delta: DeltaSink) -> Result<LlmCompletion, LlmError> {
+    async fn complete_stream(
+        &self,
+        _req: &CompletionRequest,
+        _on_delta: DeltaSink,
+    ) -> Result<LlmCompletion, LlmProviderError> {
         Ok(LlmCompletion {
             text: String::new(),
             finish_reason: None,
@@ -415,7 +459,513 @@ impl LlmProvider for CountingLlm {
         })
     }
 
-    async fn embed(&self, _req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmError> {
-        Err(LlmError::EmbeddingUnsupported)
+    async fn embed(&self, _req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmProviderError> {
+        Err(LlmProviderError::Protocol {
+            kind: LlmProtocolErrorKind::Unsupported,
+        })
     }
+}
+
+struct TrackedStore {
+    inner: Arc<SqliteStore>,
+    get_story_calls: Arc<AtomicUsize>,
+    commit_calls: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl aise::persistence::Store for TrackedStore {
+    async fn create_story(
+        &self,
+        spec: &aise::domain::StoryCreateSpec,
+    ) -> Result<aise::domain::StoryInfo, aise::persistence::StoreError> {
+        self.inner.create_story(spec).await
+    }
+
+    async fn get_story(
+        &self,
+        story_id: &StoryId,
+    ) -> Result<Option<aise::domain::StoryInfo>, aise::persistence::StoreError> {
+        self.get_story_calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.get_story(story_id).await
+    }
+
+    async fn load_story_snapshot(
+        &self,
+        story_id: &StoryId,
+        limits: SnapshotLimits,
+    ) -> Result<StoryReadSnapshot, aise::persistence::StoreError> {
+        self.inner.load_story_snapshot(story_id, limits).await
+    }
+
+    async fn find_committed_turn(
+        &self,
+        story_id: &StoryId,
+        idempotency_key: &IdempotencyKey,
+    ) -> Result<Option<aise::persistence::StoredTurnOutcome>, aise::persistence::StoreError> {
+        self.inner.find_committed_turn(story_id, idempotency_key).await
+    }
+
+    async fn commit_turn(
+        &self,
+        commit: &aise::persistence::TurnCommitSpec,
+    ) -> Result<CommittedTurnResult, aise::persistence::StoreError> {
+        self.commit_calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.commit_turn(commit).await
+    }
+}
+
+struct ConflictStore {
+    inner: Arc<SqliteStore>,
+}
+
+#[async_trait::async_trait]
+impl aise::persistence::Store for ConflictStore {
+    async fn create_story(
+        &self,
+        spec: &aise::domain::StoryCreateSpec,
+    ) -> Result<aise::domain::StoryInfo, aise::persistence::StoreError> {
+        self.inner.create_story(spec).await
+    }
+
+    async fn get_story(
+        &self,
+        story_id: &StoryId,
+    ) -> Result<Option<aise::domain::StoryInfo>, aise::persistence::StoreError> {
+        self.inner.get_story(story_id).await
+    }
+
+    async fn load_story_snapshot(
+        &self,
+        story_id: &StoryId,
+        limits: SnapshotLimits,
+    ) -> Result<StoryReadSnapshot, aise::persistence::StoreError> {
+        self.inner.load_story_snapshot(story_id, limits).await
+    }
+
+    async fn find_committed_turn(
+        &self,
+        story_id: &StoryId,
+        idempotency_key: &IdempotencyKey,
+    ) -> Result<Option<aise::persistence::StoredTurnOutcome>, aise::persistence::StoreError> {
+        self.inner.find_committed_turn(story_id, idempotency_key).await
+    }
+
+    async fn commit_turn(
+        &self,
+        _commit: &aise::persistence::TurnCommitSpec,
+    ) -> Result<CommittedTurnResult, aise::persistence::StoreError> {
+        Err(aise::persistence::StoreError::RevisionConflict)
+    }
+}
+
+struct CancellingProvider {
+    cancellation: TurnCancellation,
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for CancellingProvider {
+    fn provider_name(&self) -> &'static str {
+        "cancelling"
+    }
+
+    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmProviderError> {
+        if req.purpose == LlmCallPurpose::WriterPlan {
+            self.cancellation.cancel();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            return Err(LlmProviderError::Rejected {
+                status: 500,
+                code: None,
+            });
+        }
+        Ok(LlmCompletion {
+            text: stub_completion_text(req.purpose),
+            finish_reason: Some(FinishReason::Stop),
+            reasoning_content: None,
+            usage: None,
+            charge: None,
+        })
+    }
+
+    async fn complete_stream(
+        &self,
+        _req: &CompletionRequest,
+        _on_delta: DeltaSink,
+    ) -> Result<LlmCompletion, LlmProviderError> {
+        Err(LlmProviderError::Protocol {
+            kind: LlmProtocolErrorKind::Unsupported,
+        })
+    }
+
+    async fn embed(&self, _req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmProviderError> {
+        Err(LlmProviderError::Protocol {
+            kind: LlmProtocolErrorKind::Unsupported,
+        })
+    }
+}
+
+struct RejectingProvider;
+
+#[async_trait::async_trait]
+impl LlmProvider for RejectingProvider {
+    fn provider_name(&self) -> &'static str {
+        "rejecting"
+    }
+
+    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmProviderError> {
+        if matches!(req.purpose, LlmCallPurpose::StoryGeneration | LlmCallPurpose::StoryRepair) {
+            return Err(LlmProviderError::Rejected {
+                status: 500,
+                code: None,
+            });
+        }
+        Ok(LlmCompletion {
+            text: stub_completion_text(req.purpose),
+            finish_reason: Some(FinishReason::Stop),
+            reasoning_content: None,
+            usage: None,
+            charge: None,
+        })
+    }
+
+    async fn complete_stream(
+        &self,
+        _req: &CompletionRequest,
+        _on_delta: DeltaSink,
+    ) -> Result<LlmCompletion, LlmProviderError> {
+        Err(LlmProviderError::Protocol {
+            kind: LlmProtocolErrorKind::Unsupported,
+        })
+    }
+
+    async fn embed(&self, _req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmProviderError> {
+        Err(LlmProviderError::Protocol {
+            kind: LlmProtocolErrorKind::Unsupported,
+        })
+    }
+}
+
+struct RepairProposalProvider;
+
+fn repairable_proposal_json() -> String {
+    r#"{"story_text":"text","events":[{"kind":"action","summary":"text"}],"character_changes":[{"character_id":"c-999","goal_updates":[],"health_delta":null,"affinity_deltas":[]}],"world_change":{"add_facts":[]},"memory_changes":[],"summary_change":null}"#.to_string()
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for RepairProposalProvider {
+    fn provider_name(&self) -> &'static str {
+        "repair_loop"
+    }
+
+    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmProviderError> {
+        let text = match req.purpose {
+            LlmCallPurpose::WriterPlan => {
+                r#"{"retrieval_requests":[],"character_requests":[],"story_goal":{"summary":""}}"#.to_string()
+            }
+            _ => repairable_proposal_json(),
+        };
+        Ok(LlmCompletion {
+            text,
+            finish_reason: Some(FinishReason::Stop),
+            reasoning_content: None,
+            usage: None,
+            charge: None,
+        })
+    }
+
+    async fn complete_stream(
+        &self,
+        _req: &CompletionRequest,
+        _on_delta: DeltaSink,
+    ) -> Result<LlmCompletion, LlmProviderError> {
+        Err(LlmProviderError::Protocol {
+            kind: LlmProtocolErrorKind::Unsupported,
+        })
+    }
+
+    async fn embed(&self, _req: &EmbeddingRequest) -> Result<EmbeddingOutput, LlmProviderError> {
+        Err(LlmProviderError::Protocol {
+            kind: LlmProtocolErrorKind::Unsupported,
+        })
+    }
+}
+
+#[tokio::test]
+async fn invalid_story_id_has_no_store_or_coordinator_side_effects() {
+    let db = temp_db_path("invalid_sid");
+    let get_story_calls = Arc::new(AtomicUsize::new(0));
+    let commit_calls = Arc::new(AtomicUsize::new(0));
+    let store: Arc<dyn aise::persistence::Store> = Arc::new(TrackedStore {
+        inner: SqliteStore::connect(&db).await.expect("connect store"),
+        get_story_calls: get_story_calls.clone(),
+        commit_calls: commit_calls.clone(),
+    });
+    let engine = build_engine_with(store, Arc::new(StubLlm), AiseConfig::default()).await;
+    let recorder = Recorder::default();
+    let mut spec = spec_for("story-that-does-not-exist", "   ");
+    spec.idempotency_key = IdempotencyKey::try_new("invalid-key".to_string()).unwrap();
+    let error = engine
+        .run_turn(spec, &recorder)
+        .await
+        .expect_err("invalid request must fail before any store or coordinator side effect");
+    assert!(matches!(error.kind(), TurnFailureKind::InvalidRequest));
+    assert_eq!(
+        get_story_calls.load(Ordering::SeqCst),
+        0,
+        "request validation must run before store lookup"
+    );
+    assert_eq!(
+        commit_calls.load(Ordering::SeqCst),
+        0,
+        "nothing may commit for an invalid request"
+    );
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn idempotency_replay_emits_original_committed_event() {
+    let db = temp_db_path("replay_event");
+    let engine = build_engine(&db).await;
+    ensure_story(&engine, "story-replay").await;
+    let first_recorder = Recorder::default();
+    let mut first_spec = spec_for("story-replay", "同一个请求");
+    first_spec.idempotency_key = IdempotencyKey::try_new("replay-key".to_string()).unwrap();
+    let first = engine.run_turn(first_spec, &first_recorder).await.expect("first turn");
+
+    let replay_recorder = Recorder::default();
+    let mut replay_spec = spec_for("story-replay", "同一个请求");
+    replay_spec.idempotency_key = IdempotencyKey::try_new("replay-key".to_string()).unwrap();
+    let replay = engine.run_turn(replay_spec, &replay_recorder).await.expect("replay turn");
+
+    assert_eq!(first.turn_id, replay.turn_id);
+    assert_eq!(first.story_text, replay.story_text);
+    let events = replay_recorder.events.lock().unwrap();
+    let committed = events
+        .iter()
+        .find_map(|event| match event {
+            TurnEvent::Committed { result, replayed } => Some((result.clone(), *replayed)),
+            _ => None,
+        })
+        .expect("replay must emit a committed event");
+    assert!(committed.1, "replay must carry replayed = true");
+    assert_eq!(
+        committed.0.turn_id, first.turn_id,
+        "replay returns the original persisted result"
+    );
+    assert!(
+        !events.iter().any(|event| matches!(event, TurnEvent::StageStarted { .. })),
+        "replay must not re-run the runtime"
+    );
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn idempotency_conflict_emits_conflict_terminal() {
+    let db = temp_db_path("idem_conflict_event");
+    let engine = build_engine(&db).await;
+    ensure_story(&engine, "story-conflict").await;
+    let first_recorder = Recorder::default();
+    let mut first_spec = spec_for("story-conflict", "原始请求");
+    first_spec.idempotency_key = IdempotencyKey::try_new("conflict-key".to_string()).unwrap();
+    engine.run_turn(first_spec, &first_recorder).await.expect("first turn");
+
+    let recorder = Recorder::default();
+    let mut conflict_spec = spec_for("story-conflict", "不同请求");
+    conflict_spec.idempotency_key = IdempotencyKey::try_new("conflict-key".to_string()).unwrap();
+    let error = engine
+        .run_turn(conflict_spec, &recorder)
+        .await
+        .expect_err("same key with a different request must conflict");
+    assert!(matches!(error.kind(), TurnFailureKind::IdempotencyConflict));
+    {
+        let events = recorder.events.lock().unwrap();
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                TurnEvent::Conflict {
+                    code: "idempotency_conflict",
+                    ..
+                }
+            )),
+            "conflict must emit exactly one conflict terminal event"
+        );
+        assert!(!events.iter().any(|event| matches!(event, TurnEvent::Committed { .. })));
+    }
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn nested_llm_cancel_sets_cancelled_phase_and_event() {
+    let db = temp_db_path("nested_cancel");
+    let cancellation = TurnCancellation::new();
+    let provider: Arc<dyn LlmProvider> = Arc::new(CancellingProvider {
+        cancellation: cancellation.clone(),
+    });
+    let store: Arc<dyn aise::persistence::Store> = SqliteStore::connect(&db).await.expect("connect store");
+    let engine = build_engine_with(store, provider, AiseConfig::default()).await;
+    ensure_story(&engine, "story-cancel").await;
+    let recorder = Recorder::default();
+    let mut spec = spec_for("story-cancel", "开始吧");
+    spec.idempotency_key = IdempotencyKey::try_new("cancel-key".to_string()).unwrap();
+    spec.cancellation = cancellation.clone();
+    let error = engine
+        .run_turn(spec, &recorder)
+        .await
+        .expect_err("nested llm cancellation must fail the turn");
+    assert!(matches!(error.kind(), TurnFailureKind::Cancelled));
+    {
+        let events = recorder.events.lock().unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, TurnEvent::Cancelled { code: "cancelled", .. })),
+            "cancelled terminal must be delivered"
+        );
+        assert!(!events.iter().any(|event| matches!(event, TurnEvent::Committed { .. })));
+    }
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn nested_store_conflict_sets_conflict_phase_and_event() {
+    let db = temp_db_path("nested_store_conflict");
+    let store: Arc<dyn aise::persistence::Store> = Arc::new(ConflictStore {
+        inner: SqliteStore::connect(&db).await.expect("connect store"),
+    });
+    let engine = build_engine_with(store, Arc::new(StubLlm), AiseConfig::default()).await;
+    ensure_story(&engine, "story-conflict-nested").await;
+    let recorder = Recorder::default();
+    let mut spec = spec_for("story-conflict-nested", "开始吧");
+    spec.idempotency_key = IdempotencyKey::try_new("conflict-key".to_string()).unwrap();
+    let error = engine
+        .run_turn(spec, &recorder)
+        .await
+        .expect_err("store revision conflict must fail the turn");
+    assert!(matches!(error.kind(), TurnFailureKind::RevisionConflict));
+    {
+        let events = recorder.events.lock().unwrap();
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                TurnEvent::Conflict {
+                    code: "revision_conflict",
+                    ..
+                }
+            )),
+            "nested store conflict must map to a conflict terminal event"
+        );
+        assert!(!events.iter().any(|event| matches!(event, TurnEvent::Committed { .. })));
+    }
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn pipeline_failure_sets_failed_phase_and_closes_trace() {
+    let db = temp_db_path("pipeline_failure");
+    let provider: Arc<dyn LlmProvider> = Arc::new(RejectingProvider);
+    let store: Arc<dyn aise::persistence::Store> = SqliteStore::connect(&db).await.expect("connect store");
+    let engine = build_engine_with(store, provider, AiseConfig::default()).await;
+    ensure_story(&engine, "story-fail").await;
+    let recorder = Recorder::default();
+    let mut spec = spec_for("story-fail", "开始吧");
+    spec.idempotency_key = IdempotencyKey::try_new("fail-key".to_string()).unwrap();
+    let error = engine
+        .run_turn(spec, &recorder)
+        .await
+        .expect_err("provider rejection must fail the turn");
+    assert!(matches!(error.kind(), TurnFailureKind::Llm));
+    {
+        let events = recorder.events.lock().unwrap();
+        assert!(
+            events.iter().any(|event| matches!(event, TurnEvent::Failed { .. })),
+            "pipeline failure must emit one failed terminal event"
+        );
+        assert!(
+            events.iter().any(|event| matches!(event, TurnEvent::TraceCompleted { .. })),
+            "finalizer must close the trace on pipeline failure"
+        );
+        assert!(!events.iter().any(|event| matches!(event, TurnEvent::Committed { .. })));
+    }
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn repair_exhaustion_sets_failed_phase_and_never_commits() {
+    let db = temp_db_path("repair_exhaust");
+    let get_story_calls = Arc::new(AtomicUsize::new(0));
+    let commit_calls = Arc::new(AtomicUsize::new(0));
+    let store: Arc<dyn aise::persistence::Store> = Arc::new(TrackedStore {
+        inner: SqliteStore::connect(&db).await.expect("connect store"),
+        get_story_calls,
+        commit_calls: commit_calls.clone(),
+    });
+    let provider: Arc<dyn LlmProvider> = Arc::new(RepairProposalProvider);
+    let mut config = AiseConfig::default();
+    config.turn.max_repair_rounds = 0;
+    let engine = build_engine_with(store, provider, config).await;
+    ensure_story(&engine, "story-repair").await;
+    let recorder = Recorder::default();
+    let mut spec = spec_for("story-repair", "开始吧");
+    spec.idempotency_key = IdempotencyKey::try_new("repair-key".to_string()).unwrap();
+    let error = engine
+        .run_turn(spec, &recorder)
+        .await
+        .expect_err("exhausted repair budget must fail the turn");
+    assert!(matches!(error.kind(), TurnFailureKind::ValidationBudgetExhausted));
+    {
+        let events = recorder.events.lock().unwrap();
+        assert!(
+            events.iter().any(|event| {
+                matches!(
+                    event,
+                    TurnEvent::Failed {
+                        code: "validation_budget_exhausted",
+                        ..
+                    }
+                )
+            }),
+            "repair exhaustion must emit a failed terminal event"
+        );
+        assert!(!events.iter().any(|event| matches!(event, TurnEvent::Committed { .. })));
+    }
+    assert_eq!(
+        commit_calls.load(Ordering::SeqCst),
+        0,
+        "a turn that exhausts repair rounds must never commit"
+    );
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn validation_completed_emitted_for_each_attempt() {
+    let db = temp_db_path("validation_attempts");
+    let store: Arc<dyn aise::persistence::Store> = SqliteStore::connect(&db).await.expect("connect store");
+    let provider: Arc<dyn LlmProvider> = Arc::new(RepairProposalProvider);
+    let mut config = AiseConfig::default();
+    config.turn.max_repair_rounds = 1;
+    let engine = build_engine_with(store, provider, config).await;
+    ensure_story(&engine, "story-attempts").await;
+    let recorder = Recorder::default();
+    let mut spec = spec_for("story-attempts", "开始吧");
+    spec.idempotency_key = IdempotencyKey::try_new("attempts-key".to_string()).unwrap();
+    let error = engine.run_turn(spec, &recorder).await.expect_err("repair budget must exhaust");
+    assert!(matches!(error.kind(), TurnFailureKind::ValidationBudgetExhausted));
+    {
+        let events = recorder.events.lock().unwrap();
+        let attempts: Vec<u32> = events
+            .iter()
+            .filter_map(|event| match event {
+                TurnEvent::ValidationCompleted { attempt, decision, .. } => {
+                    assert_eq!(*decision, ValidationDecision::Repair);
+                    Some(*attempt)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            attempts,
+            vec![1, 2],
+            "ValidationCompleted must be emitted once per validation attempt"
+        );
+    }
+    let _ = std::fs::remove_file(&db);
 }

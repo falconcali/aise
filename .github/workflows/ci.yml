@@ -20,8 +20,21 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy (warnings as errors)
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Check
-        run: cargo check --workspace
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --all-features
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format (MSRV)
+        run: cargo +1.85 fmt --all --check
+      - name: Clippy (MSRV, warnings as errors)
+        run: cargo +1.85 clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Test (MSRV)
+        run: cargo +1.85 test --workspace --all-features

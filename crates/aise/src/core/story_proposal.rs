@@ -1,6 +1,7 @@
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::{CharacterId, FactId};
 use crate::domain::memory::MemoryKind;
-use crate::domain::narrative::EventKind;
+use crate::domain::narrative::{EventKind, StorySummary};
+use crate::domain::story_state::CurrentScene;
 use serde::{Deserialize, Deserializer, Serialize};
 
 fn deserialize_null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
@@ -24,7 +25,11 @@ pub struct StoryProposal {
     #[serde(default, deserialize_with = "deserialize_null_as_default")]
     pub memory_changes: Vec<ProposedMemoryChange>,
     #[serde(default)]
-    pub summary_delta: Option<String>,
+    pub scene_change: Option<CurrentScene>,
+    #[serde(default)]
+    pub constraint_changes: Vec<String>,
+    #[serde(default)]
+    pub summary_change: Option<StorySummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,7 +58,29 @@ pub struct ProposedAffinityDelta {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProposedWorldChange {
     #[serde(default, deserialize_with = "deserialize_null_as_default")]
-    pub add_facts: Vec<String>,
+    pub add_facts: Vec<ProposedWorldFact>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProposedWorldFact {
+    pub text: String,
+    pub evidence: Vec<WorldFactEvidenceRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorldFactEvidenceRef {
+    SnapshotFact(FactId),
+    ProposedEvent { event_index: u32 },
+}
+
+impl WorldFactEvidenceRef {
+    pub fn as_str(&self) -> String {
+        match self {
+            WorldFactEvidenceRef::SnapshotFact(fact_id) => format!("snapshot_fact:{}", fact_id.as_str()),
+            WorldFactEvidenceRef::ProposedEvent { event_index } => format!("proposed_event:{event_index}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

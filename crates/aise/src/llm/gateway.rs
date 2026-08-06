@@ -1,12 +1,11 @@
-use crate::config::{LlmConfig, TraceContent};
+use crate::config::{LlmConfig, TraceContentPolicy};
 use crate::core::turn_context::TurnLlmCallScope;
+use crate::core::turn_contract::{LlmBudgetReservation, LlmCallPurpose, LlmCallStatus, LlmCallUsage, UsageAccuracy};
+use crate::core::turn_error::TurnExecutionError;
 use crate::core::turn_trace::{
     LlmCallContent, LlmCallData, MAX_LLM_CONTENT_CHARS, MAX_LLM_RESPONSE_CHARS, MessageData, SpanPayload, truncate,
 };
-use crate::error::AiseError;
-use crate::llm::accounting::{
-    FinishReason, LlmCompletion, LlmTokenUsage, TokenAccountant, UsageAccuracy, estimate_tokens,
-};
+use crate::llm::accounting::{FinishReason, LlmCompletion, TokenAccountant, estimate_tokens};
 use crate::llm::error::LlmError;
 use crate::llm::limiter::LlmLimiter;
 use crate::llm::message::{CompletionRequest, CompletionSpec, EmbeddingOutput, EmbeddingRequest, Role};
@@ -23,8 +22,15 @@ pub struct LlmGateway {
 }
 
 impl LlmGateway {
-    pub fn new(provider: Arc<dyn LlmProvider>, config: LlmConfig) -> Result<Self, AiseError> {
-        config.validate()?;
+    pub fn new(provider: Arc<dyn LlmProvider>, config: LlmConfig) -> Result<Self, TurnExecutionError> {
+        config.validate().map_err(|error| {
+            crate::core::turn_error::TurnExecutionError::new(
+                crate::core::turn_error::TurnFailureKind::InvalidRequest,
+                "invalid_llm_config",
+                None,
+                error.to_string(),
+            )
+        })?;
         let limiter = LlmLimiter::new(&config)?;
         let accountant = TokenAccountant::new(&config, provider.provider_name());
         Ok(Self {
@@ -35,7 +41,12 @@ impl LlmGateway {
         })
     }
 
-    pub async fn complete(&self, scope: TurnLlmCallScope<'_>, spec: CompletionSpec) -> Result<LlmCompletion, LlmError> {
+    pub async fn complete(
+        &self,
+        mut scope: TurnLlmCallScope<'_>,
+        spec: CompletionSpec,
+        reservation: LlmBudgetReservation,
+    ) -> Result<LlmCompletion, LlmError> {
         let request = CompletionRequest {
             model: self.config.model.clone(),
             messages: spec.messages,
@@ -43,13 +54,14 @@ impl LlmGateway {
             temperature: self.config.temperature,
             purpose: spec.purpose,
         };
-        self.execute_call(scope, request, spec.purpose, false, None).await
+        self.execute_call(&mut scope, request, false, None, reservation).await
     }
 
     pub async fn complete_stream(
         &self,
         scope: TurnLlmCallScope<'_>,
         spec: CompletionSpec,
+        reservation: LlmBudgetReservation,
         sink: DeltaSink,
     ) -> Result<LlmCompletion, LlmError> {
         let request = CompletionRequest {
@@ -59,23 +71,47 @@ impl LlmGateway {
             temperature: self.config.temperature,
             purpose: spec.purpose,
         };
-        self.execute_call(scope, request, spec.purpose, true, Some(sink)).await
+        self.execute_call_owned(scope, request, true, Some(sink), reservation).await
     }
 
-    pub async fn embed(&self, mut scope: TurnLlmCallScope<'_>, input: String) -> Result<EmbeddingOutput, LlmError> {
+    pub async fn embed(
+        &self,
+        mut scope: TurnLlmCallScope<'_>,
+        inputs: Vec<String>,
+        reservation: LlmBudgetReservation,
+    ) -> Result<EmbeddingOutput, LlmError> {
         if scope.cancellation().is_cancelled() {
+            scope.release_llm(reservation);
             return Err(LlmError::Cancelled);
+        }
+        if inputs.len() > self.config.protocol.max_embedding_items {
+            scope.release_llm(reservation);
+            return Err(LlmError::ResponseLimitExceeded {
+                limit: crate::llm::error::LlmResponseLimit::EmbeddingItems,
+            });
         }
         let call_started = Instant::now();
         if call_started >= scope.deadline() {
+            scope.release_llm(reservation);
             return Err(LlmError::TurnDeadlineExceeded);
         }
-        let estimated_input = estimate_tokens(&input);
-        let reservation = scope.reserve_llm(estimated_input, 0).map_err(budget_to_llm)?;
-        self.limiter
-            .acquire_quota(estimated_input, 0, scope.deadline(), scope.cancellation())
-            .await?;
-        let permit = self.limiter.acquire_permit(scope.deadline(), scope.cancellation()).await?;
+        let estimated_input: u64 = inputs.iter().map(|input| estimate_tokens(input)).sum();
+        let max_output = 0u64;
+        if let Err(error) = self
+            .limiter
+            .acquire_quota(estimated_input, max_output, scope.deadline(), scope.cancellation())
+            .await
+        {
+            scope.release_llm(reservation);
+            return Err(error);
+        }
+        let permit = match self.limiter.acquire_permit(scope.deadline(), scope.cancellation()).await {
+            Ok(permit) => permit,
+            Err(error) => {
+                scope.release_llm(reservation);
+                return Err(error);
+            }
+        };
         let span = scope.begin_llm_span();
         let queue_wait_ms = call_started.elapsed().as_millis() as u64;
 
@@ -96,16 +132,20 @@ impl LlmGateway {
         );
         let request = EmbeddingRequest {
             model: self.config.model.clone(),
-            input,
+            inputs,
         };
         let provider_outcome = {
             let call = self.provider.embed(&request);
             async {
                 tokio::select! {
-                    result = call => result,
+                    result = call => result.map_err(LlmError::from),
                     _ = scope.cancellation().token().cancelled() => Err(LlmError::Cancelled),
                     _ = tokio::time::sleep_until(provider_deadline.into()) => {
-                        if hits_turn_deadline { Err(LlmError::TurnDeadlineExceeded) } else { Err(LlmError::ProviderTimeout) }
+                        if hits_turn_deadline {
+                            Err(LlmError::TurnDeadlineExceeded)
+                        } else {
+                            Err(LlmError::ProviderTimeout)
+                        }
                     }
                 }
             }
@@ -129,8 +169,33 @@ impl LlmGateway {
                 (None, Some(error))
             }
         };
-        let settle = scope.settle_llm(estimated_input, 0);
-        let status = if output.is_some() { "ok" } else { "error" };
+        let usage =
+            output
+                .as_ref()
+                .and_then(|output| output.usage.clone())
+                .unwrap_or(crate::llm::accounting::LlmTokenUsage {
+                    input_tokens: estimated_input,
+                    cached_input_tokens: None,
+                    output_tokens: 0,
+                    reasoning_tokens: None,
+                    total_tokens: estimated_input,
+                    accuracy: UsageAccuracy::Estimated,
+                });
+        let charge_value = output
+            .as_ref()
+            .and_then(|output| output.charge.as_ref())
+            .and_then(|charge| serde_json::to_value(charge).ok());
+        let call_usage = self.usage_to_call_usage(LlmCallPurpose::Embedding, &usage, &charge_value, None);
+        let settle = scope.settle_llm(reservation, call_usage);
+        let status = if let Some(error) = &provider_error {
+            llm_status_from_error(error)
+        } else if settle.is_err() {
+            LlmCallStatus::TokenBudgetExceeded
+        } else if output.is_some() {
+            LlmCallStatus::Succeeded
+        } else {
+            LlmCallStatus::ProviderRejected
+        };
         let error_kind = provider_error.as_ref().map(|error| error.kind().to_owned());
         let payload = SpanPayload::LlmCall(Box::new(LlmCallData {
             provider: self.provider.provider_name().to_owned(),
@@ -141,53 +206,106 @@ impl LlmGateway {
             queue_wait_ms,
             provider_latency_ms,
             total_latency_ms,
-            input_tokens: estimated_input,
-            cached_input_tokens: None,
+            input_tokens: usage.input_tokens,
+            cached_input_tokens: usage.cached_input_tokens,
             output_tokens: 0,
             reasoning_tokens: None,
-            usage_accuracy: UsageAccuracy::Estimated.as_str().to_owned(),
+            usage_accuracy: usage.accuracy.as_str().to_owned(),
             finish_reason: None,
-            charge: None,
-            status: status.to_owned(),
+            charge: charge_value,
+            status: status.as_str().to_owned(),
             error_kind,
             content: None,
         }));
         scope.end_llm_span(span, &payload);
         drop(permit);
-        let _ = reservation;
         settle.map_err(budget_to_llm)?;
         match output {
             Some(output) => Ok(output),
-            None => Err(provider_error.unwrap_or_else(|| LlmError::Protocol("provider returned no embedding".into()))),
+            None => Err(provider_error.unwrap_or(LlmError::Protocol {
+                kind: crate::llm::error::LlmProtocolErrorKind::Unsupported,
+            })),
         }
     }
 
     async fn execute_call(
         &self,
-        mut scope: TurnLlmCallScope<'_>,
+        scope: &mut TurnLlmCallScope<'_>,
         request: CompletionRequest,
-        purpose: &'static str,
         stream: bool,
         sink: Option<DeltaSink>,
+        reservation: LlmBudgetReservation,
     ) -> Result<LlmCompletion, LlmError> {
         if stream && sink.is_none() {
-            return Err(LlmError::Protocol("stream requires a delta sink".into()));
+            return Err(LlmError::Protocol {
+                kind: crate::llm::error::LlmProtocolErrorKind::InvalidSseLine,
+            });
         }
+        self.run_call(scope, request, stream, sink, reservation).await
+    }
+
+    async fn execute_call_owned(
+        &self,
+        mut scope: TurnLlmCallScope<'_>,
+        request: CompletionRequest,
+        stream: bool,
+        sink: Option<DeltaSink>,
+        reservation: LlmBudgetReservation,
+    ) -> Result<LlmCompletion, LlmError> {
+        self.run_call(&mut scope, request, stream, sink, reservation).await
+    }
+
+    async fn run_call(
+        &self,
+        scope: &mut TurnLlmCallScope<'_>,
+        request: CompletionRequest,
+        stream: bool,
+        sink: Option<DeltaSink>,
+        reservation: LlmBudgetReservation,
+    ) -> Result<LlmCompletion, LlmError> {
+        let span = scope.begin_llm_span();
+        let call_started = Instant::now();
+
         if scope.cancellation().is_cancelled() {
+            let payload = self.early_call_payload(
+                &request,
+                stream,
+                LlmCallStatus::Cancelled,
+                Some(LlmError::Cancelled.kind()),
+                0,
+                0,
+            );
+            scope.end_llm_span(span, &payload);
+            scope.release_llm(reservation);
             return Err(LlmError::Cancelled);
         }
-        let call_started = Instant::now();
         if call_started >= scope.deadline() {
+            let payload = self.early_call_payload(
+                &request,
+                stream,
+                LlmCallStatus::TurnDeadlineExceeded,
+                Some(LlmError::TurnDeadlineExceeded.kind()),
+                0,
+                0,
+            );
+            scope.end_llm_span(span, &payload);
+            scope.release_llm(reservation);
             return Err(LlmError::TurnDeadlineExceeded);
         }
 
         let estimated_input = TokenAccountant::estimate_input_tokens(&request.messages);
         let max_output = u64::from(request.max_tokens);
-        let reservation = scope.reserve_llm(estimated_input, max_output).map_err(budget_to_llm)?;
-
-        self.limiter
+        if let Err(error) = self
+            .limiter
             .acquire_quota(estimated_input, max_output, scope.deadline(), scope.cancellation())
-            .await?;
+            .await
+        {
+            let payload =
+                self.early_call_payload(&request, stream, llm_status_from_error(&error), Some(error.kind()), 0, 0);
+            scope.end_llm_span(span, &payload);
+            scope.release_llm(reservation);
+            return Err(error);
+        }
 
         let permit = match self.limiter.acquire_permit(scope.deadline(), scope.cancellation()).await {
             Ok(permit) => permit,
@@ -196,16 +314,25 @@ impl LlmGateway {
                     story_id = %scope.story_id(),
                     turn_id = %scope.turn_id(),
                     stage = %scope.stage().as_str(),
-                    purpose = purpose,
+                    purpose = request.purpose.as_str(),
                     queue_wait_ms = call_started.elapsed().as_millis(),
                     error_kind = error.kind(),
                     error = %error,
                     "llm call left the queue without reaching the provider"
                 );
+                let payload = self.early_call_payload(
+                    &request,
+                    stream,
+                    llm_status_from_error(&error),
+                    Some(error.kind()),
+                    0,
+                    call_started.elapsed().as_millis() as u64,
+                );
+                scope.end_llm_span(span, &payload);
+                scope.release_llm(reservation);
                 return Err(error);
             }
         };
-        let span = scope.begin_llm_span();
         let queue_wait_ms = call_started.elapsed().as_millis() as u64;
 
         let turn_deadline = scope.deadline();
@@ -220,19 +347,23 @@ impl LlmGateway {
             story_id = %scope.story_id(),
             turn_id = %scope.turn_id(),
             stage = %scope.stage().as_str(),
-            purpose = purpose,
+            purpose = request.purpose.as_str(),
             provider = %self.provider.provider_name(),
             model = %self.config.model,
         );
-        let provider_outcome = match stream {
+        let provider_outcome: Result<LlmCompletion, LlmError> = match stream {
             false => {
                 let call = self.provider.complete(&request);
                 async {
                     tokio::select! {
-                        result = call => result,
+                        result = call => result.map_err(LlmError::from),
                         _ = scope.cancellation().token().cancelled() => Err(LlmError::Cancelled),
                         _ = tokio::time::sleep_until(provider_deadline.into()) => {
-                            if hits_turn_deadline { Err(LlmError::TurnDeadlineExceeded) } else { Err(LlmError::ProviderTimeout) }
+                            if hits_turn_deadline {
+                                Err(LlmError::TurnDeadlineExceeded)
+                            } else {
+                                Err(LlmError::ProviderTimeout)
+                            }
                         }
                     }
                 }
@@ -243,10 +374,14 @@ impl LlmGateway {
                 let call = self.provider.complete_stream(&request, sink.expect("stream sink checked"));
                 async {
                     tokio::select! {
-                        result = call => result,
+                        result = call => result.map_err(LlmError::from),
                         _ = scope.cancellation().token().cancelled() => Err(LlmError::Cancelled),
                         _ = tokio::time::sleep_until(provider_deadline.into()) => {
-                            if hits_turn_deadline { Err(LlmError::TurnDeadlineExceeded) } else { Err(LlmError::ProviderTimeout) }
+                            if hits_turn_deadline {
+                                Err(LlmError::TurnDeadlineExceeded)
+                            } else {
+                                Err(LlmError::ProviderTimeout)
+                            }
                         }
                     }
                 }
@@ -267,7 +402,9 @@ impl LlmGateway {
                     completion.charge = self.accountant.charge(usage);
                 }
                 if completion.text.trim().is_empty() {
-                    let error = LlmError::Protocol(empty_completion_message(completion.finish_reason.as_ref()));
+                    let error = LlmError::Protocol {
+                        kind: crate::llm::error::LlmProtocolErrorKind::EmptyChoices,
+                    };
                     (None, Some(error))
                 } else {
                     (Some(completion), None)
@@ -278,7 +415,7 @@ impl LlmGateway {
                     story_id = %scope.story_id(),
                     turn_id = %scope.turn_id(),
                     stage = %scope.stage().as_str(),
-                    purpose = purpose,
+                    purpose = request.purpose.as_str(),
                     error_kind = error.kind(),
                     error = %error,
                     "llm call failed"
@@ -291,19 +428,26 @@ impl LlmGateway {
             .as_ref()
             .and_then(|c| c.usage.clone())
             .unwrap_or_else(|| estimated_usage("", estimated_input));
-        let settle = scope.settle_llm(usage.input_tokens, usage.output_tokens);
-        let usage_accuracy = usage.accuracy.as_str().to_owned();
         let charge_value = completion
             .as_ref()
             .and_then(|c| c.charge.as_ref())
             .and_then(|c| serde_json::to_value(c).ok());
-        let status = if completion.is_some() { "ok" } else { "error" };
+        let finish_reason_owned = completion.as_ref().and_then(|c| c.finish_reason.clone());
+        let finish_reason_string = finish_reason_owned.as_ref().map(|reason| reason.as_str().to_owned());
+        let call_usage = self.usage_to_call_usage(request.purpose, &usage, &charge_value, finish_reason_owned);
+        let settle = scope.settle_llm(reservation, call_usage);
+        let usage_accuracy = usage.accuracy.as_str().to_owned();
+        let status = if let Some(error) = &provider_error {
+            llm_status_from_error(error)
+        } else if settle.is_err() {
+            LlmCallStatus::TokenBudgetExceeded
+        } else if completion.is_some() {
+            LlmCallStatus::Succeeded
+        } else {
+            LlmCallStatus::ProviderRejected
+        };
         let error_kind = provider_error.as_ref().map(|error| error.kind().to_owned());
-        let finish_reason = completion
-            .as_ref()
-            .and_then(|c| c.finish_reason.as_ref())
-            .map(|reason| reason.as_str().to_owned());
-        let content = if self.config.trace_content == TraceContent::Content {
+        let content = if self.config.trace_content == TraceContentPolicy::RedactedContent {
             Some(LlmCallContent {
                 messages: request
                     .messages
@@ -324,7 +468,7 @@ impl LlmGateway {
         let payload = SpanPayload::LlmCall(Box::new(LlmCallData {
             provider: self.provider.provider_name().to_owned(),
             model: request.model.clone(),
-            purpose: purpose.to_owned(),
+            purpose: request.purpose.as_str().to_owned(),
             stream,
             attempt: 1,
             queue_wait_ms,
@@ -335,33 +479,84 @@ impl LlmGateway {
             output_tokens: usage.output_tokens,
             reasoning_tokens: usage.reasoning_tokens,
             usage_accuracy,
-            finish_reason,
+            finish_reason: finish_reason_string,
             charge: charge_value,
-            status: status.to_owned(),
+            status: status.as_str().to_owned(),
             error_kind,
             content,
         }));
         scope.end_llm_span(span, &payload);
         drop(permit);
-        let _ = reservation;
         settle.map_err(budget_to_llm)?;
         match completion {
             Some(completion) => Ok(completion),
-            None => Err(provider_error.unwrap_or_else(|| LlmError::Protocol("provider returned no result".into()))),
+            None => Err(provider_error.unwrap_or(LlmError::Protocol {
+                kind: crate::llm::error::LlmProtocolErrorKind::Unsupported,
+            })),
+        }
+    }
+
+    fn early_call_payload(
+        &self,
+        request: &CompletionRequest,
+        stream: bool,
+        status: LlmCallStatus,
+        error_kind: Option<&'static str>,
+        estimated_input: u64,
+        queue_wait_ms: u64,
+    ) -> SpanPayload {
+        SpanPayload::LlmCall(Box::new(LlmCallData {
+            provider: self.provider.provider_name().to_owned(),
+            model: self.config.model.clone(),
+            purpose: request.purpose.as_str().to_owned(),
+            stream,
+            attempt: 1,
+            queue_wait_ms,
+            provider_latency_ms: 0,
+            total_latency_ms: 0,
+            input_tokens: estimated_input,
+            cached_input_tokens: None,
+            output_tokens: 0,
+            reasoning_tokens: None,
+            usage_accuracy: UsageAccuracy::Estimated.as_str().to_owned(),
+            finish_reason: None,
+            charge: None,
+            status: status.as_str().to_owned(),
+            error_kind: error_kind.map(str::to_owned),
+            content: None,
+        }))
+    }
+
+    fn usage_to_call_usage(
+        &self,
+        purpose: LlmCallPurpose,
+        usage: &crate::llm::accounting::LlmTokenUsage,
+        charge_value: &Option<serde_json::Value>,
+        finish_reason: Option<FinishReason>,
+    ) -> LlmCallUsage {
+        let charge = charge_value
+            .as_ref()
+            .and_then(|value| serde_json::from_value(value.clone()).ok());
+        LlmCallUsage {
+            call_id: crate::core::turn_contract::LlmCallId::new(),
+            purpose,
+            provider: self.provider.provider_name().to_owned(),
+            model: self.config.model.clone(),
+            input_tokens: usage.input_tokens,
+            cached_input_tokens: usage.cached_input_tokens,
+            output_tokens: usage.output_tokens,
+            total_tokens: usage.total_tokens,
+            accuracy: usage.accuracy,
+            pricing_version: None,
+            charge,
+            finish_reason,
         }
     }
 }
 
-fn empty_completion_message(finish_reason: Option<&FinishReason>) -> String {
-    match finish_reason {
-        Some(reason) => format!("provider returned an empty completion (finish_reason={})", reason.as_str()),
-        None => "provider returned an empty completion".into(),
-    }
-}
-
-fn estimated_usage(text: &str, estimated_input: u64) -> LlmTokenUsage {
+fn estimated_usage(text: &str, estimated_input: u64) -> crate::llm::accounting::LlmTokenUsage {
     let output = estimate_tokens(text);
-    LlmTokenUsage {
+    crate::llm::accounting::LlmTokenUsage {
         input_tokens: estimated_input,
         cached_input_tokens: None,
         output_tokens: output,
@@ -371,12 +566,32 @@ fn estimated_usage(text: &str, estimated_input: u64) -> LlmTokenUsage {
     }
 }
 
-fn budget_to_llm(error: AiseError) -> LlmError {
+fn budget_to_llm(error: TurnExecutionError) -> LlmError {
+    match error.kind() {
+        crate::core::turn_error::TurnFailureKind::Cancelled => LlmError::Cancelled,
+        crate::core::turn_error::TurnFailureKind::DeadlineExceeded => LlmError::TurnDeadlineExceeded,
+        crate::core::turn_error::TurnFailureKind::TokenBudgetExceeded => {
+            LlmError::TokenBudgetExceeded(error.to_string())
+        }
+        _ => LlmError::Protocol {
+            kind: crate::llm::error::LlmProtocolErrorKind::Unsupported,
+        },
+    }
+}
+
+fn llm_status_from_error(error: &LlmError) -> LlmCallStatus {
     match error {
-        AiseError::TokenBudgetExceeded(message) => LlmError::TokenBudgetExceeded(message),
-        AiseError::Cancelled => LlmError::Cancelled,
-        AiseError::TurnDeadlineExceeded => LlmError::TurnDeadlineExceeded,
-        other => LlmError::Protocol(format!("turn budget error: {other}")),
+        LlmError::Cancelled => LlmCallStatus::Cancelled,
+        LlmError::TurnDeadlineExceeded => LlmCallStatus::TurnDeadlineExceeded,
+        LlmError::ProviderTimeout => LlmCallStatus::ProviderTimeout,
+        LlmError::QueueTimeout => LlmCallStatus::QueueTimeout,
+        LlmError::RateLimited { .. } => LlmCallStatus::RateLimited,
+        LlmError::TokenBudgetExceeded(_) => LlmCallStatus::TokenBudgetExceeded,
+        LlmError::ProviderRejected { .. } => LlmCallStatus::ProviderRejected,
+        LlmError::Transport { .. } => LlmCallStatus::TransportFailed,
+        LlmError::Protocol { .. } => LlmCallStatus::ProtocolFailed,
+        LlmError::ResponseLimitExceeded { .. } => LlmCallStatus::ResponseLimitExceeded,
+        LlmError::EmbeddingUnsupported => LlmCallStatus::ProtocolFailed,
     }
 }
 

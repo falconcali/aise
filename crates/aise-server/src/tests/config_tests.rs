@@ -48,6 +48,53 @@ fn thinking_env_override_parses_modes() {
         "AISE_LLM_THINKING" => Some("disabled".to_string()),
         _ => None,
     };
-    config.apply_env_overrides_with(get_env);
+    config.apply_env_overrides_with(get_env).unwrap();
     assert_eq!(config.aise.llm.thinking, Some(ThinkingMode::Disabled));
+}
+
+#[test]
+fn invalid_toml_fails_load() {
+    let path = PathBuf::from("config/aise_config.toml");
+    let result =
+        toml::from_str::<ServerConfig>("listen_addr = \"not-an-address\"\nmax_sessions = \n").map_err(|source| {
+            ConfigError::Parse {
+                path: path.clone(),
+                source: Box::new(source),
+            }
+        });
+    assert!(result.is_err(), "invalid TOML must fail the ServerConfig::load parse step");
+}
+
+#[test]
+fn invalid_env_override_fails_load() {
+    let mut config = ServerConfig::default();
+    let get_env = |name: &str| match name {
+        "AISE_LISTEN_ADDR" => Some("not-an-address".to_string()),
+        _ => None,
+    };
+    let result = config.apply_env_overrides_with(get_env);
+    assert!(
+        result.is_err(),
+        "invalid environment override must fail the ServerConfig::load env step"
+    );
+}
+
+#[test]
+fn env_override_applies_on_load() {
+    let mut config = ServerConfig::default();
+    let get_env = |name: &str| match name {
+        "AISE_MAX_SESSIONS" => Some("12".to_string()),
+        _ => None,
+    };
+    config.apply_env_overrides_with(get_env).unwrap();
+    assert_eq!(config.max_sessions, 12);
+}
+
+#[test]
+fn zero_max_sessions_fails_validate() {
+    let config = ServerConfig {
+        max_sessions: 0,
+        ..ServerConfig::default()
+    };
+    assert!(config.validate().is_err(), "zero capacities must fail validate");
 }

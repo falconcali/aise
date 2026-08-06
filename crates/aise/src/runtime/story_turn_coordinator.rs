@@ -1,7 +1,7 @@
 use crate::config::CoordinatorConfig;
 use crate::core::turn_contract::TurnCancellation;
+use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::domain::ids::StoryId;
-use crate::error::AiseError;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -98,19 +98,19 @@ impl StoryTurnCoordinator {
         story_id: &StoryId,
         deadline: Instant,
         cancellation: &TurnCancellation,
-    ) -> Result<StoryPermit, AiseError> {
+    ) -> Result<StoryPermit, TurnExecutionError> {
         if self.shutdown.is_cancelled() {
-            return Err(AiseError::Backpressure("story coordinator is shutting down".into()));
+            return Err(backpressure("story coordinator is shutting down"));
         }
         let semaphore = {
             let mut map = self.stories.lock().unwrap();
             self.reclaim(&mut map, Instant::now());
             if self.total_waiters.load(Ordering::Relaxed) >= self.max_total_waiters {
-                return Err(AiseError::Backpressure("story coordinator waiter capacity exceeded".into()));
+                return Err(backpressure("story coordinator waiter capacity exceeded"));
             }
             let entry = map.entry(story_id.clone()).or_insert_with(StoryEntry::new);
             if entry.waiters >= self.max_waiters_per_story {
-                return Err(AiseError::Backpressure("story waiter capacity exceeded".into()));
+                return Err(backpressure("story waiter capacity exceeded"));
             }
             entry.waiters += 1;
             self.total_waiters.fetch_add(1, Ordering::Relaxed);
@@ -146,20 +146,20 @@ impl StoryTurnCoordinator {
         semaphore: Arc<Semaphore>,
         deadline: Instant,
         cancellation: &TurnCancellation,
-    ) -> Result<OwnedSemaphorePermit, AiseError> {
+    ) -> Result<OwnedSemaphorePermit, TurnExecutionError> {
         if cancellation.is_cancelled() {
-            return Err(AiseError::Cancelled);
+            return Err(TurnExecutionError::cancelled(None));
         }
         if Instant::now() >= deadline {
-            return Err(AiseError::TurnDeadlineExceeded);
+            return Err(TurnExecutionError::deadline_exceeded(None));
         }
         tokio::select! {
             permit = semaphore.acquire_owned() => {
-                permit.map_err(|_| AiseError::Internal("story permit semaphore closed".into()))
+                permit.map_err(|_| invariant("story permit semaphore closed"))
             }
-            _ = cancellation.token().cancelled() => Err(AiseError::Cancelled),
-            _ = self.shutdown.cancelled() => Err(AiseError::Backpressure("story coordinator is shutting down".into())),
-            _ = tokio::time::sleep_until(deadline.into()) => Err(AiseError::TurnDeadlineExceeded),
+            _ = cancellation.token().cancelled() => Err(TurnExecutionError::cancelled(None)),
+            _ = self.shutdown.cancelled() => Err(backpressure("story coordinator is shutting down")),
+            _ = tokio::time::sleep_until(deadline.into()) => Err(TurnExecutionError::deadline_exceeded(None)),
         }
     }
 
@@ -181,4 +181,12 @@ impl StoryTurnCoordinator {
             None => true,
         });
     }
+}
+
+fn backpressure(message: &'static str) -> TurnExecutionError {
+    TurnExecutionError::new(TurnFailureKind::Backpressure, "backpressure", None, message)
+}
+
+fn invariant(message: &'static str) -> TurnExecutionError {
+    TurnExecutionError::new(TurnFailureKind::InvariantViolation, "coordinator_invariant", None, message)
 }

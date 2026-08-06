@@ -1,9 +1,10 @@
 use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_contract::LlmCallPurpose;
 use crate::core::turn_data::CharacterThought;
+use crate::core::turn_error::TurnExecutionError;
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::core::turn_trace::truncate;
 use crate::domain::ids::CharacterId;
-use crate::error::AiseError;
 use crate::llm::gateway::LlmGateway;
 use crate::llm::message::CompletionSpec;
 use crate::prompt::ContextMerger;
@@ -46,14 +47,14 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
         TurnStage::CharacterThink
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
+    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let baseline = ctx
             .baseline()
-            .ok_or_else(|| AiseError::InvariantViolation("baseline context not set before character think".into()))?
+            .ok_or_else(|| invariant("baseline context not set before character think"))?
             .clone();
         let plan = ctx
             .plan()
-            .ok_or_else(|| AiseError::InvariantViolation("writer plan not set before character think".into()))?
+            .ok_or_else(|| invariant("writer plan not set before character think"))?
             .clone();
         let player_input = ctx.player_input().to_string();
         let mut thoughts = Vec::with_capacity(plan.character_requests.len());
@@ -64,10 +65,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                 .find(|candidate| &candidate.id == character_id)
                 .cloned()
                 .ok_or_else(|| {
-                    AiseError::InvariantViolation(format!(
-                        "writer plan requests unknown character {}",
-                        character_id.as_str()
-                    ))
+                    invariant(format!("writer plan requests unknown character {}", character_id.as_str()))
                 })?;
             let messages = self
                 .merger
@@ -76,19 +74,21 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
             let spec = CompletionSpec {
                 messages,
                 max_output_tokens: max_output,
-                purpose: "character_think",
+                purpose: LlmCallPurpose::CharacterThink,
             };
-            let scope = ctx.llm_call_scope(TurnStage::CharacterThink);
-            let completion = self.gateway.complete(scope, spec).await?;
+            let mut scope = ctx.llm_call_scope(TurnStage::CharacterThink);
+            let estimated_input = crate::llm::accounting::TokenAccountant::estimate_input_tokens(&spec.messages);
+            let reservation = scope.reserve_llm(estimated_input, u64::from(max_output))?;
+            let completion = self.gateway.complete(scope, spec, reservation).await?;
             thoughts.push(parse_thought(&completion.text, character_id.clone())?);
         }
         ctx.set_character_thoughts(thoughts)
     }
 }
 
-fn parse_thought(text: &str, character_id: CharacterId) -> Result<CharacterThought, AiseError> {
+fn parse_thought(text: &str, character_id: CharacterId) -> Result<CharacterThought, TurnExecutionError> {
     let output: ThoughtOutput = serde_json::from_str(text).map_err(|error| {
-        AiseError::Internal(format!(
+        TurnExecutionError::invariant(format!(
             "character thought output is not valid JSON: {error}; raw_output={}",
             truncate(text, MAX_PARSE_ERROR_PREVIEW_CHARS)
         ))
@@ -104,6 +104,10 @@ fn parse_thought(text: &str, character_id: CharacterId) -> Result<CharacterThoug
 
 fn bound_field(value: &str) -> String {
     value.chars().take(MAX_THOUGHT_FIELD_CHARS).collect()
+}
+
+fn invariant(message: impl Into<String>) -> TurnExecutionError {
+    TurnExecutionError::invariant(message)
 }
 
 #[cfg(test)]

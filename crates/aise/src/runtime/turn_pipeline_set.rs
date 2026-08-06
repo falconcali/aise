@@ -1,5 +1,5 @@
+use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::error::AiseError;
 
 pub struct TurnPipelineSet {
     initializer: Box<dyn TurnExecutionPipeline>,
@@ -114,7 +114,7 @@ impl TurnPipelineSetBuilder {
         self
     }
 
-    pub fn build(self) -> Result<TurnPipelineSet, AiseError> {
+    pub fn build(self) -> Result<TurnPipelineSet, TurnExecutionError> {
         let initializer = bind("initializer", self.initializer, TurnStage::TurnInitializer)?;
         let baseline_builder = bind("baseline_builder", self.baseline_builder, TurnStage::BaselineBuilder)?;
         let writer_planner = bind("writer_planner", self.writer_planner, TurnStage::WriterPlanner)?;
@@ -142,14 +142,18 @@ fn bind(
     field: &'static str,
     pipeline: Option<Box<dyn TurnExecutionPipeline>>,
     expected: TurnStage,
-) -> Result<Box<dyn TurnExecutionPipeline>, AiseError> {
-    let pipeline = pipeline.ok_or_else(|| AiseError::InvariantViolation(format!("pipeline set is missing {field}")))?;
+) -> Result<Box<dyn TurnExecutionPipeline>, TurnExecutionError> {
+    let pipeline = pipeline.ok_or_else(|| invariant(format!("pipeline set is missing {field}")))?;
     let actual = pipeline.stage();
     if actual != expected {
-        return Err(AiseError::InvariantViolation(format!(
+        return Err(invariant(format!(
             "pipeline field {field} bound to stage {}, expected {expected}",
             actual.as_str()
         )));
     }
     Ok(pipeline)
+}
+
+fn invariant(message: String) -> TurnExecutionError {
+    TurnExecutionError::new(TurnFailureKind::InvariantViolation, "invalid_pipeline_set", None, message)
 }

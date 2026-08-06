@@ -1,62 +1,6 @@
 use crate::config::LlmConfig;
+pub use crate::core::turn_contract::{FinishReason, LlmCharge, LlmTokenUsage, UsageAccuracy};
 use crate::llm::message::ChatMessage;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UsageAccuracy {
-    Exact,
-    Estimated,
-}
-
-impl UsageAccuracy {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            UsageAccuracy::Exact => "exact",
-            UsageAccuracy::Estimated => "estimated",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct LlmTokenUsage {
-    pub input_tokens: u64,
-    pub cached_input_tokens: Option<u64>,
-    pub output_tokens: u64,
-    pub reasoning_tokens: Option<u64>,
-    pub total_tokens: u64,
-    pub accuracy: UsageAccuracy,
-}
-
-#[derive(Debug, Clone)]
-pub enum FinishReason {
-    Stop,
-    Length,
-    ContentFilter,
-    ToolCalls,
-    Other(String),
-}
-
-impl FinishReason {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            FinishReason::Stop => "stop",
-            FinishReason::Length => "length",
-            FinishReason::ContentFilter => "content_filter",
-            FinishReason::ToolCalls => "tool_calls",
-            FinishReason::Other(_) => "other",
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LlmCharge {
-    pub provider: String,
-    pub model: String,
-    pub input_tokens: u64,
-    pub cached_input_tokens: u64,
-    pub output_tokens: u64,
-    pub amount_minor: i64,
-    pub price_version: String,
-}
 
 #[derive(Debug, Clone)]
 pub struct LlmCompletion {

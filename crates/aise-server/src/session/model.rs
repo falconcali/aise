@@ -10,6 +10,14 @@ impl SessionId {
         Self(id.into())
     }
 
+    pub fn try_new(id: impl Into<String>) -> Result<Self, super::SessionError> {
+        let value = id.into();
+        if value.trim().is_empty() {
+            return Err(super::SessionError::InvalidId);
+        }
+        Ok(Self(value))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }

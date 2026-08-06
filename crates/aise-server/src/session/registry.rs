@@ -18,18 +18,30 @@ impl SessionRegistry {
         })
     }
 
-    pub async fn create(&self, name: String) -> Result<Arc<Session>, super::SessionError> {
+    pub async fn create(&self, name: String, story_id: StoryId) -> Result<Arc<Session>, super::SessionError> {
         let mut map = self.sessions.lock().await;
         if map.len() >= self.capacity {
             return Err(super::SessionError::QuotaExceeded(self.capacity));
         }
         let id = SessionId::new(Uuid::new_v4().to_string());
-
-        let story_id = StoryId::from(Uuid::new_v4().to_string());
         let created_at = now_millis();
         let session = Session::new(id, name, story_id, created_at);
         map.insert(session.id.clone(), session.clone());
         Ok(session)
+    }
+
+    pub async fn bind_story(&self, session_id: &SessionId, story_id: StoryId) -> bool {
+        let mut map = self.sessions.lock().await;
+        let rebound = map
+            .get(session_id)
+            .map(|session| Session::new(session.id.clone(), session.name.clone(), story_id, session.created_at));
+        match rebound {
+            Some(rebound) => {
+                map.insert(session_id.clone(), rebound);
+                true
+            }
+            None => false,
+        }
     }
 
     pub async fn get(&self, id: &SessionId) -> Option<Arc<Session>> {

@@ -1,75 +1,101 @@
-use crate::core::turn_contract::StoryRevision;
+use crate::config::TurnContentLimitsConfig;
 use crate::domain::character::CharacterState;
-use crate::domain::ids::{CharacterId, StoryId};
-use crate::domain::memory::MemoryEntry;
-use crate::domain::narrative::StoryTurn;
-use crate::domain::world::WorldState;
+use crate::domain::ids::CharacterId;
+use crate::domain::story_state::StoryConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy)]
 pub struct SnapshotLimits {
-    pub max_recent_turns: usize,
-    pub max_memories: usize,
+    max_story_instructions_bytes: usize,
+    max_story_config_bytes: usize,
+    max_scene_bytes: usize,
+    max_summary_bytes: usize,
+    max_constraints: usize,
+    max_constraint_bytes: usize,
+    max_characters: usize,
+    max_character_bytes: usize,
+    max_world_facts: usize,
+    max_world_fact_bytes: usize,
+    max_recent_turns: usize,
+    max_recent_turn_bytes: usize,
+    max_memories: usize,
+    max_memory_bytes: usize,
 }
 
-#[derive(Debug, Clone)]
-pub struct StoryReadSnapshot {
-    story_id: StoryId,
-    base_revision: StoryRevision,
-    player_character_id: Option<CharacterId>,
-    world: Option<WorldState>,
-    characters: Vec<CharacterState>,
-    recent_turns: Vec<StoryTurn>,
-    player_memories: Vec<MemoryEntry>,
-}
-
-impl StoryReadSnapshot {
-    pub fn new(
-        story_id: StoryId,
-        base_revision: StoryRevision,
-        player_character_id: Option<CharacterId>,
-        world: Option<WorldState>,
-        characters: Vec<CharacterState>,
-        recent_turns: Vec<StoryTurn>,
-        player_memories: Vec<MemoryEntry>,
-    ) -> Self {
+impl SnapshotLimits {
+    pub fn from_config(config: &TurnContentLimitsConfig) -> Self {
         Self {
-            story_id,
-            base_revision,
-            player_character_id,
-            world,
-            characters,
-            recent_turns,
-            player_memories,
+            max_story_instructions_bytes: config.max_story_instructions_bytes,
+            max_story_config_bytes: config.max_story_config_bytes,
+            max_scene_bytes: config.max_scene_bytes,
+            max_summary_bytes: config.max_summary_bytes,
+            max_constraints: config.max_constraints,
+            max_constraint_bytes: config.max_constraint_bytes,
+            max_characters: config.max_characters,
+            max_character_bytes: config.max_character_bytes,
+            max_world_facts: config.max_world_facts,
+            max_world_fact_bytes: config.max_world_fact_bytes,
+            max_recent_turns: config.max_recent_turns,
+            max_recent_turn_bytes: config.max_recent_turn_bytes,
+            max_memories: config.max_memories,
+            max_memory_bytes: config.max_memory_bytes,
         }
     }
 
-    pub fn story_id(&self) -> &StoryId {
-        &self.story_id
+    pub fn max_story_instructions_bytes(&self) -> usize {
+        self.max_story_instructions_bytes
     }
 
-    pub fn base_revision(&self) -> StoryRevision {
-        self.base_revision
+    pub fn max_story_config_bytes(&self) -> usize {
+        self.max_story_config_bytes
     }
 
-    pub fn player_character_id(&self) -> Option<&CharacterId> {
-        self.player_character_id.as_ref()
+    pub fn max_scene_bytes(&self) -> usize {
+        self.max_scene_bytes
     }
 
-    pub fn world(&self) -> Option<&WorldState> {
-        self.world.as_ref()
+    pub fn max_summary_bytes(&self) -> usize {
+        self.max_summary_bytes
     }
 
-    pub fn characters(&self) -> &[CharacterState] {
-        &self.characters
+    pub fn max_constraints(&self) -> usize {
+        self.max_constraints
     }
 
-    pub fn recent_turns(&self) -> &[StoryTurn] {
-        &self.recent_turns
+    pub fn max_constraint_bytes(&self) -> usize {
+        self.max_constraint_bytes
     }
 
-    pub fn player_memories(&self) -> &[MemoryEntry] {
-        &self.player_memories
+    pub fn max_characters(&self) -> usize {
+        self.max_characters
+    }
+
+    pub fn max_character_bytes(&self) -> usize {
+        self.max_character_bytes
+    }
+
+    pub fn max_world_facts(&self) -> usize {
+        self.max_world_facts
+    }
+
+    pub fn max_world_fact_bytes(&self) -> usize {
+        self.max_world_fact_bytes
+    }
+
+    pub fn max_recent_turns(&self) -> usize {
+        self.max_recent_turns
+    }
+
+    pub fn max_recent_turn_bytes(&self) -> usize {
+        self.max_recent_turn_bytes
+    }
+
+    pub fn max_memories(&self) -> usize {
+        self.max_memories
+    }
+
+    pub fn max_memory_bytes(&self) -> usize {
+        self.max_memory_bytes
     }
 }
 
@@ -89,9 +115,15 @@ impl BaselineContext {
     pub fn estimate_tokens(&self) -> u64 {
         let mut chars = 0usize;
         chars = chars.saturating_add(self.story_instructions.len());
-        chars = chars.saturating_add(self.story_config.genre.len());
-        chars = chars.saturating_add(self.story_config.tone.len());
-        chars = chars.saturating_add(self.story_config.language.len());
+        if let Some(style) = &self.story_config.style {
+            chars = chars.saturating_add(style.len());
+        }
+        if let Some(point_of_view) = &self.story_config.point_of_view {
+            chars = chars.saturating_add(point_of_view.len());
+        }
+        if let Some(tense) = &self.story_config.tense {
+            chars = chars.saturating_add(tense.len());
+        }
         if let Some(scene) = &self.current_scene {
             chars = chars.saturating_add(scene.len());
         }
@@ -111,13 +143,6 @@ impl BaselineContext {
         }
         (chars as u64).saturating_add(3).checked_div(4).unwrap_or(1).max(1)
     }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct StoryConfig {
-    pub genre: String,
-    pub tone: String,
-    pub language: String,
 }
 
 #[derive(Debug, Clone)]

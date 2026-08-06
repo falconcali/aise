@@ -1,54 +1,52 @@
-use crate::core::turn_contract::{
-    CommittedTurnResult, IdempotencyKey, LlmUsageAggregate, RequestDigest, StoryRevision,
-};
-use crate::core::turn_data::{SnapshotLimits, StoryReadSnapshot};
+use crate::core::turn_contract::{CommittedTurnResult, IdempotencyKey, RequestDigest, StoryRevision};
+use crate::core::turn_data::SnapshotLimits;
 use crate::core::turn_validation::StateChange;
-use crate::domain::character::CharacterState;
-use crate::domain::ids::{CharacterId, StoryId, TurnId};
-use crate::domain::memory::MemoryEntry;
-use crate::domain::narrative::{StoryEvent, StoryTurn};
+use crate::domain::ids::CharacterId;
+use crate::domain::narrative::{StoryEvent, StorySummary, StoryTurn};
+use crate::domain::story_state::{CurrentScene, StoryConstraint, StoryCreateSpec, StoryInfo, StoryReadSnapshot};
 use crate::domain::world::WorldState;
 use async_trait::async_trait;
 use thiserror::Error;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoreSerializationErrorKind {
+    InvalidStoryState,
+    InvalidTurnResult,
+    InvalidEventPayload,
+    InvalidWorldState,
+    InvalidCharacterState,
+    InvalidMemory,
+}
+
 #[derive(Debug, Error)]
 pub enum StoreError {
-    #[error("database error: {0}")]
-    Database(#[from] sqlx::Error),
-    #[error("migration error: {0}")]
-    Migration(#[from] sqlx::migrate::MigrateError),
-    #[error("serialization error: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("story not found")]
+    NotFound,
     #[error("revision conflict")]
     RevisionConflict,
     #[error("idempotency conflict")]
     IdempotencyConflict,
+    #[error("constraint violation: {constraint}")]
+    ConstraintViolation { constraint: String },
+    #[error("serialization error: {kind:?}")]
+    Serialization { kind: StoreSerializationErrorKind },
+    #[error("store unavailable")]
+    Unavailable,
 }
 
-#[async_trait]
-pub trait Store: Send + Sync {
-    async fn load_story_snapshot(
-        &self,
-        story_id: &StoryId,
-        limits: SnapshotLimits,
-    ) -> Result<Option<StoryReadSnapshot>, StoreError>;
-
-    async fn create_story(
-        &self,
-        story_id: &StoryId,
-        player_character_id: Option<&CharacterId>,
-        created_at: i64,
-    ) -> Result<(), StoreError>;
-
-    async fn find_committed_turn(
-        &self,
-        story_id: &StoryId,
-        idempotency_key: &IdempotencyKey,
-    ) -> Result<Option<StoredTurnOutcome>, StoreError>;
-
-    async fn commit_turn(&self, commit: &TurnCommit) -> Result<CommittedTurnResult, StoreError>;
+impl From<StoreError> for crate::core::turn_error::TurnExecutionError {
+    fn from(error: StoreError) -> Self {
+        match error {
+            StoreError::RevisionConflict => Self::revision_conflict(None),
+            StoreError::IdempotencyConflict => Self::idempotency_conflict(None),
+            other => Self::new(
+                crate::core::turn_error::TurnFailureKind::Store,
+                "store_error",
+                None,
+                other.to_string(),
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -58,27 +56,47 @@ pub struct StoredTurnOutcome {
 }
 
 #[derive(Debug, Clone)]
-pub struct TurnCommit {
-    pub story_id: StoryId,
+pub struct TurnCommitSpec {
+    pub story_id: crate::domain::ids::StoryId,
     pub turn: StoryTurn,
     pub events: Vec<StoryEvent>,
-    pub characters: Vec<CharacterState>,
-    pub world: StateChange<WorldState>,
-    pub memory: Vec<MemoryEntry>,
+    pub character_changes: Vec<crate::core::turn_validation::CharacterStateChange>,
+    pub world_change: StateChange<WorldState>,
+    pub memory_changes: Vec<crate::core::turn_validation::MemoryStateChange>,
+    pub scene_change: StateChange<CurrentScene>,
+    pub constraint_change: StateChange<Vec<StoryConstraint>>,
+    pub summary_change: StateChange<StorySummary>,
     pub base_revision: StoryRevision,
     pub idempotency_key: IdempotencyKey,
     pub request_digest: RequestDigest,
     pub player_character_id: Option<CharacterId>,
     pub outbox: Vec<OutboxRecord>,
-    pub llm_usage: LlmUsageAggregate,
+    pub llm_calls: Vec<crate::core::turn_contract::LlmCallUsage>,
 }
 
 #[derive(Debug, Clone)]
 pub struct OutboxRecord {
     pub id: String,
-    pub story_id: StoryId,
-    pub turn_id: TurnId,
+    pub story_id: crate::domain::ids::StoryId,
+    pub turn_id: crate::domain::ids::TurnId,
     pub event_type: String,
     pub payload: serde_json::Value,
     pub created_at: i64,
+}
+
+#[async_trait]
+pub trait Store: Send + Sync {
+    async fn create_story(&self, spec: &StoryCreateSpec) -> Result<StoryInfo, StoreError>;
+    async fn get_story(&self, story_id: &crate::domain::ids::StoryId) -> Result<Option<StoryInfo>, StoreError>;
+    async fn load_story_snapshot(
+        &self,
+        story_id: &crate::domain::ids::StoryId,
+        limits: SnapshotLimits,
+    ) -> Result<StoryReadSnapshot, StoreError>;
+    async fn find_committed_turn(
+        &self,
+        story_id: &crate::domain::ids::StoryId,
+        idempotency_key: &IdempotencyKey,
+    ) -> Result<Option<StoredTurnOutcome>, StoreError>;
+    async fn commit_turn(&self, spec: &TurnCommitSpec) -> Result<CommittedTurnResult, StoreError>;
 }

@@ -1,11 +1,10 @@
 use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_contract::TurnPhase;
+use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::core::turn_event::{TurnEvent, TurnEventSink};
-use crate::core::turn_pipeline::TurnExecutionPipeline;
-use crate::core::turn_pipeline::TurnStage;
+use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::core::turn_trace::{PipelineData, SpanPayload};
 use crate::core::turn_validation::ValidationDecision;
-use crate::error::AiseError;
 use crate::runtime::turn_pipeline_set::TurnPipelineSet;
 use std::time::Instant;
 
@@ -18,7 +17,11 @@ impl TurnRuntime {
         Self { pipeline_set }
     }
 
-    pub async fn run(&self, ctx: &mut TurnExecutionContext, sink: &dyn TurnEventSink) -> Result<(), AiseError> {
+    pub async fn run(
+        &self,
+        ctx: &mut TurnExecutionContext,
+        sink: &dyn TurnEventSink,
+    ) -> Result<(), TurnExecutionError> {
         self.execute(self.pipeline_set.initializer(), ctx, sink).await?;
         self.execute(self.pipeline_set.baseline_builder(), ctx, sink).await?;
         self.execute(self.pipeline_set.writer_planner(), ctx, sink).await?;
@@ -40,20 +43,44 @@ impl TurnRuntime {
 
         loop {
             self.execute(self.pipeline_set.validation(), ctx, sink).await?;
-            match ctx.validation_decision()? {
+            let decision = ctx.validation_decision()?;
+            let issue_codes = ctx
+                .validation()
+                .map(|result| result.issues().iter().map(|issue| issue.code).collect::<Vec<_>>())
+                .unwrap_or_default();
+            let _ = sink.emit(TurnEvent::ValidationCompleted {
+                turn_id: ctx.turn_id().clone(),
+                attempt: ctx.proposal_revision().saturating_add(1),
+                decision,
+                issue_codes,
+            });
+            match decision {
                 ValidationDecision::Pass => break,
                 ValidationDecision::Repair => {
                     ctx.consume_repair_round()?;
                     self.execute(self.pipeline_set.story_repairer(), ctx, sink).await?;
                 }
-                ValidationDecision::Reject => return Err(ctx.validation_error()?),
+                ValidationDecision::Reject => {
+                    let detail = ctx
+                        .validation()
+                        .map(|result| {
+                            result
+                                .issues()
+                                .iter()
+                                .map(|issue| format!("{}: {}", issue.code, issue.message))
+                                .collect::<Vec<_>>()
+                                .join("; ")
+                        })
+                        .unwrap_or_else(|| "validation rejected".into());
+                    return Err(TurnExecutionError::validation_rejected(detail));
+                }
             }
         }
 
         self.execute(self.pipeline_set.committer(), ctx, sink).await?;
         ctx.committed_result()
             .map(|_| ())
-            .ok_or_else(|| AiseError::InvariantViolation("committed turn missing committed result".into()))
+            .ok_or_else(|| invariant("committed turn missing committed result".to_string()))
     }
 
     async fn execute(
@@ -61,11 +88,11 @@ impl TurnRuntime {
         pipeline: &dyn TurnExecutionPipeline,
         ctx: &mut TurnExecutionContext,
         sink: &dyn TurnEventSink,
-    ) -> Result<(), AiseError> {
+    ) -> Result<(), TurnExecutionError> {
         let stage = pipeline.stage();
         if let Some(entry) = stage_entry_phase(stage) {
             if ctx.phase() != entry {
-                return Err(AiseError::InvariantViolation(format!(
+                return Err(invariant(format!(
                     "pipeline {} entered with unexpected phase {:?}, expected {entry:?}",
                     stage.as_str(),
                     ctx.phase()
@@ -73,12 +100,15 @@ impl TurnRuntime {
             }
         }
         if ctx.control().cancellation().is_cancelled() {
-            return Err(AiseError::Cancelled);
+            return Err(TurnExecutionError::cancelled(Some(stage)));
         }
         if Instant::now() >= ctx.control().deadline() {
-            return Err(AiseError::TurnDeadlineExceeded);
+            return Err(TurnExecutionError::deadline_exceeded(Some(stage)));
         }
-        sink.emit(TurnEvent::StageStarted(stage));
+        let _ = sink.emit(TurnEvent::StageStarted {
+            turn_id: ctx.turn_id().clone(),
+            stage,
+        });
         let pending = ctx.trace().begin_span("aise.pipeline", stage.as_str());
         let outcome = pipeline.execute(ctx).await;
         let payload = match &outcome {
@@ -97,7 +127,7 @@ impl TurnRuntime {
         if outcome.is_ok() {
             if let Some(exits) = stage_exit_phases(stage) {
                 if !exits.contains(&ctx.phase()) {
-                    return Err(AiseError::InvariantViolation(format!(
+                    return Err(invariant(format!(
                         "pipeline {} completed with unexpected phase {:?}, expected one of {exits:?}",
                         stage.as_str(),
                         ctx.phase()
@@ -120,6 +150,7 @@ fn stage_entry_phase(stage: TurnStage) -> Option<TurnPhase> {
         TurnStage::Validation => Some(TurnPhase::ProposalReady),
         TurnStage::StoryRepairer => Some(TurnPhase::RepairRequired),
         TurnStage::TurnCommitter => Some(TurnPhase::ReadyToCommit),
+        TurnStage::Context => None,
     }
 }
 
@@ -134,5 +165,10 @@ fn stage_exit_phases(stage: TurnStage) -> Option<&'static [TurnPhase]> {
         TurnStage::Validation => Some(&[TurnPhase::RepairRequired, TurnPhase::ReadyToCommit, TurnPhase::Failed]),
         TurnStage::StoryRepairer => Some(&[TurnPhase::ProposalReady]),
         TurnStage::TurnCommitter => Some(&[TurnPhase::Committed]),
+        TurnStage::Context => None,
     }
+}
+
+fn invariant(message: String) -> TurnExecutionError {
+    TurnExecutionError::new(TurnFailureKind::InvariantViolation, "turn_runtime_invariant", None, message)
 }

@@ -1,5 +1,5 @@
 use crate::core::turn_context::TurnExecutionContext;
-use crate::error::AiseError;
+use crate::core::turn_error::TurnExecutionError;
 use async_trait::async_trait;
 use std::fmt;
 
@@ -8,6 +8,7 @@ pub enum TurnStage {
     TurnInitializer,
     BaselineBuilder,
     WriterPlanner,
+    Context,
     ContextRetrieval,
     CharacterThink,
     StoryGenerator,
@@ -22,6 +23,7 @@ impl TurnStage {
             TurnStage::TurnInitializer => "turn_initializer",
             TurnStage::BaselineBuilder => "baseline_ctx_builder",
             TurnStage::WriterPlanner => "writer_planner",
+            TurnStage::Context => "context",
             TurnStage::ContextRetrieval => "context_retrieval",
             TurnStage::CharacterThink => "character_think",
             TurnStage::StoryGenerator => "story_generator",
@@ -42,5 +44,5 @@ impl fmt::Display for TurnStage {
 pub trait TurnExecutionPipeline: Send + Sync {
     fn stage(&self) -> TurnStage;
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError>;
+    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError>;
 }

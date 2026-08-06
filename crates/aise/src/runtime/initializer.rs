@@ -1,6 +1,6 @@
 use crate::core::turn_context::TurnExecutionContext;
+use crate::core::turn_error::TurnExecutionError;
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::error::AiseError;
 use async_trait::async_trait;
 
 #[derive(Default)]
@@ -12,9 +12,9 @@ impl TurnExecutionPipeline for TurnInitializer {
         TurnStage::TurnInitializer
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), AiseError> {
+    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         if ctx.player_input().trim().is_empty() {
-            return Err(AiseError::InvalidRequest("empty player input".into()));
+            return Err(TurnExecutionError::invalid_request("empty player input"));
         }
         ctx.complete_initialization()
     }

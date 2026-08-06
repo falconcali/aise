@@ -1,3 +1,4 @@
+use crate::core::turn_contract::{LlmCharge, LlmTokenUsage};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,23 +21,25 @@ pub struct CompletionRequest {
     pub messages: Vec<ChatMessage>,
     pub max_tokens: u32,
     pub temperature: f32,
-    pub purpose: &'static str,
+    pub purpose: crate::core::turn_contract::LlmCallPurpose,
 }
 
 #[derive(Debug, Clone)]
 pub struct CompletionSpec {
     pub messages: Vec<ChatMessage>,
     pub max_output_tokens: u32,
-    pub purpose: &'static str,
+    pub purpose: crate::core::turn_contract::LlmCallPurpose,
 }
 
 #[derive(Debug, Clone)]
 pub struct EmbeddingRequest {
     pub model: String,
-    pub input: String,
+    pub inputs: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct EmbeddingOutput {
-    pub embedding: Vec<f32>,
+    pub vectors: Vec<Vec<f32>>,
+    pub usage: Option<LlmTokenUsage>,
+    pub charge: Option<LlmCharge>,
 }
