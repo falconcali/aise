@@ -316,7 +316,7 @@ impl Default for TurnContentLimitsConfig {
             max_plan_bytes: 4096,
             max_retrieval_candidates: 64,
             max_retrieved_items: 10,
-            max_retrieved_item_bytes: 1024,
+            max_retrieved_item_bytes: 4096,
             max_retrieved_tokens: 4096,
             max_character_thoughts: 8,
             max_character_thought_bytes: 1024,

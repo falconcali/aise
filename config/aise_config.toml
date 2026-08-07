@@ -59,5 +59,33 @@ max_asset_files = 1024
 max_single_asset_bytes = 16777216
 max_validation_issues = 64
 
+[aise.content]
+max_story_instructions_bytes = 4096
+max_story_config_bytes = 1024
+max_scene_bytes = 8192
+max_summary_bytes = 4096
+max_constraints = 16
+max_constraint_bytes = 512
+max_characters = 16
+max_character_bytes = 2048
+max_world_facts = 128
+max_world_fact_bytes = 512
+max_recent_turns = 20
+max_recent_turn_bytes = 8192
+max_memories = 32
+max_memory_bytes = 512
+max_plan_bytes = 4096
+max_retrieval_candidates = 64
+max_retrieved_items = 10
+max_retrieved_item_bytes = 4096
+max_retrieved_tokens = 4096
+max_character_thoughts = 8
+max_character_thought_bytes = 1024
+max_proposal_bytes = 32768
+max_validation_issues = 32
+max_validation_issue_bytes = 500
+max_trace_spans = 64
+max_trace_field_bytes = 2048
+
 [aise.prompt]
 catalog_path = "prompts"

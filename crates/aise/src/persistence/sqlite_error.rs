@@ -29,14 +29,26 @@ impl From<SqliteStoreError> for StoreError {
 fn map_database_error(error: sqlx::Error) -> StoreError {
     if let sqlx::Error::Database(db) = &error {
         let code = db.code().map(|code| code.to_string()).unwrap_or_default();
-        if code.contains("2067") || code.contains("1555") || code.contains("19") {
+        let message = db.message();
+        if is_constraint_code(&code) {
             return StoreError::ConstraintViolation { constraint: code };
         }
+        tracing::error!(
+            error.message = message,
+            error.code = code,
+            "aise.store.database_error"
+        );
+        return StoreError::Unavailable;
     }
     if is_unavailable(&error) {
         return StoreError::Unavailable;
     }
+    tracing::error!(error = ?error, "aise.store.unexpected_error");
     StoreError::Unavailable
+}
+
+fn is_constraint_code(code: &str) -> bool {
+    matches!(code, "19" | "787" | "2067" | "1555" | "1299" | "1811" | "262" | "257" | "275" | "531")
 }
 
 fn is_unavailable(error: &sqlx::Error) -> bool {

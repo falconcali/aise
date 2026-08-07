@@ -128,10 +128,13 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
         .collect();
     let character_changes = apply_character_changes(snapshot, &proposal.character_changes)?;
     let world_change = apply_world_change(snapshot, &proposal.world_change)?;
+    let known_character_ids: Vec<&crate::domain::ids::CharacterId> =
+        snapshot.characters().iter().map(|character| &character.id).collect();
     let memory_changes = proposal
         .memory_changes
         .iter()
         .enumerate()
+        .filter(|(_, memory)| known_character_ids.contains(&&memory.owner))
         .map(|(seq, memory)| MemoryStateChange {
             character_id: memory.owner.clone(),
             entry: MemoryEntry {
@@ -186,15 +189,12 @@ fn apply_character_changes(
     let mut current: Vec<crate::domain::character::CharacterState> = snapshot.characters().to_vec();
     let mut result = Vec::new();
     for change in changes {
-        let target = current
+        let Some(target) = current
             .iter_mut()
             .find(|character| character.id == change.character_id)
-            .ok_or_else(|| {
-                invariant(
-                    "unknown_character",
-                    format!("character change references unknown character {}", change.character_id.as_str()),
-                )
-            })?;
+        else {
+            continue;
+        };
         if !change.goal_updates.is_empty() {
             target.internal_state.goals = change.goal_updates.clone();
         }
