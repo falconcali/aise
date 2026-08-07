@@ -504,6 +504,13 @@ impl aise::persistence::Store for TrackedStore {
         self.inner.load_story_snapshot(story_id, limits).await
     }
 
+    async fn load_story_instance_meta(
+        &self,
+        story_id: &StoryId,
+    ) -> Result<Option<aise::persistence::store::StoryInstanceMeta>, aise::persistence::StoreError> {
+        self.inner.load_story_instance_meta(story_id).await
+    }
+
     async fn find_committed_turn(
         &self,
         story_id: &StoryId,
@@ -556,6 +563,13 @@ impl aise::persistence::Store for ConflictStore {
         self.inner.load_story_snapshot(story_id, limits).await
     }
 
+    async fn load_story_instance_meta(
+        &self,
+        story_id: &StoryId,
+    ) -> Result<Option<aise::persistence::store::StoryInstanceMeta>, aise::persistence::StoreError> {
+        self.inner.load_story_instance_meta(story_id).await
+    }
+
     async fn find_committed_turn(
         &self,
         story_id: &StoryId,
@@ -589,6 +603,7 @@ impl LlmProvider for CancellingProvider {
             return Err(LlmProviderError::Rejected {
                 status: 500,
                 code: None,
+                message: None,
             });
         }
         Ok(LlmCompletion {
@@ -630,6 +645,7 @@ impl LlmProvider for RejectingProvider {
             return Err(LlmProviderError::Rejected {
                 status: 500,
                 code: None,
+                message: None,
             });
         }
         Ok(LlmCompletion {

@@ -195,13 +195,25 @@ async fn provider_classifies_429_4xx_and_5xx() {
         "429 must parse Retry-After seconds: {error}"
     );
 
-    let rejected_url = serve(400, &[], "").await;
+    let rejected_url = serve(
+        400,
+        &[],
+        r#"{"error":{"message":"stream_options should be set along with stream = true","type":"invalid_request_error","param":null,"code":"invalid_request_error"}}"#,
+    )
+    .await;
     let provider = provider_with(&rejected_url);
     let error = provider.complete(&request()).await.unwrap_err();
-    assert!(
-        matches!(error, LlmProviderError::Rejected { status: 400, .. }),
-        "4xx maps to Rejected: {error}"
-    );
+    match error {
+        LlmProviderError::Rejected { status, code, message } => {
+            assert_eq!(status, 400);
+            assert_eq!(code.as_deref(), Some("invalid_request_error"));
+            assert_eq!(
+                message.as_deref(),
+                Some("stream_options should be set along with stream = true")
+            );
+        }
+        other => panic!("4xx maps to Rejected: {other}"),
+    }
 
     let server_url = serve(500, &[], "").await;
     let provider = provider_with(&server_url);
@@ -251,4 +263,39 @@ fn thinking_toggle_serializes_when_configured() {
 fn thinking_toggle_omitted_when_not_configured() {
     let provider = provider_with("https://api.deepseek.com");
     assert!(provider.thinking_toggle().is_none());
+}
+
+#[test]
+fn stream_options_are_serialized_only_for_streaming_requests() {
+    let provider = provider_with("https://api.deepseek.com");
+    let request = request();
+    let non_streaming = serde_json::to_value(provider.completion_body(&request, false)).expect("serialize request");
+    assert_eq!(non_streaming.get("stream"), Some(&serde_json::json!(false)));
+    assert!(non_streaming.get("stream_options").is_none());
+
+    let streaming = serde_json::to_value(provider.completion_body(&request, true)).expect("serialize request");
+    assert_eq!(streaming.get("stream"), Some(&serde_json::json!(true)));
+    assert_eq!(
+        streaming.get("stream_options"),
+        Some(&serde_json::json!({"include_usage": true}))
+    );
+}
+
+#[tokio::test]
+async fn oversized_provider_error_body_is_not_retained() {
+    let body = format!(
+        "{{\"error\":{{\"message\":\"{}\",\"code\":\"too_large\"}}}}",
+        "x".repeat(MAX_PROVIDER_ERROR_BODY_BYTES)
+    );
+    let rejected_url = serve(400, &[], &body).await;
+    let provider = provider_with(&rejected_url);
+    let error = provider.complete(&request()).await.unwrap_err();
+    assert!(matches!(
+        error,
+        LlmProviderError::Rejected {
+            status: 400,
+            code: None,
+            message: None,
+        }
+    ));
 }

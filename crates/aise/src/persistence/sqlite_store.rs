@@ -71,6 +71,13 @@ impl Store for Arc<SqliteStore> {
         Store::load_story_snapshot(&**self, story_id, limits).await
     }
 
+    async fn load_story_instance_meta(
+        &self,
+        story_id: &StoryId,
+    ) -> Result<Option<crate::persistence::store::StoryInstanceMeta>, StoreError> {
+        Store::load_story_instance_meta(&**self, story_id).await
+    }
+
     async fn find_committed_turn(
         &self,
         story_id: &StoryId,
@@ -217,10 +224,12 @@ impl Store for SqliteStore {
         .execute(&mut *tx)
         .await
         .map_err(SqliteStoreError::from)?;
+        let initial_world_state =
+            serde_json::json!({"id": spec.story_id.as_str(), "name": "materialized", "facts": []});
         sqlx::query("INSERT INTO worlds (id, name, state, created_at) VALUES (?, ?, ?, ?)")
             .bind(spec.story_id.as_str())
             .bind("materialized")
-            .bind("{}")
+            .bind(initial_world_state.to_string())
             .bind(spec.created_at_ms)
             .execute(&mut *tx)
             .await
@@ -381,6 +390,32 @@ impl Store for SqliteStore {
             characters,
             recent_turns,
         ))
+    }
+
+    async fn load_story_instance_meta(
+        &self,
+        story_id: &StoryId,
+    ) -> Result<Option<crate::persistence::store::StoryInstanceMeta>, StoreError> {
+        let row: Option<(String, String, String)> =
+            sqlx::query_as("SELECT pack_id, bindings_json, characters_json FROM story_instances WHERE story_id = ?")
+                .bind(story_id.as_str())
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(SqliteStoreError::from)?;
+        let Some((pack_id, bindings_json, characters_json)) = row else {
+            return Ok(None);
+        };
+        let bindings = serde_json::from_str(&bindings_json).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        })?;
+        let characters = serde_json::from_str(&characters_json).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidCharacterState,
+        })?;
+        Ok(Some(crate::persistence::store::StoryInstanceMeta {
+            pack_id: crate::domain::asset::ids::PackId::from(pack_id),
+            bindings,
+            characters,
+        }))
     }
 
     async fn find_committed_turn(

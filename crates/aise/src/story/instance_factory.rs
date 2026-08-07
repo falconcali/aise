@@ -94,14 +94,15 @@ impl StoryInstanceFactory {
             bound_at_ms: spec.created_at_ms,
         };
         bindings.insert(spec.player_role_key.clone(), player_binding);
+        let player_role = &pack.roles[&spec.player_role_key];
         characters.insert(
             bindings[&spec.player_role_key].character_id.clone(),
             CharacterInstanceState {
                 character_id: bindings[&spec.player_role_key].character_id.clone(),
                 role_key: spec.player_role_key.clone(),
-                location: pack.start.location_key.clone(),
-                goals: Vec::new(),
-                attributes: BTreeMap::new(),
+                location: player_role.initial_state.location.clone(),
+                goals: player_role.initial_state.goals.clone(),
+                attributes: player_role.initial_state.attributes.clone(),
             },
         );
         for (role_key, role) in &pack.roles {

@@ -74,6 +74,17 @@ fn caps_span_count_and_counts_dropped() {
 }
 
 #[test]
+fn new_trace_id_is_time_prefixed() {
+    let text = TraceRecorder::new().trace_id().as_str().to_owned();
+    assert_eq!(text.len(), 48);
+    assert!(text[..8].chars().all(|c| c.is_ascii_digit()));
+    assert_eq!(&text[8..9], "-");
+    assert!(text[9..15].chars().all(|c| c.is_ascii_digit()));
+    assert_eq!(&text[15..16], "-");
+    assert!(text[16..].chars().all(|c| c.is_ascii_hexdigit()));
+}
+
+#[test]
 fn truncates_long_text() {
     let long = "a".repeat(3000);
     let cut = truncate(&long, 1000);

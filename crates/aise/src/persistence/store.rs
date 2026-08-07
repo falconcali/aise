@@ -78,6 +78,19 @@ pub struct MaterializedStoryInstanceSpec {
 }
 
 #[derive(Debug, Clone)]
+pub struct StoryInstanceMeta {
+    pub pack_id: crate::domain::asset::ids::PackId,
+    pub bindings: std::collections::BTreeMap<
+        crate::domain::asset::ids::StoryRoleKey,
+        crate::domain::story_instance::binding::RoleBinding,
+    >,
+    pub characters: std::collections::BTreeMap<
+        crate::domain::ids::CharacterId,
+        crate::domain::story_instance::state::CharacterInstanceState,
+    >,
+}
+
+#[derive(Debug, Clone)]
 pub struct TurnCommitSpec {
     pub story_id: crate::domain::ids::StoryId,
     pub turn: StoryTurn,
@@ -116,6 +129,10 @@ pub trait Store: Send + Sync {
         story_id: &crate::domain::ids::StoryId,
         limits: SnapshotLimits,
     ) -> Result<StoryReadSnapshot, StoreError>;
+    async fn load_story_instance_meta(
+        &self,
+        story_id: &crate::domain::ids::StoryId,
+    ) -> Result<Option<StoryInstanceMeta>, StoreError>;
     async fn find_committed_turn(
         &self,
         story_id: &crate::domain::ids::StoryId,

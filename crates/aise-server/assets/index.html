@@ -10,29 +10,72 @@
   <div id="app">
     <aside id="sidebar">
       <h1>AISE</h1>
-      <form id="new-session-form" autocomplete="off">
-        <input id="session-name" placeholder="新故事名称" />
-        <button type="submit">新建</button>
-      </form>
-      <ul id="session-list"></ul>
-      <p id="sidebar-hint">选择或新建一个故事会话</p>
+      <section id="pack-section">
+        <div class="section-head">
+          <h2>故事包</h2>
+          <button id="import-pack-btn" type="button" title="导入故事包 JSON">导入</button>
+          <input id="pack-file" type="file" accept=".json,application/json" hidden />
+        </div>
+        <ul id="pack-list"></ul>
+      </section>
+      <section id="session-section">
+        <div class="section-head">
+          <h2>会话</h2>
+        </div>
+        <ul id="session-list"></ul>
+      </section>
+      <p id="sidebar-hint">导入故事包，选择角色开始游戏</p>
     </aside>
     <main id="stage">
-      <div id="tabs">
-        <button id="tab-story" class="tab active" type="button">故事</button>
-        <button id="tab-trace" class="tab" type="button">调试 Trace</button>
+      <div id="view-packs" class="view active">
+        <div id="packs-empty">暂无故事包。点击左侧「导入」上传故事包 JSON 文件。</div>
+        <div id="pack-grid"></div>
       </div>
-      <div id="story" class="tab-panel active"></div>
-      <div id="trace-view" class="tab-panel">
-        <div id="trace-empty">勾选“调试 Trace”以生成</div>
+      <div id="view-detail" class="view">
+        <div id="detail-head">
+          <button id="back-to-packs" type="button">← 返回库</button>
+          <div id="detail-title"></div>
+        </div>
+        <div id="detail-body"></div>
+        <div id="role-pick">
+          <h3>选择扮演的角色</h3>
+          <div id="role-list"></div>
+        </div>
       </div>
-      <form id="turn-form" autocomplete="off">
-        <input id="player-input" placeholder="输入你的行动…" disabled />
-        <label id="trace-toggle-label" title="开启后，每次 Turn 会把全链路调用信息（阶段、LLM Prompt、工具调用、LLM 返回等）返回到调试 Trace 页签">
-          <input type="checkbox" id="trace-toggle" checked /> 调试 Trace
-        </label>
-        <button id="send-btn" type="submit" disabled>发送</button>
-      </form>
+      <div id="view-game" class="view">
+        <div id="game-head">
+          <button id="back-to-detail" type="button">← 返回</button>
+          <div id="game-title"></div>
+          <div id="game-role"></div>
+        </div>
+        <div id="game-main">
+          <div id="game-panel">
+            <div id="tabs">
+              <button id="tab-story" class="tab active" type="button">故事</button>
+              <button id="tab-trace" class="tab" type="button">调试 Trace</button>
+            </div>
+            <div id="scene-box"></div>
+            <div id="story" class="tab-panel active"></div>
+            <div id="trace-view" class="tab-panel">
+              <div id="trace-empty">勾选“调试 Trace”以生成</div>
+            </div>
+            <form id="turn-form" autocomplete="off">
+              <input id="player-input" placeholder="输入你的行动…" disabled />
+              <label id="trace-toggle-label" title="开启后，每次 Turn 会把全链路调用信息（阶段、LLM Prompt、工具调用、LLM 返回等）返回到调试 Trace 页签">
+                <input type="checkbox" id="trace-toggle" checked /> Trace
+              </label>
+              <button id="send-btn" type="submit" disabled>发送</button>
+            </form>
+          </div>
+          <aside id="game-side">
+            <h3>角色状态</h3>
+            <div id="role-state"></div>
+            <h3>世界信息</h3>
+            <div id="world-info"></div>
+          </aside>
+        </div>
+      </div>
+      <div id="toast"></div>
     </main>
   </div>
   <script src="/assets/app.js"></script>

@@ -20,10 +20,12 @@ const STORY_PROPOSAL_SCHEMA: &str = r#"{
   "story_text": "the story text",
   "events": [{"kind": "dialogue" | "action" | "world_change" | "chapter", "summary": "event summary"}],
   "character_changes": [{"character_id": "existing character id", "goal_updates": ["new goal"], "health_delta": 0, "affinity_deltas": [{"other": "existing character id", "delta": 0}]}],
-  "world_change": {"add_facts": ["new world fact"]},
+  "world_change": {"add_facts": [{"text": "new world fact", "evidence": [{"snapshot_fact": "existing fact id"} or {"proposed_event": {"event_index": 0}}]}]},
   "memory_changes": [{"owner": "existing character id", "kind": "observed" | "inferred" | "secret", "content": "memory text"}],
-  "summary_delta": "updated story summary" or null
-}"#;
+  "summary_change": {"text": "updated story summary"} or null
+}
+
+Keep every field exactly in the shape above: "events" entries are objects with "kind" and "summary" fields, "add_facts" entries are objects with "text" and "evidence" fields, "character_changes" entries are objects with a "character_id" field, and "summary_change" is an object with a "text" field or null. Never output any of these fields as a plain string."#;
 
 pub struct ContextMerger;
 
@@ -111,7 +113,8 @@ Respond with only a JSON object of this shape: \
             system,
             "You are the story writer of an interactive fiction engine. Write the next part of the story \
 responding to the player action. You may propose events, character changes, world facts, memories, and a summary \
-delta. Respond with only a JSON object matching this schema:\n{STORY_PROPOSAL_SCHEMA}"
+change. Every proposed world fact must reference at least one piece of evidence: either an existing snapshot fact \
+or one of the proposed events. Respond with only a JSON object matching this schema:\n{STORY_PROPOSAL_SCHEMA}"
         );
         if !issues.is_empty() {
             let _ = writeln!(

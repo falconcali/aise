@@ -58,6 +58,7 @@ impl SseSink {
                 serde_json::json!({
                     "turn_id": result.turn_id.as_str(),
                     "story_revision": result.story_revision.get(),
+                    "story_text": result.story_text,
                     "replayed": replayed,
                 }),
             ),

@@ -44,7 +44,32 @@ pub struct StoryView {
     pub base_revision: u64,
     pub story_instructions: String,
     pub current_scene: String,
-    pub recent_story: Vec<String>,
+    pub player_character_id: Option<String>,
+    pub turns: Vec<TurnView>,
+    pub player_role_key: Option<String>,
+    pub characters: Vec<CharacterStateView>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TurnView {
+    pub player_input: String,
+    pub story_text: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CharacterStateView {
+    pub character_id: String,
+    pub role_key: String,
+    pub location: String,
+    pub goals: Vec<String>,
+    pub attributes: Vec<AttributeView>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AttributeView {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -52,6 +77,7 @@ pub struct StoryInstanceView {
     pub story_id: String,
     pub base_revision: u64,
     pub pack_id: String,
+    pub player_role_key: String,
     pub current_scene: String,
 }
 
@@ -87,7 +113,10 @@ pub async fn create_story(
         base_revision: info.base_revision.get(),
         story_instructions: spec.story_instructions,
         current_scene: String::new(),
-        recent_story: Vec::new(),
+        player_character_id: None,
+        turns: Vec::new(),
+        player_role_key: None,
+        characters: Vec::new(),
     };
     Ok((StatusCode::CREATED, Json(view)))
 }
@@ -96,10 +125,10 @@ pub async fn create_story_instance(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateStoryInstanceRequest>,
 ) -> Result<(StatusCode, Json<StoryInstanceView>), ApiError> {
-    let pack_id = PackId::try_new(req.pack_id).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    let pack_id = PackId::try_new(req.pack_id.clone()).map_err(|error| ApiError::BadRequest(error.to_string()))?;
     let player_id = PlayerId::try_new(req.player_id).map_err(|error| ApiError::BadRequest(error.to_string()))?;
     let player_role_key =
-        StoryRoleKey::try_new(req.player_role_key).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+        StoryRoleKey::try_new(req.player_role_key.clone()).map_err(|error| ApiError::BadRequest(error.to_string()))?;
     let player_character = req
         .player_character
         .map(|reference| {
@@ -139,7 +168,8 @@ pub async fn create_story_instance(
         Json(StoryInstanceView {
             story_id: info.story_id.to_string(),
             base_revision: info.base_revision.get(),
-            pack_id: info.story_id.to_string(),
+            pack_id: req.pack_id.clone(),
+            player_role_key: req.player_role_key.clone(),
             current_scene: String::new(),
         }),
     ))
@@ -160,12 +190,54 @@ pub async fn get_story(
             aise::persistence::StoreError::NotFound => ApiError::NotFound("story".into()),
             other => ApiError::Internal(anyhow::anyhow!(other)),
         })?;
+    let instance_meta = state
+        .engine
+        .store()
+        .load_story_instance_meta(&story_id)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
+    let player_role_key = instance_meta
+        .as_ref()
+        .and_then(|meta| meta.bindings.values().find(|binding| binding.player_id.is_some()))
+        .map(|binding| binding.role_key.to_string());
+    let characters = instance_meta
+        .map(|meta| {
+            meta.characters
+                .into_values()
+                .map(|character| CharacterStateView {
+                    character_id: character.character_id.to_string(),
+                    role_key: character.role_key.to_string(),
+                    location: character.location.to_string(),
+                    goals: character.goals.iter().map(|goal| goal.to_string()).collect(),
+                    attributes: character
+                        .attributes
+                        .into_iter()
+                        .map(|(key, value)| AttributeView {
+                            key: key.to_string(),
+                            value: serde_json::to_string(&value).unwrap_or_default(),
+                        })
+                        .collect(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(Json(StoryView {
         story_id: snapshot.story_id().to_string(),
         base_revision: snapshot.base_revision().get(),
         story_instructions: snapshot.story_instructions().to_owned(),
         current_scene: snapshot.current_scene().text.clone(),
-        recent_story: snapshot.recent_turns().iter().map(|turn| turn.story_text.clone()).collect(),
+        player_character_id: snapshot.player_character_id().map(|id| id.to_string()),
+        turns: snapshot
+            .recent_turns()
+            .iter()
+            .map(|turn| TurnView {
+                player_input: turn.player_input.clone(),
+                story_text: turn.story_text.clone(),
+                created_at: turn.created_at,
+            })
+            .collect(),
+        player_role_key,
+        characters,
     }))
 }
 

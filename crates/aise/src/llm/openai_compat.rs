@@ -7,6 +7,10 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
+const MAX_PROVIDER_ERROR_BODY_BYTES: usize = 8 * 1024;
+const MAX_PROVIDER_ERROR_CODE_CHARS: usize = 128;
+const MAX_PROVIDER_ERROR_MESSAGE_CHARS: usize = 512;
+
 pub struct OpenAiCompatProvider {
     base_url: String,
     api_key: Option<String>,
@@ -43,6 +47,18 @@ impl OpenAiCompatProvider {
             },
         })
     }
+
+    fn completion_body<'a>(&'a self, req: &'a CompletionRequest, stream: bool) -> ChatCompletionRequest<'a> {
+        ChatCompletionRequest {
+            model: &req.model,
+            messages: &req.messages,
+            max_tokens: req.max_tokens,
+            temperature: req.temperature,
+            stream,
+            stream_options: stream.then_some(StreamOptions { include_usage: true }),
+            thinking: self.thinking_toggle(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -58,7 +74,8 @@ struct ChatCompletionRequest<'a> {
     max_tokens: u32,
     temperature: f32,
     stream: bool,
-    stream_options: StreamOptions,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     thinking: Option<ThinkingToggle<'a>>,
 }
@@ -100,6 +117,17 @@ struct ResponseUsage {
 }
 
 #[derive(Deserialize)]
+struct ProviderErrorEnvelope {
+    error: ProviderErrorBody,
+}
+
+#[derive(Deserialize)]
+struct ProviderErrorBody {
+    code: Option<serde_json::Value>,
+    message: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct PromptTokensDetails {
     #[serde(default)]
     cached_tokens: Option<u64>,
@@ -118,15 +146,7 @@ impl LlmProvider for OpenAiCompatProvider {
     }
 
     async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmProviderError> {
-        let body = ChatCompletionRequest {
-            model: &req.model,
-            messages: &req.messages,
-            max_tokens: req.max_tokens,
-            temperature: req.temperature,
-            stream: false,
-            stream_options: StreamOptions { include_usage: true },
-            thinking: self.thinking_toggle(),
-        };
+        let body = self.completion_body(req, false);
         let mut request = self.client.post(self.endpoint()).json(&body);
         if let Some(key) = &self.api_key {
             request = request.bearer_auth(key);
@@ -139,6 +159,9 @@ impl LlmProvider for OpenAiCompatProvider {
                 .get(reqwest::header::RETRY_AFTER)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_owned);
+            if status.is_client_error() && status.as_u16() != 429 {
+                return Err(rejected_response(response, status.as_u16()).await);
+            }
             return Err(http_to_provider_error(Some(status), retry_after));
         }
         let resp: ChatCompletionResponse = response
@@ -176,15 +199,7 @@ impl LlmProvider for OpenAiCompatProvider {
         req: &CompletionRequest,
         mut on_delta: DeltaSink,
     ) -> Result<LlmCompletion, LlmProviderError> {
-        let body = ChatCompletionRequest {
-            model: &req.model,
-            messages: &req.messages,
-            max_tokens: req.max_tokens,
-            temperature: req.temperature,
-            stream: true,
-            stream_options: StreamOptions { include_usage: true },
-            thinking: self.thinking_toggle(),
-        };
+        let body = self.completion_body(req, true);
         let mut request = self.client.post(self.endpoint()).json(&body);
         if let Some(key) = &self.api_key {
             request = request.bearer_auth(key);
@@ -197,6 +212,9 @@ impl LlmProvider for OpenAiCompatProvider {
                 .get(reqwest::header::RETRY_AFTER)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_owned);
+            if status.is_client_error() && status.as_u16() != 429 {
+                return Err(rejected_response(response, status.as_u16()).await);
+            }
             return Err(http_to_provider_error(Some(status), retry_after));
         }
         let mut stream = response.bytes_stream();
@@ -370,6 +388,49 @@ fn transport_error(error: reqwest::Error) -> LlmProviderError {
     LlmProviderError::Transport { kind }
 }
 
+async fn rejected_response(response: reqwest::Response, status: u16) -> LlmProviderError {
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let Ok(chunk) = chunk else {
+            return rejected_error(status, None, None);
+        };
+        if body.len().saturating_add(chunk.len()) > MAX_PROVIDER_ERROR_BODY_BYTES {
+            return rejected_error(status, None, None);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let Ok(envelope) = serde_json::from_slice::<ProviderErrorEnvelope>(&body) else {
+        return rejected_error(status, None, None);
+    };
+    let code = envelope
+        .error
+        .code
+        .and_then(provider_error_code)
+        .map(|value| truncate_chars(value, MAX_PROVIDER_ERROR_CODE_CHARS));
+    let message = envelope
+        .error
+        .message
+        .map(|value| truncate_chars(value, MAX_PROVIDER_ERROR_MESSAGE_CHARS));
+    rejected_error(status, code, message)
+}
+
+fn provider_error_code(value: serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => Some(value),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn truncate_chars(value: String, maximum: usize) -> String {
+    value.chars().take(maximum).collect()
+}
+
+fn rejected_error(status: u16, code: Option<String>, message: Option<String>) -> LlmProviderError {
+    LlmProviderError::Rejected { status, code, message }
+}
+
 fn http_to_provider_error(status: Option<reqwest::StatusCode>, retry_after: Option<String>) -> LlmProviderError {
     let Some(status) = status else {
         return LlmProviderError::Transport {
@@ -385,6 +446,7 @@ fn http_to_provider_error(status: Option<reqwest::StatusCode>, retry_after: Opti
         return LlmProviderError::Rejected {
             status: code,
             code: None,
+            message: None,
         };
     }
     if (500..600).contains(&code) {

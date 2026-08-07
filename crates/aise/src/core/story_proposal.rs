@@ -12,6 +12,57 @@ where
     Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
+fn deserialize_summary_change<'de, D>(deserializer: D) -> Result<Option<StorySummary>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum SummaryChangeRepr {
+        Summary(StorySummary),
+        PlainText(String),
+    }
+
+    Ok(match Option::<SummaryChangeRepr>::deserialize(deserializer)? {
+        None => None,
+        Some(SummaryChangeRepr::Summary(summary)) => Some(summary),
+        Some(SummaryChangeRepr::PlainText(text)) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(StorySummary {
+                    text: trimmed.to_owned(),
+                })
+            }
+        }
+    })
+}
+
+fn deserialize_add_facts<'de, D>(deserializer: D) -> Result<Vec<ProposedWorldFact>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum AddFactsRepr {
+        Facts(Vec<ProposedWorldFact>),
+        PlainText(Vec<String>),
+    }
+
+    Ok(match Option::<AddFactsRepr>::deserialize(deserializer)? {
+        None => Vec::new(),
+        Some(AddFactsRepr::Facts(facts)) => facts,
+        Some(AddFactsRepr::PlainText(texts)) => texts
+            .into_iter()
+            .map(|text| ProposedWorldFact {
+                text,
+                evidence: Vec::new(),
+            })
+            .collect(),
+    })
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StoryProposal {
     #[serde(default, deserialize_with = "deserialize_null_as_default")]
@@ -28,10 +79,9 @@ pub struct StoryProposal {
     pub scene_change: Option<CurrentScene>,
     #[serde(default)]
     pub constraint_changes: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_summary_change")]
     pub summary_change: Option<StorySummary>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposedEvent {
     pub kind: EventKind,
@@ -57,13 +107,14 @@ pub struct ProposedAffinityDelta {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProposedWorldChange {
-    #[serde(default, deserialize_with = "deserialize_null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_add_facts")]
     pub add_facts: Vec<ProposedWorldFact>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposedWorldFact {
     pub text: String,
+    #[serde(default, deserialize_with = "deserialize_null_as_default")]
     pub evidence: Vec<WorldFactEvidenceRef>,
 }
 

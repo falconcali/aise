@@ -63,6 +63,13 @@ impl Store for NoCommitStore {
         Err(StoreError::NotFound)
     }
 
+    async fn load_story_instance_meta(
+        &self,
+        _story_id: &StoryId,
+    ) -> Result<Option<aise::persistence::store::StoryInstanceMeta>, StoreError> {
+        Ok(None)
+    }
+
     async fn find_committed_turn(
         &self,
         _story_id: &StoryId,

@@ -1,7 +1,7 @@
 use crate::api::state::AppState;
 use crate::error::ApiError;
 use aise::story::pack_service::{
-    AssetExportError, AssetImportError, AssetInput, PackExport, PackExportFormat, PackService,
+    AssetExportError, AssetImportError, AssetInput, PackExport, PackExportFormat, PackService, PackSummary,
 };
 use axum::Json;
 use axum::body::Bytes;
@@ -29,6 +29,33 @@ pub struct ImportPackResponse {
     pub pack_key: String,
     pub version: String,
     pub digest: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PackSummaryView {
+    pub pack_id: String,
+    pub pack_key: String,
+    pub title: String,
+    pub author: String,
+    pub version: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub digest: String,
+}
+
+impl From<PackSummary> for PackSummaryView {
+    fn from(summary: PackSummary) -> Self {
+        Self {
+            pack_id: summary.pack_id.to_string(),
+            pack_key: summary.pack_key.to_string(),
+            title: summary.title,
+            author: summary.author,
+            version: summary.version.to_string(),
+            description: summary.description,
+            tags: summary.tags,
+            digest: summary.digest.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -102,6 +129,44 @@ pub async fn import_pack(
             digest: info.digest.to_string(),
         }),
     ))
+}
+
+pub async fn list_packs(State(state): State<Arc<AppState>>) -> Result<Json<Vec<PackSummaryView>>, ApiError> {
+    let pack_service = state
+        .pack_service
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("pack service not initialized")))?;
+    let summaries = pack_service.list().await.map_err(|error| match error {
+        AssetExportError::Store(store_error) => ApiError::Internal(anyhow::anyhow!(store_error)),
+        AssetExportError::Io { code } => ApiError::Internal(anyhow::anyhow!("pack list I/O failure: {code}")),
+        AssetExportError::NotFound => ApiError::Internal(anyhow::anyhow!("pack list unexpectedly empty")),
+    })?;
+    Ok(Json(summaries.into_iter().map(PackSummaryView::from).collect()))
+}
+
+pub async fn delete_pack(
+    State(state): State<Arc<AppState>>,
+    Path(pack_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let pack_id =
+        aise::domain::asset::ids::PackId::try_new(pack_id).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    let pack_service = state
+        .pack_service
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("pack service not initialized")))?;
+    let deleted = pack_service.delete(&pack_id).await.map_err(|error| match error {
+        AssetExportError::NotFound => ApiError::NotFound("story pack".into()),
+        AssetExportError::Store(aise::persistence::StoreError::ConstraintViolation { constraint }) => {
+            ApiError::Conflict(format!("story pack is in use by one or more story instances ({constraint})"))
+        }
+        AssetExportError::Store(store_error) => ApiError::Internal(anyhow::anyhow!(store_error)),
+        AssetExportError::Io { code } => ApiError::Internal(anyhow::anyhow!("pack delete I/O failure: {code}")),
+    })?;
+    if deleted {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::NotFound("story pack".into()))
+    }
 }
 
 pub async fn export_pack(

@@ -89,6 +89,11 @@ fn valid_pack_json() -> String {
 }
 
 async fn runtime_services(label: &str) -> (Arc<PackService>, Arc<StoryInstanceFactory>) {
+    let (pack_service, instance_factory, _) = runtime_services_with_url(label).await;
+    (pack_service, instance_factory)
+}
+
+async fn runtime_services_with_url(label: &str) -> (Arc<PackService>, Arc<StoryInstanceFactory>, String) {
     let db_url = temp_db_path(label);
     let store: Arc<dyn Store> = SqliteStore::connect(&db_url).await.unwrap();
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&db_url).await.unwrap();
@@ -105,7 +110,7 @@ async fn runtime_services(label: &str) -> (Arc<PackService>, Arc<StoryInstanceFa
             max_relationships: 32,
         },
     ));
-    (pack_service, instance_factory)
+    (pack_service, instance_factory, db_url)
 }
 
 #[tokio::test]
@@ -189,6 +194,98 @@ async fn reject_instance_for_missing_pack() {
     };
     let result = instance_factory.create(spec).await;
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn pack_list_and_delete_roundtrip() {
+    let (pack_service, _) = runtime_services("list_delete").await;
+    let json = valid_pack_json();
+    let info = pack_service
+        .import(AssetInput::Json(json.as_bytes()))
+        .await
+        .expect("pack import should succeed");
+    let summaries = pack_service.list().await.expect("pack list should succeed");
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].pack_id, info.pack_id);
+    assert_eq!(summaries[0].title, "Demo");
+    let deleted = pack_service.delete(&info.pack_id).await.expect("pack delete should succeed");
+    assert!(deleted);
+    let summaries = pack_service.list().await.expect("pack list should succeed");
+    assert!(summaries.is_empty());
+}
+
+#[tokio::test]
+async fn pack_delete_missing_returns_false() {
+    let (pack_service, _) = runtime_services("delete_missing").await;
+    let deleted = pack_service
+        .delete(&PackId::from("pack-missing"))
+        .await
+        .expect("delete missing pack should not error");
+    assert!(!deleted);
+}
+
+#[tokio::test]
+async fn instance_meta_exposes_binding_and_characters() {
+    let (pack_service, instance_factory, db_url) = runtime_services_with_url("instance_meta").await;
+    let json = valid_pack_json();
+    let info = pack_service
+        .import(AssetInput::Json(json.as_bytes()))
+        .await
+        .expect("pack import should succeed");
+    let spec = CreateStoryInstanceSpec {
+        pack_id: info.pack_id.clone(),
+        player_id: PlayerId::from("player-1"),
+        player_role_key: StoryRoleKey::from("protagonist"),
+        player_character: None,
+        created_at_ms: now_millis(),
+    };
+    let story_info = instance_factory
+        .create(spec)
+        .await
+        .expect("story instance creation should succeed");
+    let store: Arc<dyn Store> = SqliteStore::connect(&db_url).await.unwrap();
+    let meta = store
+        .load_story_instance_meta(&story_info.story_id)
+        .await
+        .expect("instance meta should load")
+        .expect("instance meta should exist");
+    assert_eq!(meta.pack_id, info.pack_id);
+    assert_eq!(meta.bindings.len(), 1);
+    let binding = meta.bindings.values().next().unwrap();
+    assert_eq!(binding.role_key.as_str(), "protagonist");
+    assert!(binding.player_id.is_some());
+    assert_eq!(meta.characters.len(), 1);
+    let character = meta.characters.values().next().unwrap();
+    assert_eq!(character.role_key.as_str(), "protagonist");
+}
+
+#[tokio::test]
+async fn instance_snapshot_loads_with_scene_and_binding() {
+    let (pack_service, instance_factory, db_url) = runtime_services_with_url("instance_snapshot").await;
+    let json = valid_pack_json();
+    let info = pack_service
+        .import(AssetInput::Json(json.as_bytes()))
+        .await
+        .expect("pack import should succeed");
+    let spec = CreateStoryInstanceSpec {
+        pack_id: info.pack_id.clone(),
+        player_id: PlayerId::from("player-1"),
+        player_role_key: StoryRoleKey::from("protagonist"),
+        player_character: None,
+        created_at_ms: now_millis(),
+    };
+    let story_info = instance_factory
+        .create(spec)
+        .await
+        .expect("story instance creation should succeed");
+    let store: Arc<dyn Store> = SqliteStore::connect(&db_url).await.unwrap();
+    let limits = aise::core::turn_data::SnapshotLimits::from_config(&aise::config::TurnContentLimitsConfig::default());
+    let snapshot = store
+        .load_story_snapshot(&story_info.story_id, limits)
+        .await
+        .expect("instance snapshot should load");
+    assert_eq!(snapshot.current_scene().text, "The village wakes.");
+    assert!(snapshot.recent_turns().is_empty());
 }
 
 fn now_millis() -> i64 {

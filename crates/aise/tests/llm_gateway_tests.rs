@@ -121,6 +121,7 @@ impl LlmProvider for MockProvider {
             return Err(LlmProviderError::Rejected {
                 status: 400,
                 code: None,
+                message: None,
             });
         }
         let usage = self.usage.lock().unwrap().clone();
@@ -721,7 +722,15 @@ fn llm_error_kind_labels_are_stable() {
     assert_eq!(LlmError::QueueTimeout.kind(), "queue_timeout");
     assert_eq!(LlmError::RateLimited { retry_after_ms: None }.kind(), "rate_limited");
     assert_eq!(LlmError::TokenBudgetExceeded("x".into()).kind(), "token_budget_exceeded");
-    assert_eq!(LlmError::ProviderRejected { status: 400 }.kind(), "provider_rejected");
+    assert_eq!(
+        LlmError::ProviderRejected {
+            status: 400,
+            code: None,
+            message: None,
+        }
+        .kind(),
+        "provider_rejected"
+    );
     assert_eq!(LlmError::EmbeddingUnsupported.kind(), "embedding_unsupported");
     assert_eq!(
         LlmError::Transport {

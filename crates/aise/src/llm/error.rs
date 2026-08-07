@@ -47,8 +47,12 @@ pub enum LlmProviderError {
     #[error("provider rate limited")]
     RateLimited { retry_after_ms: Option<u64> },
 
-    #[error("provider rejected request with status {status}")]
-    Rejected { status: u16, code: Option<String> },
+    #[error("provider rejected request with status {status}, code {code:?}: {message:?}")]
+    Rejected {
+        status: u16,
+        code: Option<String>,
+        message: Option<String>,
+    },
 
     #[error("transport error: {kind:?}")]
     Transport { kind: LlmTransportErrorKind },
@@ -108,8 +112,12 @@ pub enum LlmError {
     #[error("token budget exceeded: {0}")]
     TokenBudgetExceeded(String),
 
-    #[error("provider rejected request with status {status}")]
-    ProviderRejected { status: u16 },
+    #[error("provider rejected request with status {status}, code {code:?}: {message:?}")]
+    ProviderRejected {
+        status: u16,
+        code: Option<String>,
+        message: Option<String>,
+    },
 
     #[error("transport error: {kind:?}")]
     Transport { kind: LlmTransportErrorKind },
@@ -146,7 +154,9 @@ impl From<LlmProviderError> for LlmError {
     fn from(error: LlmProviderError) -> Self {
         match error {
             LlmProviderError::RateLimited { retry_after_ms } => LlmError::RateLimited { retry_after_ms },
-            LlmProviderError::Rejected { status, .. } => LlmError::ProviderRejected { status },
+            LlmProviderError::Rejected { status, code, message } => {
+                LlmError::ProviderRejected { status, code, message }
+            }
             LlmProviderError::Transport { kind } => LlmError::Transport { kind },
             LlmProviderError::Protocol { kind } => LlmError::Protocol { kind },
             LlmProviderError::ResponseLimitExceeded { limit } => LlmError::ResponseLimitExceeded { limit },

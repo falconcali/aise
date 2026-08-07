@@ -50,4 +50,6 @@ pub trait AssetStore: Send + Sync {
     async fn import_pack(&self, pack: ValidatedStoryPack) -> Result<FrozenStoryPack, StoreError>;
     async fn load_pack(&self, pack_id: &PackId) -> Result<FrozenStoryPack, StoreError>;
     async fn export_pack(&self, pack_id: &PackId) -> Result<FrozenStoryPack, StoreError>;
+    async fn list_packs(&self) -> Result<Vec<FrozenStoryPack>, StoreError>;
+    async fn delete_pack(&self, pack_id: &PackId) -> Result<bool, StoreError>;
 }

@@ -1,5 +1,6 @@
 use crate::config::TraceContentPolicy;
 use crate::domain::ids::{StoryId, TurnId};
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -30,11 +31,18 @@ impl TraceId {
     }
 
     pub fn new_id() -> Self {
-        Self(Uuid::new_v4().simple().to_string())
+        Self(format!("{}-{}", local_stamp(), Uuid::new_v4().simple()))
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    pub fn file_stem(&self) -> &str {
+        match self.0.rsplit_once('-') {
+            Some((stamp, _)) => stamp,
+            None => &self.0,
+        }
     }
 }
 
@@ -334,4 +342,8 @@ fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn local_stamp() -> String {
+    Local::now().format("%Y-%m-%d-%H_%M_%S_%3f").to_string()
 }

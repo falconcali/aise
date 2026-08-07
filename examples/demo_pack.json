@@ -1,0 +1,110 @@
+{
+  "spec": "aise_story_v3",
+  "spec_version": "3.0",
+  "meta": {
+    "pack_key": "forest_lodge",
+    "title": "林间木屋",
+    "author": "aise",
+    "version": "0.1.0",
+    "description": "一个关于林间木屋的短篇探索故事包，用于演示前端故事包功能。",
+    "tags": ["demo", "mystery"]
+  },
+  "story": {
+    "premise": "你在林中醒来，发现自己身处一座陌生的木屋。门外有脚步声。",
+    "language": "zh-CN",
+    "genre": ["mystery"],
+    "themes": ["discovery"],
+    "style": {
+      "tone": ["suspenseful"],
+      "point_of_view": "second",
+      "tense": "present"
+    }
+  },
+  "character_assets": {
+    "traveler_card": {
+      "spec": "aise_char_v3",
+      "spec_version": "3.0",
+      "character_key": "traveler",
+      "meta": {
+        "name": "旅人",
+        "version": "0.1.0"
+      },
+      "profile": {
+        "description": "一个在林间木屋醒来的旅人，对昨晚的记忆模糊不清。",
+        "personality": ["谨慎而好奇"],
+        "values": ["真相", "安全"],
+        "fears": ["被困", "失去记忆"],
+        "speaking_style": {
+          "register": "casual",
+          "verbosity": "medium",
+          "traits": []
+        },
+        "dialogue_examples": []
+      }
+    }
+  },
+  "roles": {
+    "protagonist": {
+      "role_label": "旅人",
+      "narrative_function": "player",
+      "initial_state": {
+        "location": "lodge_hall",
+        "goals": ["查明自己为何在此"],
+        "attributes": {
+          "health": 10,
+          "sanity": 8
+        }
+      },
+      "initial_relationships": [],
+      "seed_memories": []
+    }
+  },
+  "default_cast": {
+    "protagonist": { "character_ref": "traveler_card" }
+  },
+  "play": {
+    "player_count": 1,
+    "playable_role_keys": ["protagonist"]
+  },
+  "world_book": {
+    "spec": "aise_world_v3",
+    "spec_version": "3.0",
+    "world_book_key": "lodge_world",
+    "meta": {
+      "name": "木屋世界",
+      "version": "0.1.0"
+    },
+    "facts": {
+      "lodge_is_remote": {
+        "content": "木屋位于人迹罕至的密林深处。",
+        "salience": 5
+      }
+    },
+    "rumors": {}
+  },
+  "start": {
+    "scene_key": "scene_lodge",
+    "location_key": "lodge_hall",
+    "time": "night",
+    "description": "壁炉的火光摇曳，屋外传来一阵脚步声。",
+    "role_openings": {
+      "protagonist": "你睁开眼，发现自己靠坐在木屋的壁炉旁。外面的脚步声越来越近。"
+    }
+  },
+  "narrative": {
+    "entry_nodes": ["node_wake"],
+    "nodes": {
+      "node_wake": {
+        "title": "苏醒",
+        "objective": "探查木屋，弄清楚处境。",
+        "activate_when": { "type": "story_started" },
+        "complete_when": { "type": "turn_reaches", "turn": 2 },
+        "skip_when": null,
+        "effects": { "on_activate": [], "on_complete": [] },
+        "terminal": false
+      }
+    },
+    "edges": []
+  },
+  "assets": {}
+}

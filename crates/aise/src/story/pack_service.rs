@@ -767,6 +767,45 @@ impl PackService {
             PackExportFormat::AisePack => Ok(PackExport::AisePack(frozen.digest.to_string().into_bytes())),
         }
     }
+
+    pub async fn list(&self) -> Result<Vec<PackSummary>, AssetExportError> {
+        let packs = self.asset_store.list_packs().await.map_err(|error| match error {
+            StoreError::NotFound => AssetExportError::NotFound,
+            other => AssetExportError::Store(other),
+        })?;
+        Ok(packs
+            .into_iter()
+            .map(|frozen| PackSummary {
+                pack_id: frozen.pack_id,
+                pack_key: frozen.pack.meta.pack_key,
+                title: frozen.pack.meta.title.to_string(),
+                author: frozen.pack.meta.author.to_string(),
+                version: frozen.pack.meta.version,
+                description: frozen.pack.meta.description.to_string(),
+                tags: frozen.pack.meta.tags.iter().map(|tag| tag.to_string()).collect(),
+                digest: frozen.digest,
+            })
+            .collect())
+    }
+
+    pub async fn delete(&self, pack_id: &PackId) -> Result<bool, AssetExportError> {
+        self.asset_store.delete_pack(pack_id).await.map_err(|error| match error {
+            StoreError::NotFound => AssetExportError::NotFound,
+            other => AssetExportError::Store(other),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PackSummary {
+    pub pack_id: PackId,
+    pub pack_key: StoryPackKey,
+    pub title: String,
+    pub author: String,
+    pub version: SemanticVersion,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub digest: Sha256Digest,
 }
 
 pub fn sha256_digest(bytes: &[u8]) -> Sha256Digest {

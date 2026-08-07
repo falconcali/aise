@@ -94,6 +94,24 @@ fn generation_messages_render_full_merged_context() {
     assert!(messages[0].content.contains("warm"));
     assert!(messages[0].content.contains("story_text"));
     assert!(messages[0].content.contains("fix the pacing"));
+    assert!(
+        messages[0].content.contains("\"add_facts\": [{\"text\""),
+        "proposal schema must describe world facts as objects, not plain strings"
+    );
+    assert!(
+        messages[0].content.contains("\"summary_change\": {\"text\""),
+        "proposal schema must describe summary_change as an object with a text field"
+    );
+    assert!(
+        !messages[0].content.contains("summary_delta"),
+        "legacy summary_delta must not appear"
+    );
+    assert!(
+        messages[0]
+            .content
+            .contains("Never output any of these fields as a plain string"),
+        "proposal schema must forbid plain-string output for nested fields"
+    );
     let user = &messages[1].content;
     assert!(user.contains("reach the gate"));
     assert!(user.contains("the gate is guarded"));

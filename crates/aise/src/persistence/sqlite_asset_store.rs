@@ -196,6 +196,49 @@ impl AssetStore for SqliteAssetStore {
     async fn export_pack(&self, pack_id: &PackId) -> Result<FrozenStoryPack, StoreError> {
         self.load_pack(pack_id).await
     }
+
+    async fn list_packs(&self) -> Result<Vec<FrozenStoryPack>, StoreError> {
+        let rows = sqlx::query_as::<_, (String, Vec<u8>, String, Vec<u8>, Vec<u8>)>(
+            "SELECT pack_id, pack_json, digest, characters_json, world_book_json FROM story_packs ORDER BY created_at DESC",
+        )
+        .fetch_all(&*self.pool)
+        .await
+        .map_err(sqlx_error_to_store)?;
+        rows.into_iter()
+            .map(|(pack_id, pack_json, digest, characters_json, world_json)| {
+                let pack: StoryPack = serde_json::from_slice(&pack_json).map_err(|_| StoreError::Serialization {
+                    kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+                })?;
+                let resolved_characters =
+                    serde_json::from_slice(&characters_json).map_err(|_| StoreError::Serialization {
+                        kind: crate::persistence::store::StoreSerializationErrorKind::InvalidCharacterState,
+                    })?;
+                let resolved_world_book =
+                    serde_json::from_slice(&world_json).map_err(|_| StoreError::Serialization {
+                        kind: crate::persistence::store::StoreSerializationErrorKind::InvalidWorldState,
+                    })?;
+                Ok(FrozenStoryPack {
+                    pack_id: PackId::from(pack_id),
+                    pack,
+                    digest: Sha256Digest::try_new(&digest).map_err(|_| StoreError::Serialization {
+                        kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+                    })?,
+                    resolved_characters,
+                    resolved_world_book,
+                })
+            })
+            .collect()
+    }
+
+    async fn delete_pack(&self, pack_id: &PackId) -> Result<bool, StoreError> {
+        let deleted = sqlx::query("DELETE FROM story_packs WHERE pack_id = ?1")
+            .bind(pack_id.as_str())
+            .execute(&*self.pool)
+            .await
+            .map_err(sqlx_error_to_store)?
+            .rows_affected();
+        Ok(deleted > 0)
+    }
 }
 
 fn sqlx_error_to_store(error: sqlx::Error) -> StoreError {

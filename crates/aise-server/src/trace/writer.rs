@@ -216,13 +216,13 @@ async fn write_record(
         TraceRecord::Span { trace_id, span } => {
             let value = serde_json::to_value(span).map_err(|e| TraceSinkError::Io(e.to_string()))?;
             let line = render_record(value, redactor, config.max_record_bytes)?;
-            let path = trace_dir.join(format!("{}.jsonl", trace_id.as_str()));
+            let path = trace_dir.join(format!("{}.jsonl", trace_id.file_stem()));
             append_rotating(&path, &line, config.rotation_bytes).await?;
         }
         TraceRecord::Completed(trace) => {
             let value = serde_json::to_value(trace).map_err(|e| TraceSinkError::Io(e.to_string()))?;
             let body = render_record(value, redactor, config.max_record_bytes)?;
-            let path = trace_dir.join(format!("{}.json", trace.trace_id.as_str()));
+            let path = trace_dir.join(format!("{}.json", trace.trace_id.file_stem()));
             write_rotating(&path, &body, config.rotation_bytes).await?;
         }
     }
