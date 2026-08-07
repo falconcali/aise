@@ -47,7 +47,9 @@ is written, and the story goal for the turn. Respond with only a JSON object of 
 {\"retrieval_requests\":[{\"query\":\"...\",\"sources\":[\"historical_story\"]}],\
 \"character_requests\":[\"character id\"],\"story_goal\":{\"summary\":\"...\"}}. \
 Available sources: \"historical_story\", \"world_knowledge\", \"character_memory\". \
-Keep the number of requests small and only request characters present in the character list.";
+character_requests must use the exact ids listed in the \"Characters:\" section; never invent or guess ids. \
+If the story needs a character that is not in the list, introduce them through the story text instead of \
+requesting a character think. Keep the number of requests small.";
         let mut user = String::new();
         if !baseline.story_summary.trim().is_empty() {
             let _ = writeln!(
@@ -114,7 +116,9 @@ Respond with only a JSON object of this shape: \
             "You are the story writer of an interactive fiction engine. Write the next part of the story \
 responding to the player action. You may propose events, character changes, world facts, memories, and a summary \
 change. Every proposed world fact must reference at least one piece of evidence: either an existing snapshot fact \
-or one of the proposed events. Respond with only a JSON object matching this schema:\n{STORY_PROPOSAL_SCHEMA}"
+or one of the proposed events. You may introduce new characters in the story text who are not in the character \
+list, but character_changes, memory_changes, and affinity targets may only reference characters from the list. \
+Respond with only a JSON object matching this schema:\n{STORY_PROPOSAL_SCHEMA}"
         );
         if !issues.is_empty() {
             let _ = writeln!(

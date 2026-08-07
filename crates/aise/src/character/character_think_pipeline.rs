@@ -59,14 +59,20 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
         let player_input = ctx.player_input().to_string();
         let mut thoughts = Vec::with_capacity(plan.character_requests.len());
         for character_id in &plan.character_requests {
-            let character = baseline
+            let Some(character) = baseline
                 .relevant_characters
                 .iter()
                 .find(|candidate| &candidate.id == character_id)
                 .cloned()
-                .ok_or_else(|| {
-                    invariant(format!("writer plan requests unknown character {}", character_id.as_str()))
-                })?;
+            else {
+                tracing::warn!(
+                    turn_id = ctx.turn_id().as_str(),
+                    story_id = ctx.story_id().as_str(),
+                    character_id = character_id.as_str(),
+                    "aise.character_think.skip_unknown_character"
+                );
+                continue;
+            };
             let messages = self
                 .merger
                 .thought_messages(&character, &player_input, baseline.current_scene.as_deref());

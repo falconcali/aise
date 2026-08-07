@@ -75,13 +75,25 @@ fn caps_span_count_and_counts_dropped() {
 
 #[test]
 fn new_trace_id_is_time_prefixed() {
-    let text = TraceRecorder::new().trace_id().as_str().to_owned();
-    assert_eq!(text.len(), 48);
-    assert!(text[..8].chars().all(|c| c.is_ascii_digit()));
-    assert_eq!(&text[8..9], "-");
-    assert!(text[9..15].chars().all(|c| c.is_ascii_digit()));
-    assert_eq!(&text[15..16], "-");
-    assert!(text[16..].chars().all(|c| c.is_ascii_hexdigit()));
+    let trace_id = TraceRecorder::new().trace_id().clone();
+    let text = trace_id.as_str().to_owned();
+    assert_eq!(text.len(), 56);
+    assert_eq!(trace_id.file_stem(), &text[..23]);
+    assert!(text[..4].chars().all(|c| c.is_ascii_digit()));
+    assert_eq!(&text[4..5], "-");
+    assert!(text[5..7].chars().all(|c| c.is_ascii_digit()));
+    assert_eq!(&text[7..8], "-");
+    assert!(text[8..10].chars().all(|c| c.is_ascii_digit()));
+    assert_eq!(&text[10..11], "-");
+    assert!(text[11..13].chars().all(|c| c.is_ascii_digit()));
+    assert_eq!(&text[13..14], "_");
+    assert!(text[14..16].chars().all(|c| c.is_ascii_digit()));
+    assert_eq!(&text[16..17], "_");
+    assert!(text[17..19].chars().all(|c| c.is_ascii_digit()));
+    assert_eq!(&text[19..20], "_");
+    assert!(text[20..23].chars().all(|c| c.is_ascii_digit()));
+    assert_eq!(&text[23..24], "-");
+    assert!(text[24..].chars().all(|c| c.is_ascii_hexdigit()));
 }
 
 #[test]

@@ -56,7 +56,7 @@ fn config() -> TraceWriterConfig {
 async fn writes_spans_as_jsonl_and_trace_as_json() {
     let dir = temp_dir("sink");
     let sink = TraceWriter::new(config(), dir.clone(), Arc::new(NoopRedactor)).unwrap();
-    let trace_id = TraceId::try_new("abcdef0123456789abcdef0123456789").unwrap();
+    let trace_id = TraceId::new_id();
 
     sink.write_span(&trace_id, &sample_span("aise.pipeline", "planner"));
     sink.write_span(&trace_id, &sample_span("aise.validation", "schema"));
@@ -77,7 +77,10 @@ async fn writes_spans_as_jsonl_and_trace_as_json() {
     sink.write_trace(&trace);
     sink.shutdown_with_grace().await;
 
-    let jsonl = std::fs::read_to_string(dir.join(format!("{}.jsonl", trace_id.as_str()))).unwrap();
+    let stem = trace_id.file_stem();
+    assert_eq!(stem.len(), 23);
+    assert!(stem.chars().all(|c| c.is_ascii_digit() || c == '-' || c == '_'));
+    let jsonl = std::fs::read_to_string(dir.join(format!("{stem}.jsonl"))).unwrap();
     let lines: Vec<&str> = jsonl.lines().collect();
     assert_eq!(lines.len(), 2);
     let first: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
@@ -87,7 +90,7 @@ async fn writes_spans_as_jsonl_and_trace_as_json() {
     let second: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
     assert_eq!(second["kind"], "aise.validation");
 
-    let full = std::fs::read_to_string(dir.join(format!("{}.json", trace_id.as_str()))).unwrap();
+    let full = std::fs::read_to_string(dir.join(format!("{stem}.json"))).unwrap();
     let parsed: TurnTrace = serde_json::from_str(&full).unwrap();
     assert_eq!(parsed.trace_id, trace_id);
     assert_eq!(parsed.turn_id, "turn-1");
@@ -123,7 +126,7 @@ async fn trace_writer_applies_bounded_backpressure() {
     assert!(rejected > 0, "trace queue must apply bounded backpressure");
     sink.shutdown_with_grace().await;
 
-    let jsonl = std::fs::read_to_string(dir.join(format!("{}.jsonl", trace_id.as_str()))).unwrap();
+    let jsonl = std::fs::read_to_string(dir.join(format!("{}.jsonl", trace_id.file_stem()))).unwrap();
     assert!(jsonl.lines().count() > 0, "accepted records were written");
 }
 
@@ -175,7 +178,7 @@ async fn shutdown_drains_trace_writer_within_grace() {
     let elapsed = started.elapsed().unwrap();
     assert!(elapsed < Duration::from_secs(2), "drain completes within grace");
 
-    let jsonl = std::fs::read_to_string(dir.join(format!("{}.jsonl", trace_id.as_str()))).unwrap();
+    let jsonl = std::fs::read_to_string(dir.join(format!("{}.jsonl", trace_id.file_stem()))).unwrap();
     assert_eq!(jsonl.lines().count(), 8, "all accepted records drained on shutdown");
 }
 
@@ -207,7 +210,7 @@ async fn content_trace_redacts_before_truncation() {
     sink.write_span(&trace_id, &span);
     sink.shutdown_with_grace().await;
 
-    let jsonl = std::fs::read_to_string(dir.join(format!("{}.jsonl", trace_id.as_str()))).unwrap();
+    let jsonl = std::fs::read_to_string(dir.join(format!("{}.jsonl", trace_id.file_stem()))).unwrap();
     assert!(
         jsonl.contains("REDACTED"),
         "redactor replaced the secret before byte truncation"

@@ -41,6 +41,14 @@ fn plan_messages_render_context_and_input() {
     let system = &messages[0].content;
     assert!(system.contains("story planner"));
     assert!(system.contains("retrieval_requests"));
+    assert!(
+        system.contains("character_requests must use the exact ids listed in the \"Characters:\" section"),
+        "planner prompt must forbid inventing character ids"
+    );
+    assert!(
+        system.contains("introduce them through the story text instead of requesting a character think"),
+        "planner prompt must route new characters through story text"
+    );
     let user = &messages[1].content;
     assert!(user.contains("they reached the city"));
     assert!(user.contains("in the market"));
@@ -111,6 +119,12 @@ fn generation_messages_render_full_merged_context() {
             .content
             .contains("Never output any of these fields as a plain string"),
         "proposal schema must forbid plain-string output for nested fields"
+    );
+    assert!(
+        messages[0].content.contains(
+            "character_changes, memory_changes, and affinity targets may only reference characters from the list"
+        ),
+        "writer prompt must restrict state changes to known characters while allowing story-text introductions"
     );
     let user = &messages[1].content;
     assert!(user.contains("reach the gate"));
