@@ -189,10 +189,7 @@ fn apply_character_changes(
     let mut current: Vec<crate::domain::character::CharacterState> = snapshot.characters().to_vec();
     let mut result = Vec::new();
     for change in changes {
-        let Some(target) = current
-            .iter_mut()
-            .find(|character| character.id == change.character_id)
-        else {
+        let Some(target) = current.iter_mut().find(|character| character.id == change.character_id) else {
             continue;
         };
         if !change.goal_updates.is_empty() {

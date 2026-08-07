@@ -293,15 +293,9 @@ impl TurnExecutionContext {
     }
 
     pub fn requires_retrieval(&self) -> Result<bool, TurnExecutionError> {
-        let plan = self.plan.as_ref().ok_or_else(|| {
-            TurnExecutionError::new(
-                TurnFailureKind::InvariantViolation,
-                "plan_missing",
-                None,
-                "writer plan not set before retrieval check",
-            )
-        })?;
-        Ok(!plan.retrieval_requests.is_empty())
+        // TODO(temp-debug): retrieval is temporarily disabled while debugging the baseline builder.
+        // Restore the original logic: require plan, then return `!plan.retrieval_requests.is_empty()`.
+        Ok(false)
     }
 
     pub fn skip_retrieval(&mut self) -> Result<(), TurnExecutionError> {
@@ -311,15 +305,9 @@ impl TurnExecutionContext {
     }
 
     pub fn requires_character_thinking(&self) -> Result<bool, TurnExecutionError> {
-        let plan = self.plan.as_ref().ok_or_else(|| {
-            TurnExecutionError::new(
-                TurnFailureKind::InvariantViolation,
-                "plan_missing",
-                None,
-                "writer plan not set before character think check",
-            )
-        })?;
-        Ok(!plan.character_requests.is_empty())
+        // TODO(temp-debug): character thinking is temporarily disabled while debugging the baseline builder.
+        // Restore the original logic: require plan, then return `!plan.character_requests.is_empty()`.
+        Ok(false)
     }
 
     pub fn skip_character_thinking(&mut self) -> Result<(), TurnExecutionError> {

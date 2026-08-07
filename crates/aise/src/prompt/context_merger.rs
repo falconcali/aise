@@ -41,15 +41,12 @@ pub struct GenerationInput<'a> {
 
 impl ContextMerger {
     pub fn plan_messages(&self, baseline: &BaselineContext, player_input: &str) -> Vec<ChatMessage> {
+        // TODO(temp-debug): the planner no longer asks the LLM for retrieval/character requests while the
+        // baseline builder is being debugged. Restore the original prompt that plans retrieval_requests,
+        // character_requests, and the story_goal.
         let system = "You are the story planner of an interactive fiction engine. \
-You plan a single player turn. Decide what context to retrieve, which characters should think before the story \
-is written, and the story goal for the turn. Respond with only a JSON object of this shape: \
-{\"retrieval_requests\":[{\"query\":\"...\",\"sources\":[\"historical_story\"]}],\
-\"character_requests\":[\"character id\"],\"story_goal\":{\"summary\":\"...\"}}. \
-Available sources: \"historical_story\", \"world_knowledge\", \"character_memory\". \
-character_requests must use the exact ids listed in the \"Characters:\" section; never invent or guess ids. \
-If the story needs a character that is not in the list, introduce them through the story text instead of \
-requesting a character think. Keep the number of requests small.";
+You plan a single player turn. Decide the story goal for the turn. Respond with only a JSON object of this shape: \
+{\"story_goal\":{\"summary\":\"...\"}}.";
         let mut user = String::new();
         if !baseline.story_summary.trim().is_empty() {
             let _ = writeln!(

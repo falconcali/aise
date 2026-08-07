@@ -33,11 +33,7 @@ fn map_database_error(error: sqlx::Error) -> StoreError {
         if is_constraint_code(&code) {
             return StoreError::ConstraintViolation { constraint: code };
         }
-        tracing::error!(
-            error.message = message,
-            error.code = code,
-            "aise.store.database_error"
-        );
+        tracing::error!(error.message = message, error.code = code, "aise.store.database_error");
         return StoreError::Unavailable;
     }
     if is_unavailable(&error) {
@@ -48,7 +44,10 @@ fn map_database_error(error: sqlx::Error) -> StoreError {
 }
 
 fn is_constraint_code(code: &str) -> bool {
-    matches!(code, "19" | "787" | "2067" | "1555" | "1299" | "1811" | "262" | "257" | "275" | "531")
+    matches!(
+        code,
+        "19" | "787" | "2067" | "1555" | "1299" | "1811" | "262" | "257" | "275" | "531"
+    )
 }
 
 fn is_unavailable(error: &sqlx::Error) -> bool {
