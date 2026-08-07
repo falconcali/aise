@@ -1,7 +1,8 @@
 use crate::api::bind::bind_story;
+use crate::api::pack::{export_pack, import_pack, validate_pack};
 use crate::api::session::{create_session, delete_session, list_sessions};
 use crate::api::state::AppState;
-use crate::api::story::{create_story, get_story};
+use crate::api::story::{create_story, create_story_instance, get_story};
 use crate::api::turn::{get_turn_result, run_turn};
 use crate::config::ServerConfig;
 use axum::extract::State;
@@ -24,6 +25,10 @@ pub fn router(state: Arc<AppState>, config: &ServerConfig) -> Router {
         .route("/api/stories", post(create_story))
         .route("/api/stories/{id}", get(get_story))
         .route("/api/stories/{id}/turn-results/{idempotency_key}", get(get_turn_result))
+        .route("/api/packs/validate", post(validate_pack))
+        .route("/api/packs", post(import_pack))
+        .route("/api/packs/{id}", get(export_pack))
+        .route("/api/story-instances", post(create_story_instance))
         .with_state(state)
 }
 

@@ -1,5 +1,6 @@
 pub mod bind;
 pub mod dto;
+pub mod pack;
 pub mod routes;
 pub mod session;
 pub mod sse;

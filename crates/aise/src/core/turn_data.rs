@@ -3,6 +3,7 @@ use crate::domain::character::CharacterState;
 use crate::domain::ids::CharacterId;
 use crate::domain::story_state::StoryConfig;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SnapshotLimits {
@@ -99,7 +100,7 @@ impl SnapshotLimits {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BaselineContext {
     pub story_instructions: String,
     pub story_config: StoryConfig,
@@ -115,27 +116,24 @@ impl BaselineContext {
     pub fn estimate_tokens(&self) -> u64 {
         let mut chars = 0usize;
         chars = chars.saturating_add(self.story_instructions.len());
-        if let Some(style) = &self.story_config.style {
-            chars = chars.saturating_add(style.len());
-        }
-        if let Some(point_of_view) = &self.story_config.point_of_view {
-            chars = chars.saturating_add(point_of_view.len());
-        }
-        if let Some(tense) = &self.story_config.tense {
-            chars = chars.saturating_add(tense.len());
-        }
         if let Some(scene) = &self.current_scene {
             chars = chars.saturating_add(scene.len());
+        }
+        if let Some(config) = &self.story_config.style {
+            chars = chars.saturating_add(config.len());
+        }
+        if let Some(config) = &self.story_config.point_of_view {
+            chars = chars.saturating_add(config.len());
+        }
+        if let Some(config) = &self.story_config.tense {
+            chars = chars.saturating_add(config.len());
         }
         for character in &self.relevant_characters {
             chars = chars.saturating_add(character.name.len());
             chars = chars.saturating_add(character.bio.len());
-            for goal in &character.internal_state.goals {
-                chars = chars.saturating_add(goal.len());
-            }
         }
-        for story in &self.recent_story {
-            chars = chars.saturating_add(story.len());
+        for turn in &self.recent_story {
+            chars = chars.saturating_add(turn.len());
         }
         chars = chars.saturating_add(self.story_summary.len());
         for constraint in &self.active_constraints {
@@ -159,7 +157,12 @@ pub enum ContextSource {
     WorldKnowledge,
     NarrativeGraph,
     HistoricalStory,
-    LoreBook,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextRequest {
+    pub query: String,
+    pub sources: Vec<ContextSource>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -167,12 +170,6 @@ pub struct WriterPlan {
     pub retrieval_requests: Vec<ContextRequest>,
     pub character_requests: Vec<CharacterId>,
     pub story_goal: StoryGoal,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContextRequest {
-    pub query: String,
-    pub sources: Vec<ContextSource>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -188,3 +185,6 @@ pub struct CharacterThought {
     pub goal: String,
     pub possible_action: String,
 }
+
+#[allow(dead_code)]
+pub(crate) fn _turn_data_anchor(_: &BTreeMap<String, String>, _: &CharacterId, _: &StoryConfig) {}

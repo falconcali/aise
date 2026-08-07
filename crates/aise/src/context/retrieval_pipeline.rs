@@ -33,7 +33,7 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
         let mut heap: BinaryHeap<Reverse<RankedItem>> = BinaryHeap::with_capacity(max_candidates.min(64));
         let mut sequence = 0usize;
         for request in requests {
-            let sources = if request.sources.is_empty() {
+            let audiences = if request.sources.is_empty() {
                 vec![
                     ContextSource::HistoricalStory,
                     ContextSource::WorldKnowledge,
@@ -42,7 +42,7 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
             } else {
                 request.sources
             };
-            for source in sources {
+            for source in audiences {
                 for item in collect_source(snapshot, baseline, source) {
                     let score = if request.query.trim().is_empty() {
                         item.score
@@ -164,7 +164,7 @@ fn collect_source(
                 score: 1.0,
             })
             .collect(),
-        ContextSource::NarrativeGraph | ContextSource::LoreBook => Vec::new(),
+        ContextSource::NarrativeGraph => Vec::new(),
     }
 }
 

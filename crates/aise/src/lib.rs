@@ -15,8 +15,16 @@ pub mod runtime;
 pub mod story;
 pub mod validation;
 
-pub use config::{AiseConfig, CoordinatorConfig, LlmConfig, StorageConfig, TraceContentPolicy, TurnConfig};
+pub use config::{
+    AiseConfig, AssetLimitsConfig, CoordinatorConfig, LlmConfig, PromptModuleConfig, StorageConfig, TraceContentPolicy,
+    TurnConfig,
+};
 pub use core::turn_contract::{CommittedTurnResult, ExecuteTurnSpec};
 pub use core::turn_event::{TurnEvent, TurnEventSink};
 pub use engine::AiseEngine;
 pub use error::AiseError;
+pub use persistence::asset_store::{AssetStore, FrozenStoryPack, PackInfo, ValidatedStoryPack};
+pub use persistence::store::MaterializedStoryInstanceSpec;
+pub use story::pack_service::{
+    AssetExportError, AssetImportError, AssetInput, NativeAssetImporter, PackExport, PackExportFormat, PackService,
+};

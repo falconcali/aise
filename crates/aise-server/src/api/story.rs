@@ -1,7 +1,10 @@
 use crate::api::state::AppState;
 use crate::error::ApiError;
 use aise::core::turn_data::SnapshotLimits;
+use aise::domain::asset::frozen_ref::FrozenCharacterAssetRef;
+use aise::domain::asset::ids::{PackId, PlayerId, StoryRoleKey};
 use aise::domain::ids::StoryId;
+use aise::story::instance_factory::{CreateStoryInstanceSpec, StoryInstantiationError};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -19,6 +22,22 @@ pub struct CreateStoryRequest {
     pub tense: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CreateStoryInstanceRequest {
+    pub pack_id: String,
+    pub player_id: String,
+    pub player_role_key: String,
+    #[serde(default)]
+    pub player_character: Option<PlayerCharacterRef>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PlayerCharacterRef {
+    pub character_key: String,
+    pub version: String,
+    pub digest: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct StoryView {
     pub story_id: String,
@@ -26,6 +45,14 @@ pub struct StoryView {
     pub story_instructions: String,
     pub current_scene: String,
     pub recent_story: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StoryInstanceView {
+    pub story_id: String,
+    pub base_revision: u64,
+    pub pack_id: String,
+    pub current_scene: String,
 }
 
 pub async fn create_story(
@@ -63,6 +90,59 @@ pub async fn create_story(
         recent_story: Vec::new(),
     };
     Ok((StatusCode::CREATED, Json(view)))
+}
+
+pub async fn create_story_instance(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreateStoryInstanceRequest>,
+) -> Result<(StatusCode, Json<StoryInstanceView>), ApiError> {
+    let pack_id = PackId::try_new(req.pack_id).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    let player_id = PlayerId::try_new(req.player_id).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    let player_role_key =
+        StoryRoleKey::try_new(req.player_role_key).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    let player_character = req
+        .player_character
+        .map(|reference| {
+            Ok::<_, ApiError>(FrozenCharacterAssetRef {
+                character_key: aise::domain::asset::ids::CharacterAssetKey::try_new(reference.character_key)
+                    .map_err(|error| ApiError::BadRequest(error.to_string()))?,
+                version: aise::domain::asset::ids::SemanticVersion::try_new(reference.version)
+                    .map_err(|error| ApiError::BadRequest(error.to_string()))?,
+                digest: aise::domain::asset::ids::Sha256Digest::try_new(&reference.digest)
+                    .map_err(|error| ApiError::BadRequest(error.to_string()))?,
+            })
+        })
+        .transpose()?;
+    let instance_factory = state
+        .instance_factory
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("instance factory not initialized")))?;
+    let spec = CreateStoryInstanceSpec {
+        pack_id,
+        player_id,
+        player_role_key,
+        player_character,
+        created_at_ms: now_millis(),
+    };
+    let info = instance_factory.create(spec).await.map_err(|error| match error {
+        StoryInstantiationError::PackNotFound => ApiError::NotFound("story pack".into()),
+        StoryInstantiationError::RoleNotFound => ApiError::Unprocessable("story role was not found".into()),
+        StoryInstantiationError::RoleNotPlayable => ApiError::Unprocessable("story role is not playable".into()),
+        StoryInstantiationError::CharacterNotFound => ApiError::Unprocessable("character asset was not found".into()),
+        StoryInstantiationError::LimitExceeded { limit } => {
+            ApiError::Unprocessable(format!("story instantiation limit exceeded: {limit}"))
+        }
+        StoryInstantiationError::Store(store_error) => ApiError::Internal(anyhow::anyhow!(store_error)),
+    })?;
+    Ok((
+        StatusCode::CREATED,
+        Json(StoryInstanceView {
+            story_id: info.story_id.to_string(),
+            base_revision: info.base_revision.get(),
+            pack_id: info.story_id.to_string(),
+            current_scene: String::new(),
+        }),
+    ))
 }
 
 pub async fn get_story(

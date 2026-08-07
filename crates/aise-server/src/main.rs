@@ -1,8 +1,9 @@
 use aise::core::turn_trace::TraceSpanSink;
+use aise_server::app::build_services;
 use aise_server::session::SessionRegistry;
 use aise_server::shutdown::wait_for_shutdown_signal;
 use aise_server::tasks;
-use aise_server::{AppState, ServerConfig, build_engine, new_trace_writer, router};
+use aise_server::{AppState, ServerConfig, new_trace_writer, router};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
@@ -26,10 +27,13 @@ async fn main() -> anyhow::Result<()> {
 
     let trace_writer = new_trace_writer(&config)?;
     let trace_sink: Arc<dyn TraceSpanSink> = trace_writer.clone();
-    let engine = build_engine(&config, trace_sink).await?;
+    let services = build_services(&config, trace_sink).await?;
     let registry = SessionRegistry::new(config.max_sessions);
     let task_supervisor = tasks::TurnTaskSupervisor::new(config.turn_tasks())?;
-    let state = Arc::new(AppState::new(engine, registry, task_supervisor.clone(), config.clone()));
+    let state = Arc::new(
+        AppState::new(services.engine, registry, task_supervisor.clone(), config.clone())
+            .with_services(services.pack_service, services.instance_factory),
+    );
     let app = router(state, &config);
 
     let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;

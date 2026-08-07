@@ -35,3 +35,29 @@ max_repair_rounds = 3
 # max_tokens 预算，预算太小会在 content 返回前被截断（finish_reason=length）。
 max_tokens = 4096
 max_retrieved_items = 20
+
+[aise.assets]
+max_key_bytes = 128
+max_text_bytes = 32768
+max_tags_per_item = 32
+max_roles = 32
+max_character_assets = 64
+max_world_facts = 512
+max_world_rumors = 256
+max_seed_memories_per_role = 32
+max_relationships_per_role = 32
+max_graph_nodes = 256
+max_graph_edges = 512
+max_condition_depth = 8
+max_conditions_per_node = 16
+max_effects_per_node = 16
+max_manifest_bytes = 524288
+max_compressed_pack_bytes = 33554432
+max_uncompressed_pack_bytes = 134217728
+max_compression_ratio = 64
+max_asset_files = 1024
+max_single_asset_bytes = 16777216
+max_validation_issues = 64
+
+[aise.prompt]
+catalog_path = "prompts"

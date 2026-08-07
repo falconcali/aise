@@ -56,6 +56,28 @@ pub struct StoredTurnOutcome {
 }
 
 #[derive(Debug, Clone)]
+pub struct MaterializedStoryInstanceSpec {
+    pub story_id: crate::domain::ids::StoryId,
+    pub pack: crate::domain::asset::frozen_ref::FrozenStoryPackRef,
+    pub bindings: std::collections::BTreeMap<
+        crate::domain::asset::ids::StoryRoleKey,
+        crate::domain::story_instance::binding::RoleBinding,
+    >,
+    pub characters: std::collections::BTreeMap<
+        crate::domain::ids::CharacterId,
+        crate::domain::story_instance::state::CharacterInstanceState,
+    >,
+    pub relationships: Vec<crate::domain::story_instance::state::RelationshipState>,
+    pub facts: Vec<crate::domain::knowledge::fact::WorldFact>,
+    pub rumors: Vec<crate::domain::knowledge::rumor::SharedRumor>,
+    pub memories: Vec<crate::domain::knowledge::memory::MemoryEntry>,
+    pub scene: CurrentScene,
+    pub opening: crate::domain::asset::validation::BoundedText,
+    pub narrative_state: crate::domain::narrative_graph::state::NarrativeRuntimeState,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Clone)]
 pub struct TurnCommitSpec {
     pub story_id: crate::domain::ids::StoryId,
     pub turn: StoryTurn,
@@ -87,6 +109,7 @@ pub struct OutboxRecord {
 #[async_trait]
 pub trait Store: Send + Sync {
     async fn create_story(&self, spec: &StoryCreateSpec) -> Result<StoryInfo, StoreError>;
+    async fn create_story_instance(&self, spec: &MaterializedStoryInstanceSpec) -> Result<StoryInfo, StoreError>;
     async fn get_story(&self, story_id: &crate::domain::ids::StoryId) -> Result<Option<StoryInfo>, StoreError>;
     async fn load_story_snapshot(
         &self,

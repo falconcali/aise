@@ -30,6 +30,7 @@ struct MockProvider {
     protocol: Arc<AtomicUsize>,
     usage: Arc<Mutex<Option<LlmTokenUsage>>>,
     delay: Arc<Mutex<Option<Duration>>>,
+    last_messages: Arc<Mutex<Option<Vec<ChatMessage>>>>,
 }
 
 impl MockProvider {
@@ -45,6 +46,7 @@ impl MockProvider {
             protocol: Arc::new(AtomicUsize::new(0)),
             usage: Arc::new(Mutex::new(None)),
             delay: Arc::new(Mutex::new(None)),
+            last_messages: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -76,6 +78,10 @@ impl MockProvider {
         self.calls.load(Ordering::SeqCst)
     }
 
+    fn last_messages(&self) -> Vec<ChatMessage> {
+        self.last_messages.lock().unwrap().clone().unwrap_or_default()
+    }
+
     fn max_active(&self) -> usize {
         self.max_active.load(Ordering::SeqCst)
     }
@@ -103,7 +109,8 @@ impl LlmProvider for MockProvider {
         "mock"
     }
 
-    async fn complete(&self, _req: &CompletionRequest) -> Result<LlmCompletion, LlmProviderError> {
+    async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmProviderError> {
+        *self.last_messages.lock().unwrap() = Some(req.messages.clone());
         self.enter().await?;
         if self.protocol.load(Ordering::SeqCst) == 1 {
             return Err(LlmProviderError::Protocol {
@@ -918,4 +925,43 @@ async fn metadata_only_parse_error_contains_no_model_output() {
         !serialized.contains("response text"),
         "model output must not leak into the trace under MetadataOnly"
     );
+}
+
+#[tokio::test]
+async fn complete_typed_builds_trusted_system_and_encoded_context() {
+    let provider = MockProvider::new();
+    let gateway = Arc::new(
+        LlmGateway::new(Arc::new(provider.clone()), LlmConfig::default())
+            .unwrap()
+            .with_system_prompts(std::collections::HashMap::from([(
+                aise::prompt::PromptProfile::StoryGenerator,
+                "trusted narrator system".to_string(),
+            )])),
+    );
+    let mut ctx = new_ctx(far_deadline());
+    let request = aise::prompt::ModelRequest::story_generator(
+        aise::prompt::StoryGeneratorContext {
+            baseline: aise::core::turn_data::BaselineContext::default(),
+            thoughts: Vec::new(),
+            current_scene: None,
+        },
+        64,
+    );
+    let mut scope = ctx.llm_call_scope(TurnStage::StoryGenerator);
+    let estimated = request.context().baseline.estimate_tokens();
+    let reservation = scope
+        .reserve_llm(estimated, 64)
+        .map_err(|error| LlmError::TokenBudgetExceeded(error.to_string()))
+        .expect("reservation succeeds");
+    gateway
+        .complete_typed(scope, request, reservation)
+        .await
+        .expect("typed call succeeds");
+    let messages = provider.last_messages();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].role, Role::System);
+    assert_eq!(messages[0].content, "trusted narrator system");
+    assert_eq!(messages[1].role, Role::User);
+    let user: serde_json::Value = serde_json::from_str(&messages[1].content).unwrap();
+    assert!(user.get("baseline").is_some());
 }

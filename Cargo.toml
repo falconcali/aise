@@ -30,6 +30,8 @@ thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 # tokio-util: Tokio 官方取消原语 CancellationToken，用于 Turn 的 deadline/cancellation 统一协议。
 tokio-util = "0.7"
+# zip: 仅用于 .aise-pack 容器处理（有界流式读取与符号链接元数据访问），支持 Rust 1.85（R-DEP-01）。
+zip = { version = "2", default-features = false, features = ["deflate", "time"] }
 toml = "0.8"
 tower-http = { version = "0.6", features = ["fs", "trace", "cors"] }
 tracing = "0.1"

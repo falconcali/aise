@@ -8,8 +8,11 @@ use crate::core::turn_trace::{
 use crate::llm::accounting::{FinishReason, LlmCompletion, TokenAccountant, estimate_tokens};
 use crate::llm::error::LlmError;
 use crate::llm::limiter::LlmLimiter;
-use crate::llm::message::{CompletionRequest, CompletionSpec, EmbeddingOutput, EmbeddingRequest, Role};
+use crate::llm::message::{ChatMessage, CompletionRequest, CompletionSpec, EmbeddingOutput, EmbeddingRequest, Role};
 use crate::llm::provider::{DeltaSink, LlmProvider};
+use crate::prompt::{ModelRequest, PromptProfile, RuntimeContextEncoder};
+use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::Instrument;
@@ -19,6 +22,8 @@ pub struct LlmGateway {
     limiter: LlmLimiter,
     config: LlmConfig,
     accountant: TokenAccountant,
+    system_prompts: HashMap<PromptProfile, String>,
+    context_encoder: RuntimeContextEncoder,
 }
 
 impl LlmGateway {
@@ -38,7 +43,48 @@ impl LlmGateway {
             limiter,
             config,
             accountant,
+            system_prompts: HashMap::new(),
+            context_encoder: RuntimeContextEncoder,
         })
+    }
+
+    pub fn with_system_prompts(mut self, system_prompts: HashMap<PromptProfile, String>) -> Self {
+        self.system_prompts = system_prompts;
+        self
+    }
+
+    pub async fn complete_typed<C: Serialize>(
+        &self,
+        scope: TurnLlmCallScope<'_>,
+        request: ModelRequest<C>,
+        reservation: LlmBudgetReservation,
+    ) -> Result<LlmCompletion, LlmError> {
+        let system_prompt = self
+            .system_prompts
+            .get(&request.profile())
+            .cloned()
+            .unwrap_or_else(|| default_system_prompt(request.profile()));
+        let context_message = self
+            .context_encoder
+            .encode(request.context())
+            .map_err(|_error| LlmError::Protocol {
+                kind: crate::llm::error::LlmProtocolErrorKind::Unsupported,
+            })?;
+        let spec = CompletionSpec {
+            messages: vec![
+                ChatMessage {
+                    role: Role::System,
+                    content: system_prompt,
+                },
+                ChatMessage {
+                    role: Role::User,
+                    content: context_message.as_str().to_owned(),
+                },
+            ],
+            max_output_tokens: request.max_output_tokens(),
+            purpose: request.purpose(),
+        };
+        self.complete(scope, spec, reservation).await
     }
 
     pub async fn complete(
@@ -600,5 +646,29 @@ fn role_label(role: Role) -> &'static str {
         Role::System => "system",
         Role::User => "user",
         Role::Assistant => "assistant",
+    }
+}
+
+fn default_system_prompt(profile: PromptProfile) -> String {
+    match profile {
+        PromptProfile::WriterPlanner => {
+            "You are the writer planner for an interactive story. Plan retrieval and character focus for this turn."
+                .to_owned()
+        }
+        PromptProfile::CharacterThink => {
+            "You are the narrative director simulating a character's thoughts. Stay inside the character's viewpoint."
+                .to_owned()
+        }
+        PromptProfile::StoryGenerator => {
+            "You are the story generator. Write the next beat of the interactive story consistent with the plan."
+                .to_owned()
+        }
+        PromptProfile::StoryRepairer => {
+            "You are the story repairer. Revise the previous proposal to fix the reported validation issues.".to_owned()
+        }
+        PromptProfile::NarrativeValidator => {
+            "You are the narrative validator. Verify the proposal is consistent with the story world and plan."
+                .to_owned()
+        }
     }
 }

@@ -52,6 +52,13 @@ impl Store for Arc<SqliteStore> {
         Store::create_story(&**self, spec).await
     }
 
+    async fn create_story_instance(
+        &self,
+        spec: &crate::persistence::store::MaterializedStoryInstanceSpec,
+    ) -> Result<StoryInfo, StoreError> {
+        Store::create_story_instance(&**self, spec).await
+    }
+
     async fn get_story(&self, story_id: &StoryId) -> Result<Option<StoryInfo>, StoreError> {
         Store::get_story(&**self, story_id).await
     }
@@ -156,6 +163,88 @@ impl Store for SqliteStore {
         .await
         .map_err(SqliteStoreError::from)?;
         let _ = initial_world;
+        Ok(StoryInfo {
+            story_id: spec.story_id.clone(),
+            created_at_ms: spec.created_at_ms,
+            base_revision: StoryRevision::new(0),
+        })
+    }
+
+    async fn create_story_instance(
+        &self,
+        spec: &crate::persistence::store::MaterializedStoryInstanceSpec,
+    ) -> Result<StoryInfo, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(SqliteStoreError::from)?;
+        let bindings_json = serde_json::to_string(&spec.bindings).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        })?;
+        let characters_json = serde_json::to_string(&spec.characters).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidCharacterState,
+        })?;
+        let relationships_json = serde_json::to_string(&spec.relationships).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        })?;
+        let facts_json = serde_json::to_string(&spec.facts).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidWorldState,
+        })?;
+        let rumors_json = serde_json::to_string(&spec.rumors).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidWorldState,
+        })?;
+        let memories_json = serde_json::to_string(&spec.memories).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidMemory,
+        })?;
+        let narrative_state_json =
+            serde_json::to_string(&spec.narrative_state).map_err(|_| StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+            })?;
+        let opening_text = spec.opening.to_string();
+        let scene_json = serde_json::to_string(&spec.scene).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        })?;
+        sqlx::query(
+            "INSERT INTO stories (id, revision, player_character_id, created_at, story_instructions, story_config, \
+             current_scene, story_summary, active_constraints) \
+             VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(spec.story_id.as_str())
+        .bind(None::<String>)
+        .bind(spec.created_at_ms)
+        .bind(&opening_text)
+        .bind("{}")
+        .bind(&scene_json)
+        .bind("{\"text\":\"\"}")
+        .bind("[]")
+        .execute(&mut *tx)
+        .await
+        .map_err(SqliteStoreError::from)?;
+        sqlx::query("INSERT INTO worlds (id, name, state, created_at) VALUES (?, ?, ?, ?)")
+            .bind(spec.story_id.as_str())
+            .bind("materialized")
+            .bind("{}")
+            .bind(spec.created_at_ms)
+            .execute(&mut *tx)
+            .await
+            .map_err(SqliteStoreError::from)?;
+        sqlx::query(
+            "INSERT INTO story_instances \
+             (story_id, pack_id, revision, bindings_json, characters_json, relationships_json, facts_json, \
+              rumors_json, memories_json, narrative_state_json, created_at_ms) \
+             VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(spec.story_id.as_str())
+        .bind(spec.pack.pack_id.as_str())
+        .bind(&bindings_json)
+        .bind(&characters_json)
+        .bind(&relationships_json)
+        .bind(&facts_json)
+        .bind(&rumors_json)
+        .bind(&memories_json)
+        .bind(&narrative_state_json)
+        .bind(spec.created_at_ms)
+        .execute(&mut *tx)
+        .await
+        .map_err(SqliteStoreError::from)?;
+        tx.commit().await.map_err(SqliteStoreError::from)?;
         Ok(StoryInfo {
             story_id: spec.story_id.clone(),
             created_at_ms: spec.created_at_ms,

@@ -40,6 +40,17 @@ impl Store for NoCommitStore {
         })
     }
 
+    async fn create_story_instance(
+        &self,
+        _spec: &aise::persistence::store::MaterializedStoryInstanceSpec,
+    ) -> Result<aise::domain::StoryInfo, StoreError> {
+        Ok(aise::domain::StoryInfo {
+            story_id: _spec.story_id.clone(),
+            created_at_ms: _spec.created_at_ms,
+            base_revision: StoryRevision::new(0),
+        })
+    }
+
     async fn get_story(&self, _story_id: &StoryId) -> Result<Option<aise::domain::StoryInfo>, StoreError> {
         Ok(None)
     }

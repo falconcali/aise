@@ -481,6 +481,13 @@ impl aise::persistence::Store for TrackedStore {
         self.inner.create_story(spec).await
     }
 
+    async fn create_story_instance(
+        &self,
+        spec: &aise::persistence::store::MaterializedStoryInstanceSpec,
+    ) -> Result<aise::domain::StoryInfo, aise::persistence::StoreError> {
+        self.inner.create_story_instance(spec).await
+    }
+
     async fn get_story(
         &self,
         story_id: &StoryId,
@@ -525,6 +532,13 @@ impl aise::persistence::Store for ConflictStore {
         spec: &aise::domain::StoryCreateSpec,
     ) -> Result<aise::domain::StoryInfo, aise::persistence::StoreError> {
         self.inner.create_story(spec).await
+    }
+
+    async fn create_story_instance(
+        &self,
+        spec: &aise::persistence::store::MaterializedStoryInstanceSpec,
+    ) -> Result<aise::domain::StoryInfo, aise::persistence::StoreError> {
+        self.inner.create_story_instance(spec).await
     }
 
     async fn get_story(

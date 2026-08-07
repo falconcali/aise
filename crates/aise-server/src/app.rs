@@ -6,9 +6,13 @@ use aise::context::{BaselineContextBuilder, ContextRetrievalPipeline};
 use aise::core::turn_trace::TraceSpanSink;
 use aise::engine::{SystemClock, UuidIdGenerator};
 use aise::llm::{LlmGateway, LlmProvider, OpenAiCompatProvider};
+use aise::persistence::asset_store::AssetStore;
+use aise::persistence::sqlite_asset_store::SqliteAssetStore;
 use aise::persistence::{SqliteStore, Store, TurnCommitter};
 use aise::planning::WriterPlanner;
 use aise::runtime::{StoryTurnCoordinator, TurnInitializer, TurnPipelineSet, TurnRuntime};
+use aise::story::instance_factory::{StoryInstanceFactory, StoryInstantiationLimits};
+use aise::story::pack_service::{NativeAssetImporter, PackService};
 use aise::story::{StoryGenerator, StoryRepairer};
 use aise::validation::ValidationPipeline;
 use std::sync::Arc;
@@ -19,10 +23,16 @@ pub fn new_trace_writer(config: &ServerConfig) -> Result<Arc<TraceWriter>, Trace
     TraceWriter::new(writer_config, config.trace_dir.clone(), redactor)
 }
 
-pub async fn build_engine(
+pub struct EngineServices {
+    pub engine: Arc<AiseEngine>,
+    pub pack_service: Arc<PackService>,
+    pub instance_factory: Arc<StoryInstanceFactory>,
+}
+
+pub async fn build_services(
     config: &ServerConfig,
     trace_sink: Arc<dyn TraceSpanSink>,
-) -> Result<Arc<AiseEngine>, anyhow::Error> {
+) -> Result<EngineServices, anyhow::Error> {
     let provider: Arc<dyn LlmProvider> = Arc::new(OpenAiCompatProvider::new(config.aise.llm.clone()));
     let gateway = Arc::new(LlmGateway::new(provider, config.aise.llm.clone())?);
 
@@ -48,7 +58,7 @@ pub async fn build_engine(
 
     let engine = AiseEngine::new(
         runtime,
-        store,
+        store.clone(),
         coordinator,
         config.aise.clone(),
         Arc::new(UuidIdGenerator),
@@ -56,5 +66,33 @@ pub async fn build_engine(
     )
     .with_trace_sink(trace_sink);
 
-    Ok(Arc::new(engine))
+    let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&config.aise.storage.database_url)
+        .await
+        .map_err(|error| anyhow::anyhow!("asset store connect failed: {error}"))?;
+    let importer = NativeAssetImporter::new(config.aise.assets.clone());
+    let pack_service = Arc::new(PackService::new(importer, asset_store.clone()));
+    let instance_factory = Arc::new(StoryInstanceFactory::new(
+        asset_store,
+        store,
+        StoryInstantiationLimits {
+            max_roles: config.aise.assets.max_roles,
+            max_facts: config.aise.assets.max_world_facts,
+            max_rumors: config.aise.assets.max_world_rumors,
+            max_memories: config.aise.assets.max_seed_memories_per_role,
+            max_relationships: config.aise.assets.max_relationships_per_role,
+        },
+    ));
+
+    Ok(EngineServices {
+        engine: Arc::new(engine),
+        pack_service,
+        instance_factory,
+    })
+}
+
+pub async fn build_engine(
+    config: &ServerConfig,
+    trace_sink: Arc<dyn TraceSpanSink>,
+) -> Result<Arc<AiseEngine>, anyhow::Error> {
+    Ok(build_services(config, trace_sink).await?.engine)
 }

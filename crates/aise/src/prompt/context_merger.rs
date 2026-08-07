@@ -258,7 +258,6 @@ fn source_label(source: ContextSource) -> &'static str {
         ContextSource::WorldKnowledge => "world_knowledge",
         ContextSource::NarrativeGraph => "narrative_graph",
         ContextSource::HistoricalStory => "historical_story",
-        ContextSource::LoreBook => "lore_book",
     }
 }
 
