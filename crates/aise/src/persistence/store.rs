@@ -1,7 +1,7 @@
-use crate::core::turn_contract::{CommittedTurnResult, IdempotencyKey, RequestDigest, StoryRevision};
+use crate::core::turn_contract::{CommittedTurnResult, IdempotencyKey, RequestDigest};
 use crate::core::turn_data::SnapshotLimits;
 use crate::core::turn_validation::StateChange;
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::{CharacterId, StoryRevision};
 use crate::domain::narrative::{StoryEvent, StorySummary, StoryTurn};
 use crate::domain::story_state::{CurrentScene, StoryConstraint, StoryCreateSpec, StoryInfo, StoryReadSnapshot};
 use crate::domain::world::WorldState;

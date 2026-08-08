@@ -17,6 +17,19 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Domain dependency boundary
+        shell: bash
+        run: |
+          violations="$(
+            rg -n -U \
+              '(?:crate|super(?:::\s*super)*)::\s*core\b|(?:crate|super)::\s*\{[^}]*\bcore(?:::|,|\})' \
+              crates/aise/src/domain \
+              --glob '*.rs' || true
+          )"
+          if [ -n "$violations" ]; then
+            printf '%s\n' "$violations"
+            exit 1
+          fi
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy (warnings as errors)
@@ -32,6 +45,19 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Domain dependency boundary
+        shell: bash
+        run: |
+          violations="$(
+            rg -n -U \
+              '(?:crate|super(?:::\s*super)*)::\s*core\b|(?:crate|super)::\s*\{[^}]*\bcore(?:::|,|\})' \
+              crates/aise/src/domain \
+              --glob '*.rs' || true
+          )"
+          if [ -n "$violations" ]; then
+            printf '%s\n' "$violations"
+            exit 1
+          fi
       - name: Format (MSRV)
         run: cargo +1.85 fmt --all --check
       - name: Clippy (MSRV, warnings as errors)

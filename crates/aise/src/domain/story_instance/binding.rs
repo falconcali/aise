@@ -1,6 +1,5 @@
-use crate::core::turn_contract::{StoryId, StoryRevision};
 use crate::domain::asset::ids::{PackId, PlayerId, StoryRoleKey};
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::{CharacterId, StoryId, StoryRevision};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

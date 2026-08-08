@@ -4,6 +4,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use thiserror::Error;
 use uuid::Uuid;
 
 pub const MAX_LLM_CONTENT_CHARS: usize = 2000;
@@ -18,14 +19,20 @@ pub fn truncate(text: &str, max_chars: usize) -> String {
     format!("{prefix}…[+{} chars]", count - max_chars)
 }
 
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum TraceIdError {
+    #[error("trace_id must not be empty")]
+    EmptyTraceId,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TraceId(String);
 
 impl TraceId {
-    pub fn try_new(value: impl Into<String>) -> Result<Self, crate::core::turn_contract::TurnInputError> {
+    pub fn try_new(value: impl Into<String>) -> Result<Self, TraceIdError> {
         let value = value.into();
         if value.trim().is_empty() {
-            return Err(crate::core::turn_contract::TurnInputError::EmptyStoryId);
+            return Err(TraceIdError::EmptyTraceId);
         }
         Ok(Self(value))
     }

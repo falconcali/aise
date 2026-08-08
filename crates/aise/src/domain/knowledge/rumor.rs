@@ -1,7 +1,6 @@
-use crate::core::turn_contract::StoryRevision;
 use crate::domain::asset::ids::{RumorId, StoryRoleKey, TopicKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::{CharacterId, StoryRevision};
 use crate::domain::knowledge::query::KnowledgeSource;
 use serde::{Deserialize, Serialize};
 

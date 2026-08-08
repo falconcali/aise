@@ -1,5 +1,5 @@
-use crate::core::turn_contract::TurnId;
 use crate::domain::asset::ids::NarrativeNodeKey;
+use crate::domain::ids::TurnId;
 use crate::domain::narrative_graph::definition::NarrativeNodeState;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

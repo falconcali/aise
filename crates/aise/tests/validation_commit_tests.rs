@@ -5,8 +5,8 @@ use aise::core::story_proposal::{
 use aise::core::turn_budget::TurnBudget;
 use aise::core::turn_context::TurnExecutionContext;
 use aise::core::turn_contract::{
-    CommittedTurnResult, IdempotencyKey, RequestDigest, StoryRevision, TurnCancellation, TurnControl, TurnIdentity,
-    TurnPhase, TurnRequest,
+    CommittedTurnResult, IdempotencyKey, RequestDigest, TurnCancellation, TurnControl, TurnIdentity, TurnPhase,
+    TurnRequest,
 };
 use aise::core::turn_data::{BaselineContext, CharacterThought, SnapshotLimits, WriterPlan};
 use aise::core::turn_error::TurnFailureKind;
@@ -16,7 +16,7 @@ use aise::core::turn_validation::{
     BoundedValidationIssues, Repairability, StateChange, ValidationDecision, ValidationIssue, ValidationIssueCode,
     ValidationResult,
 };
-use aise::domain::ids::{CharacterId, FactId, StoryId, TurnId};
+use aise::domain::ids::{CharacterId, FactId, StoryId, StoryRevision, TurnId};
 use aise::domain::narrative::{EventKind, StorySummary, StoryTurn};
 use aise::domain::story_state::{
     AuthoritativeStoryState, CurrentScene, PlayerStoryState, StoryConfig, StoryReadSnapshot,
@@ -103,8 +103,7 @@ fn new_ctx() -> TurnExecutionContext {
             TurnId::try_new("turn-1").unwrap(),
             IdempotencyKey::try_new("key-1".to_string()).unwrap(),
             1000,
-        )
-        .unwrap(),
+        ),
         TurnRequest::try_new("开始吧".to_string()).unwrap(),
         budget(),
         TurnControl::new(Instant::now() + Duration::from_secs(60), TurnCancellation::new()),

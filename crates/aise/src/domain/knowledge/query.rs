@@ -1,7 +1,6 @@
-use crate::core::turn_contract::{StoryRevision, TurnId};
 use crate::domain::asset::ids::{EntityKey, SceneKey, TopicKey};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{CharacterId, EventId, FactId};
+use crate::domain::ids::{CharacterId, EventId, FactId, StoryRevision, TurnId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

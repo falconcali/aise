@@ -1,14 +1,12 @@
 use aise::character::CharacterThinkPipeline;
 use aise::config::{LlmConfig, TurnConfig, TurnContentLimitsConfig};
 use aise::core::turn_budget::TurnBudget;
-use aise::core::turn_contract::{
-    IdempotencyKey, StoryRevision, TurnCancellation, TurnControl, TurnIdentity, TurnRequest,
-};
+use aise::core::turn_contract::{IdempotencyKey, TurnCancellation, TurnControl, TurnIdentity, TurnRequest};
 use aise::core::turn_data::{BaselineContext, StoryGoal, WriterPlan};
 use aise::core::turn_pipeline::TurnExecutionPipeline;
 use aise::core::turn_trace::TraceRecorder;
 use aise::domain::character::CharacterState;
-use aise::domain::ids::{CharacterId, StoryId, TurnId};
+use aise::domain::ids::{CharacterId, StoryId, StoryRevision, TurnId};
 use aise::domain::story_state::{AuthoritativeStoryState, PlayerStoryState, StoryReadSnapshot};
 use aise::llm::accounting::{FinishReason, LlmCompletion, LlmTokenUsage, UsageAccuracy};
 use aise::llm::error::{LlmProtocolErrorKind, LlmProviderError};
@@ -85,8 +83,7 @@ fn prepared_ctx(character_ids: &[&str], requested: &[&str]) -> aise::core::turn_
             TurnId::try_new("turn-1").unwrap(),
             IdempotencyKey::try_new("key-1".to_string()).unwrap(),
             1000,
-        )
-        .unwrap(),
+        ),
         TurnRequest::try_new("hi".to_string()).unwrap(),
         budget(),
         TurnControl::new(Instant::now() + Duration::from_secs(60), TurnCancellation::new()),

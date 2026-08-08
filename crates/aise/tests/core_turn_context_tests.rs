@@ -3,8 +3,8 @@ use aise::core::story_proposal::{ProposedEvent, ProposedWorldChange, StoryPropos
 use aise::core::turn_budget::TurnBudget;
 use aise::core::turn_context::TurnExecutionContext;
 use aise::core::turn_contract::{
-    CommittedTurnResult, IdempotencyKey, LlmUsageAggregate, StoryRevision, TurnCancellation, TurnControl, TurnIdentity,
-    TurnPhase, TurnRequest,
+    CommittedTurnResult, IdempotencyKey, LlmUsageAggregate, TurnCancellation, TurnControl, TurnIdentity, TurnPhase,
+    TurnRequest,
 };
 use aise::core::turn_data::{BaselineContext, CharacterThought, ContextItem, ContextSource, StoryGoal, WriterPlan};
 use aise::core::turn_pipeline::TurnExecutionPipeline;
@@ -12,7 +12,7 @@ use aise::core::turn_trace::TraceRecorder;
 use aise::core::turn_validation::{
     BoundedValidationIssues, Repairability, ValidationDecision, ValidationIssue, ValidationIssueCode, ValidationResult,
 };
-use aise::domain::ids::{CharacterId, StoryId, TurnId};
+use aise::domain::ids::{CharacterId, StoryId, StoryRevision, TurnId};
 use aise::domain::narrative::EventKind;
 use aise::domain::story_state::{AuthoritativeStoryState, PlayerStoryState, StoryReadSnapshot};
 use aise::validation::ValidationPipeline;
@@ -38,7 +38,6 @@ fn identity() -> TurnIdentity {
         IdempotencyKey::try_new("key-1".to_string()).unwrap(),
         1000,
     )
-    .unwrap()
 }
 
 fn new_ctx() -> TurnExecutionContext {

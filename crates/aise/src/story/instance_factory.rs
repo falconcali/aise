@@ -1,7 +1,6 @@
-use crate::core::turn_contract::{StoryId, StoryRevision};
 use crate::domain::asset::frozen_ref::FrozenCharacterAssetRef;
 use crate::domain::asset::ids::{PackId, PlayerId, Sha256Digest, StoryRoleKey};
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::{CharacterId, StoryId, StoryRevision};
 use crate::domain::knowledge::fact::WorldFact;
 use crate::domain::knowledge::memory::MemoryEntry;
 use crate::domain::knowledge::query::KnowledgeSource;

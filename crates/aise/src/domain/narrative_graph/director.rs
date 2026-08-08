@@ -1,9 +1,8 @@
-use crate::core::turn_contract::TurnId;
 use crate::domain::asset::ids::NarrativeNodeKey;
 use crate::domain::narrative_graph::definition::{
-    NarrativeCondition, NarrativeGraphDefinition, NarrativeNodeDefinition, NarrativeNodeState, RoleControllerKind,
+    NarrativeCondition, NarrativeGraphDefinition, NarrativeNodeState, RoleControllerKind,
 };
-use crate::domain::narrative_graph::effect::{CharacterImpulse, GlobalEventIntent, ImpulseUrgency};
+use crate::domain::narrative_graph::effect::{CharacterImpulse, GlobalEventIntent};
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 
@@ -271,6 +270,3 @@ fn node_controller_kind(
         _ => RoleControllerKind::Ai,
     }
 }
-
-#[allow(dead_code)]
-pub(crate) fn _director_anchor(_: &NarrativeNodeDefinition, _: &TurnId, _: &ImpulseUrgency) {}

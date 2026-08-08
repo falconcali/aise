@@ -1,6 +1,7 @@
-use crate::core::turn_contract::{CommittedTurnResult, TurnId};
+use crate::core::turn_contract::CommittedTurnResult;
 use crate::core::turn_pipeline::TurnStage;
 use crate::core::turn_trace::TraceId;
+use crate::domain::ids::TurnId;
 use serde::Serialize;
 use thiserror::Error;
 

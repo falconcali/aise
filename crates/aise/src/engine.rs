@@ -167,13 +167,7 @@ impl AiseEngine {
         };
         let created_at = self.clock.now_millis();
         let identity =
-            match TurnIdentity::new(story_id.clone(), self.id_generator.new_turn_id(), idempotency_key, created_at) {
-                Ok(identity) => identity,
-                Err(error) => {
-                    let failure = TurnExecutionError::invalid_request(error.to_string());
-                    return self.finalize(None, Err(failure), sink, permit).await;
-                }
-            };
+            TurnIdentity::new(story_id.clone(), self.id_generator.new_turn_id(), idempotency_key, created_at);
         let control = TurnControl::new(deadline, cancellation);
         let mut recorder = TraceRecorder::with_limits(budget.max_trace_spans());
         if let Some(sink) = &self.trace_sink {

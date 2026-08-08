@@ -1,4 +1,3 @@
-use aise::core::turn_contract::{StoryId, StoryRevision};
 use aise::domain::asset::frozen_ref::FrozenStoryPackRef;
 use aise::domain::asset::ids::{
     LocationKey, NarrativeNodeKey, PackId, SemanticVersion, Sha256Digest, StoryPackKey, StoryRoleKey,
@@ -6,6 +5,7 @@ use aise::domain::asset::ids::{
 use aise::domain::asset::story_pack::{StoryProfile, StoryStyle};
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::CharacterId;
+use aise::domain::ids::{StoryId, StoryRevision};
 use aise::domain::narrative::StorySummary;
 use aise::domain::narrative_graph::definition::{
     NarrativeCondition, NarrativeGraphDefinition, NarrativeNodeDefinition, NarrativeNodeEffects, NarrativeNodeState,

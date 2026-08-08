@@ -5,10 +5,11 @@ use aise::TurnEventSink;
 use aise::character::CharacterThinkPipeline;
 use aise::context::{BaselineContextBuilder, ContextRetrievalPipeline};
 use aise::core::turn_contract::{
-    CommittedTurnResult, IdempotencyKey, LlmCallPurpose, LlmUsageAggregate, StoryRevision, TurnCancellation,
+    CommittedTurnResult, IdempotencyKey, LlmCallPurpose, LlmUsageAggregate, TurnCancellation,
 };
 use aise::core::turn_data::SnapshotLimits;
 use aise::core::turn_pipeline::TurnStage;
+use aise::domain::ids::StoryRevision;
 use aise::engine::{SystemClock, UuidIdGenerator};
 use aise::llm::LlmGateway;
 use aise::llm::accounting::{FinishReason, LlmCompletion, LlmTokenUsage, UsageAccuracy};

@@ -1,7 +1,7 @@
-use crate::core::turn_contract::{CommittedTurnResult, IdempotencyKey, StoryRevision};
+use crate::core::turn_contract::{CommittedTurnResult, IdempotencyKey};
 use crate::core::turn_data::SnapshotLimits;
 use crate::core::turn_validation::StateChange;
-use crate::domain::ids::{CharacterId, FactId, MemoryId, StoryId, TurnId};
+use crate::domain::ids::{CharacterId, FactId, MemoryId, StoryId, StoryRevision, TurnId};
 use crate::domain::memory::{MemoryEntry, MemoryKind};
 use crate::domain::narrative::StoryTurn;
 use crate::domain::story_state::{StoryCreateSpec, StoryInfo, StoryReadSnapshot};
@@ -346,7 +346,9 @@ impl Store for SqliteStore {
         .map_err(SqliteStoreError::from)?
         .into_iter()
         .map(|(id, player_input, story_text, created_at)| {
-            let id = TurnId::try_new(id).map_err(|_| StoreError::Unavailable)?;
+            let id = TurnId::try_new(id).map_err(|_| StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidTurnResult,
+            })?;
             Ok(StoryTurn {
                 id,
                 player_input,

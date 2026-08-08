@@ -1,3 +1,4 @@
+use crate::domain::ids::{StoryId, StoryRevision, TurnId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -10,11 +11,7 @@ pub const MAX_PLAYER_INPUT_CHARS: usize = 4096;
 pub const MAX_IDEMPOTENCY_KEY_CHARS: usize = 128;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
-pub enum TurnInputError {
-    #[error("story_id must not be empty")]
-    EmptyStoryId,
-    #[error("turn_id must not be empty")]
-    EmptyTurnId,
+pub enum TurnRequestError {
     #[error("idempotency key must not be empty")]
     EmptyIdempotencyKey,
     #[error("idempotency key is {actual} chars, maximum {maximum}")]
@@ -25,95 +22,18 @@ pub enum TurnInputError {
     PlayerInputTooLong { actual: usize, maximum: usize },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct StoryId(String);
-
-impl StoryId {
-    pub fn try_new(value: impl Into<String>) -> Result<Self, TurnInputError> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            return Err(TurnInputError::EmptyStoryId);
-        }
-        Ok(Self(value))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for StoryId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TurnId(String);
-
-impl TurnId {
-    pub fn try_new(value: impl Into<String>) -> Result<Self, TurnInputError> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            return Err(TurnInputError::EmptyTurnId);
-        }
-        Ok(Self(value))
-    }
-
-    pub fn new_uuid() -> Self {
-        Self(Uuid::new_v4().to_string())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for TurnId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct SessionId(String);
-
-impl SessionId {
-    pub fn try_new(value: impl Into<String>) -> Result<Self, TurnInputError> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            return Err(TurnInputError::EmptyStoryId);
-        }
-        Ok(Self(value))
-    }
-
-    pub fn new_uuid() -> Self {
-        Self(Uuid::new_v4().to_string())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for SessionId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IdempotencyKey(String);
 
 impl IdempotencyKey {
-    pub fn try_new(value: impl Into<String>) -> Result<Self, TurnInputError> {
+    pub fn try_new(value: impl Into<String>) -> Result<Self, TurnRequestError> {
         let value = value.into();
         if value.trim().is_empty() {
-            return Err(TurnInputError::EmptyIdempotencyKey);
+            return Err(TurnRequestError::EmptyIdempotencyKey);
         }
         let char_count = value.chars().count();
         if char_count > MAX_IDEMPOTENCY_KEY_CHARS {
-            return Err(TurnInputError::IdempotencyKeyTooLong {
+            return Err(TurnRequestError::IdempotencyKeyTooLong {
                 actual: char_count,
                 maximum: MAX_IDEMPOTENCY_KEY_CHARS,
             });
@@ -139,7 +59,11 @@ impl RequestDigest {
     fn from_canonical_input(input: &str) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(input.as_bytes());
-        let hex: String = hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect();
+        let hex = hasher.finalize().iter().fold(String::new(), |mut out, byte| {
+            use std::fmt::Write;
+            let _ = write!(out, "{byte:02x}");
+            out
+        });
         Self(hex)
     }
 
@@ -152,25 +76,6 @@ impl RequestDigest {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct StoryRevision(u64);
-
-impl std::fmt::Display for StoryRevision {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl StoryRevision {
-    pub const fn new(value: u64) -> Self {
-        Self(value)
-    }
-
-    pub const fn get(&self) -> u64 {
-        self.0
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct TurnIdentity {
     story_id: StoryId,
@@ -180,27 +85,13 @@ pub struct TurnIdentity {
 }
 
 impl TurnIdentity {
-    pub fn new(
-        story_id: StoryId,
-        turn_id: TurnId,
-        idempotency_key: IdempotencyKey,
-        started_at_ms: i64,
-    ) -> Result<Self, TurnInputError> {
-        if story_id.as_str().trim().is_empty() {
-            return Err(TurnInputError::EmptyStoryId);
-        }
-        if turn_id.as_str().trim().is_empty() {
-            return Err(TurnInputError::EmptyTurnId);
-        }
-        if idempotency_key.as_str().trim().is_empty() {
-            return Err(TurnInputError::EmptyIdempotencyKey);
-        }
-        Ok(Self {
+    pub fn new(story_id: StoryId, turn_id: TurnId, idempotency_key: IdempotencyKey, started_at_ms: i64) -> Self {
+        Self {
             story_id,
             turn_id,
             idempotency_key,
             started_at_ms,
-        })
+        }
     }
 
     pub fn story_id(&self) -> &StoryId {
@@ -227,14 +118,14 @@ pub struct TurnRequest {
 }
 
 impl TurnRequest {
-    pub fn try_new(player_input: String) -> Result<Self, TurnInputError> {
+    pub fn try_new(player_input: String) -> Result<Self, TurnRequestError> {
         let normalized = player_input.trim().to_string();
         let char_count = normalized.chars().count();
         if char_count == 0 {
-            return Err(TurnInputError::EmptyPlayerInput);
+            return Err(TurnRequestError::EmptyPlayerInput);
         }
         if char_count > MAX_PLAYER_INPUT_CHARS {
-            return Err(TurnInputError::PlayerInputTooLong {
+            return Err(TurnRequestError::PlayerInputTooLong {
                 actual: char_count,
                 maximum: MAX_PLAYER_INPUT_CHARS,
             });
@@ -294,7 +185,7 @@ impl ValidatedExecuteTurnSpec {
 }
 
 impl ExecuteTurnSpec {
-    pub fn try_into_validated(self) -> Result<ValidatedExecuteTurnSpec, TurnInputError> {
+    pub fn try_into_validated(self) -> Result<ValidatedExecuteTurnSpec, TurnRequestError> {
         let request = TurnRequest::try_new(self.player_input)?;
         Ok(ValidatedExecuteTurnSpec {
             story_id: self.story_id,

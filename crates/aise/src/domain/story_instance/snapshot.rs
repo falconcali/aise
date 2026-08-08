@@ -1,9 +1,8 @@
-use crate::core::turn_contract::{StoryId, StoryRevision, TurnId};
 use crate::domain::asset::character_card::CharacterCard;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
 use crate::domain::asset::ids::StoryRoleKey;
 use crate::domain::asset::story_pack::{StoryProfile, StoryRole};
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::{CharacterId, ConstraintId, StoryId, StoryRevision};
 use crate::domain::knowledge::fact::WorldFact;
 use crate::domain::knowledge::memory::MemoryEntry;
 use crate::domain::knowledge::query::CurrentPerception;
@@ -25,29 +24,6 @@ pub struct CurrentScene {
 pub struct StoryConstraint {
     pub id: ConstraintId,
     pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ConstraintId(String);
-
-impl ConstraintId {
-    pub fn try_new(value: impl Into<String>) -> Result<Self, crate::core::turn_contract::TurnInputError> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            return Err(crate::core::turn_contract::TurnInputError::EmptyStoryId);
-        }
-        Ok(Self(value))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for ConstraintId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -214,6 +190,3 @@ impl StoryReadSnapshot {
         self.narrative_state.graph_revision
     }
 }
-
-#[allow(dead_code)]
-pub(crate) fn _snapshot_anchor(_: &TurnId) {}

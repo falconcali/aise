@@ -175,7 +175,7 @@ fn build_constraint_change(
     }
     let mut constraints = Vec::with_capacity(texts.len());
     for (index, text) in texts.iter().enumerate() {
-        let id = crate::domain::story_state::ConstraintId::try_new(format!("{turn_id}#constraint#{index}"))
+        let id = crate::domain::ids::ConstraintId::try_new(format!("{turn_id}#constraint#{index}"))
             .map_err(|_| invariant("invalid_constraint_id", "failed to build constraint id"))?;
         constraints.push(crate::domain::story_state::StoryConstraint { id, text: text.clone() });
     }

@@ -1,7 +1,6 @@
-use crate::core::turn_contract::StoryRevision;
 use crate::domain::asset::ids::{MemoryKind, TopicKey};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{CharacterId, MemoryId};
+use crate::domain::ids::{CharacterId, MemoryId, StoryRevision};
 use crate::domain::knowledge::query::KnowledgeSource;
 use serde::{Deserialize, Serialize};
 

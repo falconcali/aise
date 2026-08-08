@@ -202,8 +202,7 @@ fn new_ctx_with_cancellation(deadline: Instant, cancellation: TurnCancellation) 
             TurnId::try_new("turn-1").unwrap(),
             IdempotencyKey::try_new("key-1".to_string()).unwrap(),
             1,
-        )
-        .unwrap(),
+        ),
         TurnRequest::try_new("hello".into()).unwrap(),
         budget(),
         TurnControl::new(deadline, cancellation),
@@ -436,8 +435,7 @@ async fn budget_is_reserved_before_provider_dispatch() {
             TurnId::try_new("turn-1").unwrap(),
             IdempotencyKey::try_new("key-1".to_string()).unwrap(),
             1,
-        )
-        .unwrap(),
+        ),
         TurnRequest::try_new("hello".into()).unwrap(),
         tight,
         TurnControl::new(far_deadline(), TurnCancellation::new()),
@@ -886,8 +884,7 @@ async fn settlement_overflow_marks_trace_budget_exceeded() {
             TurnId::try_new("turn-1").unwrap(),
             IdempotencyKey::try_new("key-1".to_string()).unwrap(),
             1,
-        )
-        .unwrap(),
+        ),
         TurnRequest::try_new("hello".into()).unwrap(),
         tight,
         TurnControl::new(far_deadline(), TurnCancellation::new()),

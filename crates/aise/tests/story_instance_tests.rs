@@ -1,7 +1,7 @@
-use aise::core::turn_contract::StoryRevision;
 use aise::domain::asset::ids::{
     LocationKey, PackId, PlayerId, SemanticVersion, Sha256Digest, StoryPackKey, StoryRoleKey,
 };
+use aise::domain::ids::StoryRevision;
 use aise::domain::ids::{CharacterId, StoryId};
 use aise::domain::story_instance::binding::{RoleBinding, StoryInstanceBinding};
 use aise::domain::story_instance::snapshot::StoryReadSnapshot;

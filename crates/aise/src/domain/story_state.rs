@@ -1,6 +1,5 @@
-use crate::core::turn_contract::{StoryId, StoryRevision};
 use crate::domain::character::CharacterState;
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::{CharacterId, ConstraintId, StoryId, StoryRevision};
 use crate::domain::memory::MemoryEntry;
 use crate::domain::narrative::{StorySummary, StoryTurn};
 use crate::domain::world::WorldState;
@@ -22,29 +21,6 @@ pub struct CurrentScene {
 pub struct StoryConstraint {
     pub id: ConstraintId,
     pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ConstraintId(String);
-
-impl ConstraintId {
-    pub fn try_new(value: impl Into<String>) -> Result<Self, crate::core::turn_contract::TurnInputError> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            return Err(crate::core::turn_contract::TurnInputError::EmptyStoryId);
-        }
-        Ok(Self(value))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for ConstraintId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
 }
 
 #[derive(Debug, Clone, Default)]

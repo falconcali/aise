@@ -2,13 +2,11 @@ use super::*;
 use crate::config::{TurnConfig, TurnContentLimitsConfig};
 use crate::core::turn_budget::TurnBudget;
 use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_contract::{
-    IdempotencyKey, StoryRevision, TurnCancellation, TurnControl, TurnIdentity, TurnRequest,
-};
+use crate::core::turn_contract::{IdempotencyKey, TurnCancellation, TurnControl, TurnIdentity, TurnRequest};
 use crate::core::turn_data::{BaselineContext, ContextRequest, ContextSource, StoryGoal, WriterPlan};
 use crate::core::turn_trace::TraceRecorder;
 use crate::domain::character::{CharacterState, InternalState};
-use crate::domain::ids::{CharacterId, MemoryId, StoryId, TurnId};
+use crate::domain::ids::{CharacterId, MemoryId, StoryId, StoryRevision, TurnId};
 use crate::domain::memory::{MemoryEntry, MemoryKind};
 use crate::domain::story_state::{AuthoritativeStoryState, PlayerStoryState, StoryReadSnapshot};
 use crate::domain::world::{FactSource, WorldFact, WorldState};
@@ -143,8 +141,7 @@ async fn retrieval_uses_bounded_top_k_candidates() {
             TurnId::try_new("turn-topk").unwrap(),
             IdempotencyKey::try_new("key-topk".to_string()).unwrap(),
             1000,
-        )
-        .unwrap(),
+        ),
         TurnRequest::try_new("开始吧".to_string()).unwrap(),
         budget,
         TurnControl::new(Instant::now() + Duration::from_secs(60), TurnCancellation::new()),

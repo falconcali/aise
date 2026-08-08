@@ -3,18 +3,18 @@ use aise::context::BaselineContextBuilder;
 use aise::core::turn_budget::TurnBudget;
 use aise::core::turn_context::TurnExecutionContext;
 use aise::core::turn_contract::{
-    FinishReason, IdempotencyKey, LlmCallId, LlmCallPurpose, LlmCallUsage, LlmCharge, RequestDigest, StoryRevision,
-    TurnCancellation, TurnControl, TurnIdentity, TurnRequest, UsageAccuracy,
+    FinishReason, IdempotencyKey, LlmCallId, LlmCallPurpose, LlmCallUsage, LlmCharge, RequestDigest, TurnCancellation,
+    TurnControl, TurnIdentity, TurnRequest, UsageAccuracy,
 };
 use aise::core::turn_data::SnapshotLimits;
 use aise::core::turn_pipeline::TurnExecutionPipeline;
 use aise::core::turn_trace::TraceRecorder;
 use aise::core::turn_validation::{CharacterStateChange, MemoryStateChange, StateChange};
 use aise::domain::character::{CharacterState, InternalState};
-use aise::domain::ids::{CharacterId, EventId, MemoryId, StoryId, TurnId};
+use aise::domain::ids::{CharacterId, ConstraintId, EventId, MemoryId, StoryId, StoryRevision, TurnId};
 use aise::domain::memory::{MemoryEntry, MemoryKind};
 use aise::domain::narrative::{EventKind, StoryEvent, StorySummary, StoryTurn};
-use aise::domain::story_state::{ConstraintId, CurrentScene, StoryConfig, StoryConstraint, StoryCreateSpec};
+use aise::domain::story_state::{CurrentScene, StoryConfig, StoryConstraint, StoryCreateSpec};
 use aise::persistence::{OutboxRecord, SqliteStore, Store, StoreError, TurnCommitSpec};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -229,8 +229,7 @@ async fn player_character_is_selected_by_stable_id() {
             TurnId::try_new("turn-p").unwrap(),
             IdempotencyKey::try_new("key-p".to_string()).unwrap(),
             2000,
-        )
-        .unwrap(),
+        ),
         TurnRequest::try_new("开始吧".to_string()).unwrap(),
         TurnBudget::from_config(&TurnConfig::default(), &aise::config::TurnContentLimitsConfig::default()).unwrap(),
         TurnControl::new(Instant::now() + Duration::from_secs(60), TurnCancellation::new()),
@@ -680,8 +679,7 @@ async fn baseline_uses_authoritative_scene_summary_and_constraints() {
             TurnId::try_new("turn-b").unwrap(),
             IdempotencyKey::try_new("key-b".to_string()).unwrap(),
             2000,
-        )
-        .unwrap(),
+        ),
         TurnRequest::try_new("开始吧".to_string()).unwrap(),
         TurnBudget::from_config(&TurnConfig::default(), &aise::config::TurnContentLimitsConfig::default()).unwrap(),
         TurnControl::new(Instant::now() + Duration::from_secs(60), TurnCancellation::new()),
