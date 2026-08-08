@@ -1,6 +1,6 @@
 use crate::core::turn_contract::CommittedTurnResult;
 use crate::core::turn_pipeline::TurnStage;
-use crate::core::turn_trace::TraceId;
+use crate::core::turn_trace::TurnTrace;
 use crate::domain::ids::TurnId;
 use serde::Serialize;
 use thiserror::Error;
@@ -41,7 +41,7 @@ pub enum TurnEvent {
 
     TraceCompleted {
         turn_id: TurnId,
-        trace_id: TraceId,
+        trace: TurnTrace,
     },
 }
 
@@ -126,8 +126,8 @@ impl TurnEvent {
             TurnEvent::Failed { turn_id, code } => json!({ "turn_id": turn_id.as_str(), "code": code }),
             TurnEvent::Cancelled { turn_id, code } => json!({ "turn_id": turn_id.as_str(), "code": code }),
             TurnEvent::Conflict { turn_id, code } => json!({ "turn_id": turn_id.as_str(), "code": code }),
-            TurnEvent::TraceCompleted { turn_id, trace_id } => {
-                json!({ "turn_id": turn_id.as_str(), "trace_id": trace_id.as_str() })
+            TurnEvent::TraceCompleted { trace, .. } => {
+                serde_json::to_value(trace).unwrap_or(serde_json::Value::Null)
             }
         }
     }

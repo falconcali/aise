@@ -292,13 +292,19 @@ async fn turn_trace_records_metadata_only_llm_usage() {
     let trace_event = events
         .iter()
         .find_map(|e| match e {
-            TurnEvent::TraceCompleted { turn_id, trace_id } => Some((turn_id.clone(), trace_id.clone())),
+            TurnEvent::TraceCompleted { trace, .. } => Some(trace),
             _ => None,
         })
         .expect("trace event");
-    let (trace_turn_id, trace_id) = trace_event;
-    assert_eq!(trace_turn_id, result.turn_id);
-    assert!(!trace_id.as_str().is_empty());
+    assert_eq!(trace_event.turn_id, result.turn_id.to_string());
+    assert!(!trace_event.trace_id.as_str().is_empty());
+    assert!(!trace_event.spans.is_empty());
+    assert!(
+        trace_event
+            .spans
+            .iter()
+            .any(|span| span.kind == "aise.llm_call")
+    );
     let _ = std::fs::remove_file(&db);
 }
 

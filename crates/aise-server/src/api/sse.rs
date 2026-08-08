@@ -71,14 +71,14 @@ impl SseSink {
             TurnEvent::Conflict { turn_id, code } => {
                 ("conflict", serde_json::json!({ "turn_id": turn_id.as_str(), "code": code }))
             }
-            TurnEvent::TraceCompleted { turn_id, trace_id } => {
+            TurnEvent::TraceCompleted { trace, .. } => {
                 if !self.include_trace {
                     return None;
                 }
-                (
-                    "trace",
-                    serde_json::json!({ "turn_id": turn_id.as_str(), "trace_id": trace_id.as_str() }),
-                )
+                match serde_json::to_value(trace) {
+                    Ok(value) => ("trace", value),
+                    Err(_) => return None,
+                }
             }
         };
         let data = match serde_json::to_string(&payload) {

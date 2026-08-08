@@ -263,10 +263,7 @@ impl AiseEngine {
             }
         };
         if let Some((turn_id, Some(trace))) = trace {
-            let _ = sink.emit(TurnEvent::TraceCompleted {
-                turn_id,
-                trace_id: trace.trace_id.clone(),
-            });
+            let _ = sink.emit(TurnEvent::TraceCompleted { turn_id, trace });
         }
         outcome
     }

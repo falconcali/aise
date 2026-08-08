@@ -9,6 +9,7 @@ use aise::core::turn_contract::{
 };
 use aise::core::turn_data::SnapshotLimits;
 use aise::core::turn_pipeline::TurnStage;
+use aise::core::turn_trace::{TraceId, TraceSpan, TurnTrace};
 use aise::domain::ids::StoryRevision;
 use aise::engine::{SystemClock, UuidIdGenerator};
 use aise::llm::LlmGateway;
@@ -25,6 +26,7 @@ use aise_server::api::sse::{ClientDisconnectGuard, SSE_CHANNEL_CAPACITY, SseSink
 use aise_server::session::SessionRegistry;
 use aise_server::tasks::{TurnTaskSupervisor, TurnTaskSupervisorConfig};
 use aise_server::{AppState, ServerConfig, router};
+use axum::response::IntoResponse;
 use futures::StreamExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -511,4 +513,84 @@ async fn get_turn_result_recovers_after_sse_disconnect() {
     assert_eq!(calls.load(Ordering::SeqCst), initial_calls, "recovery performs no llm call");
 
     let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn trace_completed_event_carries_full_span_payload() {
+    let (progress_tx, progress_rx) = mpsc::channel::<axum::response::sse::Event>(SSE_CHANNEL_CAPACITY);
+    let (terminal_tx, terminal_rx) = mpsc::channel::<axum::response::sse::Event>(1);
+    let sink = SseSink::new(progress_tx, terminal_tx, true);
+    let trace = TurnTrace {
+        trace_id: TraceId::try_new("trace-1").unwrap(),
+        turn_id: "turn-1".into(),
+        story_id: "story-1".into(),
+        started_at_ms: 1,
+        ended_at_ms: 2,
+        duration_ms: 1,
+        dropped_span_count: 0,
+        spans: vec![TraceSpan {
+            span_id: "span-1".into(),
+            parent_span_id: None,
+            kind: "aise.pipeline".into(),
+            name: "writer_planner".into(),
+            started_at_ms: 1,
+            ended_at_ms: 2,
+            duration_ms: 1,
+            payload: serde_json::json!({ "stage": "writer_planner", "status": "ok" }),
+        }],
+    };
+    sink.emit(TurnEvent::TraceCompleted {
+        turn_id: aise::domain::ids::TurnId::try_new("turn-1").unwrap(),
+        trace,
+    })
+    .expect("trace event accepted");
+    drop(sink);
+    let stream = sse_merged_stream(
+        progress_rx,
+        terminal_rx,
+        ClientDisconnectGuard::new(TurnCancellation::new()),
+    );
+    let response = axum::response::Sse::new(stream).into_response();
+    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+        .await
+        .expect("read sse body");
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    assert!(text.contains("event: trace"), "sse event must be named trace; got: {text}");
+    assert!(text.contains("\"spans\""), "payload must carry the spans array; got: {text}");
+    assert!(text.contains("\"writer_planner\""), "span entries must be present; got: {text}");
+    assert!(text.contains("\"status\""), "span payload must be included; got: {text}");
+}
+
+#[tokio::test]
+async fn trace_event_is_filtered_when_trace_disabled() {
+    let (progress_tx, progress_rx) = mpsc::channel::<axum::response::sse::Event>(SSE_CHANNEL_CAPACITY);
+    let (terminal_tx, terminal_rx) = mpsc::channel::<axum::response::sse::Event>(1);
+    let sink = SseSink::new(progress_tx, terminal_tx, false);
+    let trace = TurnTrace {
+        trace_id: TraceId::try_new("trace-2").unwrap(),
+        turn_id: "turn-2".into(),
+        story_id: "story-1".into(),
+        started_at_ms: 1,
+        ended_at_ms: 2,
+        duration_ms: 1,
+        dropped_span_count: 0,
+        spans: Vec::new(),
+    };
+    sink.emit(TurnEvent::TraceCompleted {
+        turn_id: aise::domain::ids::TurnId::try_new("turn-2").unwrap(),
+        trace,
+    })
+    .expect("trace event accepted");
+    drop(sink);
+    let stream = sse_merged_stream(
+        progress_rx,
+        terminal_rx,
+        ClientDisconnectGuard::new(TurnCancellation::new()),
+    );
+    let response = axum::response::Sse::new(stream).into_response();
+    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+        .await
+        .expect("read sse body");
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    assert!(!text.contains("event: trace"), "trace event must not be emitted when disabled");
 }
