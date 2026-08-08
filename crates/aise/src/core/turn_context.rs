@@ -493,7 +493,7 @@ pub struct TurnLlmCallScope<'a> {
     stage: TurnStage,
 }
 
-impl<'a> TurnLlmCallScope<'a> {
+impl TurnLlmCallScope<'_> {
     pub fn story_id(&self) -> &StoryId {
         self.identity.story_id()
     }

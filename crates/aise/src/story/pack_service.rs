@@ -449,37 +449,36 @@ impl NativeAssetImporter {
     }
 
     fn validate_salience(&self, value: &serde_json::Value, report: &mut ValidationReport) {
-        self.walk_salience(value, "/", report, 0);
-    }
-
-    fn walk_salience(&self, value: &serde_json::Value, path: &str, report: &mut ValidationReport, depth: usize) {
-        if depth > 24 {
-            return;
-        }
-        match value {
-            serde_json::Value::Object(map) => {
-                for (key, child) in map {
-                    let child_path = format!("{path}/{key}");
-                    if key == "salience" {
-                        if let Some(salience) = child.as_u64() {
-                            if salience > 100 {
-                                report.push(AssetValidationIssue::new(
-                                    AssetValidationCode::InvalidSalience,
-                                    child_path.clone(),
-                                    "salience must be within 0..=100",
-                                ));
+        let mut stack = vec![(value, "/".to_owned(), 0)];
+        while let Some((current, path, depth)) = stack.pop() {
+            if depth > 24 {
+                continue;
+            }
+            match current {
+                serde_json::Value::Object(map) => {
+                    for (key, child) in map {
+                        let child_path = format!("{path}/{key}");
+                        if key == "salience" {
+                            if let Some(salience) = child.as_u64() {
+                                if salience > 100 {
+                                    report.push(AssetValidationIssue::new(
+                                        AssetValidationCode::InvalidSalience,
+                                        child_path.clone(),
+                                        "salience must be within 0..=100",
+                                    ));
+                                }
                             }
                         }
+                        stack.push((child, child_path, depth + 1));
                     }
-                    self.walk_salience(child, &child_path, report, depth + 1);
                 }
-            }
-            serde_json::Value::Array(items) => {
-                for (index, item) in items.iter().enumerate() {
-                    self.walk_salience(item, &format!("{path}/{index}"), report, depth + 1);
+                serde_json::Value::Array(items) => {
+                    for (index, item) in items.iter().enumerate() {
+                        stack.push((item, format!("{path}/{index}"), depth + 1));
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         }
     }
 
