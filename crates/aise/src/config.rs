@@ -51,6 +51,7 @@ pub enum TraceContentPolicy {
     #[default]
     MetadataOnly,
     RedactedContent,
+    FullContent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -663,18 +664,20 @@ impl LlmConfig {
             return Err(ConfigError::Invalid("llm.provider_timeout_ms must be positive".into()));
         }
         self.protocol.validate()?;
-        if self.trace_content == TraceContentPolicy::RedactedContent
-            && !redacted_content_allowed(std::env::var("AISE_ENV").ok().as_deref())
+        if matches!(
+            self.trace_content,
+            TraceContentPolicy::RedactedContent | TraceContentPolicy::FullContent
+        ) && !content_recording_allowed(std::env::var("AISE_ENV").ok().as_deref())
         {
             return Err(ConfigError::Invalid(
-                "llm.trace_content=redacted_content requires AISE_ENV=development".into(),
+                "llm.trace_content=redacted_content|full_content requires AISE_ENV=development".into(),
             ));
         }
         Ok(())
     }
 }
 
-fn redacted_content_allowed(runtime_env: Option<&str>) -> bool {
+fn content_recording_allowed(runtime_env: Option<&str>) -> bool {
     runtime_env == Some("development")
 }
 

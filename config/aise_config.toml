@@ -25,6 +25,9 @@ temperature = 0.8
 # deepseek-v4 系列默认开启 thinking 模式：思维链与最终答案共享 max_tokens
 # 预算，且对 JSON 结构化输出不友好。显式禁用后直接返回 JSON，更稳定省钱。
 thinking = "disabled"
+# 在 trace 中记录完整的 LLM prompt 与返回内容，供调试 Trace 页签查看。
+# 需配合环境变量 AISE_ENV=development（见 .env.example），否则校验失败。
+trace_content = "full_content"
 
 [aise.storage]
 database_url = "data/aise.db"

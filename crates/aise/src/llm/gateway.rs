@@ -493,8 +493,9 @@ impl LlmGateway {
             LlmCallStatus::ProviderRejected
         };
         let error_kind = provider_error.as_ref().map(|error| error.kind().to_owned());
-        let content = if self.config.trace_content == TraceContentPolicy::RedactedContent {
-            Some(LlmCallContent {
+        let content = match self.config.trace_content {
+            TraceContentPolicy::MetadataOnly => None,
+            TraceContentPolicy::RedactedContent => Some(LlmCallContent {
                 messages: request
                     .messages
                     .iter()
@@ -507,9 +508,18 @@ impl LlmGateway {
                     .as_ref()
                     .map(|c| truncate(&c.text, MAX_LLM_RESPONSE_CHARS))
                     .unwrap_or_default(),
-            })
-        } else {
-            None
+            }),
+            TraceContentPolicy::FullContent => Some(LlmCallContent {
+                messages: request
+                    .messages
+                    .iter()
+                    .map(|message| MessageData {
+                        role: role_label(message.role).to_owned(),
+                        content: message.content.clone(),
+                    })
+                    .collect(),
+                response: completion.as_ref().map(|c| c.text.clone()).unwrap_or_default(),
+            }),
         };
         let payload = SpanPayload::LlmCall(Box::new(LlmCallData {
             provider: self.provider.provider_name().to_owned(),
