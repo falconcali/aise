@@ -1,28 +1,20 @@
 use crate::core::StoryProposal;
 use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_contract::LlmCallPurpose;
-use crate::core::turn_error::TurnExecutionError;
+use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::core::turn_trace::truncate;
+use crate::domain::asset::validation::BoundedText;
 use crate::llm::gateway::LlmGateway;
-use crate::llm::message::CompletionSpec;
-use crate::prompt::{ContextMerger, GenerationInput};
+use crate::prompt::{ModelRequest, StoryGeneratorContext};
 use async_trait::async_trait;
 use std::sync::Arc;
 
-const MAX_PARSE_ERROR_PREVIEW_CHARS: usize = 200;
-
 pub struct StoryGenerator {
     gateway: Arc<LlmGateway>,
-    merger: ContextMerger,
 }
 
 impl StoryGenerator {
     pub fn new(gateway: Arc<LlmGateway>) -> Self {
-        Self {
-            gateway,
-            merger: ContextMerger,
-        }
+        Self { gateway }
     }
 }
 
@@ -37,42 +29,35 @@ impl TurnExecutionPipeline for StoryGenerator {
             .baseline()
             .ok_or_else(|| invariant("baseline context not set before story generation"))?
             .clone();
-        let plan = ctx
+        let writer_plan = ctx
             .plan()
             .ok_or_else(|| invariant("writer plan not set before story generation"))?
             .clone();
-        let retrieved = ctx.retrieved().to_vec();
-        let thoughts = ctx.thoughts().to_vec();
-        let issues: Vec<String> = ctx
-            .validation()
-            .map(|validation| validation.issues().iter().map(|issue| issue.message.clone()).collect())
-            .unwrap_or_default();
-        let player_input = ctx.player_input().to_string();
-        let messages = self.merger.generation_messages(GenerationInput {
-            baseline: &baseline,
-            plan: &plan,
-            retrieved: &retrieved,
-            thoughts: &thoughts,
-            player_input: &player_input,
-            issues: &issues,
-            previous_story: ctx.proposal().map(|proposal| proposal.story_text.as_str()),
-        });
-        let max_output = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
-        let spec = CompletionSpec {
-            messages,
-            max_output_tokens: max_output,
-            purpose: LlmCallPurpose::StoryGeneration,
-        };
-        let mut scope = ctx.llm_call_scope(TurnStage::StoryGenerator);
-        let estimated_input = crate::llm::accounting::TokenAccountant::estimate_input_tokens(&spec.messages);
-        let reservation = scope.reserve_llm(estimated_input, u64::from(max_output))?;
-        let completion = self.gateway.complete(scope, spec, reservation).await?;
-        let proposal: StoryProposal = serde_json::from_str(&completion.text).map_err(|error| {
-            TurnExecutionError::invariant(format!(
-                "story proposal output is not valid JSON: {error}; raw_output={}",
-                truncate(&completion.text, MAX_PARSE_ERROR_PREVIEW_CHARS)
-            ))
+        let writer_context = ctx.retrieved().writer().to_vec();
+        let character_thoughts = ctx.thoughts().to_vec();
+        let player_input = BoundedText::try_new(ctx.player_input().to_owned(), "player_input", 4096)
+            .map_err(|_| invariant("player input exceeds bound"))?;
+        let request = ModelRequest::story_generator(
+            StoryGeneratorContext {
+                baseline,
+                writer_plan,
+                writer_context,
+                character_thoughts,
+                player_input,
+            },
+            ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32,
+        );
+        let scope = ctx.llm_call_scope(TurnStage::StoryGenerator);
+        let completion = self.gateway.complete_typed(scope, request).await.map_err(|error| {
+            TurnExecutionError::new(
+                TurnFailureKind::Llm,
+                "llm_error",
+                Some(TurnStage::StoryGenerator),
+                error.to_string(),
+            )
         })?;
+        let proposal: StoryProposal =
+            serde_json::from_str(&completion.text).map_err(|_| invariant("story proposal output is not valid JSON"))?;
         ctx.set_story_proposal(proposal)
     }
 }

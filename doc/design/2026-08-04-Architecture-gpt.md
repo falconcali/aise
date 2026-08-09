@@ -373,7 +373,7 @@ struct TurnExecutionContext {
     snapshot: Option<StoryReadSnapshot>,
     baseline: Option<BaselineContext>,
     plan: Option<WriterPlan>,
-    retrieved: Vec<ContextItem>,
+    retrieved: RetrievedContext,
     thoughts: Vec<CharacterThought>,
     proposal: Option<StoryProposal>,
     proposal_revision: u32,
@@ -458,13 +458,13 @@ llm_call_scope
 | --- | --- | --- |
 | Initializer | Identity、已规范化 Request、Budget、Control | Turn 临时状态、`Initialized` Phase |
 | Baseline Builder | Identity、Request、Budget | `StoryReadSnapshot`、`BaselineContext` |
-| Writer Planner | Baseline、Request | `WriterPlan` |
-| Retrieval | Plan、Baseline、Budget | `ContextItem[]` |
-| Character Think | Plan、Snapshot、Retrieved、Budget | `CharacterThought[]` |
-| Story Generator | Baseline、Plan、Retrieved、Thoughts | `StoryProposal` |
-| Validation | Snapshot、Proposal | `ValidationResult`；仅 Pass 时产生 `ValidatedChangeSet` |
-| Story Repairer | Proposal、Validation Issues | 新版本 `StoryProposal` |
-| Turn Committer | Identity、Snapshot、`ValidatedChangeSet` | `CommittedTurnResult` |
+| Writer Planner | Baseline、Snapshot、Request | `WriterPlan`（含 `RetrievalPlan` 与 Character Think 请求） |
+| Retrieval | Plan、Baseline、Budget | `RetrievedContext`（Writer / Character 分区） |
+| Character Think | Plan、Baseline Scene、Retrieved Character 分区、Budget | `CharacterThought[]` |
+| Story Generator | Baseline、Plan、Writer Context、Thoughts、Request | `StoryProposal` |
+| Validation | Snapshot、Proposal、Writer/Character Provenance | `ValidationResult`；仅 Pass 时产生 `ValidatedChangeSet` |
+| Story Repairer | Generator Context、Proposal、Validation Issues | 新版本 `StoryProposal` |
+| Turn Committer | Identity、Snapshot、`ValidatedChangeSet` | `CommittedTurnResult`（含 `StorySequence`） |
 
 `TurnInitializer` 的输入是已经有效的 Context，只负责初始化本 Turn 的临时槽位和执行状态，并将 Phase 从 `Created` 推进为 `Initialized`。它不得生成 `turn_id`、不得创建或覆盖 Budget/Deadline/Cancellation/Trace、不得调用 Store/LLM/Retriever/其他 Pipeline、不得加载 World/Character/Memory/History/Summary 或 Narrative Graph。请求规范化由 `TurnRequest::try_new` 在 Context 构造前完成。
 
@@ -503,99 +503,56 @@ llm_call_scope
 
 ### 10.1 基础上下文
 
-Baseline Context 包含：
+`BaselineContext` 仅包含：
 
-- Story Instructions。
-- Story Configuration。
-- Player Character。
-- Current Scene。
-- Relevant Characters。
-- Recent Story。
-- Story Summary。
-- Active Constraints。
-- Player Input。
+- `StoryProfile`
+- `InstanceSettings`
+- Player Character 完整视图
+- 结构化 `CurrentScene`
+- Scene Characters 完整视图
+- 有界 Character Index（非场角色）
+- `StoryContinuity`（Summary + Recent Segments，按 `StorySequence`）
+- `ActiveStoryConstraint[]`
+- Narrative State 视图
+- 确定性 `RetrievalSignals`
 
-`StoryReadSnapshot` 是一次 Turn 从 Store 原子读取的不可变视图，最低包含：`story_id`、`base_revision`、story instructions/configuration、player character id、world state、current scene、relevant characters、bounded recent turns、story summary、active constraints、required memories。
+`StoryReadSnapshot` 是唯一 Turn 快照，位于 `domain/story_instance/snapshot.rs`。它携带 Pack 摘要、角色绑定/卡片/状态、结构化场景、Narrative 定义与状态、连续性、约束、Entity 目录、Topic 字典，以及不含知识正文的 `KnowledgeSnapshotRef`。Player Input 不属于 Snapshot 或 Baseline。
 
 规则：
 
-- Snapshot 由一次一致性读事务获得。
-- Baseline 只能从该 Snapshot 构建，不再分别读取互相可能错版的数据。
-- Recent Turns 从 Store 返回给业务层时必须是时间正序。
-- Player Character 通过稳定 ID 指定，不得取 SQL 无序结果的第一项。
-- `WorldState` 不再内嵌 Character 权威副本；Character 表是 Character 当前状态的唯一权威来源。
-- `WorldFact` 使用稳定 `FactId`，删除操作不得使用数组下标。
-
-Baseline Builder 从 Snapshot 构建上下文，不负责剧情生成，也不能更新持久化状态。
+- Baseline Builder 每个非重放 Turn 只调用一次 `Store::load_story_snapshot`，且不读取 Fact/Rumor/Memory 正文。
+- 连续性由 `StorySequence` 决定；时间戳与 `StoryRevision` 不决定 Summary/Recent 边界。
+- Player / Scene / Index 角色解析必须通过稳定绑定与 ID，不得依赖集合迭代顺序。
+- 未摘要后缀超出预算时准备失败，不得静默截断。
 
 ### 10.2 上下文分类
 
-所有提供给模型的信息必须保留来源和语义类别，至少区分：
+检索结果保留来源与语义类别，至少区分 Fact、Rumor、Memory。跨语义类别即使文本相同也不得合并。Character Thought 不得自动升级为世界事实。
 
-```text
-Canonical World Fact
-Character Belief
-Character Memory
-Narrative History
-Narrative Summary
-Retrieved Lore
-Planner Hypothesis
-Character Thought
-```
+每个 `ContextItem` 携带 `ContextProvenance`（source id、kind、source、revision、audience、memory owner、match providers/reasons）与确定性 `RelevanceRank`，并用共享的 `estimate_text_tokens` 计算 `token_cost`。
 
-Character Thought、Character Belief、Planner Hypothesis 和 Retrieved Lore 都不能自动升级为世界事实。
+### 10.3 检索与分区
 
-一个 Context Item 应具有以下概念元数据：
+生产路径只注册 Entity 与 Topic Candidate Retriever。Retrieval Pipeline：
 
-```text
-source
-scope
-story_revision
-timestamp
-authority
-visibility
-relevance_score
-token_cost
-```
+- 先完成 audience / kind 授权，再查询索引。
+- 以 `(audience, source_id)` 去重并合并 match provenance。
+- 按 Match level、signal priority、salience、source id 稳定排序。
+- 按 Writer / Character 分区写入 `RetrievedContext`，并在 count / byte / token 边界处确定性裁剪。
 
-### 10.3 合并策略
-
-Context Merger 必须使用确定性策略完成：
-
-- 权威级别排序。
-- 去重。
-- 冲突保留和标记。
-- 角色可见性过滤。
-- token 预算裁剪。
-- 稳定排序。
-
-较新的 Canonical Fact 优先于摘要和角色记忆。角色记忆与世界事实冲突时应保留为角色的主观认知，不得覆盖世界事实。
-
-检索数量、单条大小和最终上下文大小必须受 `TurnBudget` 限制。
+零结果不得回退为 World Book 或 `knowledge_entries` 全表扫描。不再存在 `ContextMerger`、`ContextRequest`、`ContextSource` 或扁平中间结果。
 
 ---
 
 ## 11. Writer Planner 与 Character Think
 
-Writer Planner 分析当前 Turn 并输出生成计划，包括：
+Writer Planner 先完成 NarrativeDirector 评估，再发起一次 typed Planner LLM 调用。Planner 输出仅允许 Story Goal、Context Gaps、Character Think 请求；不得返回 Narrative Plan、约束、provider、budget 或算法字段。最终 `WriterPlan` 由自动信号、Narrative 引用与 Planner Gaps 合并而成。
 
-- 故事目标。
-- 上下文缺口。
-- Retrieval 请求。
-- 需要进行认知推演的角色集合。
+是否执行 Retrieval / Character Think 仅由最终请求集合是否非空决定。
 
-是否执行可选阶段应从请求集合推导，避免布尔值和请求内容互相矛盾。例如，Retrieval 请求为空即表示跳过 Retrieval。
+Character Think 仅接收该角色授权的 Rumor、自己的 Memory、Current Perception 与 Impulse；不得因为 Writer 见过某 Fact 就暴露给角色。Character Thought 只存在于当前 Turn，不得由 Generator/Committer 直接写入世界状态。
 
-Character Think Pipeline 只模拟关键角色在当前可见信息下的：
-
-- 感知。
-- 情绪。
-- 目标。
-- 行动倾向。
-
-Character Thought 是临时推理产物，只存在于当前 Turn。它不是权威世界事实，不得由 Generator 或 Committer 直接写入 World State。
-
-角色数量和每个角色的 Thought 大小必须有上限。角色之间需要并发推演时，也必须使用有界并发且共享全局 LLM 限制器。
+Generator 只看到 Writer Context 与 Thoughts，看不到原始 Character Memory/Rumor 分区。所有业务 LLM 调用走 `complete_typed`：一条受信任 System Prompt + 一条编码后的 Untrusted User JSON。
 
 ---
 

@@ -1,3 +1,4 @@
+use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{MemoryKind, TopicKey};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::{CharacterId, MemoryId, StoryRevision};
@@ -10,10 +11,12 @@ pub struct MemoryEntry {
     pub owner: CharacterId,
     pub kind: MemoryKind,
     pub content: BoundedText,
+    #[serde(default)]
+    pub entities: Vec<KnowledgeEntity>,
+    #[serde(default)]
+    pub topics: Vec<TopicKey>,
+    pub salience: u8,
     pub source: KnowledgeSource,
     pub story_revision: StoryRevision,
-    #[serde(default)]
-    pub tags: Vec<TopicKey>,
-    pub salience: u8,
     pub created_at_ms: i64,
 }

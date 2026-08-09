@@ -2,6 +2,7 @@ use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_error::TurnExecutionError;
 use crate::core::turn_validation::{Repairability, ValidationIssue, ValidationIssueCode, ValidationLocation};
 use crate::validation::validators::DeterministicValidator;
+use std::collections::BTreeSet;
 
 #[derive(Default)]
 pub struct ModificationPermissionValidator;
@@ -19,20 +20,20 @@ impl DeterministicValidator for ModificationPermissionValidator {
         let Some(baseline) = ctx.baseline() else {
             return Ok(issues);
         };
-        let player_character_id = baseline.player_character.as_ref().map(|character| character.id.clone());
+        let player_character_id = baseline.player_character.character_id.clone();
+        let mut known = BTreeSet::new();
+        known.insert(player_character_id.clone());
+        for character in &baseline.scene_characters {
+            known.insert(character.character_id.clone());
+        }
+        for entry in &baseline.character_index {
+            known.insert(entry.character_id.clone());
+        }
         for (index, change) in proposal.character_changes.iter().enumerate() {
-            let is_player = player_character_id
-                .as_ref()
-                .map(|id| *id == change.character_id)
-                .unwrap_or(false);
-            if is_player {
+            if change.character_id == player_character_id {
                 continue;
             }
-            let is_known = baseline
-                .relevant_characters
-                .iter()
-                .any(|character| character.id == change.character_id);
-            if !is_known {
+            if !known.contains(&change.character_id) {
                 continue;
             }
             let modifies_internal =

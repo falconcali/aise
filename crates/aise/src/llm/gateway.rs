@@ -1,33 +1,37 @@
 use crate::config::{LlmConfig, TraceContentPolicy};
+use crate::core::token_estimator::estimate_text_tokens;
 use crate::core::turn_context::TurnLlmCallScope;
 use crate::core::turn_contract::{LlmBudgetReservation, LlmCallPurpose, LlmCallStatus, LlmCallUsage, UsageAccuracy};
 use crate::core::turn_error::TurnExecutionError;
 use crate::core::turn_trace::{
     LlmCallContent, LlmCallData, MAX_LLM_CONTENT_CHARS, MAX_LLM_RESPONSE_CHARS, MessageData, SpanPayload, truncate,
 };
-use crate::llm::accounting::{FinishReason, LlmCompletion, TokenAccountant, estimate_tokens};
+use crate::llm::accounting::{FinishReason, LlmCompletion, TokenAccountant};
 use crate::llm::error::LlmError;
 use crate::llm::limiter::LlmLimiter;
 use crate::llm::message::{ChatMessage, CompletionRequest, CompletionSpec, EmbeddingOutput, EmbeddingRequest, Role};
 use crate::llm::provider::{DeltaSink, LlmProvider};
-use crate::prompt::{ModelRequest, PromptProfile, RuntimeContextEncoder};
+use crate::prompt::{ModelRequest, RuntimeContextEncoder, TrustedPromptSource};
 use serde::Serialize;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::Instrument;
 
 pub struct LlmGateway {
     provider: Arc<dyn LlmProvider>,
+    prompt_source: Arc<dyn TrustedPromptSource>,
     limiter: LlmLimiter,
     config: LlmConfig,
     accountant: TokenAccountant,
-    system_prompts: HashMap<PromptProfile, String>,
     context_encoder: RuntimeContextEncoder,
 }
 
 impl LlmGateway {
-    pub fn new(provider: Arc<dyn LlmProvider>, config: LlmConfig) -> Result<Self, TurnExecutionError> {
+    pub fn new(
+        provider: Arc<dyn LlmProvider>,
+        prompt_source: Arc<dyn TrustedPromptSource>,
+        config: LlmConfig,
+    ) -> Result<Self, TurnExecutionError> {
         config.validate().map_err(|error| {
             crate::core::turn_error::TurnExecutionError::new(
                 crate::core::turn_error::TurnFailureKind::InvalidRequest,
@@ -40,30 +44,25 @@ impl LlmGateway {
         let accountant = TokenAccountant::new(&config, provider.provider_name());
         Ok(Self {
             provider,
+            prompt_source,
             limiter,
             config,
             accountant,
-            system_prompts: HashMap::new(),
             context_encoder: RuntimeContextEncoder,
         })
     }
 
-    pub fn with_system_prompts(mut self, system_prompts: HashMap<PromptProfile, String>) -> Self {
-        self.system_prompts = system_prompts;
-        self
-    }
-
     pub async fn complete_typed<C: Serialize>(
         &self,
-        scope: TurnLlmCallScope<'_>,
+        mut scope: TurnLlmCallScope<'_>,
         request: ModelRequest<C>,
-        reservation: LlmBudgetReservation,
     ) -> Result<LlmCompletion, LlmError> {
         let system_prompt = self
-            .system_prompts
-            .get(&request.profile())
-            .cloned()
-            .unwrap_or_else(|| default_system_prompt(request.profile()));
+            .prompt_source
+            .resolve(request.profile())
+            .map_err(|_error| LlmError::Protocol {
+                kind: crate::llm::error::LlmProtocolErrorKind::Unsupported,
+            })?;
         let context_message = self
             .context_encoder
             .encode(request.context())
@@ -74,7 +73,7 @@ impl LlmGateway {
             messages: vec![
                 ChatMessage {
                     role: Role::System,
-                    content: system_prompt,
+                    content: system_prompt.as_str().to_owned(),
                 },
                 ChatMessage {
                     role: Role::User,
@@ -84,6 +83,10 @@ impl LlmGateway {
             max_output_tokens: request.max_output_tokens(),
             purpose: request.purpose(),
         };
+        let estimated_input = crate::llm::accounting::TokenAccountant::estimate_input_tokens(&spec.messages);
+        let reservation = scope
+            .reserve_llm(estimated_input, u64::from(spec.max_output_tokens))
+            .map_err(|error| LlmError::TokenBudgetExceeded(error.to_string()))?;
         self.complete(scope, spec, reservation).await
     }
 
@@ -141,7 +144,7 @@ impl LlmGateway {
             scope.release_llm(reservation);
             return Err(LlmError::TurnDeadlineExceeded);
         }
-        let estimated_input: u64 = inputs.iter().map(|input| estimate_tokens(input)).sum();
+        let estimated_input: u64 = inputs.iter().map(|input| estimate_text_tokens(input)).sum();
         let max_output = 0u64;
         if let Err(error) = self
             .limiter
@@ -611,7 +614,7 @@ impl LlmGateway {
 }
 
 fn estimated_usage(text: &str, estimated_input: u64) -> crate::llm::accounting::LlmTokenUsage {
-    let output = estimate_tokens(text);
+    let output = estimate_text_tokens(text);
     crate::llm::accounting::LlmTokenUsage {
         input_tokens: estimated_input,
         cached_input_tokens: None,
@@ -656,29 +659,5 @@ fn role_label(role: Role) -> &'static str {
         Role::System => "system",
         Role::User => "user",
         Role::Assistant => "assistant",
-    }
-}
-
-fn default_system_prompt(profile: PromptProfile) -> String {
-    match profile {
-        PromptProfile::WriterPlanner => {
-            "You are the writer planner for an interactive story. Plan retrieval and character focus for this turn."
-                .to_owned()
-        }
-        PromptProfile::CharacterThink => {
-            "You are the narrative director simulating a character's thoughts. Stay inside the character's viewpoint."
-                .to_owned()
-        }
-        PromptProfile::StoryGenerator => {
-            "You are the story generator. Write the next beat of the interactive story consistent with the plan."
-                .to_owned()
-        }
-        PromptProfile::StoryRepairer => {
-            "You are the story repairer. Revise the previous proposal to fix the reported validation issues.".to_owned()
-        }
-        PromptProfile::NarrativeValidator => {
-            "You are the narrative validator. Verify the proposal is consistent with the story world and plan."
-                .to_owned()
-        }
     }
 }

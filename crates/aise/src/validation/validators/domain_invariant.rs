@@ -19,22 +19,15 @@ impl DeterministicValidator for DomainInvariantValidator {
         for (index, change) in proposal.character_changes.iter().enumerate() {
             if let Some(delta) = change.health_delta {
                 if delta < 0 {
-                    let target_health = ctx
+                    let known = ctx
                         .snapshot()
-                        .and_then(|snapshot| {
-                            snapshot
-                                .characters()
-                                .iter()
-                                .find(|character| character.id == change.character_id)
-                        })
-                        .map(|character| character.internal_state.health)
-                        .unwrap_or(0);
-                    let projected = target_health.saturating_add(delta);
-                    if projected < 0 {
+                        .map(|snapshot| snapshot.character_states().contains_key(&change.character_id))
+                        .unwrap_or(false);
+                    if !known {
                         issues.push(issue(
-                            "negative_health",
+                            "unknown_character_health",
                             format!(
-                                "character {} health would become negative ({projected})",
+                                "character {} health change references unknown character",
                                 change.character_id.as_str()
                             ),
                             Some(ValidationLocation {

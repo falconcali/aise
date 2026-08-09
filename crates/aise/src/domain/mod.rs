@@ -7,11 +7,14 @@ pub mod memory;
 pub mod narrative;
 pub mod narrative_graph;
 pub mod story_instance;
-pub mod story_state;
+pub mod story_sequence;
 pub mod world;
 
 pub use character::{CharacterState, InternalState, Relation};
 pub use error::DomainInputError;
 pub use ids::{CharacterId, ConstraintId, EventId, FactId, MemoryId, StoryId, StoryRevision, TurnId};
-pub use narrative::{EventKind, StoryEvent, StorySummary, StoryTurn};
-pub use story_state::{CurrentScene, StoryConfig, StoryConstraint, StoryCreateSpec, StoryInfo, StoryReadSnapshot};
+pub use narrative::{EventKind, StoryContinuity, StoryEvent, StorySegment, StorySummary, StoryTurn};
+pub use story_instance::info::StoryInfo;
+pub use story_instance::snapshot::StoryReadSnapshot;
+pub use story_instance::state::CurrentScene;
+pub use story_sequence::{StoryContinuityError, StorySequence};

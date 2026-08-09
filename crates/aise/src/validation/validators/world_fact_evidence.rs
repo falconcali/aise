@@ -17,11 +17,6 @@ impl DeterministicValidator for WorldFactEvidenceValidator {
         let Some(proposal) = ctx.proposal() else {
             return Ok(issues);
         };
-        let snapshot_fact_ids: Vec<String> = ctx
-            .snapshot()
-            .and_then(|snapshot| snapshot.world())
-            .map(|world| world.facts.iter().map(|fact| fact.id.as_str().to_owned()).collect())
-            .unwrap_or_default();
         for (index, fact) in proposal.world_change.add_facts.iter().enumerate() {
             let location = Some(ValidationLocation {
                 path: format!("world_change.add_facts[{index}]"),
@@ -39,11 +34,15 @@ impl DeterministicValidator for WorldFactEvidenceValidator {
             for (evidence_index, evidence) in fact.evidence.iter().enumerate() {
                 match evidence {
                     WorldFactEvidenceRef::SnapshotFact(fact_id) => {
-                        if !snapshot_fact_ids.iter().any(|id| id == fact_id.as_str()) {
+                        let known = ctx.retrieved().writer().iter().any(|item| {
+                            item.provenance.source_id
+                                == crate::domain::knowledge::KnowledgeSourceId::Fact(fact_id.clone())
+                        });
+                        if !known {
                             issues.push(ValidationIssue {
                                 code: ValidationIssueCode::WorldFactEvidenceInvalid,
                                 message: format!(
-                                    "world fact evidence references unknown snapshot fact {}",
+                                    "world fact evidence references unavailable fact {}",
                                     fact_id.as_str()
                                 ),
                                 repairability: Repairability::Fatal,

@@ -2,6 +2,7 @@ use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_error::TurnExecutionError;
 use crate::core::turn_validation::{Repairability, ValidationIssue, ValidationIssueCode, ValidationLocation};
 use crate::validation::validators::DeterministicValidator;
+use std::collections::BTreeSet;
 
 #[derive(Default)]
 pub struct ConsistencyValidator;
@@ -19,10 +20,16 @@ impl DeterministicValidator for ConsistencyValidator {
         let Some(baseline) = ctx.baseline() else {
             return Ok(issues);
         };
-        let known: Vec<&crate::domain::ids::CharacterId> =
-            baseline.relevant_characters.iter().map(|character| &character.id).collect();
+        let mut known = BTreeSet::new();
+        known.insert(baseline.player_character.character_id.clone());
+        for character in &baseline.scene_characters {
+            known.insert(character.character_id.clone());
+        }
+        for entry in &baseline.character_index {
+            known.insert(entry.character_id.clone());
+        }
         for (index, change) in proposal.character_changes.iter().enumerate() {
-            if !known.contains(&&change.character_id) {
+            if !known.contains(&change.character_id) {
                 issues.push(issue(
                     "unknown_character",
                     format!("character change references unknown character {}", change.character_id.as_str()),
@@ -33,7 +40,7 @@ impl DeterministicValidator for ConsistencyValidator {
                 ));
             }
             for affinity in &change.affinity_deltas {
-                if !known.contains(&&affinity.other) {
+                if !known.contains(&affinity.other) {
                     issues.push(issue(
                         "unknown_affinity_target",
                         format!("affinity delta references unknown character {}", affinity.other.as_str()),
@@ -46,7 +53,7 @@ impl DeterministicValidator for ConsistencyValidator {
             }
         }
         for (index, memory) in proposal.memory_changes.iter().enumerate() {
-            if !known.contains(&&memory.owner) {
+            if !known.contains(&memory.owner) {
                 issues.push(issue(
                     "unknown_memory_owner",
                     format!("memory change references unknown owner {}", memory.owner.as_str()),

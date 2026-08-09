@@ -1,4 +1,4 @@
-use crate::config::{TurnConfig, TurnContentLimitsConfig};
+use crate::config::{RetrievalConfig, TurnConfig, TurnContentLimitsConfig};
 use crate::core::turn_contract::{LlmBudgetReservation, LlmCallId, LlmCallUsage};
 use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
 
@@ -15,10 +15,13 @@ pub struct TurnBudgetLimits {
     pub max_input_tokens: u64,
     pub max_output_tokens: u64,
     pub max_total_tokens: u64,
-    pub max_retrieved_items: usize,
-    pub max_retrieval_candidates: usize,
-    pub max_retrieved_item_bytes: usize,
+    pub max_candidates_per_retriever: usize,
+    pub max_candidates_total: usize,
+    pub max_items_per_audience: usize,
+    pub max_tokens_per_audience: u64,
+    pub max_total_items: usize,
     pub max_retrieved_tokens: u64,
+    pub max_item_bytes: usize,
     pub max_context_tokens: u64,
     pub max_character_thoughts: usize,
     pub max_character_thought_bytes: usize,
@@ -30,25 +33,28 @@ pub struct TurnBudgetLimits {
 }
 
 impl TurnBudgetLimits {
-    pub fn from(config: &TurnConfig, content: &TurnContentLimitsConfig) -> Self {
+    pub fn from(turn: &TurnConfig, content: &TurnContentLimitsConfig, retrieval: &RetrievalConfig) -> Self {
         Self {
-            max_repair_rounds: config.max_repair_rounds,
-            max_llm_calls: config.max_llm_calls,
-            max_input_tokens: config.max_input_tokens,
-            max_output_tokens: config.max_output_tokens,
-            max_total_tokens: config.max_total_tokens,
-            max_retrieved_items: config.max_retrieved_items,
-            max_retrieval_candidates: config.max_retrieval_candidates,
-            max_retrieved_item_bytes: content.max_retrieved_item_bytes,
-            max_retrieved_tokens: content.max_retrieved_tokens,
-            max_context_tokens: config.max_context_tokens,
-            max_character_thoughts: config.max_character_thoughts,
+            max_repair_rounds: turn.max_repair_rounds,
+            max_llm_calls: turn.max_llm_calls,
+            max_input_tokens: turn.max_input_tokens,
+            max_output_tokens: turn.max_output_tokens,
+            max_total_tokens: turn.max_total_tokens,
+            max_candidates_per_retriever: retrieval.max_candidates_per_retriever,
+            max_candidates_total: retrieval.max_candidates_total,
+            max_items_per_audience: retrieval.max_items_per_audience,
+            max_tokens_per_audience: retrieval.max_tokens_per_audience,
+            max_total_items: retrieval.max_total_items,
+            max_retrieved_tokens: retrieval.max_total_tokens,
+            max_item_bytes: retrieval.max_item_bytes,
+            max_context_tokens: turn.max_context_tokens,
+            max_character_thoughts: turn.max_character_thoughts,
             max_character_thought_bytes: content.max_character_thought_bytes,
             max_plan_bytes: content.max_plan_bytes,
             max_proposal_bytes: content.max_proposal_bytes,
-            max_validation_issues: config.max_validation_issues,
+            max_validation_issues: turn.max_validation_issues,
             max_validation_issue_bytes: content.max_validation_issue_bytes,
-            max_trace_spans: config.max_trace_spans,
+            max_trace_spans: turn.max_trace_spans,
         }
     }
 }
@@ -63,15 +69,22 @@ struct TurnBudgetUsage {
 }
 
 impl TurnBudget {
-    pub fn from_config(config: &TurnConfig, content: &TurnContentLimitsConfig) -> Result<Self, TurnExecutionError> {
-        config.validate().map_err(|error| {
+    pub fn from_config(
+        turn: &TurnConfig,
+        content: &TurnContentLimitsConfig,
+        retrieval: &RetrievalConfig,
+    ) -> Result<Self, TurnExecutionError> {
+        turn.validate().map_err(|error| {
             TurnExecutionError::new(TurnFailureKind::InvalidRequest, "invalid_config", None, error.to_string())
         })?;
         content.validate().map_err(|error| {
             TurnExecutionError::new(TurnFailureKind::InvalidRequest, "invalid_config", None, error.to_string())
         })?;
+        retrieval.validate().map_err(|error| {
+            TurnExecutionError::new(TurnFailureKind::InvalidRequest, "invalid_config", None, error.to_string())
+        })?;
         Ok(Self {
-            limits: TurnBudgetLimits::from(config, content),
+            limits: TurnBudgetLimits::from(turn, content, retrieval),
             usage: TurnBudgetUsage::default(),
         })
     }
@@ -80,16 +93,28 @@ impl TurnBudget {
         self.limits.max_repair_rounds
     }
 
-    pub fn max_retrieved_items(&self) -> usize {
-        self.limits.max_retrieved_items
+    pub fn max_total_items(&self) -> usize {
+        self.limits.max_total_items
     }
 
-    pub fn max_retrieval_candidates(&self) -> usize {
-        self.limits.max_retrieval_candidates
+    pub fn max_items_per_audience(&self) -> usize {
+        self.limits.max_items_per_audience
     }
 
-    pub fn max_retrieved_item_bytes(&self) -> usize {
-        self.limits.max_retrieved_item_bytes
+    pub fn max_tokens_per_audience(&self) -> u64 {
+        self.limits.max_tokens_per_audience
+    }
+
+    pub fn max_candidates_per_retriever(&self) -> usize {
+        self.limits.max_candidates_per_retriever
+    }
+
+    pub fn max_candidates_total(&self) -> usize {
+        self.limits.max_candidates_total
+    }
+
+    pub fn max_item_bytes(&self) -> usize {
+        self.limits.max_item_bytes
     }
 
     pub fn max_retrieved_tokens(&self) -> u64 {

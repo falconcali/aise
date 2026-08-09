@@ -2,14 +2,18 @@ use crate::config::ServerConfig;
 use crate::trace::{NoopRedactor, TraceRedactor, TraceSinkError, TraceWriter, TraceWriterConfig};
 use aise::AiseEngine;
 use aise::character::CharacterThinkPipeline;
-use aise::context::{BaselineContextBuilder, ContextRetrievalPipeline};
+use aise::context::{
+    BaselineContextBuilder, ContextRetrievalPipeline, EntityCandidateRetriever, TopicCandidateRetriever,
+};
 use aise::core::turn_trace::TraceSpanSink;
 use aise::engine::{SystemClock, UuidIdGenerator};
 use aise::llm::{LlmGateway, LlmProvider, OpenAiCompatProvider};
 use aise::persistence::asset_store::AssetStore;
+use aise::persistence::knowledge_read_port::KnowledgeReadPort;
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
 use aise::persistence::{SqliteStore, Store, TurnCommitter};
 use aise::planning::WriterPlanner;
+use aise::prompt::{CatalogPromptSource, TrustedPromptSource};
 use aise::runtime::{StoryTurnCoordinator, TurnInitializer, TurnPipelineSet, TurnRuntime};
 use aise::story::instance_factory::{StoryInstanceFactory, StoryInstantiationLimits};
 use aise::story::pack_service::{NativeAssetImporter, PackService};
@@ -34,21 +38,46 @@ pub async fn build_services(
     trace_sink: Arc<dyn TraceSpanSink>,
 ) -> Result<EngineServices, anyhow::Error> {
     let provider: Arc<dyn LlmProvider> = Arc::new(OpenAiCompatProvider::new(config.aise.llm.clone()));
-    let gateway = Arc::new(LlmGateway::new(provider, config.aise.llm.clone())?);
+    let prompt_source: Arc<dyn TrustedPromptSource> = Arc::new(
+        CatalogPromptSource::from_config(&config.aise.prompt)
+            .map_err(|error| anyhow::anyhow!("trusted prompt source failed: {error}"))?,
+    );
+    let gateway = Arc::new(LlmGateway::new(provider, prompt_source, config.aise.llm.clone())?);
 
-    let store: Arc<dyn Store> = SqliteStore::connect(&config.aise.storage.database_url).await?;
+    let sqlite = SqliteStore::connect(&config.aise.storage.database_url).await?;
+    let store: Arc<dyn Store> = sqlite.clone();
+    let knowledge: Arc<dyn KnowledgeReadPort> = sqlite;
 
     let coordinator = StoryTurnCoordinator::new(&config.aise.coordinator);
+
+    let retrieval = ContextRetrievalPipeline::new(
+        config.aise.retrieval.clone(),
+        vec![
+            Arc::new(EntityCandidateRetriever::new(knowledge.clone())),
+            Arc::new(TopicCandidateRetriever::new(knowledge)),
+        ],
+    )
+    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
 
     let pipeline_set = TurnPipelineSet::builder()
         .initializer(Box::<TurnInitializer>::default())
         .baseline_builder(Box::new(BaselineContextBuilder::new(
             store.clone(),
             config.aise.content.clone(),
+            config.aise.context.clone(),
+            config.aise.assets.clone(),
         )))
-        .writer_planner(Box::new(WriterPlanner::new(gateway.clone())))
-        .retrieval(Box::new(ContextRetrievalPipeline))
-        .character_think(Box::new(CharacterThinkPipeline::new(gateway.clone())))
+        .writer_planner(Box::new(WriterPlanner::new(
+            gateway.clone(),
+            config.aise.planner.clone(),
+            config.aise.retrieval.clone(),
+            config.aise.assets.clone(),
+        )))
+        .retrieval(Box::new(retrieval))
+        .character_think(Box::new(CharacterThinkPipeline::new(
+            gateway.clone(),
+            config.aise.content.max_character_thought_bytes,
+        )))
         .story_generator(Box::new(StoryGenerator::new(gateway.clone())))
         .validation(Box::new(ValidationPipeline::default()))
         .story_repairer(Box::new(StoryRepairer::new(gateway.clone())))

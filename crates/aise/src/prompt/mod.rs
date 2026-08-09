@@ -1,6 +1,5 @@
 mod asset;
 mod catalog;
-mod context_merger;
 mod error;
 mod loader;
 mod metadata;
@@ -15,11 +14,11 @@ mod resolver;
 pub mod runtime_context_encoder;
 mod section_extractor;
 mod slot;
+pub mod trusted_prompt_source;
 mod validator;
 
 pub use asset::{CompiledPromptAsset, PromptAssetManifest, compute_asset_hash};
 pub use catalog::PromptCatalog;
-pub use context_merger::{ContextMerger, GenerationInput};
 pub use error::PromptError;
 pub use loader::load_catalog;
 pub use metadata::PromptMetadata;
@@ -40,4 +39,5 @@ pub use renderer_helpers::{
 pub use resolver::{PromptRenderOptions, PromptResolver, ResolvedSlot};
 pub use runtime_context_encoder::RuntimeContextEncoder;
 pub use slot::{OutputContract, SlotRegistry, SlotSpec, VarSpec, VarType, parse_slots_yaml};
+pub use trusted_prompt_source::{CatalogPromptSource, TrustedPromptSource};
 pub use validator::{validate_input_vars, validate_output_contract};

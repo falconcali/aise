@@ -1,8 +1,9 @@
 use crate::domain::asset::character_card::AssetSpecVersion;
+use crate::domain::asset::constraint::StoryConstraintDefinition;
 use crate::domain::asset::frozen_ref::{DefaultCast, StaticAssetDescriptor, WorldBookSource};
 use crate::domain::asset::ids::{
-    AssetId, AttributeKey, CharacterAssetKey, LocationKey, MemoryKey, RelationshipKind, SceneKey, SemanticVersion,
-    StoryPackKey, StoryRoleKey, TopicKey,
+    AssetId, AttributeKey, CharacterAssetKey, ConstraintKey, LocationKey, MemoryKey, RelationshipKind, SceneKey,
+    SemanticVersion, StoryPackKey, StoryRoleKey, TopicKey,
 };
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
@@ -23,6 +24,8 @@ pub struct StoryPack {
     pub world_book: WorldBookSource,
     pub start: StoryStart,
     pub narrative: NarrativeGraphDefinition,
+    #[serde(default)]
+    pub constraints: BTreeMap<ConstraintKey, StoryConstraintDefinition>,
     #[serde(default)]
     pub assets: BTreeMap<AssetId, StaticAssetDescriptor>,
 }
@@ -100,7 +103,7 @@ pub struct MemorySeed {
     pub kind: crate::domain::asset::ids::MemoryKind,
     pub content: BoundedText,
     #[serde(default)]
-    pub tags: Vec<TopicKey>,
+    pub topics: Vec<TopicKey>,
     pub salience: u8,
 }
 

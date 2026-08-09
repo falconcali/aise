@@ -1,59 +1,44 @@
+use crate::config::{AssetLimitsConfig, PlannerConfig, RetrievalConfig};
 use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_contract::LlmCallPurpose;
-use crate::core::turn_data::{ContextRequest, ContextSource, StoryGoal, WriterPlan};
-use crate::core::turn_error::TurnExecutionError;
+use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::core::turn_trace::truncate;
-use crate::domain::ids::CharacterId;
+use crate::domain::asset::validation::BoundedText;
+use crate::domain::narrative_graph::director::{NarrativeDirector, NarrativeEvaluation, NarrativeLimits};
 use crate::llm::gateway::LlmGateway;
-use crate::llm::message::CompletionSpec;
-use crate::prompt::ContextMerger;
+use crate::planning::error::PlanningError;
+use crate::planning::planner_output::PlannerOutput;
+use crate::planning::retrieval_plan_builder::RetrievalPlanBuilder;
+use crate::prompt::{ModelRequest, WriterPlannerContext};
 use async_trait::async_trait;
-use serde::Deserialize;
 use std::sync::Arc;
-
-const MAX_RETRIEVAL_REQUESTS: usize = 4;
-const MAX_CHARACTER_REQUESTS: usize = 4;
-const MAX_QUERY_CHARS: usize = 200;
-const MAX_GOAL_CHARS: usize = 300;
-const MAX_PARSE_ERROR_PREVIEW_CHARS: usize = 200;
 
 pub struct WriterPlanner {
     gateway: Arc<LlmGateway>,
-    merger: ContextMerger,
+    narrative_director: NarrativeDirector,
+    plan_builder: RetrievalPlanBuilder,
+    config: PlannerConfig,
 }
 
 impl WriterPlanner {
-    pub fn new(gateway: Arc<LlmGateway>) -> Self {
+    pub fn new(
+        gateway: Arc<LlmGateway>,
+        planner: PlannerConfig,
+        retrieval: RetrievalConfig,
+        assets: AssetLimitsConfig,
+    ) -> Self {
         Self {
             gateway,
-            merger: ContextMerger,
+            narrative_director: NarrativeDirector::new(NarrativeLimits {
+                max_nodes: assets.max_graph_nodes,
+                max_edges: assets.max_graph_edges,
+                max_condition_depth: assets.max_condition_depth,
+                max_conditions_per_node: assets.max_conditions_per_node,
+                max_effects_per_node: assets.max_effects_per_node,
+            }),
+            plan_builder: RetrievalPlanBuilder::new(retrieval, planner.clone()),
+            config: planner,
         }
     }
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct PlanOutput {
-    #[serde(default)]
-    retrieval_requests: Vec<PlanRequest>,
-    #[serde(default)]
-    character_requests: Vec<CharacterId>,
-    #[serde(default)]
-    story_goal: PlanGoalOutput,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct PlanGoalOutput {
-    #[serde(default)]
-    summary: String,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct PlanRequest {
-    #[serde(default)]
-    query: String,
-    #[serde(default)]
-    sources: Vec<ContextSource>,
 }
 
 #[async_trait]
@@ -65,68 +50,67 @@ impl TurnExecutionPipeline for WriterPlanner {
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let baseline = ctx
             .baseline()
-            .ok_or_else(|| invariant("baseline context not set before planning"))?;
-        let messages = self.merger.plan_messages(baseline, ctx.player_input());
-        let max_output = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
-        let estimated_input = crate::llm::accounting::TokenAccountant::estimate_input_tokens(&messages);
-        let spec = CompletionSpec {
-            messages,
-            max_output_tokens: max_output,
-            purpose: LlmCallPurpose::WriterPlan,
-        };
-        let mut scope = ctx.llm_call_scope(TurnStage::WriterPlanner);
-        let reservation = scope.reserve_llm(estimated_input, u64::from(max_output))?;
-        let completion = self.gateway.complete(scope, spec, reservation).await?;
-        let plan = parse_plan(&completion.text)?;
+            .ok_or_else(|| {
+                map_planning_error(PlanningError::InvalidOutput {
+                    code: "missing_baseline",
+                })
+            })?
+            .clone();
+        let snapshot = ctx
+            .snapshot()
+            .ok_or_else(|| {
+                map_planning_error(PlanningError::InvalidOutput {
+                    code: "missing_snapshot",
+                })
+            })?
+            .clone();
+        let narrative_plan = self
+            .narrative_director
+            .evaluate(NarrativeEvaluation {
+                definition: snapshot.narrative_definition(),
+                state: snapshot.narrative_state(),
+                snapshot: &snapshot,
+            })
+            .map_err(PlanningError::from)
+            .map_err(map_planning_error)?;
+        let player_input = BoundedText::try_new(
+            ctx.player_input().to_owned(),
+            "player_input",
+            self.config.max_query_bytes.max(4096),
+        )
+        .map_err(|_| map_planning_error(PlanningError::LimitExceeded { limit: "player_input" }))?;
+        let request = ModelRequest::writer_planner(
+            WriterPlannerContext {
+                baseline: baseline.clone(),
+                narrative_plan: narrative_plan.clone(),
+                player_input,
+            },
+            ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32,
+        );
+        let scope = ctx.llm_call_scope(TurnStage::WriterPlanner);
+        let completion = self.gateway.complete_typed(scope, request).await.map_err(|error| {
+            TurnExecutionError::new(
+                TurnFailureKind::Llm,
+                "llm_error",
+                Some(TurnStage::WriterPlanner),
+                error.to_string(),
+            )
+        })?;
+        let planner_output: PlannerOutput = serde_json::from_str(&completion.text)
+            .map_err(|_| map_planning_error(PlanningError::InvalidOutput { code: "invalid_json" }))?;
+        let plan = self
+            .plan_builder
+            .build(&baseline, &narrative_plan, planner_output, &snapshot)
+            .map_err(map_planning_error)?;
         ctx.set_writer_plan(plan)
     }
 }
 
-fn invariant(message: impl Into<String>) -> TurnExecutionError {
-    TurnExecutionError::invariant(message)
+fn map_planning_error(error: PlanningError) -> TurnExecutionError {
+    TurnExecutionError::new(
+        TurnFailureKind::InvariantViolation,
+        error.turn_code(),
+        Some(TurnStage::WriterPlanner),
+        error.to_string(),
+    )
 }
-
-fn parse_plan(text: &str) -> Result<WriterPlan, TurnExecutionError> {
-    let output: PlanOutput = serde_json::from_str(text).map_err(|error| {
-        TurnExecutionError::invariant(format!(
-            "writer plan output is not valid JSON: {error}; raw_output={}",
-            truncate(text, MAX_PARSE_ERROR_PREVIEW_CHARS)
-        ))
-    })?;
-    let mut retrieval_requests = Vec::new();
-    for request in output.retrieval_requests.into_iter().take(MAX_RETRIEVAL_REQUESTS) {
-        if request.query.trim().is_empty() {
-            continue;
-        }
-        retrieval_requests.push(ContextRequest {
-            query: request.query.chars().take(MAX_QUERY_CHARS).collect(),
-            sources: request.sources,
-        });
-    }
-    let mut seen = Vec::new();
-    let mut character_requests = Vec::new();
-    for character_id in output.character_requests {
-        if character_id.as_str().is_empty() {
-            continue;
-        }
-        if seen.contains(&character_id) {
-            continue;
-        }
-        seen.push(character_id.clone());
-        character_requests.push(character_id);
-        if character_requests.len() >= MAX_CHARACTER_REQUESTS {
-            break;
-        }
-    }
-    Ok(WriterPlan {
-        retrieval_requests,
-        character_requests,
-        story_goal: StoryGoal {
-            summary: output.story_goal.summary.chars().take(MAX_GOAL_CHARS).collect(),
-        },
-    })
-}
-
-#[cfg(test)]
-#[path = "tests/writer_planner_tests.rs"]
-mod tests;

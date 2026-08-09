@@ -79,7 +79,7 @@ fn summary_change_plain_string_is_wrapped_as_object() {
     )
     .expect("plain-string summary_change must be accepted");
     let summary = proposal.summary_change.expect("summary_change must be present");
-    assert_eq!(summary.text, "the updated summary");
+    assert_eq!(summary.text.as_str(), "the updated summary");
 }
 
 #[test]

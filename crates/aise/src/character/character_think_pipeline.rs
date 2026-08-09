@@ -1,44 +1,26 @@
 use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_contract::LlmCallPurpose;
 use crate::core::turn_data::CharacterThought;
-use crate::core::turn_error::TurnExecutionError;
+use crate::core::turn_data::character::CharacterThoughtOutput;
+use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::core::turn_trace::truncate;
-use crate::domain::ids::CharacterId;
+use crate::domain::asset::validation::BoundedText;
 use crate::llm::gateway::LlmGateway;
-use crate::llm::message::CompletionSpec;
-use crate::prompt::ContextMerger;
+use crate::prompt::{CharacterThinkContext, ModelRequest};
 use async_trait::async_trait;
-use serde::Deserialize;
 use std::sync::Arc;
-
-const MAX_THOUGHT_FIELD_CHARS: usize = 300;
-const MAX_PARSE_ERROR_PREVIEW_CHARS: usize = 200;
 
 pub struct CharacterThinkPipeline {
     gateway: Arc<LlmGateway>,
-    merger: ContextMerger,
+    max_thought_bytes: usize,
 }
 
 impl CharacterThinkPipeline {
-    pub fn new(gateway: Arc<LlmGateway>) -> Self {
+    pub fn new(gateway: Arc<LlmGateway>, max_thought_bytes: usize) -> Self {
         Self {
             gateway,
-            merger: ContextMerger,
+            max_thought_bytes,
         }
     }
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct ThoughtOutput {
-    #[serde(default)]
-    perception: String,
-    #[serde(default)]
-    emotion: String,
-    #[serde(default)]
-    goal: String,
-    #[serde(default)]
-    possible_action: String,
 }
 
 #[async_trait]
@@ -56,60 +38,86 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
             .plan()
             .ok_or_else(|| invariant("writer plan not set before character think"))?
             .clone();
-        let player_input = ctx.player_input().to_string();
-        let mut thoughts = Vec::with_capacity(plan.character_requests.len());
-        for character_id in &plan.character_requests {
-            let Some(character) = baseline
-                .relevant_characters
+        let snapshot = ctx
+            .snapshot()
+            .ok_or_else(|| invariant("snapshot not set before character think"))?
+            .clone();
+        let player_input = BoundedText::try_new(ctx.player_input().to_owned(), "player_input", 4096)
+            .map_err(|_| invariant("player input exceeds bound"))?;
+        let mut thoughts = Vec::with_capacity(plan.character_think_requests.len());
+        for request in &plan.character_think_requests {
+            let character = baseline
+                .scene_characters
                 .iter()
-                .find(|candidate| &candidate.id == character_id)
+                .find(|candidate| candidate.character_id == request.character_id)
                 .cloned()
-            else {
+                .or_else(|| {
+                    if baseline.player_character.character_id == request.character_id {
+                        Some(baseline.player_character.clone())
+                    } else {
+                        None
+                    }
+                });
+            let Some(character) = character else {
                 tracing::warn!(
                     turn_id = ctx.turn_id().as_str(),
                     story_id = ctx.story_id().as_str(),
-                    character_id = character_id.as_str(),
+                    character_id = request.character_id.as_str(),
                     "aise.character_think.skip_unknown_character"
                 );
                 continue;
             };
-            let messages = self
-                .merger
-                .thought_messages(&character, &player_input, baseline.current_scene.as_deref());
-            let max_output = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
-            let spec = CompletionSpec {
-                messages,
-                max_output_tokens: max_output,
-                purpose: LlmCallPurpose::CharacterThink,
+            let retrieved_context = ctx.retrieved().for_character(&request.character_id).to_vec();
+            let current_perception = snapshot
+                .current_perceptions()
+                .iter()
+                .filter(|perception| perception.character_id == request.character_id)
+                .cloned()
+                .collect();
+            let impulses = plan
+                .narrative_plan
+                .character_impulses
+                .iter()
+                .filter(|impulse| impulse.target_character_id == request.character_id)
+                .cloned()
+                .collect();
+            let model_request = ModelRequest::character_think(
+                CharacterThinkContext {
+                    character,
+                    current_scene: baseline.current_scene.clone(),
+                    retrieved_context,
+                    current_perception,
+                    impulses,
+                    player_input: player_input.clone(),
+                },
+                ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32,
+            );
+            let scope = ctx.llm_call_scope(TurnStage::CharacterThink);
+            let completion = self.gateway.complete_typed(scope, model_request).await.map_err(|error| {
+                TurnExecutionError::new(
+                    TurnFailureKind::Llm,
+                    "llm_error",
+                    Some(TurnStage::CharacterThink),
+                    error.to_string(),
+                )
+            })?;
+            let output: CharacterThoughtOutput = serde_json::from_str(&completion.text)
+                .map_err(|_| invariant("character thought output is not valid JSON"))?;
+            let thought = CharacterThought {
+                character_id: request.character_id.clone(),
+                perception: output.perception,
+                emotion: output.emotion,
+                goal: output.goal,
+                possible_action: output.possible_action,
             };
-            let mut scope = ctx.llm_call_scope(TurnStage::CharacterThink);
-            let estimated_input = crate::llm::accounting::TokenAccountant::estimate_input_tokens(&spec.messages);
-            let reservation = scope.reserve_llm(estimated_input, u64::from(max_output))?;
-            let completion = self.gateway.complete(scope, spec, reservation).await?;
-            thoughts.push(parse_thought(&completion.text, character_id.clone())?);
+            let serialized = serde_json::to_string(&thought).map_err(|_| invariant("thought serialize failed"))?;
+            if serialized.len() > self.max_thought_bytes {
+                return Err(invariant("character thought exceeds byte budget"));
+            }
+            thoughts.push(thought);
         }
         ctx.set_character_thoughts(thoughts)
     }
-}
-
-fn parse_thought(text: &str, character_id: CharacterId) -> Result<CharacterThought, TurnExecutionError> {
-    let output: ThoughtOutput = serde_json::from_str(text).map_err(|error| {
-        TurnExecutionError::invariant(format!(
-            "character thought output is not valid JSON: {error}; raw_output={}",
-            truncate(text, MAX_PARSE_ERROR_PREVIEW_CHARS)
-        ))
-    })?;
-    Ok(CharacterThought {
-        character_id,
-        perception: bound_field(&output.perception),
-        emotion: bound_field(&output.emotion),
-        goal: bound_field(&output.goal),
-        possible_action: bound_field(&output.possible_action),
-    })
-}
-
-fn bound_field(value: &str) -> String {
-    value.chars().take(MAX_THOUGHT_FIELD_CHARS).collect()
 }
 
 fn invariant(message: impl Into<String>) -> TurnExecutionError {

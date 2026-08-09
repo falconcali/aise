@@ -7,11 +7,11 @@ use crate::core::turn_validation::{
     BoundedValidationIssues, CharacterStateChange, MemoryStateChange, Repairability, StateChange, ValidatedChangeSet,
     ValidationIssue, ValidationResult,
 };
-use crate::domain::character::Relation;
+use crate::domain::character::{CharacterState, InternalState, Relation};
 use crate::domain::ids::{EventId, FactId, MemoryId};
 use crate::domain::memory::MemoryEntry;
 use crate::domain::narrative::StoryEvent;
-use crate::domain::story_state::StoryReadSnapshot;
+use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::world::{FactSource, WorldFact, WorldState};
 use crate::validation::validators::DeterministicValidator;
 use crate::validation::validators::consistency::ConsistencyValidator;
@@ -90,10 +90,8 @@ impl TurnExecutionPipeline for ValidationPipeline {
 
 impl ValidationPipeline {
     fn run_deterministic(&self, ctx: &TurnExecutionContext) -> Result<Vec<ValidationIssue>, TurnExecutionError> {
-        // TODO: temporarily bypass every deterministic validator so all proposals pass validation.
-        // Restore the validator loop below before this change is shipped.
-        let _ = ctx;
-        let _ = [
+        let mut issues = Vec::new();
+        for validator in [
             &self.schema as &dyn DeterministicValidator,
             &self.consistency as &dyn DeterministicValidator,
             &self.modification_permission as &dyn DeterministicValidator,
@@ -101,8 +99,10 @@ impl ValidationPipeline {
             &self.knowledge_boundary as &dyn DeterministicValidator,
             &self.player_control as &dyn DeterministicValidator,
             &self.world_fact_evidence as &dyn DeterministicValidator,
-        ];
-        Ok(Vec::new())
+        ] {
+            issues.extend(validator.validate(ctx)?);
+        }
+        Ok(issues)
     }
 }
 
@@ -128,8 +128,7 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
         .collect();
     let character_changes = apply_character_changes(snapshot, &proposal.character_changes)?;
     let world_change = apply_world_change(snapshot, &proposal.world_change)?;
-    let known_character_ids: Vec<&crate::domain::ids::CharacterId> =
-        snapshot.characters().iter().map(|character| &character.id).collect();
+    let known_character_ids: Vec<&crate::domain::ids::CharacterId> = snapshot.character_states().keys().collect();
     let memory_changes = proposal
         .memory_changes
         .iter()
@@ -169,7 +168,7 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
 fn build_constraint_change(
     texts: &[String],
     turn_id: &crate::domain::ids::TurnId,
-) -> Result<StateChange<Vec<crate::domain::story_state::StoryConstraint>>, TurnExecutionError> {
+) -> Result<StateChange<Vec<crate::domain::story_instance::constraint::ActiveStoryConstraint>>, TurnExecutionError> {
     if texts.is_empty() {
         return Ok(StateChange::Unchanged);
     }
@@ -177,7 +176,18 @@ fn build_constraint_change(
     for (index, text) in texts.iter().enumerate() {
         let id = crate::domain::ids::ConstraintId::try_new(format!("{turn_id}#constraint#{index}"))
             .map_err(|_| invariant("invalid_constraint_id", "failed to build constraint id"))?;
-        constraints.push(crate::domain::story_state::StoryConstraint { id, text: text.clone() });
+        let statement =
+            crate::domain::asset::validation::BoundedText::try_new(text.clone(), "constraint_statement", 512)
+                .map_err(|_| invariant("invalid_constraint_text", "constraint statement exceeds bound"))?;
+        constraints.push(crate::domain::story_instance::constraint::ActiveStoryConstraint {
+            id,
+            source: crate::domain::story_instance::constraint::StoryConstraintSource::CommittedTurn {
+                turn_id: turn_id.clone(),
+            },
+            scope: crate::domain::asset::constraint::StoryConstraintScope::Story,
+            requirement: crate::domain::asset::constraint::StoryConstraintRequirement::Require { statement },
+            lifecycle: crate::domain::asset::constraint::StoryConstraintLifecycle::Persistent,
+        });
     }
     Ok(StateChange::Replace(constraints))
 }
@@ -186,35 +196,34 @@ fn apply_character_changes(
     snapshot: &StoryReadSnapshot,
     changes: &[ProposedCharacterChange],
 ) -> Result<Vec<CharacterStateChange>, TurnExecutionError> {
-    let mut current: Vec<crate::domain::character::CharacterState> = snapshot.characters().to_vec();
     let mut result = Vec::new();
     for change in changes {
-        let Some(target) = current.iter_mut().find(|character| character.id == change.character_id) else {
+        if !snapshot.character_states().contains_key(&change.character_id) {
             continue;
+        }
+        let mut state = CharacterState {
+            id: change.character_id.clone(),
+            name: change.character_id.as_str().to_owned(),
+            bio: String::new(),
+            internal_state: InternalState {
+                goals: change.goal_updates.clone(),
+                health: change.health_delta.unwrap_or(0),
+                relationships: change
+                    .affinity_deltas
+                    .iter()
+                    .map(|affinity| Relation {
+                        other: affinity.other.clone(),
+                        affinity: affinity.delta,
+                    })
+                    .collect(),
+            },
         };
-        if !change.goal_updates.is_empty() {
-            target.internal_state.goals = change.goal_updates.clone();
-        }
         if let Some(delta) = change.health_delta {
-            target.internal_state.health = target.internal_state.health.saturating_add(delta);
-        }
-        for affinity in &change.affinity_deltas {
-            match target
-                .internal_state
-                .relationships
-                .iter_mut()
-                .find(|relation| relation.other == affinity.other)
-            {
-                Some(relation) => relation.affinity = relation.affinity.saturating_add(affinity.delta),
-                None => target.internal_state.relationships.push(Relation {
-                    other: affinity.other.clone(),
-                    affinity: affinity.delta,
-                }),
-            }
+            state.internal_state.health = state.internal_state.health.saturating_add(delta);
         }
         result.push(CharacterStateChange {
             character_id: change.character_id.clone(),
-            new_state: target.clone(),
+            new_state: state,
         });
     }
     Ok(result)
@@ -227,24 +236,15 @@ fn apply_world_change(
     if change.add_facts.is_empty() {
         return Ok(StateChange::Unchanged);
     }
-    let mut world = match snapshot.world() {
-        Some(existing) => existing.clone(),
-        None => WorldState {
-            id: snapshot.story_id().clone(),
-            name: String::new(),
-            facts: Vec::new(),
-        },
+    let mut world = WorldState {
+        id: snapshot.story_id().clone(),
+        name: String::new(),
+        facts: Vec::new(),
     };
-    let next_seq = world
-        .facts
-        .iter()
-        .filter_map(|fact| fact.id.as_str().rsplit('-').next()?.parse::<usize>().ok())
-        .max()
-        .unwrap_or(0);
     world
         .facts
         .extend(change.add_facts.iter().enumerate().map(|(offset, fact)| WorldFact {
-            id: FactId::from(format!("{}-fact-{}", world.id.as_str(), next_seq + offset + 1)),
+            id: FactId::from(format!("{}-fact-{}", world.id.as_str(), offset + 1)),
             text: fact.text.clone(),
             source: FactSource::CommittedTurn,
         }));

@@ -37,12 +37,15 @@ max_repair_rounds = 3
 # thinking 模式（deepseek-v4 系列默认开启）下，reasoning 与最终答案共享
 # max_tokens 预算，预算太小会在 content 返回前被截断（finish_reason=length）。
 max_tokens = 4096
-max_retrieved_items = 20
 
 [aise.assets]
 max_key_bytes = 128
 max_text_bytes = 32768
 max_tags_per_item = 32
+max_topics = 256
+max_topic_aliases_per_topic = 16
+max_entities_per_entry = 16
+max_topics_per_entry = 16
 max_roles = 32
 max_character_assets = 64
 max_world_facts = 512
@@ -63,32 +66,57 @@ max_single_asset_bytes = 16777216
 max_validation_issues = 64
 
 [aise.content]
-max_story_instructions_bytes = 4096
-max_story_config_bytes = 1024
+max_story_profile_bytes = 4096
+max_instance_settings = 32
+max_instance_setting_bytes = 256
 max_scene_bytes = 8192
 max_summary_bytes = 4096
 max_constraints = 16
 max_constraint_bytes = 512
 max_characters = 16
 max_character_bytes = 2048
-max_world_facts = 128
-max_world_fact_bytes = 512
-max_recent_turns = 20
-max_recent_turn_bytes = 8192
-max_memories = 32
-max_memory_bytes = 512
+max_perception_bytes = 512
+max_recent_segments = 20
+max_recent_segment_bytes = 8192
+max_recent_segment_tokens = 2048
 max_plan_bytes = 4096
-max_retrieval_candidates = 64
-max_retrieved_items = 10
-max_retrieved_item_bytes = 4096
-max_retrieved_tokens = 4096
-max_character_thoughts = 8
 max_character_thought_bytes = 1024
 max_proposal_bytes = 32768
-max_validation_issues = 32
 max_validation_issue_bytes = 500
-max_trace_spans = 64
 max_trace_field_bytes = 2048
+
+[aise.context]
+max_scene_characters = 8
+max_character_index = 16
+max_relationships = 64
+max_current_perceptions = 32
+max_condition_event_keys = 256
+max_condition_fact_values = 256
+max_entity_catalog = 256
+max_signal_entities = 32
+max_signal_topics = 32
+recent_segments_for_signals = 2
+
+[aise.planner]
+max_context_gaps = 8
+max_character_think_requests = 8
+max_goal_bytes = 512
+max_query_bytes = 512
+max_reason_bytes = 256
+max_entities_per_request = 8
+max_topics_per_request = 8
+max_kinds_per_request = 3
+
+[aise.retrieval]
+max_requests = 16
+max_candidate_retrievers = 2
+max_candidates_per_retriever = 32
+max_candidates_total = 64
+max_items_per_audience = 10
+max_tokens_per_audience = 2048
+max_total_items = 20
+max_total_tokens = 4096
+max_item_bytes = 4096
 
 [aise.prompt]
 catalog_path = "prompts"

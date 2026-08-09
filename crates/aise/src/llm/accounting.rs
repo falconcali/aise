@@ -1,4 +1,5 @@
 use crate::config::LlmConfig;
+use crate::core::token_estimator::estimate_text_tokens;
 pub use crate::core::turn_contract::{FinishReason, LlmCharge, LlmTokenUsage, UsageAccuracy};
 use crate::llm::message::ChatMessage;
 
@@ -35,12 +36,12 @@ impl TokenAccountant {
     pub fn estimate_input_tokens(messages: &[ChatMessage]) -> u64 {
         messages
             .iter()
-            .map(|m| estimate_tokens(&m.content))
+            .map(|m| estimate_text_tokens(&m.content))
             .fold(0u64, u64::saturating_add)
     }
 
     pub fn estimate_output_tokens(text: &str) -> u64 {
-        estimate_tokens(text)
+        estimate_text_tokens(text)
     }
 
     pub fn charge(&self, usage: &LlmTokenUsage) -> Option<LlmCharge> {
@@ -64,14 +65,6 @@ impl TokenAccountant {
             price_version: self.price_version.clone(),
         })
     }
-}
-
-pub fn estimate_tokens(text: &str) -> u64 {
-    (text.chars().count() as u64)
-        .saturating_add(3)
-        .checked_div(4)
-        .unwrap_or(0)
-        .max(1)
 }
 
 fn price_for_tokens(tokens: u64, price_per_1k: i64) -> i64 {

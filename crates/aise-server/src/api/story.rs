@@ -12,17 +12,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
-pub struct CreateStoryRequest {
-    pub story_instructions: Option<String>,
-    #[serde(default)]
-    pub style: Option<String>,
-    #[serde(default)]
-    pub point_of_view: Option<String>,
-    #[serde(default)]
-    pub tense: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct CreateStoryInstanceRequest {
     pub pack_id: String,
     pub player_id: String,
@@ -42,7 +31,7 @@ pub struct PlayerCharacterRef {
 pub struct StoryView {
     pub story_id: String,
     pub base_revision: u64,
-    pub story_instructions: String,
+    pub premise: String,
     pub current_scene: String,
     pub player_character_id: Option<String>,
     pub turns: Vec<TurnView>,
@@ -81,46 +70,6 @@ pub struct StoryInstanceView {
     pub current_scene: String,
 }
 
-pub async fn create_story(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<CreateStoryRequest>,
-) -> Result<(StatusCode, Json<StoryView>), ApiError> {
-    let story_id =
-        StoryId::try_new(uuid::Uuid::new_v4().to_string()).map_err(|error| ApiError::BadRequest(error.to_string()))?;
-    let spec = aise::domain::StoryCreateSpec {
-        story_id: story_id.clone(),
-        story_instructions: req.story_instructions.unwrap_or_default(),
-        story_config: aise::domain::StoryConfig {
-            style: req.style,
-            point_of_view: req.point_of_view,
-            tense: req.tense,
-        },
-        player_character_id: None,
-        initial_world: None,
-        current_scene: aise::domain::CurrentScene { text: String::new() },
-        story_summary: aise::domain::StorySummary { text: String::new() },
-        active_constraints: Vec::new(),
-        created_at_ms: now_millis(),
-    };
-    let info = state
-        .engine
-        .store()
-        .create_story(&spec)
-        .await
-        .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
-    let view = StoryView {
-        story_id: info.story_id.to_string(),
-        base_revision: info.base_revision.get(),
-        story_instructions: spec.story_instructions,
-        current_scene: String::new(),
-        player_character_id: None,
-        turns: Vec::new(),
-        player_role_key: None,
-        characters: Vec::new(),
-    };
-    Ok((StatusCode::CREATED, Json(view)))
-}
-
 pub async fn create_story_instance(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateStoryInstanceRequest>,
@@ -149,57 +98,70 @@ pub async fn create_story_instance(
     let spec = CreateStoryInstanceSpec {
         pack_id,
         player_id,
-        player_role_key,
+        player_role_key: player_role_key.clone(),
         player_character,
         created_at_ms: now_millis(),
     };
-    let info = instance_factory.create(spec).await.map_err(|error| match error {
-        StoryInstantiationError::PackNotFound => ApiError::NotFound("story pack".into()),
-        StoryInstantiationError::RoleNotFound => ApiError::Unprocessable("story role was not found".into()),
-        StoryInstantiationError::RoleNotPlayable => ApiError::Unprocessable("story role is not playable".into()),
-        StoryInstantiationError::CharacterNotFound => ApiError::Unprocessable("character asset was not found".into()),
-        StoryInstantiationError::LimitExceeded { limit } => {
-            ApiError::Unprocessable(format!("story instantiation limit exceeded: {limit}"))
-        }
-        StoryInstantiationError::Store(store_error) => ApiError::Internal(anyhow::anyhow!(store_error)),
-    })?;
+    let info = instance_factory.create(spec).await.map_err(map_instantiation_error)?;
+    let store = state.engine.store();
+    let limits = SnapshotLimits::from_config(
+        &state.engine.config().content,
+        &state.engine.config().context,
+        &state.engine.config().assets,
+    );
+    let snapshot = store
+        .load_story_snapshot(&info.story_id, limits)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!(error.to_string())))?;
     Ok((
         StatusCode::CREATED,
         Json(StoryInstanceView {
             story_id: info.story_id.to_string(),
             base_revision: info.base_revision.get(),
-            pack_id: req.pack_id.clone(),
-            player_role_key: req.player_role_key.clone(),
-            current_scene: String::new(),
+            pack_id: snapshot.pack().pack_id.to_string(),
+            player_role_key: player_role_key.to_string(),
+            current_scene: snapshot.current_scene().description.to_string(),
         }),
     ))
 }
 
 pub async fn get_story(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
+    Path(story_id): Path<String>,
 ) -> Result<Json<StoryView>, ApiError> {
-    let story_id = StoryId::try_new(id).map_err(|error| ApiError::BadRequest(error.to_string()))?;
-    let limits = SnapshotLimits::from_config(&state.config.aise.content);
+    let story_id = StoryId::try_new(story_id).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    let limits = SnapshotLimits::from_config(
+        &state.engine.config().content,
+        &state.engine.config().context,
+        &state.engine.config().assets,
+    );
     let snapshot = state
         .engine
         .store()
         .load_story_snapshot(&story_id, limits)
         .await
         .map_err(|error| match error {
-            aise::persistence::StoreError::NotFound => ApiError::NotFound("story".into()),
-            other => ApiError::Internal(anyhow::anyhow!(other)),
+            aise::persistence::StoreError::NotFound => ApiError::NotFound("story not found".into()),
+            other => ApiError::Internal(anyhow::anyhow!(other.to_string())),
         })?;
     let instance_meta = state
         .engine
         .store()
         .load_story_instance_meta(&story_id)
         .await
-        .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
-    let player_role_key = instance_meta
-        .as_ref()
-        .and_then(|meta| meta.bindings.values().find(|binding| binding.player_id.is_some()))
-        .map(|binding| binding.role_key.to_string());
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!(error.to_string())))?;
+    let player_role_key = instance_meta.as_ref().and_then(|meta| {
+        meta.bindings
+            .values()
+            .find(|binding| binding.player_id.is_some())
+            .map(|binding| binding.role_key.to_string())
+    });
+    let player_character_id = instance_meta.as_ref().and_then(|meta| {
+        meta.bindings
+            .values()
+            .find(|binding| binding.player_id.is_some())
+            .map(|binding| binding.character_id.to_string())
+    });
     let characters = instance_meta
         .map(|meta| {
             meta.characters
@@ -224,21 +186,35 @@ pub async fn get_story(
     Ok(Json(StoryView {
         story_id: snapshot.story_id().to_string(),
         base_revision: snapshot.base_revision().get(),
-        story_instructions: snapshot.story_instructions().to_owned(),
-        current_scene: snapshot.current_scene().text.clone(),
-        player_character_id: snapshot.player_character_id().map(|id| id.to_string()),
+        premise: snapshot.story_profile().premise.to_string(),
+        current_scene: snapshot.current_scene().description.to_string(),
+        player_character_id,
         turns: snapshot
-            .recent_turns()
+            .story_continuity()
+            .recent_segments()
             .iter()
-            .map(|turn| TurnView {
-                player_input: turn.player_input.clone(),
-                story_text: turn.story_text.clone(),
-                created_at: turn.created_at,
+            .map(|segment| TurnView {
+                player_input: String::new(),
+                story_text: segment.text.to_string(),
+                created_at: 0,
             })
             .collect(),
         player_role_key,
         characters,
     }))
+}
+
+fn map_instantiation_error(error: StoryInstantiationError) -> ApiError {
+    match error {
+        StoryInstantiationError::PackNotFound => ApiError::NotFound("pack not found".into()),
+        StoryInstantiationError::RoleNotFound | StoryInstantiationError::RoleNotPlayable => {
+            ApiError::BadRequest("invalid player role".into())
+        }
+        StoryInstantiationError::LimitExceeded { limit } => {
+            ApiError::Unprocessable(format!("story instantiation limit exceeded: {limit}"))
+        }
+        other => ApiError::Unprocessable(other.to_string()),
+    }
 }
 
 fn now_millis() -> i64 {

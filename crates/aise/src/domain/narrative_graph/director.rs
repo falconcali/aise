@@ -1,10 +1,12 @@
 use crate::domain::asset::ids::NarrativeNodeKey;
+use crate::domain::asset::validation::BoundedText;
 use crate::domain::narrative_graph::definition::{
     NarrativeCondition, NarrativeGraphDefinition, NarrativeNodeState, RoleControllerKind,
 };
 use crate::domain::narrative_graph::effect::{CharacterImpulse, GlobalEventIntent};
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
+use serde::Serialize;
 
 #[derive(Debug, Clone)]
 pub struct NarrativeLimits {
@@ -25,12 +27,12 @@ pub enum NarrativeError {
     Invariant { code: &'static str },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct StoryGoal {
-    pub summary: String,
+    pub summary: BoundedText,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct NarrativePlan {
     pub active_nodes: Vec<NarrativeNodeKey>,
     pub active_goals: Vec<StoryGoal>,
@@ -53,7 +55,7 @@ impl NarrativePlan {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProposedNarrativeTransition {
     pub node_key: NarrativeNodeKey,
     pub from: NarrativeNodeState,
@@ -61,13 +63,13 @@ pub struct ProposedNarrativeTransition {
     pub expected_graph_revision: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum NarrativeEffectDisposition {
     Pending,
     NotApplicable(NotApplicableReason),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum NotApplicableReason {
     PlayerControlled,
 }
@@ -105,7 +107,11 @@ impl NarrativeDirector {
                 code: "max_edges_exceeded",
             });
         }
-        let turn_number = snapshot.recent_turns().len() as u64;
+        let turn_number = snapshot
+            .story_continuity()
+            .latest_sequence()
+            .map(|sequence| sequence.get())
+            .unwrap_or(0);
         let mut plan = NarrativePlan::empty();
         for (node_key, node_def) in &definition.nodes {
             let current = state.node_state(node_key);
@@ -121,7 +127,7 @@ impl NarrativeDirector {
                         });
                         plan.effect_dispositions.push(NarrativeEffectDisposition::Pending);
                         plan.active_goals.push(StoryGoal {
-                            summary: node_def.objective.to_string(),
+                            summary: node_def.objective.clone(),
                         });
                     }
                 }
@@ -245,14 +251,17 @@ impl NarrativeDirector {
                 node_key,
                 state: expected,
             } => Ok(state.node_state(node_key) == *expected),
-            NarrativeCondition::EventOccurred { event_key } => Ok(snapshot
-                .canonical_events()
-                .iter()
-                .any(|event| event_key.as_str() == event.kind.as_str())),
-            NarrativeCondition::FactStateEquals { .. } => Ok(false),
+            NarrativeCondition::EventOccurred { event_key } => {
+                Ok(snapshot.condition_state().occurred_event_keys.contains(event_key))
+            }
+            NarrativeCondition::FactStateEquals { fact_key, value } => {
+                Ok(snapshot.condition_state().fact_values.get(fact_key) == Some(value))
+            }
             NarrativeCondition::CharacterStateEquals { .. } => Ok(false),
             NarrativeCondition::RelationshipReaches { .. } => Ok(false),
-            NarrativeCondition::PlayerActionOccurred { .. } => Ok(false),
+            NarrativeCondition::PlayerActionOccurred { event_key } => {
+                Ok(snapshot.condition_state().player_action_event_keys.contains(event_key))
+            }
             NarrativeCondition::RoleControllerIs { role_key, controller } => {
                 let kind = node_controller_kind(role_key, snapshot);
                 Ok(kind == *controller)

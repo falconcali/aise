@@ -107,6 +107,8 @@ key_type!(RumorId);
 key_type!(AttributeKey);
 key_type!(RelationshipKind);
 key_type!(MemoryKind);
+key_type!(ConstraintKey);
+key_type!(InstanceSettingKey);
 
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SemanticVersion(Arc<str>);

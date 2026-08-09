@@ -196,6 +196,25 @@ impl PromptCatalog {
             }),
         }
     }
+
+    pub fn render_asset_text(&self, asset_ref: &str) -> Result<String, PromptError> {
+        let compiled = self
+            .assets
+            .get(asset_ref)
+            .ok_or_else(|| PromptError::AssetNotFound(asset_ref.to_string()))?;
+        let vars = HashMap::new();
+        let rendered = self
+            .renderer
+            .render_prompt(&compiled.template_name, &compiled.manifest.kind, &vars)?;
+        match rendered {
+            RenderedPrompt::Text(text) => Ok(normalize_rendered_text(&text)),
+            RenderedPrompt::Messages(_) => Err(PromptError::KindMismatch {
+                slot: asset_ref.to_string(),
+                expected: vec![PromptKind::Text, PromptKind::Fragment],
+                actual: PromptKind::Messages,
+            }),
+        }
+    }
 }
 
 fn normalize_rendered_text(text: &str) -> String {

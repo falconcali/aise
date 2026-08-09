@@ -1,4 +1,5 @@
-use crate::domain::asset::ids::{RumorId, StoryRoleKey, TopicKey};
+use crate::domain::asset::entity::KnowledgeEntity;
+use crate::domain::asset::ids::{RumorId, RumorKey, StoryRoleKey, TopicKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::{CharacterId, StoryRevision};
 use crate::domain::knowledge::query::KnowledgeSource;
@@ -7,17 +8,19 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharedRumor {
     pub id: RumorId,
-    pub key: Option<crate::domain::asset::ids::RumorKey>,
+    pub key: Option<RumorKey>,
     pub content: BoundedText,
     pub claim: Option<Claim>,
+    #[serde(default)]
+    pub entities: Vec<KnowledgeEntity>,
+    #[serde(default)]
+    pub topics: Vec<TopicKey>,
+    pub salience: u8,
     pub source_role_key: Option<StoryRoleKey>,
     pub source_character_id: Option<CharacterId>,
     pub truth_value: TruthValue,
     pub source: KnowledgeSource,
     pub story_revision: StoryRevision,
-    #[serde(default)]
-    pub tags: Vec<TopicKey>,
-    pub salience: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,7 +34,7 @@ pub enum TruthValue {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Claim {
-    pub subject: crate::domain::asset::world_book::EntityRef,
+    pub subject: KnowledgeEntity,
     pub predicate: BoundedText,
     pub value: ScalarValue,
 }

@@ -714,12 +714,16 @@ impl PackService {
                 });
             }
         };
-        let validated = ValidatedStoryPack {
-            pack,
-            canonical_manifest,
-            digest,
-            resolved_characters: BTreeMap::new(),
-            resolved_world_book: WorldBook {
+        let resolved_world_book = match &pack.world_book {
+            WorldBookSource::Embedded(book) => {
+                crate::domain::asset::world_book::validate_topic_dictionary(&book.topics).map_err(|_| {
+                    AssetImportError::Io {
+                        code: "topic_alias_collision",
+                    }
+                })?;
+                book.clone()
+            }
+            WorldBookSource::Frozen(_) => WorldBook {
                 spec: crate::domain::asset::world_book::WorldSpec::V3,
                 spec_version: crate::domain::asset::character_card::AssetSpecVersion::V3_0,
                 world_book_key: crate::domain::asset::ids::WorldBookKey::from("placeholder"),
@@ -733,9 +737,17 @@ impl PackService {
                     version: SemanticVersion::try_new("0.1.0")
                         .map_err(|_| AssetImportError::Io { code: "limit_bounds" })?,
                 },
+                topics: BTreeMap::new(),
                 facts: BTreeMap::new(),
                 rumors: BTreeMap::new(),
             },
+        };
+        let validated = ValidatedStoryPack {
+            pack,
+            canonical_manifest,
+            digest,
+            resolved_characters: BTreeMap::new(),
+            resolved_world_book,
         };
         let frozen = self.asset_store.import_pack(validated).await.map_err(AssetImportError::Store)?;
         Ok(PackInfo {

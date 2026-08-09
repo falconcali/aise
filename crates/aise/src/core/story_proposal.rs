@@ -1,7 +1,8 @@
+use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::{CharacterId, FactId};
 use crate::domain::memory::MemoryKind;
 use crate::domain::narrative::{EventKind, StorySummary};
-use crate::domain::story_state::CurrentScene;
+use crate::domain::story_instance::state::CurrentScene;
 use serde::{Deserialize, Deserializer, Serialize};
 
 fn deserialize_null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
@@ -32,7 +33,9 @@ where
                 None
             } else {
                 Some(StorySummary {
-                    text: trimmed.to_owned(),
+                    text: BoundedText::try_new(trimmed.to_owned(), "summary", usize::MAX)
+                        .map_err(serde::de::Error::custom)?,
+                    summarized_through: None,
                 })
             }
         }

@@ -389,9 +389,9 @@ impl ServerConfig {
                 message: e.to_string(),
             })?;
         }
-        if let Some(v) = get("AISE_TURN_MAX_RETRIEVED_ITEMS") {
-            self.aise.turn.max_retrieved_items = v.parse::<usize>().map_err(|e| ConfigError::Env {
-                env: "AISE_TURN_MAX_RETRIEVED_ITEMS",
+        if let Some(v) = get("AISE_RETRIEVAL_MAX_TOTAL_ITEMS") {
+            self.aise.retrieval.max_total_items = v.parse::<usize>().map_err(|e| ConfigError::Env {
+                env: "AISE_RETRIEVAL_MAX_TOTAL_ITEMS",
                 message: e.to_string(),
             })?;
         }

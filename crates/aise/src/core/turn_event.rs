@@ -126,9 +126,7 @@ impl TurnEvent {
             TurnEvent::Failed { turn_id, code } => json!({ "turn_id": turn_id.as_str(), "code": code }),
             TurnEvent::Cancelled { turn_id, code } => json!({ "turn_id": turn_id.as_str(), "code": code }),
             TurnEvent::Conflict { turn_id, code } => json!({ "turn_id": turn_id.as_str(), "code": code }),
-            TurnEvent::TraceCompleted { trace, .. } => {
-                serde_json::to_value(trace).unwrap_or(serde_json::Value::Null)
-            }
+            TurnEvent::TraceCompleted { trace, .. } => serde_json::to_value(trace).unwrap_or(serde_json::Value::Null),
         }
     }
 }

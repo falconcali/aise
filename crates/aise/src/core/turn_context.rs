@@ -1,15 +1,20 @@
 use crate::core::story_proposal::StoryProposal;
+use crate::core::token_estimator::estimate_text_tokens;
 use crate::core::turn_budget::TurnBudget;
 use crate::core::turn_contract::{
     CommittedTurnResult, LlmBudgetReservation, LlmCallUsage, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
 };
-use crate::core::turn_data::{BaselineContext, CharacterThought, ContextItem, WriterPlan};
+use crate::core::turn_data::{
+    BaselineContext, CharacterThought, ContextItem, RetrievalAudience, RetrievedContext, RetrievedContextLimits,
+    WriterPlan,
+};
 use crate::core::turn_error::{TurnExecutionError, TurnFailureKind, TurnTerminalKind};
 use crate::core::turn_pipeline::TurnStage;
 use crate::core::turn_trace::{PendingSpan, TraceRecorder};
 use crate::core::turn_validation::{ValidatedChangeSet, ValidationResult};
 use crate::domain::ids::{StoryId, TurnId};
-use crate::domain::story_state::StoryReadSnapshot;
+use crate::domain::knowledge::KnowledgeKind;
+use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use serde::Serialize;
 use std::time::Instant;
 
@@ -23,7 +28,7 @@ pub struct TurnExecutionContext {
     snapshot: Option<StoryReadSnapshot>,
     baseline: Option<BaselineContext>,
     plan: Option<WriterPlan>,
-    retrieved: Vec<ContextItem>,
+    retrieved: RetrievedContext,
     thoughts: Vec<CharacterThought>,
     proposal: Option<StoryProposal>,
     proposal_revision: u32,
@@ -61,7 +66,7 @@ impl TurnExecutionContext {
             snapshot: None,
             baseline: None,
             plan: None,
-            retrieved: Vec::new(),
+            retrieved: RetrievedContext::default(),
             thoughts: Vec::new(),
             proposal: None,
             proposal_revision: 0,
@@ -122,7 +127,7 @@ impl TurnExecutionContext {
         self.plan.as_ref()
     }
 
-    pub fn retrieved(&self) -> &[ContextItem] {
+    pub fn retrieved(&self) -> &RetrievedContext {
         &self.retrieved
     }
 
@@ -203,49 +208,63 @@ impl TurnExecutionContext {
         Ok(())
     }
 
-    pub fn set_retrieved_context(&mut self, items: Vec<ContextItem>) -> Result<(), TurnExecutionError> {
+    pub fn set_retrieved_context(&mut self, context: RetrievedContext) -> Result<(), TurnExecutionError> {
         self.expect_phase(TurnPhase::Planned)?;
-        if items.len() > self.budget.max_retrieved_items() {
+        let limits = RetrievedContextLimits {
+            max_character_audiences: self.budget.max_character_thoughts(),
+            max_items_per_audience: self.budget.max_items_per_audience(),
+            max_tokens_per_audience: self.budget.max_tokens_per_audience(),
+            max_total_items: self.budget.max_total_items(),
+            max_total_tokens: self.budget.max_retrieved_tokens(),
+            max_item_bytes: self.budget.max_item_bytes(),
+        };
+        self.validate_retrieved_partition(context.writer(), &RetrievalAudience::GlobalWriter, limits)?;
+        for (character_id, items) in context.characters() {
+            self.validate_retrieved_partition(
+                items,
+                &RetrievalAudience::Character {
+                    character_id: character_id.clone(),
+                },
+                limits,
+            )?;
+        }
+        if context.characters().len() > limits.max_character_audiences {
+            return Err(TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "retrieved_character_audience_limit",
+                Some(TurnStage::Context),
+                format!(
+                    "retrieved character audiences {} exceeds budget {}",
+                    context.characters().len(),
+                    limits.max_character_audiences
+                ),
+            ));
+        }
+        if context.total_items() > limits.max_total_items {
             return Err(TurnExecutionError::new(
                 TurnFailureKind::InvariantViolation,
                 "retrieved_item_limit",
                 Some(TurnStage::Context),
                 format!(
                     "retrieved context {} exceeds budget {}",
-                    items.len(),
-                    self.budget.max_retrieved_items()
+                    context.total_items(),
+                    limits.max_total_items
                 ),
             ));
         }
-        let mut total_bytes = 0usize;
-        let mut total_tokens = 0u64;
-        for item in &items {
-            total_bytes = total_bytes.saturating_add(item.content.len());
-            total_tokens = total_tokens.saturating_add((item.content.chars().count() as u64).saturating_add(3) / 4);
-        }
-        if total_bytes > self.budget.max_retrieved_item_bytes() {
-            return Err(TurnExecutionError::new(
-                TurnFailureKind::InvariantViolation,
-                "retrieved_item_byte_limit",
-                Some(TurnStage::Context),
-                format!(
-                    "retrieved context {total_bytes} bytes exceeds budget {}",
-                    self.budget.max_retrieved_item_bytes()
-                ),
-            ));
-        }
-        if total_tokens > self.budget.max_retrieved_tokens() {
+        if context.total_tokens() > limits.max_total_tokens {
             return Err(TurnExecutionError::new(
                 TurnFailureKind::InvariantViolation,
                 "retrieved_token_limit",
                 Some(TurnStage::Context),
                 format!(
-                    "retrieved context {total_tokens} tokens exceeds budget {}",
-                    self.budget.max_retrieved_tokens()
+                    "retrieved context {} tokens exceeds budget {}",
+                    context.total_tokens(),
+                    limits.max_total_tokens
                 ),
             ));
         }
-        self.retrieved = items;
+        self.retrieved = context;
         Ok(())
     }
 
@@ -266,10 +285,10 @@ impl TurnExecutionContext {
         let mut total_bytes = 0usize;
         for thought in &thoughts {
             total_bytes = total_bytes
-                .saturating_add(thought.perception.len())
-                .saturating_add(thought.emotion.len())
-                .saturating_add(thought.goal.len())
-                .saturating_add(thought.possible_action.len());
+                .saturating_add(thought.perception.as_str().len())
+                .saturating_add(thought.emotion.as_str().len())
+                .saturating_add(thought.goal.as_str().len())
+                .saturating_add(thought.possible_action.as_str().len());
         }
         if total_bytes > self.budget.max_character_thought_bytes() {
             return Err(TurnExecutionError::new(
@@ -293,21 +312,35 @@ impl TurnExecutionContext {
     }
 
     pub fn requires_retrieval(&self) -> Result<bool, TurnExecutionError> {
-        // TODO(temp-debug): retrieval is temporarily disabled while debugging the baseline builder.
-        // Restore the original logic: require plan, then return `!plan.retrieval_requests.is_empty()`.
-        Ok(false)
+        self.expect_phase(TurnPhase::Planned)?;
+        let plan = self.plan.as_ref().ok_or_else(|| {
+            TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "missing_writer_plan",
+                Some(TurnStage::Context),
+                "writer plan is required before retrieval",
+            )
+        })?;
+        Ok(!plan.retrieval_plan.requests.is_empty())
     }
 
     pub fn skip_retrieval(&mut self) -> Result<(), TurnExecutionError> {
         self.expect_phase(TurnPhase::Planned)?;
-        self.retrieved = Vec::new();
+        self.retrieved = RetrievedContext::default();
         Ok(())
     }
 
     pub fn requires_character_thinking(&self) -> Result<bool, TurnExecutionError> {
-        // TODO(temp-debug): character thinking is temporarily disabled while debugging the baseline builder.
-        // Restore the original logic: require plan, then return `!plan.character_requests.is_empty()`.
-        Ok(false)
+        self.expect_phase(TurnPhase::Planned)?;
+        let plan = self.plan.as_ref().ok_or_else(|| {
+            TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "missing_writer_plan",
+                Some(TurnStage::CharacterThink),
+                "writer plan is required before character thinking",
+            )
+        })?;
+        Ok(!plan.character_think_requests.is_empty())
     }
 
     pub fn skip_character_thinking(&mut self) -> Result<(), TurnExecutionError> {
@@ -445,6 +478,95 @@ impl TurnExecutionContext {
 
     pub fn is_terminal(&self) -> bool {
         self.phase.is_terminal()
+    }
+
+    fn validate_retrieved_partition(
+        &self,
+        items: &[ContextItem],
+        expected_audience: &RetrievalAudience,
+        limits: RetrievedContextLimits,
+    ) -> Result<(), TurnExecutionError> {
+        if items.len() > limits.max_items_per_audience {
+            return Err(TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "retrieved_audience_item_limit",
+                Some(TurnStage::Context),
+                format!(
+                    "retrieved audience items {} exceeds budget {}",
+                    items.len(),
+                    limits.max_items_per_audience
+                ),
+            ));
+        }
+        let mut tokens = 0u64;
+        for item in items {
+            if item.content.as_str().len() > limits.max_item_bytes {
+                return Err(TurnExecutionError::new(
+                    TurnFailureKind::InvariantViolation,
+                    "retrieved_item_byte_limit",
+                    Some(TurnStage::Context),
+                    format!(
+                        "retrieved item {} bytes exceeds budget {}",
+                        item.content.as_str().len(),
+                        limits.max_item_bytes
+                    ),
+                ));
+            }
+            if item.token_cost != estimate_text_tokens(item.content.as_str()) {
+                return Err(TurnExecutionError::new(
+                    TurnFailureKind::InvariantViolation,
+                    "retrieved_token_cost_mismatch",
+                    Some(TurnStage::Context),
+                    "retrieved item token_cost does not match content",
+                ));
+            }
+            if &item.provenance.audience != expected_audience {
+                return Err(TurnExecutionError::new(
+                    TurnFailureKind::InvariantViolation,
+                    "retrieved_audience_mismatch",
+                    Some(TurnStage::Context),
+                    "retrieved item provenance audience does not match partition",
+                ));
+            }
+            match (
+                &item.provenance.knowledge_kind,
+                &item.provenance.memory_owner,
+                expected_audience,
+            ) {
+                (KnowledgeKind::Memory, Some(owner), RetrievalAudience::Character { character_id })
+                    if owner == character_id => {}
+                (KnowledgeKind::Memory, _, _) => {
+                    return Err(TurnExecutionError::new(
+                        TurnFailureKind::InvariantViolation,
+                        "retrieved_memory_owner_invalid",
+                        Some(TurnStage::Context),
+                        "memory items require matching character audience and owner",
+                    ));
+                }
+                (_, Some(_), _) => {
+                    return Err(TurnExecutionError::new(
+                        TurnFailureKind::InvariantViolation,
+                        "retrieved_memory_owner_invalid",
+                        Some(TurnStage::Context),
+                        "non-memory items must not set memory_owner",
+                    ));
+                }
+                _ => {}
+            }
+            tokens = tokens.saturating_add(item.token_cost);
+        }
+        if tokens > limits.max_tokens_per_audience {
+            return Err(TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "retrieved_audience_token_limit",
+                Some(TurnStage::Context),
+                format!(
+                    "retrieved audience tokens {tokens} exceeds budget {}",
+                    limits.max_tokens_per_audience
+                ),
+            ));
+        }
+        Ok(())
     }
 
     fn expect_terminal(&self, expected: TurnTerminalKind) -> Result<(), TurnExecutionError> {

@@ -67,17 +67,22 @@ fn story_revision_preserves_integer_serde_shape() {
 }
 
 #[test]
-fn legacy_and_v3_constraints_share_one_id_type() {
+fn active_story_constraint_uses_shared_constraint_id() {
     let id = ConstraintId::try_new("shared-constraint").unwrap();
-    let legacy = aise::domain::story_state::StoryConstraint {
+    let constraint = aise::domain::story_instance::constraint::ActiveStoryConstraint {
         id: id.clone(),
-        text: "legacy".into(),
+        source: aise::domain::story_instance::constraint::StoryConstraintSource::Pack {
+            pack_id: aise::domain::asset::ids::PackId::from("pack-1"),
+            constraint_key: aise::domain::asset::ids::ConstraintKey::from("c1"),
+        },
+        scope: aise::domain::asset::constraint::StoryConstraintScope::Story,
+        requirement: aise::domain::asset::constraint::StoryConstraintRequirement::Require {
+            statement: aise::domain::asset::validation::BoundedText::try_new("stay consistent", "constraint", 128)
+                .unwrap(),
+        },
+        lifecycle: aise::domain::asset::constraint::StoryConstraintLifecycle::Persistent,
     };
-    let v3 = aise::domain::story_instance::snapshot::StoryConstraint {
-        id: id.clone(),
-        text: "v3".into(),
-    };
-    assert_eq!(legacy.id, v3.id);
+    assert_eq!(constraint.id, id);
 }
 
 #[test]

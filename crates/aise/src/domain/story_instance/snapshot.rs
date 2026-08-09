@@ -1,29 +1,39 @@
 use crate::domain::asset::character_card::CharacterCard;
+use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
-use crate::domain::asset::ids::StoryRoleKey;
+use crate::domain::asset::ids::{CanonicalEventKey, FactKey, Sha256Digest, StoryRoleKey, TopicKey};
 use crate::domain::asset::story_pack::{StoryProfile, StoryRole};
-use crate::domain::ids::{CharacterId, ConstraintId, StoryId, StoryRevision};
-use crate::domain::knowledge::fact::WorldFact;
-use crate::domain::knowledge::memory::MemoryEntry;
+use crate::domain::asset::validation::ScalarValue;
+use crate::domain::asset::world_book::TopicDefinition;
+use crate::domain::ids::{CharacterId, StoryId, StoryRevision};
 use crate::domain::knowledge::query::CurrentPerception;
-use crate::domain::knowledge::rumor::SharedRumor;
-use crate::domain::narrative::{StoryEvent, StorySummary, StoryTurn};
+use crate::domain::narrative::StoryContinuity;
 use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::binding::RoleBinding;
-use crate::domain::story_instance::state::{CharacterInstanceState, RelationshipState};
+use crate::domain::story_instance::constraint::ActiveStoryConstraint;
+use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings, RelationshipState};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CurrentScene {
-    pub text: String,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnowledgeSnapshotRef {
+    pub story_id: StoryId,
+    pub pack_digest: Sha256Digest,
+    pub base_revision: StoryRevision,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoryConstraint {
-    pub id: ConstraintId,
-    pub text: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NarrativeConditionStateView {
+    pub occurred_event_keys: BTreeSet<CanonicalEventKey>,
+    pub player_action_event_keys: BTreeSet<CanonicalEventKey>,
+    pub fact_values: BTreeMap<FactKey, ScalarValue>,
+}
+
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum StorySnapshotError {
+    #[error("story snapshot is inconsistent: {code}")]
+    Inconsistent { code: &'static str },
 }
 
 #[derive(Debug, Clone)]
@@ -32,70 +42,85 @@ pub struct StoryReadSnapshot {
     base_revision: StoryRevision,
     pack: FrozenStoryPackRef,
     story_profile: StoryProfile,
+    instance_settings: InstanceSettings,
     role_definitions: BTreeMap<StoryRoleKey, StoryRole>,
     role_bindings: BTreeMap<StoryRoleKey, RoleBinding>,
     character_cards: BTreeMap<CharacterId, CharacterCard>,
     character_states: BTreeMap<CharacterId, CharacterInstanceState>,
-    world_facts: Vec<WorldFact>,
-    shared_rumors: Vec<SharedRumor>,
-    memories: Vec<MemoryEntry>,
-    current_perceptions: Vec<CurrentPerception>,
     current_scene: CurrentScene,
     relationships: Vec<RelationshipState>,
+    current_perceptions: Vec<CurrentPerception>,
     narrative_definition: NarrativeGraphDefinition,
     narrative_state: NarrativeRuntimeState,
-    canonical_events: Vec<StoryEvent>,
-    recent_turns: Vec<StoryTurn>,
-    story_summary: StorySummary,
-    active_constraints: Vec<StoryConstraint>,
+    condition_state: NarrativeConditionStateView,
+    story_continuity: StoryContinuity,
+    active_constraints: Vec<ActiveStoryConstraint>,
+    entity_catalog: Vec<KnowledgeEntity>,
+    topic_dictionary: BTreeMap<TopicKey, TopicDefinition>,
+    knowledge_snapshot: KnowledgeSnapshotRef,
 }
 
 impl StoryReadSnapshot {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn try_new(
         story_id: StoryId,
         base_revision: StoryRevision,
         pack: FrozenStoryPackRef,
         story_profile: StoryProfile,
+        instance_settings: InstanceSettings,
         role_definitions: BTreeMap<StoryRoleKey, StoryRole>,
         role_bindings: BTreeMap<StoryRoleKey, RoleBinding>,
         character_cards: BTreeMap<CharacterId, CharacterCard>,
         character_states: BTreeMap<CharacterId, CharacterInstanceState>,
-        world_facts: Vec<WorldFact>,
-        shared_rumors: Vec<SharedRumor>,
-        memories: Vec<MemoryEntry>,
-        current_perceptions: Vec<CurrentPerception>,
         current_scene: CurrentScene,
         relationships: Vec<RelationshipState>,
+        current_perceptions: Vec<CurrentPerception>,
         narrative_definition: NarrativeGraphDefinition,
         narrative_state: NarrativeRuntimeState,
-        canonical_events: Vec<StoryEvent>,
-        recent_turns: Vec<StoryTurn>,
-        story_summary: StorySummary,
-        active_constraints: Vec<StoryConstraint>,
-    ) -> Self {
-        Self {
+        condition_state: NarrativeConditionStateView,
+        story_continuity: StoryContinuity,
+        active_constraints: Vec<ActiveStoryConstraint>,
+        entity_catalog: Vec<KnowledgeEntity>,
+        topic_dictionary: BTreeMap<TopicKey, TopicDefinition>,
+        knowledge_snapshot: KnowledgeSnapshotRef,
+    ) -> Result<Self, StorySnapshotError> {
+        if knowledge_snapshot.story_id != story_id {
+            return Err(StorySnapshotError::Inconsistent {
+                code: "knowledge_story_id_mismatch",
+            });
+        }
+        if knowledge_snapshot.pack_digest != pack.digest {
+            return Err(StorySnapshotError::Inconsistent {
+                code: "knowledge_pack_digest_mismatch",
+            });
+        }
+        if knowledge_snapshot.base_revision != base_revision {
+            return Err(StorySnapshotError::Inconsistent {
+                code: "knowledge_base_revision_mismatch",
+            });
+        }
+        Ok(Self {
             story_id,
             base_revision,
             pack,
             story_profile,
+            instance_settings,
             role_definitions,
             role_bindings,
             character_cards,
             character_states,
-            world_facts,
-            shared_rumors,
-            memories,
-            current_perceptions,
             current_scene,
             relationships,
+            current_perceptions,
             narrative_definition,
             narrative_state,
-            canonical_events,
-            recent_turns,
-            story_summary,
+            condition_state,
+            story_continuity,
             active_constraints,
-        }
+            entity_catalog,
+            topic_dictionary,
+            knowledge_snapshot,
+        })
     }
 
     pub fn story_id(&self) -> &StoryId {
@@ -112,6 +137,10 @@ impl StoryReadSnapshot {
 
     pub fn story_profile(&self) -> &StoryProfile {
         &self.story_profile
+    }
+
+    pub fn instance_settings(&self) -> &InstanceSettings {
+        &self.instance_settings
     }
 
     pub fn role_definitions(&self) -> &BTreeMap<StoryRoleKey, StoryRole> {
@@ -134,32 +163,16 @@ impl StoryReadSnapshot {
         &self.character_states
     }
 
-    pub fn world_facts(&self) -> &[WorldFact] {
-        &self.world_facts
-    }
-
-    pub fn shared_rumors(&self) -> &[SharedRumor] {
-        &self.shared_rumors
-    }
-
-    pub fn memories(&self) -> &[MemoryEntry] {
-        &self.memories
-    }
-
-    pub fn current_perceptions(&self) -> &[CurrentPerception] {
-        &self.current_perceptions
-    }
-
-    pub fn character_memory(&self, id: &CharacterId) -> impl Iterator<Item = &MemoryEntry> {
-        self.memories.iter().filter(move |entry| &entry.owner == id)
-    }
-
     pub fn current_scene(&self) -> &CurrentScene {
         &self.current_scene
     }
 
     pub fn relationships(&self) -> &[RelationshipState] {
         &self.relationships
+    }
+
+    pub fn current_perceptions(&self) -> &[CurrentPerception] {
+        &self.current_perceptions
     }
 
     pub fn narrative_definition(&self) -> &NarrativeGraphDefinition {
@@ -170,20 +183,28 @@ impl StoryReadSnapshot {
         &self.narrative_state
     }
 
-    pub fn canonical_events(&self) -> &[StoryEvent] {
-        &self.canonical_events
+    pub fn condition_state(&self) -> &NarrativeConditionStateView {
+        &self.condition_state
     }
 
-    pub fn recent_turns(&self) -> &[StoryTurn] {
-        &self.recent_turns
+    pub fn story_continuity(&self) -> &StoryContinuity {
+        &self.story_continuity
     }
 
-    pub fn story_summary(&self) -> &StorySummary {
-        &self.story_summary
-    }
-
-    pub fn active_constraints(&self) -> &[StoryConstraint] {
+    pub fn active_constraints(&self) -> &[ActiveStoryConstraint] {
         &self.active_constraints
+    }
+
+    pub fn entity_catalog(&self) -> &[KnowledgeEntity] {
+        &self.entity_catalog
+    }
+
+    pub fn topic_dictionary(&self) -> &BTreeMap<TopicKey, TopicDefinition> {
+        &self.topic_dictionary
+    }
+
+    pub fn knowledge_snapshot(&self) -> &KnowledgeSnapshotRef {
+        &self.knowledge_snapshot
     }
 
     pub fn graph_revision(&self) -> u64 {

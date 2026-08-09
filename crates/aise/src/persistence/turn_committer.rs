@@ -84,6 +84,14 @@ impl TurnExecutionPipeline for TurnCommitter {
             story_id: story_id.clone(),
             turn: StoryTurn {
                 id: turn_id.clone(),
+                sequence: snapshot.story_continuity().next_sequence().map_err(|_| {
+                    TurnExecutionError::new(
+                        crate::core::turn_error::TurnFailureKind::InvariantViolation,
+                        "story_sequence_overflow",
+                        Some(TurnStage::TurnCommitter),
+                        "failed to assign next story sequence",
+                    )
+                })?,
                 player_input: ctx.player_input().to_string(),
                 story_text,
                 created_at,
@@ -98,7 +106,11 @@ impl TurnExecutionPipeline for TurnCommitter {
             base_revision: snapshot.base_revision(),
             idempotency_key: ctx.identity().idempotency_key().clone(),
             request_digest: ctx.request().request_digest().clone(),
-            player_character_id: snapshot.player_character_id().cloned(),
+            player_character_id: snapshot
+                .role_bindings()
+                .values()
+                .find(|binding| binding.player_id.is_some())
+                .map(|binding| binding.character_id.clone()),
             outbox,
             llm_calls,
         };

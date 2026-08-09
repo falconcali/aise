@@ -279,13 +279,17 @@ async fn instance_snapshot_loads_with_scene_and_binding() {
         .await
         .expect("story instance creation should succeed");
     let store: Arc<dyn Store> = SqliteStore::connect(&db_url).await.unwrap();
-    let limits = aise::core::turn_data::SnapshotLimits::from_config(&aise::config::TurnContentLimitsConfig::default());
+    let limits = aise::core::turn_data::SnapshotLimits::from_config(
+        &aise::config::TurnContentLimitsConfig::default(),
+        &aise::config::ContextPreparationConfig::default(),
+        &aise::config::AssetLimitsConfig::default(),
+    );
     let snapshot = store
         .load_story_snapshot(&story_info.story_id, limits)
         .await
         .expect("instance snapshot should load");
-    assert_eq!(snapshot.current_scene().text, "The village wakes.");
-    assert!(snapshot.recent_turns().is_empty());
+    assert_eq!(snapshot.current_scene().description.as_str(), "The village wakes.");
+    assert!(snapshot.story_continuity().recent_segments().is_empty());
 }
 
 fn now_millis() -> i64 {

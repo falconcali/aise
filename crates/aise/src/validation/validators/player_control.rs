@@ -19,14 +19,15 @@ impl DeterministicValidator for PlayerControlValidator {
         let Some(baseline) = ctx.baseline() else {
             return Ok(issues);
         };
-        let Some(player) = &baseline.player_character else {
-            return Ok(issues);
-        };
+        let player = &baseline.player_character;
         for (index, memory) in proposal.memory_changes.iter().enumerate() {
-            if memory.owner == player.id && memory.kind == crate::domain::memory::MemoryKind::Secret {
+            if memory.owner == player.character_id && memory.kind == crate::domain::memory::MemoryKind::Secret {
                 issues.push(issue(
                     "player_secret_memory_overwrite",
-                    format!("player character {} cannot be assigned a secret memory", player.id.as_str()),
+                    format!(
+                        "player character {} cannot be assigned a secret memory",
+                        player.character_id.as_str()
+                    ),
                     Some(ValidationLocation {
                         path: format!("memory_changes[{index}]"),
                         item_index: Some(index as u32),

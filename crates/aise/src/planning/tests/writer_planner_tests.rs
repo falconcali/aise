@@ -1,57 +1,69 @@
 use super::*;
-use crate::core::turn_data::ContextSource;
+use crate::core::turn_data::{CharacterThinkRequest, RetrievalAudience, WriterStoryGoal};
+use crate::domain::asset::validation::BoundedText;
+use crate::domain::ids::CharacterId;
+use crate::planning::planner_output::PlannerOutput;
 
 #[test]
-fn parse_plan_reads_requests_and_goal() {
-    let plan = parse_plan(
-        r#"{"retrieval_requests":[{"query":"the gate","sources":["historical_story","world_knowledge"]}],"character_requests":["c-1","c-2"],"story_goal":{"summary":"reach the gate"}}"#,
+fn planner_output_reads_goal_gaps_and_character_requests() {
+    let output: PlannerOutput = serde_json::from_str(
+        r#"{
+            "story_goal":{"summary":"reach the gate"},
+            "context_gaps":[{
+                "audience":"global_writer",
+                "knowledge_kinds":["fact"],
+                "entities":[],
+                "topics":[],
+                "query_text":"the gate",
+                "reason":"need location lore"
+            }],
+            "character_think_requests":[{"character_id":"c-1","reason":"present"}]
+        }"#,
     )
-    .expect("valid plan");
-    assert_eq!(plan.retrieval_requests.len(), 1);
-    assert_eq!(plan.retrieval_requests[0].query, "the gate");
-    assert_eq!(
-        plan.retrieval_requests[0].sources,
-        vec![ContextSource::HistoricalStory, ContextSource::WorldKnowledge]
-    );
-    assert_eq!(plan.character_requests.len(), 2);
-    assert_eq!(plan.story_goal.summary, "reach the gate");
+    .expect("valid planner output");
+    assert_eq!(output.story_goal.summary.as_str(), "reach the gate");
+    assert_eq!(output.context_gaps.len(), 1);
+    assert_eq!(output.character_think_requests.len(), 1);
+    assert_eq!(output.character_think_requests[0].character_id.as_str(), "c-1");
 }
 
 #[test]
-fn parse_plan_drops_empty_and_duplicate_requests() {
-    let plan = parse_plan(
-        r#"{"retrieval_requests":[{"query":"  ","sources":[]},{"query":"keep me","sources":[]}],"character_requests":["c-1","c-1",""],"story_goal":{}}"#,
-    )
-    .expect("valid plan");
-    assert_eq!(plan.retrieval_requests.len(), 1, "blank query must be dropped");
-    assert_eq!(plan.retrieval_requests[0].query, "keep me");
-    assert_eq!(plan.character_requests.len(), 1, "duplicate and blank ids must be dropped");
-    assert_eq!(plan.character_requests[0].as_str(), "c-1");
+fn planner_output_rejects_provider_and_budget_fields() {
+    for payload in [
+        r#"{"story_goal":{"summary":"x"},"provider":"entity"}"#,
+        r#"{"story_goal":{"summary":"x"},"budget":10}"#,
+        r#"{"story_goal":{"summary":"x"},"top_k":3}"#,
+        r#"{"story_goal":{"summary":"x"},"retriever":"bm25"}"#,
+        r#"{"story_goal":{"summary":"x"},"narrative_plan":{}}"#,
+        r#"{"story_goal":{"summary":"x"},"active_constraints":[]}"#,
+    ] {
+        let err = serde_json::from_str::<PlannerOutput>(payload);
+        assert!(err.is_err(), "must reject forbidden field: {payload}");
+    }
 }
 
 #[test]
-fn parse_plan_bounds_output_sizes() {
-    let long_query = "q".repeat(400);
-    let long_goal = "g".repeat(600);
-    let character_ids: Vec<String> = (0..20).map(|index| format!("c-{index}")).collect();
-    let plan = parse_plan(&format!(
-        r#"{{"retrieval_requests":[{{"query":"{long_query}","sources":[]}}],"character_requests":{character_ids:?},"story_goal":{{"summary":"{long_goal}"}}}}"#
-    ))
-    .expect("valid plan");
-    assert!(plan.retrieval_requests[0].query.len() <= super::MAX_QUERY_CHARS);
-    assert!(plan.story_goal.summary.len() <= super::MAX_GOAL_CHARS);
-    assert!(plan.character_requests.len() <= super::MAX_CHARACTER_REQUESTS);
+fn planner_output_rejects_unknown_fields() {
+    let err = serde_json::from_str::<PlannerOutput>(r#"{"story_goal":{"summary":"x"},"extra":1}"#);
+    assert!(err.is_err());
 }
 
 #[test]
-fn parse_plan_rejects_invalid_json() {
-    assert!(parse_plan("not json").is_err());
-}
-
-#[test]
-fn parse_plan_error_includes_raw_output_preview() {
-    let error = parse_plan("```json\n{\"story_goal\":{\"summary\":\"x\"}\n```").unwrap_err();
-    let message = error.to_string();
-    assert!(message.contains("raw_output="), "error must preview raw output: {message}");
-    assert!(message.contains("```json"), "raw output must appear in the error: {message}");
+fn writer_story_goal_roundtrips() {
+    let goal = WriterStoryGoal {
+        summary: BoundedText::try_new("keep moving".into(), "goal", 512).unwrap(),
+    };
+    let json = serde_json::to_string(&goal).unwrap();
+    let parsed: WriterStoryGoal = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed.summary.as_str(), "keep moving");
+    let request = CharacterThinkRequest {
+        character_id: CharacterId::try_new("c-1").unwrap(),
+        reason: BoundedText::try_new("present".into(), "reason", 256).unwrap(),
+    };
+    assert!(matches!(
+        RetrievalAudience::Character {
+            character_id: request.character_id.clone()
+        },
+        RetrievalAudience::Character { .. }
+    ));
 }

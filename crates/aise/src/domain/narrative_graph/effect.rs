@@ -1,6 +1,6 @@
+use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{CanonicalEventKey, LocationKey, NarrativeNodeKey, StoryRoleKey};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::asset::world_book::EntityRef;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 
@@ -17,7 +17,7 @@ pub struct GlobalEventIntentDefinition {
     pub event_key: CanonicalEventKey,
     pub category: BoundedText,
     #[serde(default)]
-    pub participants: Vec<EntityRef>,
+    pub participants: Vec<KnowledgeEntity>,
     pub location: Option<LocationKey>,
     pub description: BoundedText,
 }
@@ -41,17 +41,17 @@ pub enum ImpulseUrgency {
     High,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct GlobalEventIntent {
     pub source_node: NarrativeNodeKey,
     pub event_key: CanonicalEventKey,
     pub category: BoundedText,
-    pub participants: Vec<EntityRef>,
+    pub participants: Vec<KnowledgeEntity>,
     pub location: Option<LocationKey>,
     pub description: BoundedText,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CharacterImpulse {
     pub source_node: NarrativeNodeKey,
     pub target_role_key: StoryRoleKey,

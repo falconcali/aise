@@ -1,22 +1,41 @@
-use crate::config::TurnContentLimitsConfig;
+use crate::config::{AssetLimitsConfig, ContextPreparationConfig, TurnContentLimitsConfig};
+use crate::context::error::ContextError;
+use crate::context::retrieval_signal_builder::RetrievalSignalBuilder;
 use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_data::{BaselineContext, SnapshotLimits};
-use crate::core::turn_error::TurnExecutionError;
+use crate::core::turn_data::{BaselineContext, CharacterIndexEntry, CharacterView, NarrativeStateView, SnapshotLimits};
+use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::core::turn_trace::{SpanPayload, ToolCallData};
+use crate::domain::narrative::StoryContinuityLimits;
 use crate::persistence::store::Store;
 use async_trait::async_trait;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
 
 pub struct BaselineContextBuilder {
     store: Arc<dyn Store>,
     content_limits: TurnContentLimitsConfig,
+    context_config: ContextPreparationConfig,
+    asset_limits: AssetLimitsConfig,
+    signal_builder: RetrievalSignalBuilder,
 }
 
 impl BaselineContextBuilder {
-    pub fn new(store: Arc<dyn Store>, content_limits: TurnContentLimitsConfig) -> Self {
-        Self { store, content_limits }
+    pub fn new(
+        store: Arc<dyn Store>,
+        content_limits: TurnContentLimitsConfig,
+        context_config: ContextPreparationConfig,
+        asset_limits: AssetLimitsConfig,
+    ) -> Self {
+        let signal_builder = RetrievalSignalBuilder::new(context_config.clone());
+        Self {
+            store,
+            content_limits,
+            context_config,
+            asset_limits,
+            signal_builder,
+        }
     }
 }
 
@@ -28,7 +47,7 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
 
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let story_id = ctx.story_id().clone();
-        let limits = SnapshotLimits::from_config(&self.content_limits);
+        let limits = SnapshotLimits::from_config(&self.content_limits, &self.context_config, &self.asset_limits);
         let snapshot = {
             let pending = ctx.trace().begin_span("aise.tool_call", "store.load_story_snapshot");
             let started = Instant::now();
@@ -48,33 +67,157 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
                     latency_ms,
                 }),
             );
-            outcome?
+            outcome.map_err(TurnExecutionError::from)?
         };
-        let player_character = snapshot
-            .player_character_id()
-            .and_then(|player_id| snapshot.characters().iter().find(|c| c.id == *player_id).cloned());
-        let current_scene = if snapshot.current_scene().text.trim().is_empty() {
-            None
-        } else {
-            Some(snapshot.current_scene().text.clone())
+        let continuity_limits = StoryContinuityLimits {
+            max_summary_bytes: limits.continuity.max_summary_bytes,
+            max_recent_segments: limits.continuity.max_recent_segments,
+            max_recent_segment_bytes: limits.continuity.max_recent_segment_bytes,
+            max_recent_segment_tokens: limits.continuity.max_recent_segment_tokens,
         };
-        let story_summary = snapshot.story_summary().text.clone();
-        ctx.set_prepared_context(
-            snapshot.clone(),
-            BaselineContext {
-                story_instructions: snapshot.story_instructions().to_owned(),
-                story_config: snapshot.story_config().clone(),
-                player_character,
-                current_scene,
-                relevant_characters: snapshot.characters().to_vec(),
-                recent_story: snapshot.recent_turns().iter().map(|t| t.story_text.clone()).collect(),
-                story_summary,
-                active_constraints: snapshot
-                    .active_constraints()
-                    .iter()
-                    .map(|constraint| constraint.text.clone())
-                    .collect(),
-            },
-        )
+        let _ = continuity_limits;
+        let baseline = build_baseline(&snapshot, ctx.player_input(), &self.signal_builder, &self.context_config)
+            .map_err(map_baseline_error)?;
+        ctx.set_prepared_context(snapshot, baseline)
     }
+}
+
+fn build_baseline(
+    snapshot: &crate::domain::story_instance::snapshot::StoryReadSnapshot,
+    player_input: &str,
+    signal_builder: &RetrievalSignalBuilder,
+    context_config: &ContextPreparationConfig,
+) -> Result<BaselineContext, ContextError> {
+    let player_bindings: Vec<_> = snapshot
+        .role_bindings()
+        .values()
+        .filter(|binding| binding.player_id.is_some())
+        .collect();
+    if player_bindings.len() != 1 {
+        return Err(ContextError::SnapshotInconsistent {
+            code: "player_binding_count",
+        });
+    }
+    let player_binding = player_bindings[0];
+    let player_character = resolve_character_view(snapshot, &player_binding.character_id)?;
+    let mut seen_scene = BTreeSet::new();
+    let mut scene_characters = Vec::new();
+    for character_id in &snapshot.current_scene().present_character_ids {
+        if !seen_scene.insert(character_id.clone()) {
+            return Err(ContextError::SnapshotInconsistent {
+                code: "duplicate_scene_character",
+            });
+        }
+        scene_characters.push(resolve_character_view(snapshot, character_id)?);
+        if scene_characters.len() > context_config.max_scene_characters {
+            return Err(ContextError::SignalLimitExceeded {
+                limit: "max_scene_characters",
+            });
+        }
+    }
+    let mut character_index = Vec::new();
+    for (character_id, state) in snapshot.character_states() {
+        if seen_scene.contains(character_id) {
+            continue;
+        }
+        let role = snapshot
+            .role_definitions()
+            .get(&state.role_key)
+            .ok_or(ContextError::SnapshotInconsistent {
+                code: "missing_role_definition",
+            })?;
+        let card = snapshot
+            .character_cards()
+            .get(character_id)
+            .ok_or(ContextError::SnapshotInconsistent {
+                code: "missing_character_card",
+            })?;
+        let binding = snapshot
+            .role_bindings()
+            .values()
+            .find(|binding| &binding.character_id == character_id)
+            .ok_or(ContextError::SnapshotInconsistent {
+                code: "missing_role_binding",
+            })?;
+        character_index.push(CharacterIndexEntry {
+            character_id: character_id.clone(),
+            role_key: state.role_key.clone(),
+            name: card.meta.name.clone(),
+            narrative_function: role.narrative_function.clone(),
+            location_key: state.location.clone(),
+            player_controlled: binding.player_id.is_some(),
+        });
+    }
+    character_index.sort_by(|left, right| left.character_id.cmp(&right.character_id));
+    if character_index.len() > context_config.max_character_index {
+        return Err(ContextError::SignalLimitExceeded {
+            limit: "max_character_index",
+        });
+    }
+    let retrieval_signals = signal_builder.build(snapshot, player_input)?;
+    Ok(BaselineContext {
+        story_profile: snapshot.story_profile().clone(),
+        instance_settings: snapshot.instance_settings().clone(),
+        player_character,
+        current_scene: snapshot.current_scene().clone(),
+        scene_characters,
+        character_index,
+        story_continuity: snapshot.story_continuity().clone(),
+        active_story_constraints: snapshot.active_constraints().to_vec(),
+        narrative_state_view: NarrativeStateView {
+            pack_digest: snapshot.pack().digest.clone(),
+            graph_revision: snapshot.graph_revision(),
+            node_states: snapshot.narrative_state().node_states.clone(),
+        },
+        retrieval_signals,
+    })
+}
+
+fn resolve_character_view(
+    snapshot: &crate::domain::story_instance::snapshot::StoryReadSnapshot,
+    character_id: &crate::domain::ids::CharacterId,
+) -> Result<CharacterView, ContextError> {
+    let state = snapshot
+        .character_states()
+        .get(character_id)
+        .ok_or(ContextError::SnapshotInconsistent {
+            code: "missing_character_state",
+        })?;
+    let role = snapshot
+        .role_definitions()
+        .get(&state.role_key)
+        .ok_or(ContextError::SnapshotInconsistent {
+            code: "missing_role_definition",
+        })?;
+    let binding = snapshot
+        .role_bindings()
+        .values()
+        .find(|binding| &binding.character_id == character_id)
+        .ok_or(ContextError::SnapshotInconsistent {
+            code: "missing_role_binding",
+        })?
+        .clone();
+    let card = snapshot
+        .character_cards()
+        .get(character_id)
+        .ok_or(ContextError::SnapshotInconsistent {
+            code: "missing_character_card",
+        })?;
+    Ok(CharacterView {
+        character_id: character_id.clone(),
+        role_key: state.role_key.clone(),
+        role: role.clone(),
+        binding,
+        card: card.clone(),
+        state: state.clone(),
+    })
+}
+
+fn map_baseline_error(error: ContextError) -> TurnExecutionError {
+    TurnExecutionError::new(
+        TurnFailureKind::InvariantViolation,
+        error.turn_code(),
+        Some(TurnStage::BaselineBuilder),
+        error.to_string(),
+    )
 }

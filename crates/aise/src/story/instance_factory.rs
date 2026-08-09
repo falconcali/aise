@@ -7,8 +7,9 @@ use crate::domain::knowledge::query::KnowledgeSource;
 use crate::domain::knowledge::rumor::SharedRumor;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::binding::{RoleBinding, StoryInstanceBinding};
+use crate::domain::story_instance::info::StoryInfo;
+use crate::domain::story_instance::state::CurrentScene;
 use crate::domain::story_instance::state::{CharacterInstanceState, RelationshipState};
-use crate::domain::story_state::{CurrentScene, StoryInfo};
 use crate::persistence::asset_store::AssetStore;
 use crate::persistence::store::{MaterializedStoryInstanceSpec, Store, StoreError};
 use std::collections::BTreeMap;
@@ -140,6 +141,7 @@ impl StoryInstanceFactory {
             .get(&spec.player_role_key)
             .map(|opening| opening.to_string())
             .unwrap_or_default();
+        let present_character_ids = characters.keys().cloned().collect();
         let materialized = MaterializedStoryInstanceSpec {
             story_id: story_id.clone(),
             pack: frozen.frozen_ref(),
@@ -150,7 +152,11 @@ impl StoryInstanceFactory {
             rumors: Vec::new(),
             memories: Vec::new(),
             scene: CurrentScene {
-                text: pack.start.description.to_string(),
+                scene_key: pack.start.scene_key.clone(),
+                location_key: pack.start.location_key.clone(),
+                time: pack.start.time.clone(),
+                description: pack.start.description.clone(),
+                present_character_ids,
             },
             opening: crate::domain::asset::validation::BoundedText::try_new(opening, "opening", 4096)
                 .map_err(|_| StoryInstantiationError::LimitExceeded { limit: "opening" })?,

@@ -3,7 +3,10 @@ use crate::core::turn_data::SnapshotLimits;
 use crate::core::turn_validation::StateChange;
 use crate::domain::ids::{CharacterId, StoryRevision};
 use crate::domain::narrative::{StoryEvent, StorySummary, StoryTurn};
-use crate::domain::story_state::{CurrentScene, StoryConstraint, StoryCreateSpec, StoryInfo, StoryReadSnapshot};
+use crate::domain::story_instance::constraint::ActiveStoryConstraint;
+use crate::domain::story_instance::info::StoryInfo;
+use crate::domain::story_instance::snapshot::StoryReadSnapshot;
+use crate::domain::story_instance::state::CurrentScene;
 use crate::domain::world::WorldState;
 use async_trait::async_trait;
 use thiserror::Error;
@@ -99,7 +102,7 @@ pub struct TurnCommitSpec {
     pub world_change: StateChange<WorldState>,
     pub memory_changes: Vec<crate::core::turn_validation::MemoryStateChange>,
     pub scene_change: StateChange<CurrentScene>,
-    pub constraint_change: StateChange<Vec<StoryConstraint>>,
+    pub constraint_change: StateChange<Vec<ActiveStoryConstraint>>,
     pub summary_change: StateChange<StorySummary>,
     pub base_revision: StoryRevision,
     pub idempotency_key: IdempotencyKey,
@@ -121,7 +124,6 @@ pub struct OutboxRecord {
 
 #[async_trait]
 pub trait Store: Send + Sync {
-    async fn create_story(&self, spec: &StoryCreateSpec) -> Result<StoryInfo, StoreError>;
     async fn create_story_instance(&self, spec: &MaterializedStoryInstanceSpec) -> Result<StoryInfo, StoreError>;
     async fn get_story(&self, story_id: &crate::domain::ids::StoryId) -> Result<Option<StoryInfo>, StoreError>;
     async fn load_story_snapshot(

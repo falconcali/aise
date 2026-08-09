@@ -4,7 +4,8 @@ use crate::domain::character::CharacterState;
 use crate::domain::ids::CharacterId;
 use crate::domain::memory::MemoryEntry;
 use crate::domain::narrative::{StoryEvent, StorySummary};
-use crate::domain::story_state::{CurrentScene, StoryConstraint};
+use crate::domain::story_instance::constraint::ActiveStoryConstraint;
+use crate::domain::story_instance::state::CurrentScene;
 use crate::domain::world::WorldState;
 use serde::{Deserialize, Serialize};
 
@@ -246,7 +247,7 @@ pub struct MemoryStateChange {
 #[derive(Debug, Clone)]
 pub struct StoryStateChanges {
     pub scene_change: StateChange<CurrentScene>,
-    pub constraint_change: StateChange<Vec<StoryConstraint>>,
+    pub constraint_change: StateChange<Vec<ActiveStoryConstraint>>,
     pub summary_change: StateChange<StorySummary>,
 }
 
@@ -318,7 +319,7 @@ impl ValidatedChangeSet {
         self.story_state.scene_change.clone()
     }
 
-    pub fn constraint_change(&self) -> StateChange<Vec<StoryConstraint>> {
+    pub fn constraint_change(&self) -> StateChange<Vec<ActiveStoryConstraint>> {
         self.story_state.constraint_change.clone()
     }
 
