@@ -118,5 +118,11 @@ max_total_items = 20
 max_total_tokens = 4096
 max_item_bytes = 4096
 
-[aise.prompt]
-catalog_path = "prompts"
+[aise.prompt.source]
+kind = "packaged"
+
+[aise.prompt.profile_assets]
+writer_planner = "context-v1/writer-planner"
+character_think = "context-v1/character-think"
+story_generator = "context-v1/story-generator"
+story_repairer = "context-v1/story-repairer"
