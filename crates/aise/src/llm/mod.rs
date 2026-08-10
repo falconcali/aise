@@ -6,7 +6,7 @@ pub mod message;
 pub mod openai_compat;
 pub mod provider;
 
-pub use crate::core::token_estimator::estimate_text_tokens;
+pub use crate::domain::text::estimate_text_tokens;
 pub use accounting::{FinishReason, LlmCharge, LlmCompletion, LlmTokenUsage, TokenAccountant, UsageAccuracy};
 pub use error::LlmError;
 pub use gateway::LlmGateway;

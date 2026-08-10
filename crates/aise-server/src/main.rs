@@ -31,8 +31,11 @@ async fn main() -> anyhow::Result<()> {
     let registry = SessionRegistry::new(config.max_sessions);
     let task_supervisor = tasks::TurnTaskSupervisor::new(config.turn_tasks())?;
     let state = Arc::new(
-        AppState::new(services.engine, registry, task_supervisor.clone(), config.clone())
-            .with_services(services.pack_service, services.instance_factory),
+        AppState::new(services.engine, registry, task_supervisor.clone(), config.clone()).with_services(
+            services.pack_service,
+            services.instance_factory,
+            services.story_history_reader,
+        ),
     );
     let app = router(state, &config);
 

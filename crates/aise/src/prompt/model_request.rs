@@ -1,19 +1,14 @@
 use crate::core::story_proposal::StoryProposal;
 use crate::core::turn_contract::LlmCallPurpose;
-use crate::core::turn_data::{
-    BaselineContext, CharacterThought, CharacterView, ContextItem, ContextProvenance, WriterPlan,
-};
+use crate::core::turn_data::{BaselineContext, CharacterThought, CharacterView, ContextItem, WriterPlan};
 use crate::core::turn_validation::ValidationIssue;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{CharacterId, StoryRevision};
 use crate::domain::knowledge::query::CurrentPerception;
 use crate::domain::narrative_graph::director::NarrativePlan;
 use crate::domain::narrative_graph::effect::CharacterImpulse;
-use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::state::CurrentScene;
 use crate::prompt::profile::PromptProfile;
 use serde::Serialize;
-use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WriterPlannerContext {
@@ -46,16 +41,6 @@ pub struct StoryRepairerContext {
     pub generation: StoryGeneratorContext,
     pub previous_proposal: StoryProposal,
     pub issues: Vec<ValidationIssue>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct NarrativeValidatorContext {
-    pub baseline: BaselineContext,
-    pub snapshot_revision: StoryRevision,
-    pub active_constraints: Vec<ActiveStoryConstraint>,
-    pub proposal: StoryProposal,
-    pub writer_context_provenance: Vec<ContextProvenance>,
-    pub character_context_provenance: BTreeMap<CharacterId, Vec<ContextProvenance>>,
 }
 
 #[derive(Debug, Clone)]
@@ -128,17 +113,6 @@ impl ModelRequest<StoryRepairerContext> {
             context,
             max_output_tokens,
             purpose: LlmCallPurpose::StoryRepair,
-        }
-    }
-}
-
-impl ModelRequest<NarrativeValidatorContext> {
-    pub fn narrative_validator(context: NarrativeValidatorContext, max_output_tokens: u32) -> Self {
-        Self {
-            profile: PromptProfile::NarrativeValidator,
-            context,
-            max_output_tokens,
-            purpose: LlmCallPurpose::NarrativeValidation,
         }
     }
 }

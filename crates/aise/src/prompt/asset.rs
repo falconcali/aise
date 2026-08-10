@@ -44,7 +44,13 @@ pub fn compute_asset_hash(template_content: &str, manifest: &PromptAssetManifest
     hasher.update(normalized.as_bytes());
 
     hasher.update(manifest.asset_id.as_ref().as_bytes());
-    hasher.update(serde_json::to_string(&manifest.kind).unwrap_or_default().as_bytes());
+    let kind = match manifest.kind {
+        PromptKind::Text => b"\"text\"".as_slice(),
+        PromptKind::Messages => b"\"messages\"".as_slice(),
+        PromptKind::Fragment => b"\"fragment\"".as_slice(),
+        PromptKind::FewShot => b"\"few_shot\"".as_slice(),
+    };
+    hasher.update(kind);
 
     if let Some(ref schema) = manifest.input_schema_ref {
         hasher.update(schema.as_bytes());

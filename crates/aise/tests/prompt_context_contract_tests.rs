@@ -4,20 +4,36 @@ use aise::core::{WriterPlan, WriterStoryGoal};
 use aise::domain::asset::character_card::{
     AssetSpecVersion, CharacterCard, CharacterMeta, CharacterProfile, CharacterSpec, SpeakingStyle,
 };
+use aise::domain::asset::frozen_ref::FrozenCharacterAssetRef;
 use aise::domain::asset::ids::{CharacterAssetKey, LocationKey, SceneKey, SemanticVersion, Sha256Digest, StoryRoleKey};
 use aise::domain::asset::story_pack::{InitialRoleState, StoryProfile, StoryRole, StoryStyle};
 use aise::domain::asset::validation::BoundedText;
-use aise::domain::ids::{CharacterId, StoryRevision};
+use aise::domain::ids::CharacterId;
 use aise::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySummary};
 use aise::domain::narrative_graph::director::NarrativePlan;
-use aise::domain::story_instance::binding::RoleBinding;
+use aise::domain::story_instance::binding::{RoleBinding, RoleController};
 use aise::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings};
 use aise::prompt::profile::PromptProfile;
 use aise::prompt::{
-    CharacterThinkContext, ModelRequest, NarrativeValidatorContext, RuntimeContextEncoder, StoryGeneratorContext,
-    StoryRepairerContext, WriterPlannerContext,
+    CatalogPromptSource, CharacterThinkContext, ModelRequest, RuntimeContextEncoder, StoryGeneratorContext,
+    StoryRepairerContext, TrustedPromptSource, WriterPlannerContext,
 };
 use std::collections::BTreeMap;
+
+#[test]
+fn packaged_prompt_catalog_has_four_strict_profiles() {
+    let source = CatalogPromptSource::from_config(&aise::config::PromptModuleConfig::default()).expect("catalog");
+    for profile in [
+        PromptProfile::WriterPlanner,
+        PromptProfile::CharacterThink,
+        PromptProfile::StoryGenerator,
+        PromptProfile::StoryRepairer,
+    ] {
+        let prompt = source.resolve(profile).expect("profile prompt");
+        assert!(prompt.as_str().contains("untrusted JSON data"));
+        assert!(prompt.as_str().contains("additional field"));
+    }
+}
 
 fn bounded(text: &str) -> BoundedText {
     BoundedText::try_new(text, "text", 256).unwrap()
@@ -62,8 +78,14 @@ fn minimal_baseline(adversarial: &str) -> BaselineContext {
     };
     let binding = RoleBinding {
         role_key: role_key.clone(),
-        player_id: None,
         character_id: character_id.clone(),
+        character_asset: FrozenCharacterAssetRef {
+            character_key: card.character_key.clone(),
+            version: card.meta.version.clone(),
+            digest: Sha256Digest::try_new("sha256:0000000000000000000000000000000000000000000000000000000000000000")
+                .unwrap(),
+        },
+        controller: RoleController::Ai,
         bound_at_ms: 0,
     };
     let state = CharacterInstanceState {
@@ -187,7 +209,7 @@ fn typed_context_emits_one_trusted_system_and_one_untrusted_user_message() {
         PromptProfile::StoryGenerator
     );
     let proposal: StoryProposal = serde_json::from_str(
-        r#"{"story_text":"hello","events":[],"character_changes":[],"world_change":{"add_facts":[]},"memory_changes":[],"summary_change":null}"#,
+        r#"{"story_text":"hello","events":[],"character_changes":[],"relationship_changes":[],"knowledge_changes":[],"perceptions":[],"scene_change":null,"summary_text":null}"#,
     )
     .unwrap();
     assert_eq!(
@@ -208,21 +230,7 @@ fn typed_context_emits_one_trusted_system_and_one_untrusted_user_message() {
         .profile(),
         PromptProfile::StoryRepairer
     );
-    assert_eq!(
-        ModelRequest::narrative_validator(
-            NarrativeValidatorContext {
-                baseline,
-                snapshot_revision: StoryRevision::new(0),
-                active_constraints: Vec::new(),
-                proposal,
-                writer_context_provenance: Vec::new(),
-                character_context_provenance: BTreeMap::new(),
-            },
-            128,
-        )
-        .profile(),
-        PromptProfile::NarrativeValidator
-    );
+    let _ = (baseline, proposal);
 }
 
 #[test]

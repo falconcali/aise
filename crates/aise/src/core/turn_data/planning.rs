@@ -29,6 +29,7 @@ pub struct RetrievalRequest {
     pub entities: Vec<KnowledgeEntity>,
     pub topics: Vec<TopicKey>,
     pub query_text: Option<BoundedText>,
+    pub authorized_memory_owners: Vec<CharacterId>,
     pub reason: BoundedText,
     pub origin: RetrievalRequestOrigin,
     pub signal_priority: u8,

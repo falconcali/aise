@@ -1,13 +1,29 @@
+use crate::domain::asset::frozen_ref::FrozenCharacterAssetRef;
 use crate::domain::asset::ids::{PackId, PlayerId, StoryRoleKey};
 use crate::domain::ids::{CharacterId, StoryId, StoryRevision};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "player_id", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RoleController {
+    Player(PlayerId),
+    Ai,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RoleBinding {
     pub role_key: StoryRoleKey,
-    pub player_id: Option<PlayerId>,
     pub character_id: CharacterId,
+    pub character_asset: FrozenCharacterAssetRef,
+    pub controller: RoleController,
     pub bound_at_ms: i64,
+}
+
+impl RoleBinding {
+    pub fn is_player_controlled(&self) -> bool {
+        matches!(self.controller, RoleController::Player(_))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

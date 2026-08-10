@@ -1,7 +1,6 @@
 use crate::context::candidate_retriever::{CandidateRetrievalRequest, CandidateRetriever, ContextCandidate};
 use crate::context::error::ContextError;
-use crate::core::turn_data::{CandidateMatch, CandidateRetrieverKind, RetrievalAudience, RetrievalRequest};
-use crate::domain::asset::entity::KnowledgeEntity;
+use crate::core::turn_data::{CandidateRetrieverKind, RetrievalAudience, RetrievalRequest};
 use crate::domain::knowledge::KnowledgeKind;
 use crate::persistence::knowledge_read_port::{KnowledgeFilter, KnowledgeReadPort, TopicKnowledgeQuery};
 use async_trait::async_trait;
@@ -31,7 +30,8 @@ impl CandidateRetriever for TopicCandidateRetriever {
         let filter = KnowledgeFilter {
             audience: request.request.audience.clone(),
             knowledge_kinds: request.request.knowledge_kinds.clone(),
-            allowed_writer_memory_owners: request.allowed_writer_memory_owners.to_vec(),
+            authorized_memory_owners: request.request.authorized_memory_owners.clone(),
+            max_item_bytes: request.max_item_bytes,
         };
         let records = self
             .knowledge
@@ -43,23 +43,18 @@ impl CandidateRetriever for TopicCandidateRetriever {
             })
             .await?;
         let mut candidates = Vec::with_capacity(records.len());
-        for (index, record) in records.into_iter().enumerate() {
-            let matches = request
-                .request
-                .topics
-                .iter()
-                .filter(|topic| record.topics.contains(topic))
-                .cloned()
-                .map(CandidateMatch::Topic)
-                .collect::<Vec<_>>();
-            candidates.push(ContextCandidate {
-                record,
-                audience: request.request.audience.clone(),
-                retriever: CandidateRetrieverKind::Topic,
-                provider_rank: (index as u32).saturating_add(1),
-                matches,
-                signal_priority: request.request.signal_priority,
-            });
+        for (index, hit) in records.into_iter().enumerate() {
+            let provider_rank = u32::try_from(index)
+                .ok()
+                .and_then(|value| value.checked_add(1))
+                .ok_or(ContextError::CandidateLimitExceeded)?;
+            candidates.push(ContextCandidate::from_hit(
+                hit,
+                request.request.audience.clone(),
+                CandidateRetrieverKind::Topic,
+                provider_rank,
+                request.request.signal_priority,
+            )?);
         }
         Ok(candidates)
     }
@@ -68,14 +63,8 @@ impl CandidateRetriever for TopicCandidateRetriever {
 fn authorize_request(request: &RetrievalRequest) -> Result<(), ContextError> {
     match &request.audience {
         RetrievalAudience::GlobalWriter => {
-            if request.knowledge_kinds.contains(&KnowledgeKind::Memory) {
-                let has_owner = request
-                    .entities
-                    .iter()
-                    .any(|entity| matches!(entity, KnowledgeEntity::Character(_)));
-                if !has_owner {
-                    return Err(ContextError::KnowledgeAudienceViolation);
-                }
+            if request.knowledge_kinds.contains(&KnowledgeKind::Memory) && request.authorized_memory_owners.is_empty() {
+                return Err(ContextError::KnowledgeAudienceViolation);
             }
             Ok(())
         }

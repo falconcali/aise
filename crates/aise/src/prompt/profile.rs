@@ -7,7 +7,6 @@ pub enum PromptProfile {
     CharacterThink,
     StoryGenerator,
     StoryRepairer,
-    NarrativeValidator,
 }
 
 impl PromptProfile {
@@ -17,7 +16,6 @@ impl PromptProfile {
             PromptProfile::CharacterThink => "character_think",
             PromptProfile::StoryGenerator => "story_generator",
             PromptProfile::StoryRepairer => "story_repairer",
-            PromptProfile::NarrativeValidator => "narrative_validator",
         }
     }
 }

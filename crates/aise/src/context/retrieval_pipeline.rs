@@ -63,13 +63,11 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
                 })
             })?
             .clone();
-        let allowed_owners: Vec<CharacterId> = plan
-            .character_think_requests
-            .iter()
-            .map(|request| request.character_id.clone())
-            .collect();
+        let pending = ctx.trace().begin_span("context.retrieve", "context.retrieve");
         let mut candidates = Vec::new();
         let mut total_collected = 0usize;
+        let mut entity_candidate_count = 0usize;
+        let mut topic_candidate_count = 0usize;
         for request in &plan.retrieval_plan.requests {
             for retriever in &self.retrievers {
                 if total_collected >= self.config.max_candidates_total {
@@ -85,16 +83,22 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
                     .retrieve(CandidateRetrievalRequest {
                         snapshot: snapshot.knowledge_snapshot(),
                         request,
-                        allowed_writer_memory_owners: &allowed_owners,
                         limit,
+                        max_item_bytes: self.config.max_item_bytes,
                     })
                     .await
                     .map_err(map_context_error)?;
                 total_collected = total_collected.saturating_add(batch.len());
+                match retriever.kind() {
+                    CandidateRetrieverKind::Entity => entity_candidate_count += batch.len(),
+                    CandidateRetrieverKind::Topic => topic_candidate_count += batch.len(),
+                    CandidateRetrieverKind::Bm25 | CandidateRetrieverKind::Embedding => {}
+                }
                 candidates.extend(batch);
             }
         }
-        let merged = merge_candidates(candidates);
+        let merged = merge_candidates(candidates)?;
+        let merged_count = merged.len();
         let partitions = partition_and_rank(merged, &self.config)?;
         let limits = RetrievedContextLimits {
             max_character_audiences: ctx.budget().max_character_thoughts(),
@@ -113,6 +117,21 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
                 error.to_string(),
             )
         })?;
+        let payload = serde_json::json!({
+            "story_id": ctx.story_id(),
+            "turn_id": ctx.turn_id(),
+            "base_revision": snapshot.base_revision().get(),
+            "request_count": plan.retrieval_plan.requests.len(),
+            "entity_candidate_count": entity_candidate_count,
+            "topic_candidate_count": topic_candidate_count,
+            "merged_count": merged_count,
+            "writer_item_count": context.writer().len(),
+            "character_partition_count": context.characters().len(),
+            "total_tokens": context.total_tokens(),
+            "status": "ok",
+            "error_code": null,
+        });
+        ctx.trace().end_span_with(pending, &payload);
         ctx.set_retrieved_context(context)
     }
 }
@@ -122,29 +141,49 @@ struct PartitionedItems {
     characters: BTreeMap<CharacterId, Vec<ContextItem>>,
 }
 
-fn merge_candidates(candidates: Vec<ContextCandidate>) -> Vec<ContextCandidate> {
+fn merge_candidates(candidates: Vec<ContextCandidate>) -> Result<Vec<ContextCandidate>, TurnExecutionError> {
     let mut by_key: BTreeMap<(RetrievalAudience, KnowledgeSourceId), ContextCandidate> = BTreeMap::new();
     for candidate in candidates {
         let key = (candidate.audience.clone(), candidate.record.source_id.clone());
         match by_key.get_mut(&key) {
             Some(existing) => {
-                for matched in candidate.matches {
-                    if !existing.matches.contains(&matched) {
-                        existing.matches.push(matched);
+                for (provider, evidence) in candidate.evidence {
+                    match existing.evidence.get_mut(&provider) {
+                        Some(existing_evidence) => {
+                            existing_evidence.provider_rank =
+                                existing_evidence.provider_rank.min(evidence.provider_rank);
+                            for matched in evidence.matches {
+                                if !existing_evidence.matches.contains(&matched) {
+                                    existing_evidence.matches.push(matched);
+                                }
+                            }
+                            existing_evidence.matches.sort();
+                        }
+                        None => {
+                            existing.evidence.insert(provider, evidence);
+                        }
                     }
                 }
                 existing.signal_priority = existing.signal_priority.min(candidate.signal_priority);
-                existing.provider_rank = existing.provider_rank.min(candidate.provider_rank);
-                if candidate.retriever != existing.retriever {
-                    existing.retriever = CandidateRetrieverKind::Entity;
-                }
             }
             None => {
                 by_key.insert(key, candidate);
             }
         }
     }
-    by_key.into_values().collect()
+    let merged = by_key.into_values().collect::<Vec<_>>();
+    if merged.iter().any(|candidate| {
+        candidate.evidence.is_empty()
+            || candidate
+                .evidence
+                .values()
+                .any(|evidence| evidence.provider_rank == 0 || evidence.matches.is_empty())
+    }) {
+        return Err(map_context_error(ContextError::InvalidRecord {
+            code: "candidate_evidence_invalid",
+        }));
+    }
+    Ok(merged)
 }
 
 fn partition_and_rank(
@@ -176,12 +215,14 @@ fn partition_and_rank(
 }
 
 fn candidate_to_item(candidate: ContextCandidate) -> Result<ContextItem, TurnExecutionError> {
-    let match_level = match_level_from(&candidate.matches);
-    let mut matched_by = vec![candidate.retriever];
-    matched_by.sort();
-    matched_by.dedup();
-    let mut provider_ranks = BTreeMap::new();
-    provider_ranks.insert(candidate.retriever, candidate.provider_rank);
+    let matches = candidate
+        .evidence
+        .values()
+        .flat_map(|evidence| evidence.matches.iter().cloned())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let match_level = match_level_from(&matches)?;
     let provenance = ContextProvenance {
         source_id: candidate.record.source_id,
         knowledge_kind: candidate.record.kind,
@@ -189,9 +230,7 @@ fn candidate_to_item(candidate: ContextCandidate) -> Result<ContextItem, TurnExe
         source_revision: candidate.record.source_revision,
         audience: candidate.audience,
         memory_owner: candidate.record.memory_owner,
-        matched_by,
-        provider_ranks,
-        matches: candidate.matches,
+        evidence: candidate.evidence,
     };
     let relevance = RelevanceRank {
         match_level,
@@ -201,14 +240,16 @@ fn candidate_to_item(candidate: ContextCandidate) -> Result<ContextItem, TurnExe
     Ok(ContextItem::from_parts(candidate.record.content, provenance, relevance))
 }
 
-fn match_level_from(matches: &[CandidateMatch]) -> MatchLevel {
+fn match_level_from(matches: &[CandidateMatch]) -> Result<MatchLevel, TurnExecutionError> {
     let has_entity = matches.iter().any(|item| matches!(item, CandidateMatch::Entity(_)));
     let has_topic = matches.iter().any(|item| matches!(item, CandidateMatch::Topic(_)));
     match (has_entity, has_topic) {
-        (true, true) => MatchLevel::EntityAndTopic,
-        (true, false) => MatchLevel::Entity,
-        (false, true) => MatchLevel::Topic,
-        (false, false) => MatchLevel::Topic,
+        (true, true) => Ok(MatchLevel::EntityAndTopic),
+        (true, false) => Ok(MatchLevel::Entity),
+        (false, true) => Ok(MatchLevel::Topic),
+        (false, false) => Err(map_context_error(ContextError::InvalidRecord {
+            code: "candidate_match_missing",
+        })),
     }
 }
 
@@ -295,12 +336,12 @@ fn trim_round_robin(
                 && audience_tokens.saturating_add(item.token_cost) <= limits.max_tokens_per_audience
             {
                 out.push(source[idx].clone());
-                *char_idxs.get_mut(character_id).expect("index") += 1;
+                char_idxs.insert(character_id.clone(), idx + 1);
                 total_items += 1;
                 total_tokens = next_tokens;
                 progressed = true;
             } else {
-                *char_idxs.get_mut(character_id).expect("index") = source.len();
+                char_idxs.insert(character_id.clone(), source.len());
             }
         }
         if !progressed {

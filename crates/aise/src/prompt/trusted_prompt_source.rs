@@ -1,14 +1,10 @@
-use crate::config::PromptModuleConfig;
-use crate::prompt::asset::{CompiledPromptAsset, PromptAssetManifest};
-use crate::prompt::catalog::{PromptCatalog, PromptCatalogParts};
+use crate::config::{PromptCatalogSourceConfig, PromptModuleConfig};
+use crate::prompt::catalog::PromptCatalog;
 use crate::prompt::error::PromptError;
-use crate::prompt::loader::load_catalog;
-use crate::prompt::model::{AssetRef, AssetStatus, PromptKind};
+use crate::prompt::loader::{load_catalog, load_catalog_bundle};
+use crate::prompt::model::AssetRef;
 use crate::prompt::profile::{PromptProfile, TrustedSystemPrompt};
-use crate::prompt::renderer::PromptRenderer;
-use crate::prompt::resolver::PromptResolver;
-use crate::prompt::slot::SlotRegistry;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub trait TrustedPromptSource: Send + Sync {
@@ -25,6 +21,11 @@ impl CatalogPromptSource {
         catalog: Arc<PromptCatalog>,
         profile_assets: BTreeMap<PromptProfile, AssetRef>,
     ) -> Result<Self, PromptError> {
+        if profile_assets.len() != all_profiles().len() {
+            return Err(PromptError::CatalogLoad(
+                "profile assets must contain exactly four business profiles".into(),
+            ));
+        }
         for profile in all_profiles() {
             let asset_ref = profile_assets
                 .get(&profile)
@@ -40,16 +41,11 @@ impl CatalogPromptSource {
     }
 
     pub fn from_config(config: &PromptModuleConfig) -> Result<Self, PromptError> {
-        let catalog = match load_catalog(&config.catalog_path) {
-            Ok(catalog) => Arc::new(catalog),
-            Err(_) => Arc::new(builtin_catalog()?),
+        let catalog = match &config.source {
+            PromptCatalogSourceConfig::Packaged => packaged_catalog()?,
+            PromptCatalogSourceConfig::Directory { path } => load_catalog(path)?,
         };
-        let profile_assets = if config.profile_assets.is_empty() {
-            builtin_profile_assets()
-        } else {
-            config.profile_assets.clone()
-        };
-        Self::new(catalog, profile_assets)
+        Self::new(Arc::new(catalog), config.profile_assets.clone())
     }
 }
 
@@ -64,80 +60,37 @@ impl TrustedPromptSource for CatalogPromptSource {
     }
 }
 
-fn all_profiles() -> [PromptProfile; 5] {
+fn all_profiles() -> [PromptProfile; 4] {
     [
         PromptProfile::WriterPlanner,
         PromptProfile::CharacterThink,
         PromptProfile::StoryGenerator,
         PromptProfile::StoryRepairer,
-        PromptProfile::NarrativeValidator,
     ]
 }
 
-fn builtin_profile_assets() -> BTreeMap<PromptProfile, AssetRef> {
-    let mut assets = BTreeMap::new();
-    for profile in all_profiles() {
-        assets.insert(profile, AssetRef::new(format!("builtin/{}", profile.as_str())));
-    }
-    assets
-}
-
-fn builtin_catalog() -> Result<PromptCatalog, PromptError> {
-    let mut renderer = PromptRenderer::new();
-    let mut assets = HashMap::new();
-    for (profile, body) in [
+fn packaged_catalog() -> Result<PromptCatalog, PromptError> {
+    let sources = BTreeMap::from([
         (
-            PromptProfile::WriterPlanner,
-            "You are the writer planner for an interactive story. Plan retrieval and character focus for this turn.",
+            "files/writer-planner.md.j2",
+            include_str!("../../assets/prompts/context-v1/files/writer-planner.md.j2"),
         ),
         (
-            PromptProfile::CharacterThink,
-            "You are the narrative director simulating a character's thoughts. Stay inside the character's viewpoint.",
+            "files/character-think.md.j2",
+            include_str!("../../assets/prompts/context-v1/files/character-think.md.j2"),
         ),
         (
-            PromptProfile::StoryGenerator,
-            "You are the story generator. Write the next beat of the interactive story consistent with the plan.",
+            "files/story-generator.md.j2",
+            include_str!("../../assets/prompts/context-v1/files/story-generator.md.j2"),
         ),
         (
-            PromptProfile::StoryRepairer,
-            "You are the story repairer. Revise the previous proposal to fix the reported validation issues.",
+            "files/story-repairer.md.j2",
+            include_str!("../../assets/prompts/context-v1/files/story-repairer.md.j2"),
         ),
-        (
-            PromptProfile::NarrativeValidator,
-            "You are the narrative validator. Verify the proposal is consistent with the story world and plan.",
-        ),
-    ] {
-        let asset_id = AssetRef::new(format!("builtin/{}", profile.as_str()));
-        renderer.add_template(asset_id.as_str(), body)?;
-        assets.insert(
-            asset_id.clone(),
-            CompiledPromptAsset {
-                manifest: PromptAssetManifest {
-                    asset_id: asset_id.clone(),
-                    kind: PromptKind::Text,
-                    source_path: asset_id.as_str().to_owned(),
-                    input_schema_ref: None,
-                    output_contract_ref: None,
-                    labels: HashMap::new(),
-                    hash: None,
-                    status: AssetStatus::Active,
-                },
-                source_anchor: asset_id.as_str().to_owned(),
-                resolved_hash: format!("builtin:{}", profile.as_str()),
-                template_name: asset_id.as_str().to_owned(),
-            },
-        );
-    }
-    Ok(PromptCatalog::from_parts(PromptCatalogParts {
-        assets,
-        slots: SlotRegistry::default(),
-        packs: HashMap::new(),
-        raw_packs: HashMap::new(),
-        resolver: PromptResolver {
-            default_pack: "default".to_string(),
-        },
-        policies: Vec::new(),
-        loaded_at: chrono::Utc::now(),
-        renderer,
-    }))
+    ]);
+    load_catalog_bundle(
+        include_str!("../../assets/prompts/context-v1/index.yaml"),
+        include_str!("../../assets/prompts/context-v1/slots.yaml"),
+        &sources,
+    )
 }

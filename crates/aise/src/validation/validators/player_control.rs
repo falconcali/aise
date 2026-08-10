@@ -12,38 +12,28 @@ impl DeterministicValidator for PlayerControlValidator {
     }
 
     fn validate(&self, ctx: &TurnExecutionContext) -> Result<Vec<ValidationIssue>, TurnExecutionError> {
-        let mut issues = Vec::new();
-        let Some(proposal) = ctx.proposal() else {
-            return Ok(issues);
+        let (Some(proposal), Some(snapshot)) = (ctx.proposal(), ctx.snapshot()) else {
+            return Ok(Vec::new());
         };
-        let Some(baseline) = ctx.baseline() else {
-            return Ok(issues);
-        };
-        let player = &baseline.player_character;
-        for (index, memory) in proposal.memory_changes.iter().enumerate() {
-            if memory.owner == player.character_id && memory.kind == crate::domain::memory::MemoryKind::Secret {
-                issues.push(issue(
-                    "player_secret_memory_overwrite",
-                    format!(
-                        "player character {} cannot be assigned a secret memory",
-                        player.character_id.as_str()
-                    ),
-                    Some(ValidationLocation {
-                        path: format!("memory_changes[{index}]"),
-                        item_index: Some(index as u32),
-                    }),
-                ));
-            }
-        }
-        Ok(issues)
-    }
-}
-
-fn issue(code: &'static str, message: String, location: Option<ValidationLocation>) -> ValidationIssue {
-    ValidationIssue {
-        code: ValidationIssueCode::PlayerControlViolated,
-        message: format!("{code}: {message}"),
-        repairability: Repairability::Fatal,
-        location,
+        let player = snapshot
+            .role_bindings()
+            .values()
+            .find(|binding| binding.is_player_controlled())
+            .map(|binding| &binding.character_id);
+        Ok(proposal
+            .character_changes
+            .iter()
+            .enumerate()
+            .filter(|(_, change)| player == Some(&change.character_id))
+            .map(|(index, _)| ValidationIssue {
+                code: ValidationIssueCode::PlayerControlViolated,
+                message: "model cannot mutate player-controlled character state".into(),
+                repairability: Repairability::Fatal,
+                location: Some(ValidationLocation {
+                    path: format!("character_changes[{index}]"),
+                    item_index: u32::try_from(index).ok(),
+                }),
+            })
+            .collect())
     }
 }

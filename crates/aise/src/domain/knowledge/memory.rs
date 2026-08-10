@@ -6,6 +6,7 @@ use crate::domain::knowledge::query::KnowledgeSource;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MemoryEntry {
     pub id: MemoryId,
     pub owner: CharacterId,

@@ -1,12 +1,8 @@
 use crate::config::AssetLimitsConfig;
-use crate::domain::asset::character_card::CharacterCard;
-use crate::domain::asset::frozen_ref::{
-    CharacterAssetSource, DefaultCast, FrozenCharacterAssetRef, FrozenWorldBookRef, WorldBookSource,
-};
+use crate::domain::asset::frozen_ref::{CharacterAssetSource, WorldBookSource};
 use crate::domain::asset::ids::{PackId, SemanticVersion, Sha256Digest, StoryPackKey};
 use crate::domain::asset::story_pack::StoryPack;
 use crate::domain::asset::validation::{AssetValidationCode, AssetValidationIssue, ValidationReport};
-use crate::domain::asset::world_book::WorldBook;
 use crate::persistence::asset_store::{AssetStore, PackInfo, ValidatedStoryPack};
 use crate::persistence::store::StoreError;
 use sha2::{Digest, Sha256};
@@ -705,8 +701,12 @@ impl PackService {
         };
         let digest = sha256_digest(&canonical_manifest);
         let pack: StoryPack = match input {
-            AssetInput::Json(bytes) => serde_json::from_slice(bytes).map_err(|_| AssetImportError::Io {
-                code: "pack_json_deserialize_failed",
+            AssetInput::Json(bytes) => serde_json::from_slice(bytes).map_err(|_| {
+                invalid_import(
+                    AssetValidationCode::SchemaInvalid,
+                    "/",
+                    "pack JSON does not match the final schema",
+                )
             })?,
             AssetInput::Pack(_) => {
                 return Err(AssetImportError::Io {
@@ -717,36 +717,58 @@ impl PackService {
         let resolved_world_book = match &pack.world_book {
             WorldBookSource::Embedded(book) => {
                 crate::domain::asset::world_book::validate_topic_dictionary(&book.topics).map_err(|_| {
-                    AssetImportError::Io {
-                        code: "topic_alias_collision",
-                    }
+                    invalid_import(
+                        AssetValidationCode::DuplicateKey,
+                        "/world_book/topics",
+                        "topic label or alias collides after normalization",
+                    )
                 })?;
                 book.clone()
             }
-            WorldBookSource::Frozen(_) => WorldBook {
-                spec: crate::domain::asset::world_book::WorldSpec::V3,
-                spec_version: crate::domain::asset::character_card::AssetSpecVersion::V3_0,
-                world_book_key: crate::domain::asset::ids::WorldBookKey::from("placeholder"),
-                meta: crate::domain::asset::world_book::WorldBookMeta {
-                    name: crate::domain::asset::validation::BoundedText::try_new(
-                        "placeholder",
-                        "world_book_name",
-                        self.importer.limits.max_text_bytes,
-                    )
-                    .map_err(|_| AssetImportError::Io { code: "limit_bounds" })?,
-                    version: SemanticVersion::try_new("0.1.0")
-                        .map_err(|_| AssetImportError::Io { code: "limit_bounds" })?,
-                },
-                topics: BTreeMap::new(),
-                facts: BTreeMap::new(),
-                rumors: BTreeMap::new(),
-            },
+            WorldBookSource::Frozen(_) => {
+                return Err(invalid_import(
+                    AssetValidationCode::MissingReference,
+                    "/world_book",
+                    "frozen world book is not present in the imported dependency set",
+                ));
+            }
         };
+        let mut resolved_characters = BTreeMap::new();
+        for (key, source) in &pack.character_assets {
+            match source {
+                CharacterAssetSource::Embedded(card) if card.character_key == *key => {
+                    resolved_characters.insert(key.clone(), (**card).clone());
+                }
+                CharacterAssetSource::Embedded(_) => {
+                    return Err(invalid_import(
+                        AssetValidationCode::MissingReference,
+                        format!("/character_assets/{}", key.as_str()),
+                        "embedded character key does not match its dependency key",
+                    ));
+                }
+                CharacterAssetSource::Frozen(_) => {
+                    return Err(invalid_import(
+                        AssetValidationCode::MissingReference,
+                        format!("/character_assets/{}", key.as_str()),
+                        "frozen character is not present in the imported dependency set",
+                    ));
+                }
+            }
+        }
+        for (role_key, cast) in &pack.default_cast {
+            if !resolved_characters.contains_key(&cast.character_ref) {
+                return Err(invalid_import(
+                    AssetValidationCode::MissingDefaultCast,
+                    format!("/default_cast/{}", role_key.as_str()),
+                    "default cast does not resolve to a stored character card",
+                ));
+            }
+        }
         let validated = ValidatedStoryPack {
             pack,
             canonical_manifest,
             digest,
-            resolved_characters: BTreeMap::new(),
+            resolved_characters,
             resolved_world_book,
         };
         let frozen = self.asset_store.import_pack(validated).await.map_err(AssetImportError::Store)?;
@@ -807,6 +829,12 @@ impl PackService {
     }
 }
 
+fn invalid_import(code: AssetValidationCode, path: impl Into<String>, message: impl Into<String>) -> AssetImportError {
+    AssetImportError::Invalid(ValidationReport::with_issues(vec![AssetValidationIssue::new(
+        code, path, message,
+    )]))
+}
+
 #[derive(Debug, Clone)]
 pub struct PackSummary {
     pub pack_id: PackId,
@@ -826,16 +854,4 @@ pub fn sha256_digest(bytes: &[u8]) -> Sha256Digest {
     let mut out = [0u8; 32];
     out.copy_from_slice(&result);
     Sha256Digest::from_bytes(out)
-}
-
-#[allow(dead_code)]
-pub(crate) fn _pack_service_anchor(
-    _: &CharacterCard,
-    _: &CharacterAssetSource,
-    _: &DefaultCast,
-    _: &FrozenCharacterAssetRef,
-    _: &FrozenWorldBookRef,
-    _: &WorldBookSource,
-    _: &StoryPackKey,
-) {
 }

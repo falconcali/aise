@@ -57,6 +57,7 @@ id_type!(CharacterId);
 id_type!(EventId);
 id_type!(MemoryId);
 id_type!(FactId);
+id_type!(RumorId);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StoryId(Arc<str>);

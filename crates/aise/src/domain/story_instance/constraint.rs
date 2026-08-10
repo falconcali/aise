@@ -1,18 +1,13 @@
 use crate::domain::asset::constraint::{StoryConstraintLifecycle, StoryConstraintRequirement, StoryConstraintScope};
 use crate::domain::asset::ids::{ConstraintKey, PackId};
-use crate::domain::ids::{ConstraintId, TurnId};
+use crate::domain::ids::ConstraintId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum StoryConstraintSource {
-    Pack {
-        pack_id: PackId,
-        constraint_key: ConstraintKey,
-    },
-    CommittedTurn {
-        turn_id: TurnId,
-    },
+pub struct StoryConstraintSource {
+    pub pack_id: PackId,
+    pub constraint_key: ConstraintKey,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,8 +1,5 @@
-use crate::domain::asset::ids::{
-    AssetId, CharacterAssetKey, PackId, SemanticVersion, Sha256Digest, StoryPackKey, StoryRoleKey, WorldBookKey,
-};
+use crate::domain::asset::ids::{CharacterAssetKey, PackId, SemanticVersion, Sha256Digest, StoryPackKey, WorldBookKey};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -18,7 +15,7 @@ pub enum WorldBookSource {
     Frozen(FrozenWorldBookRef),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenCharacterAssetRef {
     pub character_key: CharacterAssetKey,
@@ -66,6 +63,3 @@ pub struct FrozenStoryPackRef {
     pub version: SemanticVersion,
     pub digest: Sha256Digest,
 }
-
-#[allow(dead_code)]
-pub(crate) fn _static_asset_anchor(_: &BTreeMap<AssetId, StaticAssetDescriptor>, _: &StoryRoleKey) {}

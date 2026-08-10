@@ -372,7 +372,6 @@ pub enum LlmCallPurpose {
     CharacterThink,
     StoryGeneration,
     StoryRepair,
-    NarrativeValidation,
     Embedding,
 }
 
@@ -384,7 +383,6 @@ impl LlmCallPurpose {
             LlmCallPurpose::CharacterThink => "character_think",
             LlmCallPurpose::StoryGeneration => "story_generation",
             LlmCallPurpose::StoryRepair => "story_repair",
-            LlmCallPurpose::NarrativeValidation => "narrative_validation",
             LlmCallPurpose::Embedding => "embedding",
         }
     }

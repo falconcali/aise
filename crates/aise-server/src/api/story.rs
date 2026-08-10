@@ -4,9 +4,11 @@ use aise::core::turn_data::SnapshotLimits;
 use aise::domain::asset::frozen_ref::FrozenCharacterAssetRef;
 use aise::domain::asset::ids::{PackId, PlayerId, StoryRoleKey};
 use aise::domain::ids::StoryId;
+use aise::domain::story_sequence::StorySequence;
+use aise::persistence::{StoryHistoryQuery, StoryTurnView};
 use aise::story::instance_factory::{CreateStoryInstanceSpec, StoryInstantiationError};
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -34,16 +36,17 @@ pub struct StoryView {
     pub premise: String,
     pub current_scene: String,
     pub player_character_id: Option<String>,
-    pub turns: Vec<TurnView>,
+    pub turns: Vec<StoryTurnView>,
+    pub next_turn_after: Option<u64>,
     pub player_role_key: Option<String>,
     pub characters: Vec<CharacterStateView>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct TurnView {
-    pub player_input: String,
-    pub story_text: String,
-    pub created_at: i64,
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GetStoryQuery {
+    pub turn_after: Option<u64>,
+    pub turn_limit: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -128,6 +131,7 @@ pub async fn create_story_instance(
 pub async fn get_story(
     State(state): State<Arc<AppState>>,
     Path(story_id): Path<String>,
+    Query(query): Query<GetStoryQuery>,
 ) -> Result<Json<StoryView>, ApiError> {
     let story_id = StoryId::try_new(story_id).map_err(|error| ApiError::BadRequest(error.to_string()))?;
     let limits = SnapshotLimits::from_config(
@@ -144,61 +148,69 @@ pub async fn get_story(
             aise::persistence::StoreError::NotFound => ApiError::NotFound("story not found".into()),
             other => ApiError::Internal(anyhow::anyhow!(other.to_string())),
         })?;
-    let instance_meta = state
-        .engine
-        .store()
-        .load_story_instance_meta(&story_id)
+    let player_role_key = snapshot
+        .role_bindings()
+        .values()
+        .find(|binding| binding.is_player_controlled())
+        .map(|binding| binding.role_key.to_string());
+    let player_character_id = snapshot
+        .role_bindings()
+        .values()
+        .find(|binding| binding.is_player_controlled())
+        .map(|binding| binding.character_id.to_string());
+    let characters = snapshot
+        .character_states()
+        .values()
+        .map(|character| {
+            let attributes = character
+                .attributes
+                .iter()
+                .map(|(key, value)| {
+                    serde_json::to_string(value)
+                        .map(|value| AttributeView {
+                            key: key.to_string(),
+                            value,
+                        })
+                        .map_err(|error| ApiError::Internal(error.into()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(CharacterStateView {
+                character_id: character.character_id.to_string(),
+                role_key: character.role_key.to_string(),
+                location: character.location.to_string(),
+                goals: character.goals.iter().map(ToString::to_string).collect(),
+                attributes,
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+    let history_config = &state.engine.config().story_history;
+    let limit = query
+        .turn_limit
+        .unwrap_or(history_config.default_page_size)
+        .min(history_config.max_page_size);
+    if limit == 0 {
+        return Err(ApiError::BadRequest("turn_limit must be positive".into()));
+    }
+    let after_sequence = match query.turn_after {
+        None | Some(0) => None,
+        Some(value) => Some(StorySequence::try_new(value).map_err(|error| ApiError::BadRequest(error.to_string()))?),
+    };
+    let history_reader = state
+        .story_history_reader
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("story history reader not initialized")))?;
+    let history = history_reader
+        .load_story_history(&story_id, StoryHistoryQuery { after_sequence, limit })
         .await
         .map_err(|error| ApiError::Internal(anyhow::anyhow!(error.to_string())))?;
-    let player_role_key = instance_meta.as_ref().and_then(|meta| {
-        meta.bindings
-            .values()
-            .find(|binding| binding.player_id.is_some())
-            .map(|binding| binding.role_key.to_string())
-    });
-    let player_character_id = instance_meta.as_ref().and_then(|meta| {
-        meta.bindings
-            .values()
-            .find(|binding| binding.player_id.is_some())
-            .map(|binding| binding.character_id.to_string())
-    });
-    let characters = instance_meta
-        .map(|meta| {
-            meta.characters
-                .into_values()
-                .map(|character| CharacterStateView {
-                    character_id: character.character_id.to_string(),
-                    role_key: character.role_key.to_string(),
-                    location: character.location.to_string(),
-                    goals: character.goals.iter().map(|goal| goal.to_string()).collect(),
-                    attributes: character
-                        .attributes
-                        .into_iter()
-                        .map(|(key, value)| AttributeView {
-                            key: key.to_string(),
-                            value: serde_json::to_string(&value).unwrap_or_default(),
-                        })
-                        .collect(),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
     Ok(Json(StoryView {
         story_id: snapshot.story_id().to_string(),
         base_revision: snapshot.base_revision().get(),
         premise: snapshot.story_profile().premise.to_string(),
         current_scene: snapshot.current_scene().description.to_string(),
         player_character_id,
-        turns: snapshot
-            .story_continuity()
-            .recent_segments()
-            .iter()
-            .map(|segment| TurnView {
-                player_input: String::new(),
-                story_text: segment.text.to_string(),
-                created_at: 0,
-            })
-            .collect(),
+        turns: history.turns,
+        next_turn_after: history.next_after_sequence.map(|sequence| sequence.get()),
         player_role_key,
         characters,
     }))

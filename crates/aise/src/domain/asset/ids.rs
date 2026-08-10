@@ -103,7 +103,6 @@ key_type!(CanonicalEventKey);
 key_type!(AssetId);
 key_type!(PackId);
 key_type!(PlayerId);
-key_type!(RumorId);
 key_type!(AttributeKey);
 key_type!(RelationshipKind);
 key_type!(MemoryKind);

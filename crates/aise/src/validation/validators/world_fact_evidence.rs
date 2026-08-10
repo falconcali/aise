@@ -1,7 +1,8 @@
-use crate::core::story_proposal::WorldFactEvidenceRef;
+use crate::core::story_proposal::{ProposedKnowledgeChange, WorldFactEvidenceRef};
 use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_error::TurnExecutionError;
 use crate::core::turn_validation::{Repairability, ValidationIssue, ValidationIssueCode, ValidationLocation};
+use crate::domain::knowledge::KnowledgeSourceId;
 use crate::validation::validators::DeterministicValidator;
 
 #[derive(Default)]
@@ -13,50 +14,42 @@ impl DeterministicValidator for WorldFactEvidenceValidator {
     }
 
     fn validate(&self, ctx: &TurnExecutionContext) -> Result<Vec<ValidationIssue>, TurnExecutionError> {
-        let mut issues = Vec::new();
         let Some(proposal) = ctx.proposal() else {
-            return Ok(issues);
+            return Ok(Vec::new());
         };
-        for (index, fact) in proposal.world_change.add_facts.iter().enumerate() {
-            let location = Some(ValidationLocation {
-                path: format!("world_change.add_facts[{index}]"),
-                item_index: Some(index as u32),
-            });
-            if fact.evidence.is_empty() {
-                issues.push(ValidationIssue {
-                    code: ValidationIssueCode::WorldFactEvidenceMissing,
-                    message: "world fact carries no evidence reference".into(),
-                    repairability: Repairability::Fatal,
-                    location: location.clone(),
-                });
+        let mut issues = Vec::new();
+        for (index, change) in proposal.knowledge_changes.iter().enumerate() {
+            let ProposedKnowledgeChange::Fact { evidence, .. } = change else {
                 continue;
+            };
+            if evidence.is_empty() {
+                issues.push(issue(index, ValidationIssueCode::WorldFactEvidenceMissing));
             }
-            for (evidence_index, evidence) in fact.evidence.iter().enumerate() {
-                match evidence {
-                    WorldFactEvidenceRef::SnapshotFact(fact_id) => {
-                        let known = ctx.retrieved().writer().iter().any(|item| {
-                            item.provenance.source_id
-                                == crate::domain::knowledge::KnowledgeSourceId::Fact(fact_id.clone())
-                        });
-                        if !known {
-                            issues.push(ValidationIssue {
-                                code: ValidationIssueCode::WorldFactEvidenceInvalid,
-                                message: format!(
-                                    "world fact evidence references unavailable fact {}",
-                                    fact_id.as_str()
-                                ),
-                                repairability: Repairability::Fatal,
-                                location: Some(ValidationLocation {
-                                    path: format!("world_change.add_facts[{index}].evidence[{evidence_index}]"),
-                                    item_index: Some(index as u32),
-                                }),
-                            });
-                        }
+            for evidence in evidence {
+                if let WorldFactEvidenceRef::SnapshotFact(id) = evidence {
+                    let available = ctx
+                        .retrieved()
+                        .writer()
+                        .iter()
+                        .any(|item| item.provenance.source_id == KnowledgeSourceId::Fact(id.clone()));
+                    if !available {
+                        issues.push(issue(index, ValidationIssueCode::WorldFactEvidenceInvalid));
                     }
-                    WorldFactEvidenceRef::ProposedEvent { .. } => {}
                 }
             }
         }
         Ok(issues)
+    }
+}
+
+fn issue(index: usize, code: ValidationIssueCode) -> ValidationIssue {
+    ValidationIssue {
+        code,
+        message: "fact evidence is missing or unavailable".into(),
+        repairability: Repairability::Fatal,
+        location: Some(ValidationLocation {
+            path: format!("knowledge_changes[{index}].evidence"),
+            item_index: u32::try_from(index).ok(),
+        }),
     }
 }

@@ -10,7 +10,7 @@ pub use planning::{
     WriterStoryGoal,
 };
 pub use retrieval::{
-    CandidateMatch, CandidateRetrieverKind, ContextItem, ContextProvenance, EntitySignal, MatchLevel, RelevanceRank,
-    RetrievalSignalOrigin, RetrievalSignals, RetrievedContext, RetrievedContextError, RetrievedContextLimits,
-    TopicSignal,
+    CandidateMatch, CandidateRetrieverKind, ContextItem, ContextProvenance, EntitySignal, MatchLevel, ProviderEvidence,
+    RelevanceRank, RetrievalSignalOrigin, RetrievalSignals, RetrievedContext, RetrievedContextError,
+    RetrievedContextLimits, TopicSignal,
 };

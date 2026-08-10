@@ -3,7 +3,7 @@ use crate::context::error::ContextError;
 use crate::context::retrieval_pipeline::ContextRetrievalPipeline;
 use crate::context::{EntityCandidateRetriever, TopicCandidateRetriever};
 use crate::persistence::knowledge_read_port::{
-    EntityKnowledgeQuery, KnowledgeReadPort, KnowledgeRecord, TopicKnowledgeQuery,
+    EntityKnowledgeQuery, KnowledgeLookupHit, KnowledgeReadPort, TopicKnowledgeQuery,
 };
 use crate::persistence::store::StoreError;
 use async_trait::async_trait;
@@ -13,11 +13,11 @@ struct EmptyKnowledge;
 
 #[async_trait]
 impl KnowledgeReadPort for EmptyKnowledge {
-    async fn find_by_entities(&self, _query: EntityKnowledgeQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError> {
+    async fn find_by_entities(&self, _query: EntityKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError> {
         Ok(Vec::new())
     }
 
-    async fn find_by_topics(&self, _query: TopicKnowledgeQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError> {
+    async fn find_by_topics(&self, _query: TopicKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError> {
         Ok(Vec::new())
     }
 }

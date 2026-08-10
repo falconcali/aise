@@ -184,7 +184,7 @@ impl NarrativeDirector {
                     }
                     crate::domain::narrative_graph::effect::NarrativeEffectDefinition::CharacterImpulse(impulse) => {
                         if let Some(binding) = snapshot.role_binding(&impulse.target_role_key) {
-                            if binding.player_id.is_some() {
+                            if binding.is_player_controlled() {
                                 plan.effect_dispositions.push(NarrativeEffectDisposition::NotApplicable(
                                     NotApplicableReason::PlayerControlled,
                                 ));
@@ -257,8 +257,49 @@ impl NarrativeDirector {
             NarrativeCondition::FactStateEquals { fact_key, value } => {
                 Ok(snapshot.condition_state().fact_values.get(fact_key) == Some(value))
             }
-            NarrativeCondition::CharacterStateEquals { .. } => Ok(false),
-            NarrativeCondition::RelationshipReaches { .. } => Ok(false),
+            NarrativeCondition::CharacterStateEquals {
+                role_key,
+                attribute,
+                value,
+            } => {
+                let Some(binding) = snapshot.role_binding(role_key) else {
+                    return Err(NarrativeError::MissingReference {
+                        key: role_key.as_str().to_owned(),
+                    });
+                };
+                let Some(character) = snapshot.character_states().get(&binding.character_id) else {
+                    return Err(NarrativeError::MissingReference {
+                        key: binding.character_id.as_str().to_owned(),
+                    });
+                };
+                Ok(character
+                    .attributes
+                    .get(&crate::domain::asset::ids::AttributeKey::from(attribute.as_str()))
+                    == Some(value))
+            }
+            NarrativeCondition::RelationshipReaches {
+                source_role_key,
+                target_role_key,
+                minimum_trust,
+            } => {
+                let source =
+                    snapshot
+                        .role_binding(source_role_key)
+                        .ok_or_else(|| NarrativeError::MissingReference {
+                            key: source_role_key.as_str().to_owned(),
+                        })?;
+                let target =
+                    snapshot
+                        .role_binding(target_role_key)
+                        .ok_or_else(|| NarrativeError::MissingReference {
+                            key: target_role_key.as_str().to_owned(),
+                        })?;
+                Ok(snapshot.relationships().iter().any(|relationship| {
+                    relationship.source_character_id == source.character_id
+                        && relationship.target_character_id == target.character_id
+                        && relationship.trust >= *minimum_trust
+                }))
+            }
             NarrativeCondition::PlayerActionOccurred { event_key } => {
                 Ok(snapshot.condition_state().player_action_event_keys.contains(event_key))
             }
@@ -275,7 +316,7 @@ fn node_controller_kind(
     snapshot: &StoryReadSnapshot,
 ) -> RoleControllerKind {
     match snapshot.role_binding(role_key) {
-        Some(binding) if binding.player_id.is_some() => RoleControllerKind::Player,
+        Some(binding) if binding.is_player_controlled() => RoleControllerKind::Player,
         _ => RoleControllerKind::Ai,
     }
 }

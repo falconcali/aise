@@ -12,7 +12,7 @@ use crate::prompt::{
 };
 use serde::Deserialize;
 use std::{
-    collections::{HashMap, HashSet, hash_map::Entry},
+    collections::{BTreeMap, HashMap, HashSet, hash_map::Entry},
     path::Path,
 };
 
@@ -37,14 +37,39 @@ pub fn load_catalog(dir: &Path) -> Result<PromptCatalog, PromptError> {
     let index_path = dir.join("index.yaml");
     let index_content = std::fs::read_to_string(&index_path)
         .map_err(|error| PromptError::CatalogLoad(format!("failed to read {}: {}", index_path.display(), error)))?;
-    let index: IndexFile = serde_yaml::from_str(&index_content)
-        .map_err(|error| PromptError::CatalogLoad(format!("failed to parse {}: {}", index_path.display(), error)))?;
-
     let slots_path = dir.join("slots.yaml");
     let slots_content = std::fs::read_to_string(&slots_path)
         .map_err(|error| PromptError::CatalogLoad(format!("failed to read {}: {}", slots_path.display(), error)))?;
-    let slots = parse_slots_yaml(&slots_content)
-        .map_err(|error| PromptError::CatalogLoad(format!("failed to parse {}: {}", slots_path.display(), error)))?;
+    load_catalog_contents(&index_content, &slots_content, |source_path| {
+        let template_path = dir.join(source_path);
+        std::fs::read_to_string(&template_path).map_err(|error| {
+            PromptError::CatalogLoad(format!("failed to read template {}: {}", template_path.display(), error))
+        })
+    })
+}
+
+pub fn load_catalog_bundle(
+    index_content: &str,
+    slots_content: &str,
+    sources: &BTreeMap<&str, &str>,
+) -> Result<PromptCatalog, PromptError> {
+    load_catalog_contents(index_content, slots_content, |source_path| {
+        sources
+            .get(source_path)
+            .map(|content| (*content).to_owned())
+            .ok_or_else(|| PromptError::CatalogLoad(format!("packaged template missing: {source_path}")))
+    })
+}
+
+fn load_catalog_contents(
+    index_content: &str,
+    slots_content: &str,
+    load_source: impl Fn(&str) -> Result<String, PromptError>,
+) -> Result<PromptCatalog, PromptError> {
+    let index: IndexFile = serde_yaml::from_str(index_content)
+        .map_err(|error| PromptError::CatalogLoad(format!("failed to parse index.yaml: {error}")))?;
+    let slots = parse_slots_yaml(slots_content)
+        .map_err(|error| PromptError::CatalogLoad(format!("failed to parse slots.yaml: {error}")))?;
 
     validate_policy_support(&index.policies)?;
 
@@ -53,19 +78,17 @@ pub fn load_catalog(dir: &Path) -> Result<PromptCatalog, PromptError> {
     let mut asset_slot_ids: HashMap<AssetRef, Vec<SlotId>> = HashMap::new();
 
     for (source_path, manifests) in manifests_by_source_path(index.assets) {
-        let template_path = dir.join(&source_path);
-        let template_content = std::fs::read_to_string(&template_path).map_err(|error| {
-            PromptError::CatalogLoad(format!("failed to read template {}: {}", template_path.display(), error))
-        })?;
-        let sections = extract_asset_sections(&source_path, &template_content).map_err(|error| {
-            PromptError::CatalogLoad(format!("failed to parse sections in {}: {}", template_path.display(), error))
-        })?;
+        let template_content = load_source(&source_path)?;
+        let sections = extract_asset_sections(&source_path, &template_content)
+            .map_err(|error| PromptError::CatalogLoad(format!("failed to parse sections in {source_path}: {error}")))?;
 
         validate_sections_for_source(&source_path, &manifests, &sections, &slots)?;
 
         for manifest in manifests {
             validate_asset_status(&manifest)?;
-            let section = sections.get(&manifest.asset_id).expect("section existence validated");
+            let section = sections.get(&manifest.asset_id).ok_or_else(|| {
+                PromptError::CatalogLoad(format!("section missing after validation for `{}`", manifest.asset_id))
+            })?;
             let asset_ref = manifest.asset_id.clone();
             let computed_hash = compute_asset_hash(&section.body, &manifest);
             let resolved_hash = if let Some(ref declared_hash) = manifest.hash {
@@ -142,9 +165,9 @@ pub fn load_catalog(dir: &Path) -> Result<PromptCatalog, PromptError> {
                 )));
             }
 
-            let declared_slots = asset_slot_ids
-                .get(&asset_id)
-                .expect("slot declarations exist for every compiled asset");
+            let declared_slots = asset_slot_ids.get(&asset_id).ok_or_else(|| {
+                PromptError::CatalogLoad(format!("slot declarations missing for compiled asset `{asset_id}`"))
+            })?;
             if !declared_slots.iter().any(|declared_slot| declared_slot == slot_id) {
                 let source_anchor = &assets[&asset_id].source_anchor;
                 return Err(PromptError::CatalogLoad(format!(

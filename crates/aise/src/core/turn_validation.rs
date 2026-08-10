@@ -1,12 +1,14 @@
 use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::core::turn_pipeline::TurnStage;
-use crate::domain::character::CharacterState;
+use crate::domain::asset::ids::NarrativeNodeKey;
+use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::CharacterId;
-use crate::domain::memory::MemoryEntry;
+use crate::domain::knowledge::{CurrentPerception, KnowledgeEntry};
 use crate::domain::narrative::{StoryEvent, StorySummary};
+use crate::domain::narrative_graph::definition::NarrativeNodeState;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
-use crate::domain::story_instance::state::CurrentScene;
-use crate::domain::world::WorldState;
+use crate::domain::story_instance::snapshot::NarrativeConditionStateView;
+use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, RelationshipKey, RelationshipState};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -233,44 +235,43 @@ impl<T> StateChange<T> {
 }
 
 #[derive(Debug, Clone)]
-pub struct CharacterStateChange {
+pub struct CharacterInstanceStateChange {
     pub character_id: CharacterId,
-    pub new_state: CharacterState,
+    pub new_state: CharacterInstanceState,
 }
 
 #[derive(Debug, Clone)]
-pub struct MemoryStateChange {
-    pub character_id: CharacterId,
-    pub entry: MemoryEntry,
+pub struct RelationshipStateChange {
+    pub key: RelationshipKey,
+    pub new_state: RelationshipState,
 }
 
 #[derive(Debug, Clone)]
-pub struct StoryStateChanges {
-    pub scene_change: StateChange<CurrentScene>,
-    pub constraint_change: StateChange<Vec<ActiveStoryConstraint>>,
-    pub summary_change: StateChange<StorySummary>,
+pub struct ValidatedNarrativeChange {
+    pub node_key: NarrativeNodeKey,
+    pub from: NarrativeNodeState,
+    pub to: NarrativeNodeState,
+    pub expected_graph_revision: u64,
 }
 
 #[derive(Debug, Clone)]
 pub struct ValidatedChangeSet {
-    story_text: String,
+    story_text: BoundedText,
     events: Vec<StoryEvent>,
-    character_changes: Vec<CharacterStateChange>,
-    world_change: StateChange<WorldState>,
-    memory_changes: Vec<MemoryStateChange>,
-    story_state: StoryStateChanges,
+    character_changes: Vec<CharacterInstanceStateChange>,
+    relationship_changes: Vec<RelationshipStateChange>,
+    knowledge_additions: Vec<KnowledgeEntry>,
+    current_perceptions: Vec<CurrentPerception>,
+    scene_change: StateChange<CurrentScene>,
+    narrative_changes: Vec<ValidatedNarrativeChange>,
+    condition_state: NarrativeConditionStateView,
+    constraint_change: StateChange<Vec<ActiveStoryConstraint>>,
+    summary_change: StateChange<StorySummary>,
 }
 
 impl ValidatedChangeSet {
-    pub(crate) fn new(
-        story_text: String,
-        events: Vec<StoryEvent>,
-        character_changes: Vec<CharacterStateChange>,
-        world_change: StateChange<WorldState>,
-        memory_changes: Vec<MemoryStateChange>,
-        story_state: StoryStateChanges,
-    ) -> Result<Self, TurnExecutionError> {
-        if story_text.trim().is_empty() {
+    pub fn new(parts: ValidatedChangeSetParts) -> Result<Self, TurnExecutionError> {
+        if parts.story_text.as_str().trim().is_empty() {
             return Err(TurnExecutionError::new(
                 TurnFailureKind::ValidationRejected,
                 "no_story_text",
@@ -279,69 +280,89 @@ impl ValidatedChangeSet {
             ));
         }
         Ok(Self {
-            story_text,
-            events,
-            character_changes,
-            world_change,
-            memory_changes,
-            story_state,
+            story_text: parts.story_text,
+            events: parts.events,
+            character_changes: parts.character_changes,
+            relationship_changes: parts.relationship_changes,
+            knowledge_additions: parts.knowledge_additions,
+            current_perceptions: parts.current_perceptions,
+            scene_change: parts.scene_change,
+            narrative_changes: parts.narrative_changes,
+            condition_state: parts.condition_state,
+            constraint_change: parts.constraint_change,
+            summary_change: parts.summary_change,
         })
     }
 
     pub fn story_text(&self) -> &str {
-        &self.story_text
+        self.story_text.as_str()
     }
 
     pub fn events(&self) -> &[StoryEvent] {
         &self.events
     }
 
-    pub fn character_changes(&self) -> &[CharacterStateChange] {
+    pub fn character_changes(&self) -> &[CharacterInstanceStateChange] {
         &self.character_changes
     }
 
-    pub fn world_change(&self) -> StateChange<WorldState> {
-        match &self.world_change {
-            StateChange::Unchanged => StateChange::Unchanged,
-            StateChange::Replace(world) => StateChange::Replace(world.clone()),
-        }
+    pub fn relationship_changes(&self) -> &[RelationshipStateChange] {
+        &self.relationship_changes
     }
 
-    pub fn world_change_ref(&self) -> Option<&WorldState> {
-        self.world_change.as_ref()
+    pub fn knowledge_additions(&self) -> &[KnowledgeEntry] {
+        &self.knowledge_additions
     }
 
-    pub fn memory_changes(&self) -> &[MemoryStateChange] {
-        &self.memory_changes
+    pub fn current_perceptions(&self) -> &[CurrentPerception] {
+        &self.current_perceptions
     }
 
     pub fn scene_change(&self) -> StateChange<CurrentScene> {
-        self.story_state.scene_change.clone()
+        self.scene_change.clone()
+    }
+
+    pub fn narrative_changes(&self) -> &[ValidatedNarrativeChange] {
+        &self.narrative_changes
+    }
+
+    pub fn condition_state(&self) -> &NarrativeConditionStateView {
+        &self.condition_state
     }
 
     pub fn constraint_change(&self) -> StateChange<Vec<ActiveStoryConstraint>> {
-        self.story_state.constraint_change.clone()
+        self.constraint_change.clone()
     }
 
     pub fn summary_change(&self) -> StateChange<StorySummary> {
-        self.story_state.summary_change.clone()
-    }
-
-    pub fn has_world_change(&self) -> bool {
-        matches!(self.world_change, StateChange::Replace(_))
+        self.summary_change.clone()
     }
 
     pub fn has_scene_change(&self) -> bool {
-        matches!(self.story_state.scene_change, StateChange::Replace(_))
+        matches!(self.scene_change, StateChange::Replace(_))
     }
 
     pub fn has_summary_change(&self) -> bool {
-        matches!(self.story_state.summary_change, StateChange::Replace(_))
+        matches!(self.summary_change, StateChange::Replace(_))
     }
 
     pub fn has_constraint_change(&self) -> bool {
-        matches!(self.story_state.constraint_change, StateChange::Replace(_))
+        matches!(self.constraint_change, StateChange::Replace(_))
     }
+}
+
+pub struct ValidatedChangeSetParts {
+    pub story_text: BoundedText,
+    pub events: Vec<StoryEvent>,
+    pub character_changes: Vec<CharacterInstanceStateChange>,
+    pub relationship_changes: Vec<RelationshipStateChange>,
+    pub knowledge_additions: Vec<KnowledgeEntry>,
+    pub current_perceptions: Vec<CurrentPerception>,
+    pub scene_change: StateChange<CurrentScene>,
+    pub narrative_changes: Vec<ValidatedNarrativeChange>,
+    pub condition_state: NarrativeConditionStateView,
+    pub constraint_change: StateChange<Vec<ActiveStoryConstraint>>,
+    pub summary_change: StateChange<StorySummary>,
 }
 
 fn invariant(code: &'static str, stage: Option<TurnStage>, message: impl Into<String>) -> TurnExecutionError {

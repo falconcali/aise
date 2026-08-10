@@ -25,6 +25,7 @@ fn sample_plan(with_requests: bool) -> WriterPlan {
             entities: Vec::new(),
             topics: Vec::new(),
             query_text: None,
+            authorized_memory_owners: Vec::new(),
             reason: BoundedText::try_new("need", "reason", 64).unwrap(),
             origin: RetrievalRequestOrigin::Automatic,
             signal_priority: 0,

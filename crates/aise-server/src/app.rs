@@ -11,7 +11,7 @@ use aise::llm::{LlmGateway, LlmProvider, OpenAiCompatProvider};
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::knowledge_read_port::KnowledgeReadPort;
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
-use aise::persistence::{SqliteStore, Store, TurnCommitter};
+use aise::persistence::{SqliteStore, SqliteStoryHistoryReader, Store, StoryHistoryReadPort, TurnCommitter};
 use aise::planning::WriterPlanner;
 use aise::prompt::{CatalogPromptSource, TrustedPromptSource};
 use aise::runtime::{StoryTurnCoordinator, TurnInitializer, TurnPipelineSet, TurnRuntime};
@@ -31,6 +31,7 @@ pub struct EngineServices {
     pub engine: Arc<AiseEngine>,
     pub pack_service: Arc<PackService>,
     pub instance_factory: Arc<StoryInstanceFactory>,
+    pub story_history_reader: Arc<dyn StoryHistoryReadPort>,
 }
 
 pub async fn build_services(
@@ -45,6 +46,9 @@ pub async fn build_services(
     let gateway = Arc::new(LlmGateway::new(provider, prompt_source, config.aise.llm.clone())?);
 
     let sqlite = SqliteStore::connect(&config.aise.storage.database_url).await?;
+    let story_history_reader: Arc<dyn StoryHistoryReadPort> = Arc::new(
+        SqliteStoryHistoryReader::new(sqlite.clone(), config.aise.story_history.clone()).map_err(anyhow::Error::msg)?,
+    );
     let store: Arc<dyn Store> = sqlite.clone();
     let knowledge: Arc<dyn KnowledgeReadPort> = sqlite;
 
@@ -116,6 +120,7 @@ pub async fn build_services(
         engine: Arc::new(engine),
         pack_service,
         instance_factory,
+        story_history_reader,
     })
 }
 

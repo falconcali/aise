@@ -1,11 +1,11 @@
 use crate::config::{LlmConfig, TraceContentPolicy};
-use crate::core::token_estimator::estimate_text_tokens;
 use crate::core::turn_context::TurnLlmCallScope;
 use crate::core::turn_contract::{LlmBudgetReservation, LlmCallPurpose, LlmCallStatus, LlmCallUsage, UsageAccuracy};
 use crate::core::turn_error::TurnExecutionError;
 use crate::core::turn_trace::{
     LlmCallContent, LlmCallData, MAX_LLM_CONTENT_CHARS, MAX_LLM_RESPONSE_CHARS, MessageData, SpanPayload, truncate,
 };
+use crate::domain::text::estimate_text_tokens;
 use crate::llm::accounting::{FinishReason, LlmCompletion, TokenAccountant};
 use crate::llm::error::LlmError;
 use crate::llm::limiter::LlmLimiter;

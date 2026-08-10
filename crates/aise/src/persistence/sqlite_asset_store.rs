@@ -5,7 +5,6 @@ use crate::domain::asset::world_book::WorldBook;
 use crate::persistence::asset_store::{AssetStore, FrozenStoryPack, ValidatedStoryPack};
 use crate::persistence::store::StoreError;
 use async_trait::async_trait;
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -34,18 +33,6 @@ impl SqliteAssetStore {
         Ok(Arc::new(Self { pool: Arc::new(pool) }))
     }
 
-    #[allow(dead_code)]
-    fn pack_digest(pack: &StoryPack) -> Sha256Digest {
-        let mut hasher = Sha256::new();
-        if let Ok(json) = serde_json::to_vec(pack) {
-            hasher.update(&json);
-        }
-        let result = hasher.finalize();
-        let mut out = [0u8; 32];
-        out.copy_from_slice(&result);
-        Sha256Digest::from_bytes(out)
-    }
-
     async fn store_pack_row(
         &self,
         pack_id: &PackId,
@@ -66,9 +53,23 @@ impl SqliteAssetStore {
         let world_json = serde_json::to_vec(world_book).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidWorldState,
         })?;
+        let story_profile_json = serde_json::to_vec(&pack.story).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        })?;
+        let role_definitions_json = serde_json::to_vec(&pack.roles).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        })?;
+        let narrative_definition_json = serde_json::to_vec(&pack.narrative).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        })?;
+        let topic_dictionary_json = serde_json::to_vec(&world_book.topics).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidWorldState,
+        })?;
         sqlx::query(
-            "INSERT INTO story_packs (pack_id, pack_key, version, digest, pack_json, manifest_json, characters_json, world_book_json) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO story_packs (pack_id, pack_key, version, digest, pack_json, manifest_json, \
+             characters_json, world_book_json, story_profile_json, role_definitions_json, \
+             narrative_definition_json, topic_dictionary_json, resolved_characters_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         )
         .bind(pack_id.as_str())
         .bind(pack_key)
@@ -78,6 +79,13 @@ impl SqliteAssetStore {
         .bind(manifest)
         .bind(characters_json)
         .bind(world_json)
+        .bind(story_profile_json)
+        .bind(role_definitions_json)
+        .bind(narrative_definition_json)
+        .bind(topic_dictionary_json)
+        .bind(serde_json::to_vec(characters).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidCharacterState,
+        })?)
         .execute(&*self.pool)
         .await
         .map_err(sqlx_error_to_store)?;
@@ -250,6 +258,3 @@ fn sqlx_error_to_store(error: sqlx::Error) -> StoreError {
         _ => StoreError::Unavailable,
     }
 }
-
-#[allow(dead_code)]
-pub(crate) fn _sqlite_asset_anchor(_: &dyn AssetStore, _: &FrozenStoryPack) {}

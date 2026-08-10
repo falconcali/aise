@@ -76,8 +76,34 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
             max_recent_segment_tokens: limits.continuity.max_recent_segment_tokens,
         };
         let _ = continuity_limits;
-        let baseline = build_baseline(&snapshot, ctx.player_input(), &self.signal_builder, &self.context_config)
-            .map_err(map_baseline_error)?;
+        let pending = ctx.trace().begin_span("context.prepare", "context.prepare");
+        let baseline_result = build_baseline(&snapshot, ctx.player_input(), &self.signal_builder, &self.context_config);
+        let payload = match &baseline_result {
+            Ok(baseline) => serde_json::json!({
+                "story_id": story_id,
+                "turn_id": ctx.turn_id(),
+                "base_revision": snapshot.base_revision().get(),
+                "character_count": baseline.character_index.len() + baseline.scene_characters.len() + 1,
+                "constraint_count": baseline.active_story_constraints.len(),
+                "entity_signal_count": baseline.retrieval_signals.entities.len(),
+                "topic_signal_count": baseline.retrieval_signals.topics.len(),
+                "status": "ok",
+                "error_code": null,
+            }),
+            Err(error) => serde_json::json!({
+                "story_id": story_id,
+                "turn_id": ctx.turn_id(),
+                "base_revision": snapshot.base_revision().get(),
+                "character_count": 0,
+                "constraint_count": 0,
+                "entity_signal_count": 0,
+                "topic_signal_count": 0,
+                "status": "error",
+                "error_code": error.turn_code(),
+            }),
+        };
+        ctx.trace().end_span_with(pending, &payload);
+        let baseline = baseline_result.map_err(map_baseline_error)?;
         ctx.set_prepared_context(snapshot, baseline)
     }
 }
@@ -91,7 +117,7 @@ fn build_baseline(
     let player_bindings: Vec<_> = snapshot
         .role_bindings()
         .values()
-        .filter(|binding| binding.player_id.is_some())
+        .filter(|binding| binding.is_player_controlled())
         .collect();
     if player_bindings.len() != 1 {
         return Err(ContextError::SnapshotInconsistent {
@@ -145,7 +171,7 @@ fn build_baseline(
             name: card.meta.name.clone(),
             narrative_function: role.narrative_function.clone(),
             location_key: state.location.clone(),
-            player_controlled: binding.player_id.is_some(),
+            player_controlled: binding.is_player_controlled(),
         });
     }
     character_index.sort_by(|left, right| left.character_id.cmp(&right.character_id));

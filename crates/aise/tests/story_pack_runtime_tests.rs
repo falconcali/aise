@@ -34,7 +34,13 @@ fn valid_pack_json() -> String {
             "themes": ["hope"],
             "style": {"tone": ["light"], "point_of_view": "third", "tense": "past"}
         },
-        "character_assets": {},
+        "character_assets": {
+            "protagonist_card": {
+                "spec": "aise_char_v3", "spec_version": "3.0", "character_key": "protagonist_card",
+                "meta": {"name": "Hero", "version": "0.1.0"},
+                "profile": {"description": "Hero", "personality": [], "values": [], "speaking_style": {"register": "neutral", "verbosity": "medium"}}
+            }
+        },
         "roles": {
             "protagonist": {
                 "role_label": "Protagonist",
@@ -253,7 +259,7 @@ async fn instance_meta_exposes_binding_and_characters() {
     assert_eq!(meta.bindings.len(), 1);
     let binding = meta.bindings.values().next().unwrap();
     assert_eq!(binding.role_key.as_str(), "protagonist");
-    assert!(binding.player_id.is_some());
+    assert!(binding.is_player_controlled());
     assert_eq!(meta.characters.len(), 1);
     let character = meta.characters.values().next().unwrap();
     assert_eq!(character.role_key.as_str(), "protagonist");

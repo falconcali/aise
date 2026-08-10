@@ -1,5 +1,4 @@
 pub mod story_proposal;
-pub mod token_estimator;
 pub mod turn_budget;
 pub mod turn_context;
 pub mod turn_contract;
@@ -10,7 +9,7 @@ pub mod turn_pipeline;
 pub mod turn_trace;
 pub mod turn_validation;
 
-pub use story_proposal::StoryProposal;
+pub use story_proposal::{StoryProposal, StoryProposalOutput};
 pub use turn_context::TurnExecutionContext;
 pub use turn_data::{
     BaselineContext, CharacterThinkRequest, CharacterThought, ContextItem, ContextProvenance, NarrativeStateView,

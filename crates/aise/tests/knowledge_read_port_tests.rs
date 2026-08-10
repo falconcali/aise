@@ -7,7 +7,7 @@ use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::knowledge_read_port::{
-    EntityKnowledgeQuery, KnowledgeFilter, KnowledgeReadPort, TopicKnowledgeQuery,
+    EntityKnowledgeQuery, KnowledgeFilter, KnowledgeLookupHit, KnowledgeReadPort, TopicKnowledgeQuery,
 };
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
 use aise::persistence::{SqliteStore, Store};
@@ -43,7 +43,13 @@ fn valid_pack_json() -> String {
             "themes": ["hope"],
             "style": {"tone": ["light"], "point_of_view": "third", "tense": "past"}
         },
-        "character_assets": {},
+        "character_assets": {
+            "protagonist_card": {
+                "spec": "aise_char_v3", "spec_version": "3.0", "character_key": "protagonist_card",
+                "meta": {"name": "Hero", "version": "0.1.0"},
+                "profile": {"description": "Hero", "personality": [], "values": [], "speaking_style": {"register": "neutral", "verbosity": "medium"}}
+            }
+        },
         "roles": {
             "protagonist": {
                 "role_label": "Protagonist",
@@ -110,7 +116,7 @@ impl KnowledgeReadPort for CountingKnowledge {
     async fn find_by_entities(
         &self,
         query: EntityKnowledgeQuery<'_>,
-    ) -> Result<Vec<aise::persistence::knowledge_read_port::KnowledgeRecord>, aise::persistence::StoreError> {
+    ) -> Result<Vec<KnowledgeLookupHit>, aise::persistence::StoreError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.inner.find_by_entities(query).await
     }
@@ -118,7 +124,7 @@ impl KnowledgeReadPort for CountingKnowledge {
     async fn find_by_topics(
         &self,
         query: TopicKnowledgeQuery<'_>,
-    ) -> Result<Vec<aise::persistence::knowledge_read_port::KnowledgeRecord>, aise::persistence::StoreError> {
+    ) -> Result<Vec<KnowledgeLookupHit>, aise::persistence::StoreError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.inner.find_by_topics(query).await
     }
@@ -183,6 +189,7 @@ async fn character_fact_request_is_rejected_before_store_lookup() {
         ))],
         topics: Vec::new(),
         query_text: None,
+        authorized_memory_owners: Vec::new(),
         reason: aise::domain::asset::validation::BoundedText::try_new("x", "r", 32).unwrap(),
         origin: aise::core::turn_data::RetrievalRequestOrigin::Planner,
         signal_priority: 0,
@@ -192,8 +199,8 @@ async fn character_fact_request_is_rejected_before_store_lookup() {
         .retrieve(aise::context::CandidateRetrievalRequest {
             snapshot: &snapshot,
             request: &request,
-            allowed_writer_memory_owners: &[],
             limit: 8,
+            max_item_bytes: 4096,
         })
         .await;
     assert!(err.is_err());
@@ -207,7 +214,8 @@ async fn zero_result_request_never_falls_back_to_full_scan() {
     let filter = KnowledgeFilter {
         audience: RetrievalAudience::GlobalWriter,
         knowledge_kinds: vec![KnowledgeKind::Fact],
-        allowed_writer_memory_owners: Vec::new(),
+        authorized_memory_owners: Vec::new(),
+        max_item_bytes: 4096,
     };
     let records = sqlite
         .find_by_topics(TopicKnowledgeQuery {
@@ -229,7 +237,8 @@ async fn knowledge_read_rejects_revision_or_digest_mismatch() {
     let filter = KnowledgeFilter {
         audience: RetrievalAudience::GlobalWriter,
         knowledge_kinds: vec![KnowledgeKind::Fact],
-        allowed_writer_memory_owners: Vec::new(),
+        authorized_memory_owners: Vec::new(),
+        max_item_bytes: 4096,
     };
     let err = sqlite
         .find_by_entities(EntityKnowledgeQuery {

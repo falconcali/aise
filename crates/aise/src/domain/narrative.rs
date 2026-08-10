@@ -102,7 +102,7 @@ impl StoryContinuity {
 
         let mut token_sum = 0u64;
         for segment in &recent_segments {
-            let tokens = estimate_segment_tokens(segment.text.as_str());
+            let tokens = crate::domain::text::estimate_text_tokens(segment.text.as_str());
             token_sum = token_sum.checked_add(tokens).ok_or(StoryContinuityError::LimitExceeded {
                 limit: "max_recent_segment_tokens",
             })?;
@@ -144,19 +144,13 @@ impl StoryContinuity {
     pub fn estimate_tokens(&self) -> u64 {
         let mut total = 0u64;
         if !self.summary.text.as_str().trim().is_empty() {
-            total = total.saturating_add(estimate_segment_tokens(self.summary.text.as_str()));
+            total = total.saturating_add(crate::domain::text::estimate_text_tokens(self.summary.text.as_str()));
         }
         for segment in &self.recent_segments {
-            total = total.saturating_add(estimate_segment_tokens(segment.text.as_str()));
+            total = total.saturating_add(crate::domain::text::estimate_text_tokens(segment.text.as_str()));
         }
         total
     }
-}
-
-fn estimate_segment_tokens(text: &str) -> u64 {
-    let chars = text.chars().count() as u64;
-    let estimated = chars.div_ceil(4);
-    estimated.max(1)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

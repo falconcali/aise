@@ -2,7 +2,6 @@ use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_contract::TurnPhase;
 use crate::core::turn_error::TurnExecutionError;
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::core::turn_trace::{PersistData, SpanPayload};
 use crate::domain::narrative::StoryTurn;
 use crate::persistence::store::{OutboxRecord, Store, TurnCommitSpec};
 use async_trait::async_trait;
@@ -34,30 +33,29 @@ impl TurnExecutionPipeline for TurnCommitter {
                 format!("committer requires ReadyToCommit phase, current {:?}", ctx.phase()),
             ));
         }
-        let change_set = ctx.change_set().ok_or_else(|| {
-            TurnExecutionError::new(
-                crate::core::turn_error::TurnFailureKind::InvariantViolation,
-                "missing_change_set",
-                Some(TurnStage::TurnCommitter),
-                "committer requires a validated change set",
-            )
-        })?;
-        let snapshot = ctx.snapshot().ok_or_else(|| {
-            TurnExecutionError::new(
-                crate::core::turn_error::TurnFailureKind::InvariantViolation,
-                "missing_snapshot",
-                Some(TurnStage::TurnCommitter),
-                "committer requires a story snapshot",
-            )
-        })?;
+        let change_set = ctx
+            .change_set()
+            .ok_or_else(|| {
+                TurnExecutionError::new(
+                    crate::core::turn_error::TurnFailureKind::InvariantViolation,
+                    "missing_change_set",
+                    Some(TurnStage::TurnCommitter),
+                    "committer requires a validated change set",
+                )
+            })?
+            .clone();
+        let snapshot = ctx
+            .snapshot()
+            .ok_or_else(|| {
+                TurnExecutionError::new(
+                    crate::core::turn_error::TurnFailureKind::InvariantViolation,
+                    "missing_snapshot",
+                    Some(TurnStage::TurnCommitter),
+                    "committer requires a story snapshot",
+                )
+            })?
+            .clone();
         let story_text = change_set.story_text().to_owned();
-        let events = change_set.events().to_vec();
-        let character_changes = change_set.character_changes().to_vec();
-        let world_change = change_set.world_change();
-        let memory_changes = change_set.memory_changes().to_vec();
-        let scene_change = change_set.scene_change();
-        let constraint_change = change_set.constraint_change();
-        let summary_change = change_set.summary_change();
         let turn_id = ctx.turn_id().clone();
         let story_id = ctx.story_id().clone();
         let created_at = ctx.identity().started_at_ms();
@@ -96,44 +94,56 @@ impl TurnExecutionPipeline for TurnCommitter {
                 story_text,
                 created_at,
             },
-            events,
-            character_changes,
-            world_change,
-            memory_changes,
-            scene_change,
-            constraint_change,
-            summary_change,
             base_revision: snapshot.base_revision(),
+            expected_graph_revision: snapshot.graph_revision(),
+            changes: change_set.clone(),
             idempotency_key: ctx.identity().idempotency_key().clone(),
             request_digest: ctx.request().request_digest().clone(),
-            player_character_id: snapshot
-                .role_bindings()
-                .values()
-                .find(|binding| binding.player_id.is_some())
-                .map(|binding| binding.character_id.clone()),
             outbox,
             llm_calls,
         };
-        let pending = ctx.trace().begin_span("aise.persist", "turn_committer.commit");
+        let pending = ctx.trace().begin_span("story.commit", "story.commit");
         let started = Instant::now();
         let outcome = self.store.commit_turn(&commit).await;
         let latency_ms = started.elapsed().as_millis() as u64;
         let payload = match &outcome {
-            Ok(_) => SpanPayload::Persist(PersistData {
-                turn_id: turn_id.to_string(),
-                status: "ok".into(),
-                error: None,
-                latency_ms,
+            Ok(result) => serde_json::json!({
+                "story_id": story_id,
+                "turn_id": turn_id,
+                "base_revision": snapshot.base_revision().get(),
+                "committed_revision": result.story_revision.get(),
+                "knowledge_addition_count": change_set.knowledge_additions().len(),
+                "transition_count": change_set.narrative_changes().len(),
+                "status": "ok",
+                "error_code": null,
+                "latency_ms": latency_ms,
             }),
-            Err(error) => SpanPayload::Persist(PersistData {
-                turn_id: turn_id.to_string(),
-                status: "error".into(),
-                error: Some(error.to_string()),
-                latency_ms,
+            Err(error) => serde_json::json!({
+                "story_id": story_id,
+                "turn_id": turn_id,
+                "base_revision": snapshot.base_revision().get(),
+                "committed_revision": null,
+                "knowledge_addition_count": change_set.knowledge_additions().len(),
+                "transition_count": change_set.narrative_changes().len(),
+                "status": "error",
+                "error_code": store_error_code(error),
+                "latency_ms": latency_ms,
             }),
         };
         ctx.trace().end_span_with(pending, &payload);
         let result = outcome?;
         ctx.set_committed_result(result)
+    }
+}
+
+fn store_error_code(error: &crate::persistence::store::StoreError) -> &'static str {
+    match error {
+        crate::persistence::store::StoreError::NotFound => "story_not_found",
+        crate::persistence::store::StoreError::RevisionConflict => "revision_conflict",
+        crate::persistence::store::StoreError::IdempotencyConflict => "idempotency_conflict",
+        crate::persistence::store::StoreError::ConstraintViolation { .. } => "constraint_violation",
+        crate::persistence::store::StoreError::LimitExceeded { .. } => "store_limit_exceeded",
+        crate::persistence::store::StoreError::Serialization { .. } => "store_serialization_error",
+        crate::persistence::store::StoreError::Unavailable => "store_unavailable",
     }
 }

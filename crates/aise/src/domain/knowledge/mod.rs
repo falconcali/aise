@@ -4,8 +4,8 @@ pub mod memory;
 pub mod query;
 pub mod rumor;
 
-pub use entry::KnowledgeEntity;
+pub use entry::{KnowledgeEntity, KnowledgeEntry};
 pub use fact::{Proposition, WorldFact};
 pub use memory::MemoryEntry;
-pub use query::{CurrentPerception, KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
+pub use query::{CurrentPerception, KnowledgeIndexMatch, KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 pub use rumor::{Claim, SharedRumor, TruthValue};

@@ -1,13 +1,11 @@
 use crate::core::turn_contract::{CommittedTurnResult, IdempotencyKey, RequestDigest};
 use crate::core::turn_data::SnapshotLimits;
-use crate::core::turn_validation::StateChange;
-use crate::domain::ids::{CharacterId, StoryRevision};
-use crate::domain::narrative::{StoryEvent, StorySummary, StoryTurn};
+use crate::domain::ids::StoryRevision;
+use crate::domain::narrative::StoryTurn;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::info::StoryInfo;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::story_instance::state::CurrentScene;
-use crate::domain::world::WorldState;
 use async_trait::async_trait;
 use thiserror::Error;
 
@@ -31,6 +29,8 @@ pub enum StoreError {
     IdempotencyConflict,
     #[error("constraint violation: {constraint}")]
     ConstraintViolation { constraint: String },
+    #[error("store limit exceeded: {limit}")]
+    LimitExceeded { limit: &'static str },
     #[error("serialization error: {kind:?}")]
     Serialization { kind: StoreSerializationErrorKind },
     #[error("store unavailable")]
@@ -62,6 +62,7 @@ pub struct StoredTurnOutcome {
 pub struct MaterializedStoryInstanceSpec {
     pub story_id: crate::domain::ids::StoryId,
     pub pack: crate::domain::asset::frozen_ref::FrozenStoryPackRef,
+    pub settings: crate::domain::story_instance::state::InstanceSettings,
     pub bindings: std::collections::BTreeMap<
         crate::domain::asset::ids::StoryRoleKey,
         crate::domain::story_instance::binding::RoleBinding,
@@ -71,12 +72,13 @@ pub struct MaterializedStoryInstanceSpec {
         crate::domain::story_instance::state::CharacterInstanceState,
     >,
     pub relationships: Vec<crate::domain::story_instance::state::RelationshipState>,
-    pub facts: Vec<crate::domain::knowledge::fact::WorldFact>,
-    pub rumors: Vec<crate::domain::knowledge::rumor::SharedRumor>,
-    pub memories: Vec<crate::domain::knowledge::memory::MemoryEntry>,
+    pub knowledge: Vec<crate::domain::knowledge::KnowledgeEntry>,
     pub scene: CurrentScene,
+    pub current_perceptions: Vec<crate::domain::knowledge::CurrentPerception>,
     pub opening: crate::domain::asset::validation::BoundedText,
     pub narrative_state: crate::domain::narrative_graph::state::NarrativeRuntimeState,
+    pub condition_state: crate::domain::story_instance::snapshot::NarrativeConditionStateView,
+    pub active_constraints: Vec<ActiveStoryConstraint>,
     pub created_at_ms: i64,
 }
 
@@ -96,18 +98,12 @@ pub struct StoryInstanceMeta {
 #[derive(Debug, Clone)]
 pub struct TurnCommitSpec {
     pub story_id: crate::domain::ids::StoryId,
-    pub turn: StoryTurn,
-    pub events: Vec<StoryEvent>,
-    pub character_changes: Vec<crate::core::turn_validation::CharacterStateChange>,
-    pub world_change: StateChange<WorldState>,
-    pub memory_changes: Vec<crate::core::turn_validation::MemoryStateChange>,
-    pub scene_change: StateChange<CurrentScene>,
-    pub constraint_change: StateChange<Vec<ActiveStoryConstraint>>,
-    pub summary_change: StateChange<StorySummary>,
     pub base_revision: StoryRevision,
+    pub expected_graph_revision: u64,
+    pub turn: StoryTurn,
+    pub changes: crate::core::turn_validation::ValidatedChangeSet,
     pub idempotency_key: IdempotencyKey,
     pub request_digest: RequestDigest,
-    pub player_character_id: Option<CharacterId>,
     pub outbox: Vec<OutboxRecord>,
     pub llm_calls: Vec<crate::core::turn_contract::LlmCallUsage>,
 }

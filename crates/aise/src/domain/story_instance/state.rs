@@ -23,7 +23,8 @@ pub struct CurrentScene {
     pub present_character_ids: Vec<CharacterId>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CharacterInstanceState {
     pub character_id: CharacterId,
     pub role_key: StoryRoleKey,
@@ -33,10 +34,28 @@ pub struct CharacterInstanceState {
     pub attributes: BTreeMap<AttributeKey, ScalarValue>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RelationshipKey {
+    pub source_character_id: CharacterId,
+    pub target_character_id: CharacterId,
+    pub kind: RelationshipKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RelationshipState {
     pub source_character_id: CharacterId,
     pub target_character_id: CharacterId,
     pub kind: RelationshipKind,
     pub trust: i16,
+}
+
+impl RelationshipState {
+    pub fn key(&self) -> RelationshipKey {
+        RelationshipKey {
+            source_character_id: self.source_character_id.clone(),
+            target_character_id: self.target_character_id.clone(),
+            kind: self.kind.clone(),
+        }
+    }
 }

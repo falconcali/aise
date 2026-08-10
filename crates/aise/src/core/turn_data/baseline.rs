@@ -1,5 +1,4 @@
 use crate::config::{AssetLimitsConfig, ContextPreparationConfig, TurnContentLimitsConfig};
-use crate::core::token_estimator::estimate_text_tokens;
 use crate::core::turn_data::retrieval::RetrievalSignals;
 use crate::domain::asset::character_card::CharacterCard;
 use crate::domain::asset::ids::{LocationKey, NarrativeNodeKey, Sha256Digest, StoryRoleKey};
@@ -11,6 +10,7 @@ use crate::domain::narrative_graph::definition::NarrativeNodeState;
 use crate::domain::story_instance::binding::RoleBinding;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings};
+use crate::domain::text::estimate_text_tokens;
 use serde::Serialize;
 use std::collections::BTreeMap;
 

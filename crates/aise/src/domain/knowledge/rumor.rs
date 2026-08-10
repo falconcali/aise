@@ -1,11 +1,12 @@
 use crate::domain::asset::entity::KnowledgeEntity;
-use crate::domain::asset::ids::{RumorId, RumorKey, StoryRoleKey, TopicKey};
+use crate::domain::asset::ids::{RumorKey, StoryRoleKey, TopicKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
-use crate::domain::ids::{CharacterId, StoryRevision};
+use crate::domain::ids::{CharacterId, RumorId, StoryRevision};
 use crate::domain::knowledge::query::KnowledgeSource;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SharedRumor {
     pub id: RumorId,
     pub key: Option<RumorKey>,

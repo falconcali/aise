@@ -1,8 +1,10 @@
 use aise::domain::CurrentScene as DomainScene;
+use aise::domain::asset::frozen_ref::FrozenCharacterAssetRef;
+use aise::domain::asset::ids::{CharacterAssetKey, SemanticVersion, Sha256Digest};
 use aise::domain::asset::ids::{LocationKey, PackId, PlayerId, SceneKey, StoryRoleKey};
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::{CharacterId, StoryId, StoryRevision};
-use aise::domain::story_instance::binding::{RoleBinding, StoryInstanceBinding};
+use aise::domain::story_instance::binding::{RoleBinding, RoleController, StoryInstanceBinding};
 use aise::domain::story_instance::state::{CharacterInstanceState, CurrentScene};
 use std::collections::BTreeMap;
 
@@ -17,8 +19,16 @@ fn binding_resolves_character_for_role() {
         revision: StoryRevision::new(3),
         role_bindings: vec![RoleBinding {
             role_key: role_key.clone(),
-            player_id: Some(PlayerId::from("player-1")),
             character_id: character_id.clone(),
+            character_asset: FrozenCharacterAssetRef {
+                character_key: CharacterAssetKey::from("character"),
+                version: SemanticVersion::try_new("0.1.0").unwrap(),
+                digest: Sha256Digest::try_new(
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                )
+                .unwrap(),
+            },
+            controller: RoleController::Player(PlayerId::from("player-1")),
             bound_at_ms: 0,
         }],
     };

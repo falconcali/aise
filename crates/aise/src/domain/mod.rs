@@ -1,18 +1,14 @@
 pub mod asset;
-pub mod character;
 pub mod error;
 pub mod ids;
 pub mod knowledge;
-pub mod memory;
 pub mod narrative;
 pub mod narrative_graph;
 pub mod story_instance;
 pub mod story_sequence;
-pub mod world;
-
-pub use character::{CharacterState, InternalState, Relation};
+pub mod text;
 pub use error::DomainInputError;
-pub use ids::{CharacterId, ConstraintId, EventId, FactId, MemoryId, StoryId, StoryRevision, TurnId};
+pub use ids::{CharacterId, ConstraintId, EventId, FactId, MemoryId, RumorId, StoryId, StoryRevision, TurnId};
 pub use narrative::{EventKind, StoryContinuity, StoryEvent, StorySegment, StorySummary, StoryTurn};
 pub use story_instance::info::StoryInfo;
 pub use story_instance::snapshot::StoryReadSnapshot;

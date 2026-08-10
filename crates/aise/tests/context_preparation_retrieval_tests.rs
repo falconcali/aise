@@ -1,6 +1,5 @@
 use aise::config::{PlannerConfig, RetrievalConfig};
-use aise::context::TopicMatcher;
-use aise::core::token_estimator::estimate_text_tokens;
+use aise::context::TextMatcher;
 use aise::core::turn_data::{
     CandidateRetrieverKind, CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest,
     RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
@@ -11,6 +10,7 @@ use aise::domain::asset::world_book::{TopicDefinition, TopicDictionaryError, val
 use aise::domain::ids::CharacterId;
 use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::narrative_graph::director::NarrativePlan;
+use aise::domain::text::estimate_text_tokens;
 use aise::planning::planner_output::PlannerOutput;
 use aise::planning::retrieval_plan_builder::RetrievalPlanBuilder;
 use std::collections::BTreeMap;
@@ -53,7 +53,7 @@ fn topic_matcher_handles_ascii_boundaries_and_chinese_aliases() {
             aliases: vec![BoundedText::try_new("山门", "alias", 64).unwrap()],
         },
     );
-    let matcher = TopicMatcher;
+    let matcher = TextMatcher;
     assert!(matcher.match_topics("concatenate", &dictionary).is_empty());
     assert_eq!(matcher.match_topics("a cat sat", &dictionary), vec![TopicKey::from("cat")]);
     assert_eq!(matcher.match_topics("走近山门", &dictionary), vec![TopicKey::from("temple")]);
@@ -99,6 +99,7 @@ fn automatic_requests_run_when_planner_gaps_are_empty() {
                 entities: Vec::new(),
                 topics: vec![TopicKey::from("gate")],
                 query_text: None,
+                authorized_memory_owners: Vec::new(),
                 reason: BoundedText::try_new("automatic", "reason", 64).unwrap(),
                 origin: RetrievalRequestOrigin::Automatic,
                 signal_priority: 0,
@@ -120,6 +121,7 @@ fn retrieval_plan_merge_is_deterministic() {
             entities: Vec::new(),
             topics: vec![TopicKey::from("b")],
             query_text: None,
+            authorized_memory_owners: Vec::new(),
             reason: BoundedText::try_new("b", "reason", 64).unwrap(),
             origin: RetrievalRequestOrigin::Automatic,
             signal_priority: 1,
@@ -130,6 +132,7 @@ fn retrieval_plan_merge_is_deterministic() {
             entities: Vec::new(),
             topics: vec![TopicKey::from("a")],
             query_text: None,
+            authorized_memory_owners: Vec::new(),
             reason: BoundedText::try_new("a", "reason", 64).unwrap(),
             origin: RetrievalRequestOrigin::Automatic,
             signal_priority: 0,
@@ -174,6 +177,7 @@ fn retrieval_and_character_think_are_enabled_from_plan_collections() {
                 entities: Vec::new(),
                 topics: Vec::new(),
                 query_text: Some(BoundedText::try_new("q", "q", 64).unwrap()),
+                authorized_memory_owners: Vec::new(),
                 reason: BoundedText::try_new("gap", "reason", 64).unwrap(),
                 origin: RetrievalRequestOrigin::Planner,
                 signal_priority: 4,

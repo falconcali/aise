@@ -12,7 +12,8 @@ use async_trait::async_trait;
 pub struct KnowledgeFilter {
     pub audience: RetrievalAudience,
     pub knowledge_kinds: Vec<KnowledgeKind>,
-    pub allowed_writer_memory_owners: Vec<CharacterId>,
+    pub authorized_memory_owners: Vec<CharacterId>,
+    pub max_item_bytes: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -20,12 +21,16 @@ pub struct KnowledgeRecord {
     pub source_id: KnowledgeSourceId,
     pub kind: KnowledgeKind,
     pub content: BoundedText,
-    pub entities: Vec<KnowledgeEntity>,
-    pub topics: Vec<TopicKey>,
     pub salience: u8,
     pub source: KnowledgeSource,
     pub source_revision: StoryRevision,
     pub memory_owner: Option<CharacterId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct KnowledgeLookupHit {
+    pub record: KnowledgeRecord,
+    pub matches: Vec<crate::domain::knowledge::KnowledgeIndexMatch>,
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +51,7 @@ pub struct TopicKnowledgeQuery<'a> {
 
 #[async_trait]
 pub trait KnowledgeReadPort: Send + Sync {
-    async fn find_by_entities(&self, query: EntityKnowledgeQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError>;
+    async fn find_by_entities(&self, query: EntityKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError>;
 
-    async fn find_by_topics(&self, query: TopicKnowledgeQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError>;
+    async fn find_by_topics(&self, query: TopicKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError>;
 }

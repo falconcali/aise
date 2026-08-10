@@ -20,14 +20,13 @@ mod validator;
 pub use asset::{CompiledPromptAsset, PromptAssetManifest, compute_asset_hash};
 pub use catalog::PromptCatalog;
 pub use error::PromptError;
-pub use loader::load_catalog;
+pub use loader::{load_catalog, load_catalog_bundle};
 pub use metadata::PromptMetadata;
 pub use model::{
     AssetRef, AssetStatus, PromptKind, PromptLineageNode, PromptMessage, PromptRole, RenderedPrompt, SlotId,
 };
 pub use model_request::{
-    CharacterThinkContext, ModelRequest, NarrativeValidatorContext, StoryGeneratorContext, StoryRepairerContext,
-    WriterPlannerContext,
+    CharacterThinkContext, ModelRequest, StoryGeneratorContext, StoryRepairerContext, WriterPlannerContext,
 };
 pub use pack::{PromptPack, ResolvedPack, resolve_pack};
 pub use policy::{PreamblePosition, PromptPolicy};

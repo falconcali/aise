@@ -1,6 +1,6 @@
 use crate::config::LlmConfig;
-use crate::core::token_estimator::estimate_text_tokens;
 pub use crate::core::turn_contract::{FinishReason, LlmCharge, LlmTokenUsage, UsageAccuracy};
+use crate::domain::text::estimate_text_tokens;
 use crate::llm::message::ChatMessage;
 
 #[derive(Debug, Clone)]

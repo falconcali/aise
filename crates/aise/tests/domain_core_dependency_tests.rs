@@ -71,7 +71,7 @@ fn active_story_constraint_uses_shared_constraint_id() {
     let id = ConstraintId::try_new("shared-constraint").unwrap();
     let constraint = aise::domain::story_instance::constraint::ActiveStoryConstraint {
         id: id.clone(),
-        source: aise::domain::story_instance::constraint::StoryConstraintSource::Pack {
+        source: aise::domain::story_instance::constraint::StoryConstraintSource {
             pack_id: aise::domain::asset::ids::PackId::from("pack-1"),
             constraint_key: aise::domain::asset::ids::ConstraintKey::from("c1"),
         },

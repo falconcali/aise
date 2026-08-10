@@ -64,15 +64,36 @@ impl TurnExecutionPipeline for WriterPlanner {
                 })
             })?
             .clone();
-        let narrative_plan = self
-            .narrative_director
-            .evaluate(NarrativeEvaluation {
-                definition: snapshot.narrative_definition(),
-                state: snapshot.narrative_state(),
-                snapshot: &snapshot,
-            })
-            .map_err(PlanningError::from)
-            .map_err(map_planning_error)?;
+        let pending = ctx.trace().begin_span("narrative.evaluate", "narrative.evaluate");
+        let narrative_result = self.narrative_director.evaluate(NarrativeEvaluation {
+            definition: snapshot.narrative_definition(),
+            state: snapshot.narrative_state(),
+            snapshot: &snapshot,
+        });
+        let narrative_payload = match &narrative_result {
+            Ok(plan) => serde_json::json!({
+                "story_id": ctx.story_id(),
+                "turn_id": ctx.turn_id(),
+                "graph_revision": snapshot.graph_revision(),
+                "active_node_count": plan.active_nodes.len(),
+                "transition_count": plan.proposed_transitions.len(),
+                "intent_count": plan.global_event_intents.len(),
+                "status": "ok",
+                "error_code": null,
+            }),
+            Err(_) => serde_json::json!({
+                "story_id": ctx.story_id(),
+                "turn_id": ctx.turn_id(),
+                "graph_revision": snapshot.graph_revision(),
+                "active_node_count": 0,
+                "transition_count": 0,
+                "intent_count": 0,
+                "status": "error",
+                "error_code": "narrative_evaluation_failed",
+            }),
+        };
+        ctx.trace().end_span_with(pending, &narrative_payload);
+        let narrative_plan = narrative_result.map_err(PlanningError::from).map_err(map_planning_error)?;
         let player_input = BoundedText::try_new(
             ctx.player_input().to_owned(),
             "player_input",

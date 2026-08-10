@@ -4,6 +4,6 @@ pub mod entity;
 pub mod frozen_ref;
 pub mod ids;
 pub mod story_pack;
-pub mod topic_matcher;
+pub mod text_matcher;
 pub mod validation;
 pub mod world_book;

@@ -1,3 +1,4 @@
+use crate::core::StoryProposal;
 use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
@@ -73,8 +74,26 @@ impl TurnExecutionPipeline for StoryRepairer {
                 error.to_string(),
             )
         })?;
-        let proposal =
-            serde_json::from_str(&completion.text).map_err(|_| invariant("story proposal output is not valid JSON"))?;
+        let proposal: StoryProposal = serde_json::from_str(&completion.text).map_err(|_| {
+            TurnExecutionError::new(
+                TurnFailureKind::Llm,
+                "model_output_invalid",
+                Some(TurnStage::StoryRepairer),
+                "story repair output is invalid",
+            )
+        })?;
+        if !proposal.is_within_bounds(
+            ctx.budget().max_total_items(),
+            ctx.budget().max_item_bytes(),
+            ctx.budget().max_proposal_bytes(),
+        ) {
+            return Err(TurnExecutionError::new(
+                TurnFailureKind::Llm,
+                "model_output_invalid",
+                Some(TurnStage::StoryRepairer),
+                "story repair output exceeds a field or collection bound",
+            ));
+        }
         ctx.replace_story_proposal(proposal)
     }
 }

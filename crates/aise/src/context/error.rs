@@ -15,6 +15,8 @@ pub enum ContextError {
     KnowledgeAudienceViolation,
     #[error("candidate retriever configuration is invalid: {code}")]
     InvalidRetrieverSet { code: &'static str },
+    #[error("retrieval record is invalid: {code}")]
+    InvalidRecord { code: &'static str },
     #[error("retrieval candidate limit exceeded")]
     CandidateLimitExceeded,
     #[error("retrieved context budget exceeded: {limit}")]
@@ -32,6 +34,7 @@ impl ContextError {
             ContextError::SignalLimitExceeded { .. } => "context_baseline_limit",
             ContextError::InvalidPlan { .. } | ContextError::KnowledgeAudienceViolation => "writer_plan_invalid",
             ContextError::InvalidRetrieverSet { .. } => "retrieval_candidate_limit",
+            ContextError::InvalidRecord { .. } => "retrieval_record_invalid",
             ContextError::CandidateLimitExceeded => "retrieval_candidate_limit",
             ContextError::RetrievedBudgetExceeded { .. } => "retrieval_context_limit",
             ContextError::Store(StoreError::RevisionConflict) => "retrieval_snapshot_conflict",

@@ -1,5 +1,4 @@
 use crate::core::story_proposal::StoryProposal;
-use crate::core::token_estimator::estimate_text_tokens;
 use crate::core::turn_budget::TurnBudget;
 use crate::core::turn_contract::{
     CommittedTurnResult, LlmBudgetReservation, LlmCallUsage, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
@@ -12,9 +11,10 @@ use crate::core::turn_error::{TurnExecutionError, TurnFailureKind, TurnTerminalK
 use crate::core::turn_pipeline::TurnStage;
 use crate::core::turn_trace::{PendingSpan, TraceRecorder};
 use crate::core::turn_validation::{ValidatedChangeSet, ValidationResult};
-use crate::domain::ids::{StoryId, TurnId};
+use crate::domain::ids::{CharacterId, StoryId, TurnId};
 use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
+use crate::domain::text::estimate_text_tokens;
 use serde::Serialize;
 use std::time::Instant;
 
@@ -218,13 +218,26 @@ impl TurnExecutionContext {
             max_total_tokens: self.budget.max_retrieved_tokens(),
             max_item_bytes: self.budget.max_item_bytes(),
         };
-        self.validate_retrieved_partition(context.writer(), &RetrievalAudience::GlobalWriter, limits)?;
+        let authorized_writer_memory_owners = self
+            .plan
+            .as_ref()
+            .into_iter()
+            .flat_map(|plan| plan.retrieval_plan.requests.iter())
+            .flat_map(|request| request.authorized_memory_owners.iter().cloned())
+            .collect::<std::collections::BTreeSet<_>>();
+        self.validate_retrieved_partition(
+            context.writer(),
+            &RetrievalAudience::GlobalWriter,
+            &authorized_writer_memory_owners,
+            limits,
+        )?;
         for (character_id, items) in context.characters() {
             self.validate_retrieved_partition(
                 items,
                 &RetrievalAudience::Character {
                     character_id: character_id.clone(),
                 },
+                &authorized_writer_memory_owners,
                 limits,
             )?;
         }
@@ -351,28 +364,29 @@ impl TurnExecutionContext {
 
     pub fn set_story_proposal(&mut self, proposal: StoryProposal) -> Result<(), TurnExecutionError> {
         self.expect_phase(TurnPhase::ContextReady)?;
-        let serialized = serde_json::to_string(&proposal).map_err(|error| {
+        self.ensure_proposal_bound(&proposal, TurnStage::StoryGenerator)?;
+        self.proposal = Some(proposal);
+        self.phase = TurnPhase::ProposalReady;
+        Ok(())
+    }
+
+    fn ensure_proposal_bound(&self, proposal: &StoryProposal, stage: TurnStage) -> Result<(), TurnExecutionError> {
+        let serialized = serde_json::to_string(proposal).map_err(|error| {
             TurnExecutionError::new(
                 TurnFailureKind::InvariantViolation,
                 "proposal_serialization_failed",
-                Some(TurnStage::StoryGenerator),
+                Some(stage),
                 error.to_string(),
             )
         })?;
         if serialized.len() > self.budget.max_proposal_bytes() {
             return Err(TurnExecutionError::new(
-                TurnFailureKind::InvariantViolation,
-                "proposal_byte_limit",
-                Some(TurnStage::StoryGenerator),
-                format!(
-                    "story proposal {} bytes exceeds budget {}",
-                    serialized.len(),
-                    self.budget.max_proposal_bytes()
-                ),
+                TurnFailureKind::Llm,
+                "model_output_invalid",
+                Some(stage),
+                "story proposal exceeds its byte bound",
             ));
         }
-        self.proposal = Some(proposal);
-        self.phase = TurnPhase::ProposalReady;
         Ok(())
     }
 
@@ -401,10 +415,18 @@ impl TurnExecutionContext {
 
     pub fn replace_story_proposal(&mut self, proposal: StoryProposal) -> Result<(), TurnExecutionError> {
         self.expect_phase(TurnPhase::RepairRequired)?;
+        self.ensure_proposal_bound(&proposal, TurnStage::StoryRepairer)?;
         self.proposal = Some(proposal);
         self.validation = None;
         self.change_set = None;
-        self.proposal_revision = self.proposal_revision.saturating_add(1);
+        self.proposal_revision = self.proposal_revision.checked_add(1).ok_or_else(|| {
+            TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "proposal_revision_overflow",
+                Some(TurnStage::StoryRepairer),
+                "proposal revision overflow",
+            )
+        })?;
         self.phase = TurnPhase::ProposalReady;
         Ok(())
     }
@@ -484,6 +506,7 @@ impl TurnExecutionContext {
         &self,
         items: &[ContextItem],
         expected_audience: &RetrievalAudience,
+        authorized_writer_memory_owners: &std::collections::BTreeSet<CharacterId>,
         limits: RetrievedContextLimits,
     ) -> Result<(), TurnExecutionError> {
         if items.len() > limits.max_items_per_audience {
@@ -535,6 +558,8 @@ impl TurnExecutionContext {
             ) {
                 (KnowledgeKind::Memory, Some(owner), RetrievalAudience::Character { character_id })
                     if owner == character_id => {}
+                (KnowledgeKind::Memory, Some(owner), RetrievalAudience::GlobalWriter)
+                    if authorized_writer_memory_owners.contains(owner) => {}
                 (KnowledgeKind::Memory, _, _) => {
                     return Err(TurnExecutionError::new(
                         TurnFailureKind::InvariantViolation,
@@ -553,7 +578,14 @@ impl TurnExecutionContext {
                 }
                 _ => {}
             }
-            tokens = tokens.saturating_add(item.token_cost);
+            tokens = tokens.checked_add(item.token_cost).ok_or_else(|| {
+                TurnExecutionError::new(
+                    TurnFailureKind::InvariantViolation,
+                    "retrieved_context_limit",
+                    Some(TurnStage::Context),
+                    "retrieved audience token arithmetic overflow",
+                )
+            })?;
         }
         if tokens > limits.max_tokens_per_audience {
             return Err(TurnExecutionError::new(

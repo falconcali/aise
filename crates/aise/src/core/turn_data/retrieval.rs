@@ -1,10 +1,10 @@
-use crate::core::token_estimator::estimate_text_tokens;
 use crate::core::turn_data::planning::RetrievalAudience;
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{LocationKey, SceneKey, StoryRoleKey, TopicKey};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::{CharacterId, StoryRevision};
-use crate::domain::knowledge::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
+use crate::domain::knowledge::{KnowledgeIndexMatch, KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
+use crate::domain::text::estimate_text_tokens;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -64,12 +64,7 @@ pub enum CandidateRetrieverKind {
     Embedding,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(tag = "kind", content = "key", rename_all = "snake_case")]
-pub enum CandidateMatch {
-    Entity(KnowledgeEntity),
-    Topic(TopicKey),
-}
+pub use crate::domain::knowledge::KnowledgeIndexMatch as CandidateMatch;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -87,6 +82,12 @@ pub struct RelevanceRank {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ProviderEvidence {
+    pub provider_rank: u32,
+    pub matches: Vec<KnowledgeIndexMatch>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ContextProvenance {
     pub source_id: KnowledgeSourceId,
     pub knowledge_kind: KnowledgeKind,
@@ -94,9 +95,7 @@ pub struct ContextProvenance {
     pub source_revision: StoryRevision,
     pub audience: RetrievalAudience,
     pub memory_owner: Option<CharacterId>,
-    pub matched_by: Vec<CandidateRetrieverKind>,
-    pub provider_ranks: BTreeMap<CandidateRetrieverKind, u32>,
-    pub matches: Vec<CandidateMatch>,
+    pub evidence: BTreeMap<CandidateRetrieverKind, ProviderEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -168,9 +167,12 @@ impl RetrievedContext {
         for items in characters.values() {
             validate_partition(items, limits)?;
         }
+        let character_items = characters.values().try_fold(0usize, |total, items| {
+            total.checked_add(items.len()).ok_or(RetrievedContextError::ArithmeticOverflow)
+        })?;
         let total_items = writer
             .len()
-            .checked_add(characters.values().map(Vec::len).sum())
+            .checked_add(character_items)
             .ok_or(RetrievedContextError::ArithmeticOverflow)?;
         if total_items > limits.max_total_items {
             return Err(RetrievedContextError::CountLimit {
@@ -232,6 +234,21 @@ fn validate_partition(items: &[ContextItem], limits: RetrievedContextLimits) -> 
         }
         if item.token_cost != estimate_text_tokens(item.content.as_str()) {
             return Err(RetrievedContextError::InvalidAudience);
+        }
+        match (
+            &item.provenance.audience,
+            item.provenance.knowledge_kind,
+            &item.provenance.memory_owner,
+        ) {
+            (RetrievalAudience::GlobalWriter, KnowledgeKind::Memory, Some(_)) => {}
+            (RetrievalAudience::Character { character_id }, KnowledgeKind::Memory, Some(owner))
+                if character_id == owner => {}
+            (RetrievalAudience::Character { .. }, KnowledgeKind::Fact, _) => {
+                return Err(RetrievedContextError::InvalidAudience);
+            }
+            (_, KnowledgeKind::Memory, _) => return Err(RetrievedContextError::InvalidMemoryOwner),
+            (_, _, None) => {}
+            (_, _, Some(_)) => return Err(RetrievedContextError::InvalidMemoryOwner),
         }
         tokens = tokens
             .checked_add(item.token_cost)

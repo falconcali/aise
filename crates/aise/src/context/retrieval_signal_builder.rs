@@ -1,22 +1,22 @@
 use crate::config::ContextPreparationConfig;
 use crate::context::error::ContextError;
-use crate::context::topic_matcher::{TopicMatcher, normalize_match_text, term_matches};
 use crate::core::turn_data::{EntitySignal, RetrievalSignalOrigin, RetrievalSignals, TopicSignal};
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::StoryRoleKey;
+use crate::domain::asset::text_matcher::{TextMatcher, normalize_match_text, term_matches};
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use std::collections::BTreeSet;
 
 pub struct RetrievalSignalBuilder {
     config: ContextPreparationConfig,
-    topic_matcher: TopicMatcher,
+    topic_matcher: TextMatcher,
 }
 
 impl RetrievalSignalBuilder {
     pub fn new(config: ContextPreparationConfig) -> Self {
         Self {
             config,
-            topic_matcher: TopicMatcher,
+            topic_matcher: TextMatcher,
         }
     }
 

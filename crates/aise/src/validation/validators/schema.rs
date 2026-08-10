@@ -1,3 +1,4 @@
+use crate::core::story_proposal::ProposedKnowledgeChange;
 use crate::core::turn_context::TurnExecutionContext;
 use crate::core::turn_error::TurnExecutionError;
 use crate::core::turn_validation::{Repairability, ValidationIssue, ValidationIssueCode, ValidationLocation};
@@ -12,83 +13,102 @@ impl DeterministicValidator for SchemaValidator {
     }
 
     fn validate(&self, ctx: &TurnExecutionContext) -> Result<Vec<ValidationIssue>, TurnExecutionError> {
-        let mut issues = Vec::new();
         let Some(proposal) = ctx.proposal() else {
-            issues.push(issue("missing_proposal", "no story proposal produced", None));
-            return Ok(issues);
+            return Ok(vec![issue("proposal", 0, "proposal is missing", Repairability::Fatal)]);
         };
+        let mut issues = Vec::new();
         if proposal.story_text.trim().is_empty() {
-            issues.push(fatal("empty_story", "story text is empty", None));
+            issues.push(issue("story_text", 0, "story text is empty", Repairability::Fatal));
         }
-        if proposal.events.is_empty() {
-            issues.push(fatal("missing_events", "proposal has no events", None));
+        for (path, count) in [
+            ("events", proposal.events.len()),
+            ("character_changes", proposal.character_changes.len()),
+            ("relationship_changes", proposal.relationship_changes.len()),
+            ("knowledge_changes", proposal.knowledge_changes.len()),
+            ("perceptions", proposal.perceptions.len()),
+        ] {
+            if count > ctx.budget().max_total_items() {
+                issues.push(issue(path, 0, "proposal collection exceeds its bound", Repairability::Fatal));
+            }
+        }
+        if proposal.story_text.len() > ctx.budget().max_proposal_bytes()
+            || proposal
+                .summary_text
+                .as_ref()
+                .is_some_and(|text| text.len() > ctx.budget().max_proposal_bytes())
+        {
+            issues.push(issue("story_text", 0, "proposal text exceeds its bound", Repairability::Fatal));
         }
         for (index, event) in proposal.events.iter().enumerate() {
-            if event.summary.trim().is_empty() {
-                issues.push(issue(
-                    "empty_event_summary",
-                    "event has an empty summary",
-                    Some(ValidationLocation {
-                        path: format!("events[{index}]"),
-                        item_index: Some(index as u32),
-                    }),
-                ));
-            }
-        }
-        for (index, fact) in proposal.world_change.add_facts.iter().enumerate() {
-            if fact.text.trim().is_empty() {
-                issues.push(issue(
-                    "empty_world_fact",
-                    "world fact text is empty",
-                    Some(ValidationLocation {
-                        path: format!("world_change.add_facts[{index}]"),
-                        item_index: Some(index as u32),
-                    }),
-                ));
-            }
-        }
-        for (index, memory) in proposal.memory_changes.iter().enumerate() {
-            if memory.content.trim().is_empty() {
-                issues.push(issue(
-                    "empty_memory",
-                    "memory content is empty",
-                    Some(ValidationLocation {
-                        path: format!("memory_changes[{index}]"),
-                        item_index: Some(index as u32),
-                    }),
-                ));
+            if event.summary.trim().is_empty() || event.summary.len() > ctx.budget().max_item_bytes() {
+                issues.push(issue("events", index, "event summary is empty", Repairability::Repairable));
             }
         }
         for (index, change) in proposal.character_changes.iter().enumerate() {
-            if change.goal_updates.is_empty() && change.health_delta.is_none() && change.affinity_deltas.is_empty() {
+            if change.location.is_none() && change.goals.is_none() && change.attribute_updates.is_empty() {
                 issues.push(issue(
-                    "empty_character_change",
-                    "character change carries no goal, health, or affinity update",
-                    Some(ValidationLocation {
-                        path: format!("character_changes[{index}]"),
-                        item_index: Some(index as u32),
-                    }),
+                    "character_changes",
+                    index,
+                    "character change is empty",
+                    Repairability::Repairable,
                 ));
             }
+            if change.goals.as_ref().is_some_and(|goals| {
+                goals.len() > ctx.budget().max_total_items()
+                    || goals.iter().any(|goal| goal.len() > ctx.budget().max_item_bytes())
+            }) {
+                issues.push(issue(
+                    "character_changes",
+                    index,
+                    "character goals exceed their bound",
+                    Repairability::Fatal,
+                ));
+            }
+        }
+        for (index, change) in proposal.knowledge_changes.iter().enumerate() {
+            let content = match change {
+                ProposedKnowledgeChange::Fact { content, .. }
+                | ProposedKnowledgeChange::Rumor { content, .. }
+                | ProposedKnowledgeChange::Memory { content, .. } => content,
+            };
+            if content.trim().is_empty() || content.len() > ctx.budget().max_item_bytes() {
+                issues.push(issue(
+                    "knowledge_changes",
+                    index,
+                    "knowledge content is empty",
+                    Repairability::Repairable,
+                ));
+            }
+        }
+        for (index, perception) in proposal.perceptions.iter().enumerate() {
+            if perception.content.trim().is_empty() || perception.content.len() > ctx.budget().max_item_bytes() {
+                issues.push(issue(
+                    "perceptions",
+                    index,
+                    "perception content is empty or oversized",
+                    Repairability::Fatal,
+                ));
+            }
+        }
+        if proposal.scene_change.as_ref().is_some_and(|scene| {
+            scene.time.as_str().len() > ctx.budget().max_item_bytes()
+                || scene.description.as_str().len() > ctx.budget().max_proposal_bytes()
+                || scene.present_character_ids.len() > ctx.budget().max_total_items()
+        }) {
+            issues.push(issue("scene_change", 0, "scene exceeds its bound", Repairability::Fatal));
         }
         Ok(issues)
     }
 }
 
-fn issue(code: &'static str, message: &str, location: Option<ValidationLocation>) -> ValidationIssue {
+fn issue(path: &str, index: usize, message: &str, repairability: Repairability) -> ValidationIssue {
     ValidationIssue {
         code: ValidationIssueCode::SchemaInvalid,
-        message: format!("{code}: {message}"),
-        repairability: Repairability::Repairable,
-        location,
-    }
-}
-
-fn fatal(code: &'static str, message: &str, location: Option<ValidationLocation>) -> ValidationIssue {
-    ValidationIssue {
-        code: ValidationIssueCode::SchemaInvalid,
-        message: format!("{code}: {message}"),
-        repairability: Repairability::Fatal,
-        location,
+        message: message.into(),
+        repairability,
+        location: Some(ValidationLocation {
+            path: format!("{path}[{index}]"),
+            item_index: u32::try_from(index).ok(),
+        }),
     }
 }

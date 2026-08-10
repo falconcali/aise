@@ -34,7 +34,13 @@ fn valid_pack_json() -> String {
             "themes": ["hope"],
             "style": {"tone": ["light"], "point_of_view": "third", "tense": "past"}
         },
-        "character_assets": {},
+        "character_assets": {
+            "protagonist_card": {
+                "spec": "aise_char_v3", "spec_version": "3.0", "character_key": "protagonist_card",
+                "meta": {"name": "Hero", "version": "0.1.0"},
+                "profile": {"description": "Hero", "personality": [], "values": [], "speaking_style": {"register": "neutral", "verbosity": "medium"}}
+            }
+        },
         "roles": {
             "protagonist": {
                 "role_label": "Protagonist",

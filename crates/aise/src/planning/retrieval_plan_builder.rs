@@ -5,9 +5,8 @@ use crate::core::turn_data::{
 };
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
-use crate::domain::asset::topic_matcher::TopicMatcher;
+use crate::domain::asset::text_matcher::{TextMatcher, normalize_match_text, term_matches};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::asset::world_book::normalize_topic_term;
 use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::narrative_graph::director::NarrativePlan;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
@@ -18,7 +17,7 @@ use std::collections::BTreeSet;
 pub struct RetrievalPlanBuilder {
     retrieval: RetrievalConfig,
     planner: PlannerConfig,
-    topic_matcher: TopicMatcher,
+    topic_matcher: TextMatcher,
 }
 
 impl RetrievalPlanBuilder {
@@ -26,7 +25,7 @@ impl RetrievalPlanBuilder {
         Self {
             retrieval,
             planner,
-            topic_matcher: TopicMatcher,
+            topic_matcher: TextMatcher,
         }
     }
 
@@ -190,7 +189,7 @@ impl RetrievalPlanBuilder {
                     gap.topics.push(topic);
                 }
             }
-            let haystack = normalize_topic_term(query.as_str());
+            let haystack = normalize_match_text(query.as_str());
             for entity in snapshot.entity_catalog() {
                 let key = match entity {
                     KnowledgeEntity::World(key) => key.as_str(),
@@ -201,16 +200,26 @@ impl RetrievalPlanBuilder {
                     KnowledgeEntity::NarrativeNode(key) => key.as_str(),
                     KnowledgeEntity::Event(key) => key.as_str(),
                 };
-                if haystack.contains(&normalize_topic_term(key)) && !gap.entities.contains(entity) {
+                if term_matches(&haystack, &normalize_match_text(key)) && !gap.entities.contains(entity) {
                     gap.entities.push(entity.clone());
                 }
             }
             gap.query_text = Some(
-                BoundedText::try_new(normalize_topic_term(query.as_str()), "query_text", self.planner.max_query_bytes)
+                BoundedText::try_new(normalize_match_text(query.as_str()), "query_text", self.planner.max_query_bytes)
                     .map_err(|_| PlanningError::InvalidOutput {
                         code: "query_text_invalid",
                     })?,
             );
+        }
+        if gap.entities.len() > self.planner.max_entities_per_request {
+            return Err(PlanningError::LimitExceeded {
+                limit: "max_entities_per_request",
+            });
+        }
+        if gap.topics.len() > self.planner.max_topics_per_request {
+            return Err(PlanningError::LimitExceeded {
+                limit: "max_topics_per_request",
+            });
         }
         authorize_gap(&gap, think_requests)?;
         for entity in &gap.entities {
@@ -253,16 +262,46 @@ impl RetrievalPlanBuilder {
                     limit: "max_reason_bytes",
                 }
             })?;
+        let authorized_memory_owners = authorized_memory_owners(&draft.audience, &knowledge_kinds, &entities)?;
         Ok(RetrievalRequest {
             audience: draft.audience,
             knowledge_kinds,
             entities,
             topics,
             query_text: draft.query_text,
+            authorized_memory_owners,
             reason,
             origin: draft.origin,
             signal_priority: draft.signal_priority,
         })
+    }
+}
+
+fn authorized_memory_owners(
+    audience: &RetrievalAudience,
+    knowledge_kinds: &[KnowledgeKind],
+    entities: &[KnowledgeEntity],
+) -> Result<Vec<crate::domain::ids::CharacterId>, PlanningError> {
+    if !knowledge_kinds.contains(&KnowledgeKind::Memory) {
+        return Ok(Vec::new());
+    }
+    match audience {
+        RetrievalAudience::GlobalWriter => {
+            let mut owners = entities
+                .iter()
+                .filter_map(|entity| match entity {
+                    KnowledgeEntity::Character(id) => Some(id.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            owners.sort();
+            owners.dedup();
+            if owners.is_empty() {
+                return Err(PlanningError::KnowledgeAudienceViolation);
+            }
+            Ok(owners)
+        }
+        RetrievalAudience::Character { character_id } => Ok(vec![character_id.clone()]),
     }
 }
 
@@ -290,10 +329,12 @@ fn authorize_gap(
         RetrievalAudience::GlobalWriter => {
             if gap.knowledge_kinds.contains(&KnowledgeKind::Memory) {
                 let owners: BTreeSet<_> = think_requests.iter().map(|req| &req.character_id).collect();
-                let ok = gap.entities.iter().any(|entity| match entity {
-                    KnowledgeEntity::Character(id) => owners.contains(id),
-                    _ => false,
+                let requested_owners = gap.entities.iter().filter_map(|entity| match entity {
+                    KnowledgeEntity::Character(id) => Some(id),
+                    _ => None,
                 });
+                let ok = requested_owners.clone().next().is_some()
+                    && requested_owners.into_iter().all(|id| owners.contains(id));
                 if !ok {
                     return Err(PlanningError::KnowledgeAudienceViolation);
                 }
@@ -304,7 +345,8 @@ fn authorize_gap(
 }
 
 fn dedupe_and_sort(requests: Vec<RetrievalRequest>) -> Vec<RetrievalRequest> {
-    let mut by_key: std::collections::BTreeMap<String, RetrievalRequest> = std::collections::BTreeMap::new();
+    let mut by_key: std::collections::BTreeMap<RetrievalRequestKey, RetrievalRequest> =
+        std::collections::BTreeMap::new();
     for request in requests {
         let key = canonical_key(&request);
         match by_key.get(&key) {
@@ -326,30 +368,30 @@ fn dedupe_and_sort(requests: Vec<RetrievalRequest>) -> Vec<RetrievalRequest> {
         left.signal_priority
             .cmp(&right.signal_priority)
             .then_with(|| origin_rank(left.origin).cmp(&origin_rank(right.origin)))
-            .then_with(|| audience_key(&left.audience).cmp(&audience_key(&right.audience)))
-            .then_with(|| format!("{:?}", left.knowledge_kinds).cmp(&format!("{:?}", right.knowledge_kinds)))
-            .then_with(|| format!("{:?}", left.entities).cmp(&format!("{:?}", right.entities)))
-            .then_with(|| format!("{:?}", left.topics).cmp(&format!("{:?}", right.topics)))
-            .then_with(|| {
-                left.query_text
-                    .as_ref()
-                    .map(|text| text.as_str())
-                    .unwrap_or("")
-                    .cmp(right.query_text.as_ref().map(|text| text.as_str()).unwrap_or(""))
-            })
+            .then_with(|| canonical_key(left).cmp(&canonical_key(right)))
     });
     out
 }
 
-fn canonical_key(request: &RetrievalRequest) -> String {
-    format!(
-        "{:?}|{:?}|{:?}|{:?}|{}",
-        request.audience,
-        request.knowledge_kinds,
-        request.entities,
-        request.topics,
-        request.query_text.as_ref().map(|text| text.as_str()).unwrap_or("")
-    )
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct RetrievalRequestKey {
+    audience: RetrievalAudience,
+    knowledge_kinds: Vec<KnowledgeKind>,
+    entities: Vec<KnowledgeEntity>,
+    topics: Vec<TopicKey>,
+    query_text: Option<String>,
+    authorized_memory_owners: Vec<crate::domain::ids::CharacterId>,
+}
+
+fn canonical_key(request: &RetrievalRequest) -> RetrievalRequestKey {
+    RetrievalRequestKey {
+        audience: request.audience.clone(),
+        knowledge_kinds: request.knowledge_kinds.clone(),
+        entities: request.entities.clone(),
+        topics: request.topics.clone(),
+        query_text: request.query_text.as_ref().map(ToString::to_string),
+        authorized_memory_owners: request.authorized_memory_owners.clone(),
+    }
 }
 
 fn origin_rank(origin: RetrievalRequestOrigin) -> u8 {
@@ -357,12 +399,5 @@ fn origin_rank(origin: RetrievalRequestOrigin) -> u8 {
         RetrievalRequestOrigin::Automatic => 0,
         RetrievalRequestOrigin::Narrative => 1,
         RetrievalRequestOrigin::Planner => 2,
-    }
-}
-
-fn audience_key(audience: &RetrievalAudience) -> String {
-    match audience {
-        RetrievalAudience::GlobalWriter => "0".into(),
-        RetrievalAudience::Character { character_id } => format!("1:{}", character_id.as_str()),
     }
 }
