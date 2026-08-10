@@ -573,7 +573,7 @@ pub struct ValidatedChangeSet {
 }
 ```
 
-Only deterministic Validation constructs `ValidatedChangeSet`. It applies Character patches to the corresponding Snapshot state instead of rebuilding a blank legacy state. It applies each relationship delta once. Unknown Character IDs, unresolved Topic/Entity references, invalid evidence, player-controlled state mutation, duplicate changes, and any bound violation produce Validation issues; none are dropped with `continue`, `filter`, warning, or default values.
+Only deterministic Validation constructs `ValidatedChangeSet`. It applies Character patches to the corresponding Snapshot state instead of rebuilding a blank legacy state. It applies each relationship delta once. Unknown Character IDs, unresolved Topic/Entity references, invalid evidence, duplicate changes, and any bound violation produce Validation issues; none are dropped with `continue`, `filter`, warning, or default values.
 
 Knowledge additions use deterministic IDs and the committed revision:
 

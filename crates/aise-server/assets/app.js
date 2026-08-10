@@ -654,15 +654,141 @@ function renderSpanNode(span, byParent, parentEl) {
 
   const body = document.createElement("div");
   body.className = "trace-body";
-  const pre = document.createElement("pre");
-  pre.textContent = JSON.stringify(span.payload, null, 2);
-  body.appendChild(pre);
+  if (payload.kind === "llm_call") {
+    renderLlmCallPayload(body, payload);
+  } else {
+    const pre = document.createElement("pre");
+    pre.className = "trace-json";
+    pre.innerHTML = highlightJson(payload);
+    body.appendChild(pre);
+  }
 
   const children = byParent.get(span.span_id) || [];
   for (const child of children) renderSpanNode(child, byParent, body);
 
   details.appendChild(body);
   parentEl.appendChild(details);
+}
+
+function highlightJson(value, depth = 0) {
+  const pad = "  ".repeat(depth);
+  if (value === null || value === undefined) return `${pad}<span class="j-null">null</span>`;
+  if (typeof value === "string") return `${pad}<span class="j-str">${escapeHtml(value)}</span>`;
+  if (typeof value === "number") return `${pad}<span class="j-num">${escapeHtml(String(value))}</span>`;
+  if (typeof value === "boolean") return `${pad}<span class="j-bool">${escapeHtml(String(value))}</span>`;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return `${pad}<span class="j-punc">[ ]</span>`;
+    const lines = [`${pad}<span class="j-punc">[</span>`];
+    for (const item of value) lines.push(highlightJson(item, depth + 1));
+    lines.push(`${pad}<span class="j-punc">]</span>`);
+    return lines.join("\n");
+  }
+  const keys = Object.keys(value);
+  if (keys.length === 0) return `${pad}<span class="j-punc">{ }</span>`;
+  const lines = [`${pad}<span class="j-punc">{</span>`];
+  const padN = "  ".repeat(depth + 1);
+  for (const key of keys) {
+    const keyHtml = `<span class="j-key">"${escapeHtml(key)}"</span><span class="j-punc">:</span> `;
+    const rendered = highlightJson(value[key], depth + 1);
+    lines.push(`${padN}${keyHtml}${rendered.slice(padN.length)}`);
+  }
+  lines.push(`${pad}<span class="j-punc">}</span>`);
+  return lines.join("\n");
+}
+
+function roleLabel(role) {
+  const labels = { system: "系统", user: "用户", assistant: "助手", tool: "工具", developer: "开发者", response: "返回" };
+  return labels[role] || role || "未知";
+}
+
+function renderLlmMessageContent(pre, text) {
+  const raw = text == null ? "" : String(text);
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    pre.textContent = "（空）";
+    return;
+  }
+  let parsed = null;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (_) {
+    parsed = null;
+  }
+  if (parsed !== null && typeof parsed === "object") {
+    pre.innerHTML = highlightJson(parsed);
+  } else {
+    pre.textContent = raw;
+  }
+}
+
+function renderLlmCallPayload(body, payload) {
+  const metaDefs = [
+    ["provider", "提供方"],
+    ["model", "模型"],
+    ["purpose", "用途"],
+    ["stream", "流式"],
+    ["attempt", "尝试次数"],
+    ["queue_wait_ms", "排队等待 ms"],
+    ["provider_latency_ms", "提供方耗时 ms"],
+    ["total_latency_ms", "总耗时 ms"],
+    ["input_tokens", "输入 tokens"],
+    ["cached_input_tokens", "缓存 tokens"],
+    ["output_tokens", "输出 tokens"],
+    ["reasoning_tokens", "推理 tokens"],
+    ["usage_accuracy", "用量精度"],
+    ["finish_reason", "结束原因"],
+    ["status", "状态"],
+    ["error_kind", "错误类型"],
+  ];
+  const meta = document.createElement("div");
+  meta.className = "trace-meta";
+  const rows = [];
+  for (const [key, label] of metaDefs) {
+    const value = payload[key];
+    if (value === undefined || value === null) continue;
+    const display = key === "stream" ? (value ? "是" : "否") : String(value);
+    rows.push(
+      `<div class="tm-row"><span class="tm-k">${escapeHtml(label)}</span><span class="tm-v">${escapeHtml(display)}</span></div>`
+    );
+  }
+  if (payload.charge !== undefined && payload.charge !== null) {
+    rows.push(
+      `<div class="tm-row"><span class="tm-k">费用</span><span class="tm-v">${escapeHtml(JSON.stringify(payload.charge))}</span></div>`
+    );
+  }
+  meta.innerHTML = rows.join("");
+  body.appendChild(meta);
+
+  const content = payload.content || {};
+  const messages = Array.isArray(content.messages) ? content.messages : [];
+  for (const message of messages) {
+    const block = document.createElement("div");
+    block.className = "trace-msg";
+    const role = document.createElement("span");
+    role.className = `trace-role role-${escapeHtml(String(message.role || "unknown"))}`;
+    role.textContent = roleLabel(message.role);
+    const pre = document.createElement("pre");
+    pre.className = "trace-msg-content";
+    renderLlmMessageContent(pre, message.content);
+    block.appendChild(role);
+    block.appendChild(pre);
+    body.appendChild(block);
+  }
+
+  const response = content.response;
+  if (response != null && String(response).trim() !== "") {
+    const block = document.createElement("div");
+    block.className = "trace-msg trace-response";
+    const role = document.createElement("span");
+    role.className = "trace-role role-assistant";
+    role.textContent = "返回";
+    const pre = document.createElement("pre");
+    pre.className = "trace-msg-content";
+    renderLlmMessageContent(pre, response);
+    block.appendChild(role);
+    block.appendChild(pre);
+    body.appendChild(block);
+  }
 }
 
 showView("packs");

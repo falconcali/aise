@@ -1,6 +1,6 @@
 use aise::config::AssetLimitsConfig;
 use aise::domain::asset::entity::KnowledgeEntity;
-use aise::domain::asset::ids::{PlayerId, StoryRoleKey, TopicKey};
+use aise::domain::asset::ids::{LocationKey, PlayerId, SceneKey, StoryRoleKey, TopicKey};
 use aise::domain::ids::{CharacterId, StoryId};
 use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::story_instance::snapshot::KnowledgeSnapshotRef;
@@ -74,7 +74,18 @@ fn valid_pack_json() -> String {
             "topics": {
                 "gate": {"label": "Gate", "aliases": ["the gate"]}
             },
-            "facts": {},
+            "facts": {
+                "village_gate": {
+                    "proposition": null,
+                    "content": "The village gate is closed.",
+                    "entities": [
+                        {"kind": "location", "key": "village"},
+                        {"kind": "scene", "key": "scene_1"}
+                    ],
+                    "topics": ["gate"],
+                    "salience": 80
+                }
+            },
             "rumors": {}
         },
         "start": {
@@ -227,6 +238,32 @@ async fn zero_result_request_never_falls_back_to_full_scan() {
         .await
         .expect("query");
     assert!(records.is_empty());
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn sqlite_entity_query_accepts_multiple_selectors() {
+    let (sqlite, snapshot, db) = seeded_store("entity_multiple").await;
+    let filter = KnowledgeFilter {
+        audience: RetrievalAudience::GlobalWriter,
+        knowledge_kinds: vec![KnowledgeKind::Fact],
+        authorized_memory_owners: Vec::new(),
+        max_item_bytes: 4096,
+    };
+    let records = sqlite
+        .find_by_entities(EntityKnowledgeQuery {
+            snapshot: &snapshot,
+            filter: &filter,
+            entities: &[
+                KnowledgeEntity::Location(LocationKey::from("village")),
+                KnowledgeEntity::Scene(SceneKey::from("scene_1")),
+            ],
+            limit: 8,
+        })
+        .await
+        .expect("query");
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].matches.len(), 2);
     let _ = std::fs::remove_file(&db);
 }
 

@@ -190,7 +190,7 @@ AISE v3 只有一条资产制作路径：所有人物卡、世界书和故事包
 包含诱导模型越权的文本，因此系统还必须保证：
 
 1. LLM 只能产生不可信 `StoryProposal`。
-2. Proposal 必须经过 Schema、引用、权限、玩家控制、知识边界和领域不变量校验。
+2. Proposal 必须经过 Schema、引用、权限、知识边界和领域不变量校验。
 3. 只有 `ValidatedChangeSet` 可以进入 `TurnCommitter`。
 4. Story Pack 不能授予 Tool、网络、文件、数据库或其他外部权限。
 5. 所有资源数量、文本长度、Context 大小和 Graph 规模都受引擎硬预算限制。
@@ -976,7 +976,7 @@ Narrative Graph 不新增可互相调用的 Pipeline。它由现有固定流程�
    CharacterId，分发对应 Impulse，并执行知识过滤；玩家控制的角色完全跳过。
 6. `StoryGenerator` 根据 Global Event Intent 与 Character Thought 生成
    `StoryProposal`。
-7. `ValidationPipeline` 校验知识泄漏、玩家控制、Graph 权限、事件合法性与叙事一致性；
+7. `ValidationPipeline` 校验知识泄漏、Graph 权限、事件合法性与叙事一致性；
    `StoryRepairer` 只能修复 Proposal，不能修改 Graph Definition。
 8. `TurnCommitter` 原子提交 Validated Story、Event、Fact、Rumor、Memory、Character、
    Scene 与 Narrative State 变更。

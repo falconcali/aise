@@ -792,3 +792,115 @@ button:disabled {
 .trace-body .trace-span {
   margin-top: 2px;
 }
+
+.trace-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 4px 18px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.tm-row {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tm-k {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.tm-v {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.trace-role {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--panel-hover);
+  border: 1px solid var(--border);
+}
+
+.trace-role.role-system {
+  color: #c792ea;
+  background: rgba(199, 146, 234, 0.12);
+  border-color: rgba(199, 146, 234, 0.35);
+}
+
+.trace-role.role-user {
+  color: var(--accent);
+  background: rgba(108, 158, 248, 0.12);
+  border-color: rgba(108, 158, 248, 0.35);
+}
+
+.trace-role.role-assistant,
+.trace-role.role-response {
+  color: var(--ok);
+  background: rgba(74, 222, 128, 0.12);
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
+.trace-role.role-tool {
+  color: var(--warn);
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.trace-msg-content {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.j-key {
+  color: var(--accent);
+}
+
+.j-str {
+  color: #a5d6a7;
+}
+
+.j-num {
+  color: #ffab70;
+}
+
+.j-bool {
+  color: #f48fb1;
+}
+
+.j-null {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.j-punc {
+  color: var(--muted);
+}

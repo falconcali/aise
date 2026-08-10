@@ -3,7 +3,7 @@ assets:
     kind: text
     source_path: files/writer-planner.md.j2
     output_contract_ref: PlannerOutput
-    hash: sha256:df7ebc62811bd001cb4ccbf814c9bbe70d55e640a8ccf5d9977ea8a44c94a091
+    hash: sha256:d7c8fbaa577a5696219278d43f64563a4e20e9d4f83aa32904635e82709def94
     status: active
   - asset_id: context-v1/character-think
     kind: text

@@ -1,7 +1,6 @@
 pub mod consistency;
 pub mod domain_invariant;
 pub mod knowledge_boundary;
-pub mod player_control;
 pub mod schema;
 pub mod world_fact_evidence;
 

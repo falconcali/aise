@@ -7,8 +7,8 @@ use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::narrative_graph::director::NarrativePlan;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{
-    BaselineContext, CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest, RetrievalRequestOrigin,
-    WriterPlan, WriterStoryGoal,
+    BaselineContext, CharacterThinkRequest, EntitySignal, RetrievalAudience, RetrievalPlan, RetrievalRequest,
+    RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
 };
 use crate::planning::error::PlanningError;
 use crate::planning::planner_output::PlannerOutput;
@@ -79,7 +79,7 @@ impl RetrievalPlanBuilder {
         }
         requests.extend(self.narrative_requests(narrative_plan)?);
         for gap in planner_output.context_gaps {
-            requests.push(self.planner_gap_request(gap, snapshot, &think_requests)?);
+            requests.push(self.planner_gap_request(gap, baseline, snapshot, &think_requests)?);
         }
         let requests = dedupe_and_sort(requests);
         if requests.len() > self.retrieval.max_requests {
@@ -154,6 +154,7 @@ impl RetrievalPlanBuilder {
     fn planner_gap_request(
         &self,
         mut gap: crate::planning::planner_output::PlannerContextGap,
+        baseline: &BaselineContext,
         snapshot: &StoryReadSnapshot,
         think_requests: &[CharacterThinkRequest],
     ) -> Result<RetrievalRequest, PlanningError> {
@@ -223,9 +224,7 @@ impl RetrievalPlanBuilder {
         }
         authorize_gap(&gap, think_requests)?;
         for entity in &gap.entities {
-            if !snapshot.entity_catalog().contains(entity)
-                && !matches!(entity, KnowledgeEntity::Character(_) | KnowledgeEntity::Role(_))
-            {
+            if !entity_is_known(entity, snapshot.entity_catalog(), &baseline.retrieval_signals.entities) {
                 return Err(PlanningError::UnknownRetrievalKey);
             }
         }
@@ -401,3 +400,13 @@ fn origin_rank(origin: RetrievalRequestOrigin) -> u8 {
         RetrievalRequestOrigin::Planner => 2,
     }
 }
+
+fn entity_is_known(entity: &KnowledgeEntity, catalog: &[KnowledgeEntity], signals: &[EntitySignal]) -> bool {
+    catalog.contains(entity)
+        || signals.iter().any(|signal| &signal.entity == entity)
+        || matches!(entity, KnowledgeEntity::Character(_) | KnowledgeEntity::Role(_))
+}
+
+#[cfg(test)]
+#[path = "tests/retrieval_plan_builder_tests.rs"]
+mod tests;

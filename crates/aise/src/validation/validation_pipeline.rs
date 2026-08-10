@@ -22,7 +22,6 @@ use crate::validation::validators::DeterministicValidator;
 use crate::validation::validators::consistency::ConsistencyValidator;
 use crate::validation::validators::domain_invariant::DomainInvariantValidator;
 use crate::validation::validators::knowledge_boundary::KnowledgeBoundaryValidator;
-use crate::validation::validators::player_control::PlayerControlValidator;
 use crate::validation::validators::schema::SchemaValidator;
 use crate::validation::validators::world_fact_evidence::WorldFactEvidenceValidator;
 use async_trait::async_trait;
@@ -34,7 +33,6 @@ pub struct ValidationPipeline {
     consistency: ConsistencyValidator,
     domain_invariant: DomainInvariantValidator,
     knowledge_boundary: KnowledgeBoundaryValidator,
-    player_control: PlayerControlValidator,
     world_fact_evidence: WorldFactEvidenceValidator,
 }
 
@@ -76,7 +74,6 @@ impl ValidationPipeline {
             &self.consistency,
             &self.domain_invariant,
             &self.knowledge_boundary,
-            &self.player_control,
             &self.world_fact_evidence,
         ] {
             issues.extend(validator.validate(ctx)?);

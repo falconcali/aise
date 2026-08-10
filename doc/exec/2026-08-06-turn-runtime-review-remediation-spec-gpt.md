@@ -351,7 +351,6 @@ pub enum ValidationIssueCode {
     ModificationForbidden,
     DomainInvariantViolated,
     KnowledgeBoundaryViolated,
-    PlayerControlViolated,
     WorldFactEvidenceMissing,
     WorldFactEvidenceInvalid,
     NarrativeInconsistent,

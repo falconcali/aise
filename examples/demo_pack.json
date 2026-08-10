@@ -24,7 +24,7 @@
     "traveler_card": {
       "spec": "aise_char_v3",
       "spec_version": "3.0",
-      "character_key": "traveler",
+      "character_key": "traveler_card",
       "meta": {
         "name": "旅人",
         "version": "0.1.0"

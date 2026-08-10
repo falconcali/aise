@@ -180,10 +180,12 @@ fn push_selector_exists(builder: &mut QueryBuilder<'_, Sqlite>, selector: &Selec
                  WHERE m.story_id = e.story_id AND m.knowledge_kind = e.knowledge_kind \
                  AND m.source_id = e.source_id AND (",
             );
-            let mut separated = builder.separated(" OR ");
-            for entity in *entities {
+            for (index, entity) in entities.iter().enumerate() {
+                if index > 0 {
+                    builder.push(" OR ");
+                }
                 let (kind, key) = entity_parts(entity);
-                separated
+                builder
                     .push("(m.entity_kind = ")
                     .push_bind(kind)
                     .push(" AND m.entity_key = ")
