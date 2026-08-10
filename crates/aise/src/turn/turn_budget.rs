@@ -1,6 +1,6 @@
 use crate::config::{RetrievalConfig, TurnConfig, TurnContentLimitsConfig};
-use crate::core::turn_contract::{LlmBudgetReservation, LlmCallId, LlmCallUsage};
-use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
+use crate::turn::turn_contract::{LlmBudgetReservation, LlmCallId, LlmCallUsage};
+use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
 #[derive(Debug, Clone)]
 pub struct TurnBudget {

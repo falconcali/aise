@@ -1,11 +1,11 @@
-use crate::core::StoryProposal;
-use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
-use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::core::turn_validation::ValidationDecision;
 use crate::domain::asset::validation::BoundedText;
+use crate::domain::turn::StoryProposal;
 use crate::llm::gateway::LlmGateway;
 use crate::prompt::{ModelRequest, StoryGeneratorContext, StoryRepairerContext};
+use crate::turn::turn_context::TurnExecutionContext;
+use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
+use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
+use crate::turn::turn_validation::ValidationDecision;
 use async_trait::async_trait;
 use std::sync::Arc;
 

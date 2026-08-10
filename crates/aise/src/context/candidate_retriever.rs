@@ -1,6 +1,6 @@
 use crate::context::error::ContextError;
-use crate::core::turn_data::{CandidateRetrieverKind, ProviderEvidence, RetrievalAudience, RetrievalRequest};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
+use crate::domain::turn::{CandidateRetrieverKind, ProviderEvidence, RetrievalAudience, RetrievalRequest};
 use crate::persistence::knowledge_read_port::{KnowledgeLookupHit, KnowledgeRecord};
 use async_trait::async_trait;
 use std::collections::BTreeMap;

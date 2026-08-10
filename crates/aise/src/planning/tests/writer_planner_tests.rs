@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::turn_data::{CharacterThinkRequest, RetrievalAudience, WriterStoryGoal};
+use crate::domain::turn::{CharacterThinkRequest, RetrievalAudience, WriterStoryGoal};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::CharacterId;
 use crate::planning::planner_output::PlannerOutput;

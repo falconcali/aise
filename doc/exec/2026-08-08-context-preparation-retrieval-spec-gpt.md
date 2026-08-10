@@ -50,8 +50,8 @@ Replace the legacy Turn context path with a bounded Story Pack v3 baseline, dete
 - Delete superseded types, fields, functions, tests, Prompt assembly, Store reads, config fields, and dead comments in the same change.
 - `TurnRuntime` remains the only Pipeline orchestrator. No Pipeline may call another Pipeline.
 - Every Pipeline continues to implement `TurnExecutionPipeline` and communicates only through `&mut TurnExecutionContext`.
-- `core` may depend on `domain`; `core` must not import `context`, `planning`, `character`, `story`, `validation`, `runtime`, or persistence adapters.
-- Domain code must contain zero Core imports.
+- `turn` may depend on `domain`; `turn` must not import `context`, `planning`, `character`, `story`, `validation`, `runtime`, or persistence adapters.
+- Domain code must contain zero turn imports.
 - Imported assets, Story state, Player Input, Retrieved Context, Character Thought, and LLM output are untrusted data. Only the internal Prompt module may create a System message.
 - All collections and text fields introduced by this spec require explicit count, byte, and/or token limits from trusted `AiseConfig`.
 - No write lock may cross `.await`; no Store, channel, trace sink, or LLM side effect may run while a write lock is held.
@@ -67,7 +67,7 @@ It also supersedes `2026-08-07-story-pack-v3-spec-gpt.md` §3.10 where `CurrentP
 
 1. Add the Domain sequencing, scene, constraint, Topic Dictionary, and knowledge metadata contracts.
 2. Add the persistence migration, sole Story Instance Snapshot loader, `KnowledgeSnapshotRef`, and indexed `KnowledgeReadPort`.
-3. Replace `core::turn_data` and update `TurnExecutionContext`/`TurnBudget` to the final bounded contracts.
+3. Replace `domain::turn` and update `TurnExecutionContext`/`TurnBudget` to the final bounded contracts.
 4. Implement continuity validation, character views, Topic matching, and retrieval signal extraction in `BaselineContextBuilder`.
 5. Integrate `NarrativeDirector`, strict Planner output, typed Prompt requests, and deterministic `RetrievalPlanBuilder`.
 6. Implement Entity/Topic Candidate Retrievers, audience filtering, ranking, deduplication, and budget trimming.
@@ -83,7 +83,7 @@ It also supersedes `2026-08-07-story-pack-v3-spec-gpt.md` §3.10 where `CurrentP
 
 ```text
 crates/aise/src/
-├── core/
+├── turn/
 │   ├── turn_context.rs
 │   ├── turn_budget.rs
 │   ├── token_estimator.rs
@@ -157,14 +157,14 @@ crates/aise/assets/persistence/mig/
 Required deletions:
 
 ```text
-crates/aise/src/core/turn_data.rs
+crates/aise/src/turn/turn_data.rs
 crates/aise/src/context/context_item.rs
 crates/aise/src/domain/story_state.rs
 crates/aise/src/prompt/context_merger.rs
 crates/aise/src/prompt/tests/context_merger_tests.rs
 ```
 
-`core/turn_data/mod.rs`, `context/mod.rs`, `planning/mod.rs`, `domain/knowledge/mod.rs`, `domain/story_instance/mod.rs`, and `persistence/mod.rs` contain only declarations, re-exports, and item attributes.
+`domain/turn/mod.rs`, `context/mod.rs`, `planning/mod.rs`, `domain/knowledge/mod.rs`, `domain/story_instance/mod.rs`, and `persistence/mod.rs` contain only declarations, re-exports, and item attributes.
 
 ### 3.2 Story Sequence and Continuity
 
@@ -583,7 +583,7 @@ The Snapshot contains no Fact, Rumor, or Memory bodies and no `WorldState` lore 
 
 `KnowledgeSnapshotRef.story_id` equals Snapshot `story_id`, `pack_digest` equals `pack.digest`, and `base_revision` equals Snapshot `base_revision`. Snapshot construction fails on any mismatch.
 
-`core/turn_data/baseline.rs` owns the exact Store read limits:
+`domain/turn/baseline.rs` owns the exact Store read limits:
 
 ```rust
 #[derive(Debug, Clone, Copy)]
@@ -623,7 +623,7 @@ The Store applies every limit while reading and before allocating the final coll
 
 ### 3.6 Baseline and Character Views
 
-`core/turn_data/baseline.rs` defines the final Baseline:
+`domain/turn/baseline.rs` defines the final Baseline:
 
 ```rust
 #[derive(Debug, Clone, Serialize)]
@@ -689,7 +689,7 @@ Fact/Rumor/Memory bodies
 
 ### 3.7 Retrieval Signals and Topic Matching
 
-`core/turn_data/retrieval.rs` defines signal values; it stores resolved keys and origin metadata, never source text:
+`domain/turn/retrieval.rs` defines signal values; it stores resolved keys and origin metadata, never source text:
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -785,7 +785,7 @@ pub struct NarrativePlan {
 
 ### 3.9 Planner Output, Retrieval Requests, and Writer Plan
 
-`core/turn_data/planning.rs` owns the final Turn plan contracts:
+`domain/turn/planning.rs` owns the final Turn plan contracts:
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -978,7 +978,7 @@ pub trait KnowledgeReadPort: Send + Sync {
 }
 ```
 
-The provider identity and match provenance contracts live in `core/turn_data/retrieval.rs` so Core never imports `context`:
+The provider identity and match provenance contracts live in `domain/turn/retrieval.rs` so turn never imports `context`:
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -998,7 +998,7 @@ pub enum CandidateMatch {
 }
 ```
 
-`context/candidate_retriever.rs` imports those Core contracts and defines the provider extension boundary:
+`context/candidate_retriever.rs` imports those turn contracts and defines the provider extension boundary:
 
 ```rust
 #[derive(Debug, Clone)]
@@ -1056,7 +1056,7 @@ Do not add `Bm25CandidateRetriever` or `EmbeddingCandidateRetriever` in this cha
 
 ### 3.11 Retrieved Context, Provenance, and Ranking
 
-`core/turn_data/retrieval.rs` owns the sole final Context item model:
+`domain/turn/retrieval.rs` owns the sole final Context item model:
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -1144,9 +1144,9 @@ impl RetrievedContext {
 }
 ```
 
-`RetrievedContextError` is Core-owned. `ContextRetrievalPipeline` constructs results only through `try_new`; `TurnExecutionContext::set_retrieved_context` repeats the checks against its own Turn limits before phase advancement.
+`RetrievedContextError` is owned by `domain::turn`. `ContextRetrievalPipeline` constructs results only through `try_new`; `TurnExecutionContext::set_retrieved_context` repeats the checks against its own Turn limits before phase advancement.
 
-`core/token_estimator.rs` owns the shared estimator:
+`domain/text/token_estimator.rs` owns the shared estimator:
 
 ```rust
 pub fn estimate_text_tokens(text: &str) -> u64;
@@ -1268,7 +1268,7 @@ pub struct NarrativeValidatorContext {
 
 `NarrativeValidatorContext.baseline` is the bounded serializable projection built from the same Snapshot revision; the LLM-facing Validator does not serialize the private Snapshot object itself. Deterministic Validators continue to read the same Snapshot directly from `TurnExecutionContext`.
 
-`core/turn_data/character.rs` owns the bounded transient cognition contract:
+`domain/turn/character.rs` owns the bounded transient cognition contract:
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1688,12 +1688,12 @@ The minimum production and contract change set is:
 doc/design/2026-08-04-Architecture-gpt.md
 crates/aise/assets/persistence/mig/0009_context_retrieval.sql
 crates/aise/src/config.rs
-crates/aise/src/core/mod.rs
-crates/aise/src/core/turn_budget.rs
-crates/aise/src/core/turn_context.rs
-crates/aise/src/core/token_estimator.rs                  ADD
-crates/aise/src/core/turn_data.rs                         DELETE
-crates/aise/src/core/turn_data/*                         ADD
+crates/aise/src/turn/mod.rs
+crates/aise/src/turn/turn_budget.rs
+crates/aise/src/turn/turn_context.rs
+crates/aise/src/turn/token_estimator.rs                  ADD
+crates/aise/src/turn/turn_data.rs                         DELETE
+crates/aise/src/turn/turn_data/*                         ADD
 crates/aise/src/context/*
 crates/aise/src/context/context_item.rs                   DELETE
 crates/aise/src/domain/asset/ids.rs
@@ -1987,10 +1987,10 @@ Identifiers and error codes are structured fields, not interpolated messages. Sp
 - [ ] `rg -n 'max_story_instructions_bytes|max_story_config_bytes|max_world_fact_bytes|max_memories|max_memory_bytes' crates/aise/src --glob '*.rs'` returns zero matches.
 - [ ] `rg -n '\bmax_retrieved_items\b|\bmax_retrieval_candidates\b|\bmax_retrieved_item_bytes\b|\bmax_retrieved_tokens\b' crates/aise/src/config.rs` returns zero matches.
 - [ ] `rg -n '\bmax_recent_turns\b|\bmax_recent_turn_bytes\b' crates/aise/src/config.rs` returns zero matches.
-- [ ] `rg -n 'pub fn estimate_text_tokens\b' crates/aise/src --glob '*.rs'` returns exactly one match in `core/token_estimator.rs`, and `rg -n 'pub fn estimate_tokens\(text' crates/aise/src --glob '*.rs'` returns zero matches.
+- [ ] `rg -n 'pub fn estimate_text_tokens\b' crates/aise/src --glob '*.rs'` returns exactly one match in `domain/text/token_estimator.rs`, and `rg -n 'pub fn estimate_tokens\(text' crates/aise/src --glob '*.rs'` returns zero matches.
 - [ ] `cargo test -p aise --test dependency_direction_tests` passes.
-- [ ] `rg -n -U '(?:crate|super(?:::\s*super)*)::\s*core\b|(?:crate|super)::\s*\{[^}]*\bcore(?:::|,|\})' crates/aise/src/domain --glob '*.rs'` returns zero matches.
-- [ ] `core/turn_data/mod.rs` and every touched `mod.rs`/`lib.rs` remain index-only.
+- [ ] `rg -n -U '(?:crate|super(?:::\s*super)*)::\s*turn\b|(?:crate|super)::\s*\{[^}]*\bturn(?:::|,|\})' crates/aise/src/domain --glob '*.rs'` returns zero matches.
+- [ ] `domain/turn/mod.rs` and every touched `mod.rs`/`lib.rs` remain index-only.
 - [ ] All new unit tests use dedicated `tests/<source>_tests.rs`; no new inline `mod tests` block exists.
 - [ ] `doc/design/2026-08-04-Architecture-gpt.md` §§8.2–8.3 and §§10–11 describe the final contracts and no longer list legacy Baseline fields.
 
@@ -2026,10 +2026,10 @@ Identifiers and error codes are structured fields, not interpolated messages. Sp
 - Story Pack trust and knowledge model: [AISE Story Pack Design v3.0](../design/2026-08-06-StoryPackDesign-gpt.md)
 - Prior Story Pack implementation contract: [Story Pack v3 — Spec](./2026-08-07-story-pack-v3-spec-gpt.md)
 - Earlier temporary two-Snapshot rule superseded by this spec: [Domain-to-Core Dependency Removal — Spec](./2026-08-08-domain-core-dependency-removal-spec-gpt.md)
-- Current legacy Baseline and flat Context contracts: `crates/aise/src/core/turn_data.rs:103`, `crates/aise/src/core/turn_data.rs:146`
+- Current legacy Baseline and flat Context contracts: `crates/aise/src/turn/turn_data.rs:103`, `crates/aise/src/turn/turn_data.rs:146`
 - Current Baseline copies old instructions/config/all Characters: `crates/aise/src/context/baseline_ctx_builder.rs:53`
 - Current full-scan keyword Retrieval: `crates/aise/src/context/retrieval_pipeline.rs:20`, `crates/aise/src/context/retrieval_pipeline.rs:109`
-- Current unconditional Retrieval/Character skips: `crates/aise/src/core/turn_context.rs:295`
+- Current unconditional Retrieval/Character skips: `crates/aise/src/turn/turn_context.rs:295`
 - Current duplicate scoped Context model: `crates/aise/src/context/context_item.rs:6`
 - Current Story Pack v3 Snapshot with eager knowledge bodies: `crates/aise/src/domain/story_instance/snapshot.rs:30`
 - Current World Book Entry metadata: `crates/aise/src/domain/asset/world_book.rs:33`

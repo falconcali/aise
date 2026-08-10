@@ -1,7 +1,7 @@
 use crate::context::candidate_retriever::{CandidateRetrievalRequest, CandidateRetriever, ContextCandidate};
 use crate::context::error::ContextError;
-use crate::core::turn_data::{CandidateRetrieverKind, RetrievalAudience, RetrievalRequest};
 use crate::domain::knowledge::KnowledgeKind;
+use crate::domain::turn::{CandidateRetrieverKind, RetrievalAudience, RetrievalRequest};
 use crate::persistence::knowledge_read_port::{KnowledgeFilter, KnowledgeReadPort, TopicKnowledgeQuery};
 use async_trait::async_trait;
 use std::sync::Arc;

@@ -1,4 +1,4 @@
-use aise::core::turn_contract::TurnCancellation;
+use aise::turn::turn_contract::TurnCancellation;
 use aise_server::tasks::{TurnTaskError, TurnTaskSpec, TurnTaskSupervisor, TurnTaskSupervisorConfig};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

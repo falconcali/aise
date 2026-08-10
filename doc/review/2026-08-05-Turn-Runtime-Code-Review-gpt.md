@@ -3,13 +3,13 @@
 > **审查对象**：`falconcali/aise` `main@bf653e5439ff04a563d50fb8be8f8492a6bd8bee`  
 > **审查基线**：`doc/exec/2026-08004-Turn-Runtime-Codegen-Spec-gpt.md` v1.0（基线 `main@c14f84e`）  
 > **审查日期**：2026-08-05  
-> **覆盖范围**：Turn Core、Engine/Runtime、各业务 Pipeline、LLM Gateway/Provider、Persistence、SSE/Task 生命周期，以及对应测试；Prompt 资产管理子系统只检查与 Turn Runtime 的集成点。
+> **覆盖范围**：Turn、Engine/Runtime、各业务 Pipeline、LLM Gateway/Provider、Persistence、SSE/Task 生命周期，以及对应测试；Prompt 资产管理子系统只检查与 Turn Runtime 的集成点。
 
 ## 1. 总体结论
 
 **结论：当前实现不能判定为 Spec 最终完成，建议暂不进入新的业务增强阶段。**
 
-核心架构方向是对的，而且主要骨架已经落地：Core Contract、固定 `TurnPipelineSet`、有界 Repair Loop、Story 级串行化、统一 `LlmGateway`、Proposal → Validation → Commit、revision CAS、幂等、事务和 Outbox 都已存在。当前 commit 的 GitHub Actions 也全部为绿色。
+核心架构方向是对的，而且主要骨架已经落地：turn Contract、固定 `TurnPipelineSet`、有界 Repair Loop、Story 级串行化、统一 `LlmGateway`、Proposal → Validation → Commit、revision CAS、幂等、事务和 Outbox 都已存在。当前 commit 的 GitHub Actions 也全部为绿色。
 
 但代码仍存在若干会破坏 Spec 核心不变量的问题，主要集中在五个方面：
 
@@ -23,7 +23,7 @@
 
 ## 2. 已正确完成、应当保留的部分
 
-- 已建立 `core` Turn Contract 层，旧的 Runtime Contract 文件和 `StoryDraft` 路径已删除。
+- 已建立 `turn` Turn Contract 层，旧的 Runtime Contract 文件和 `StoryDraft` 路径已删除。
 - 所有业务 Pipeline 均通过 `TurnExecutionPipeline::execute(&mut TurnExecutionContext)` 工作，业务 Pipeline 未直接依赖 `LlmProvider`。
 - `TurnPipelineSet` 使用固定命名字段并校验 Stage，Runtime 顺序不可动态重排。
 - Retrieval、Character Think 的跳过由 Runtime 控制，跳过时不会发送 `StageStarted`。
@@ -69,7 +69,7 @@
 
 ### P1-03：错误被错误分类，Context 没有进入完整终态
 
-**证据**：`AiseError` 使用 `Llm(#[from] LlmError)` 和 `Store(#[from] StoreError)` 包装内层错误（[`error.rs:1-42`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/error.rs#L1-L42)），但 Engine 只匹配顶层 `AiseError::Cancelled/RevisionConflict/IdempotencyConflict`（[`engine.rs:162-173`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/engine.rs#L162-L173)）。Context 只有 Validation Reject 会写 `Failed`，没有通用的 `mark_failed/mark_cancelled/mark_conflict`（[`turn_context.rs:258-282`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/core/turn_context.rs#L258-L282)）。
+**证据**：`AiseError` 使用 `Llm(#[from] LlmError)` 和 `Store(#[from] StoreError)` 包装内层错误（[`error.rs:1-42`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/error.rs#L1-L42)），但 Engine 只匹配顶层 `AiseError::Cancelled/RevisionConflict/IdempotencyConflict`（[`engine.rs:162-173`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/engine.rs#L162-L173)）。Context 只有 Validation Reject 会写 `Failed`，没有通用的 `mark_failed/mark_cancelled/mark_conflict`（[`turn_context.rs:258-282`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/turn/turn_context.rs#L258-L282)）。
 
 **结果**：
 
@@ -79,17 +79,17 @@
 
 **建议**：建立单一 `TurnFailureKind`/错误归一化层，并在 Engine finalizer 中无条件推进 Context 到唯一终态。增加 nested LLM cancel、nested Store conflict、repair exhaustion、pipeline failure 的 Phase 与事件断言。
 
-### P1-04：Core 的依赖方向并未真正单向
+### P1-04：turn 的依赖方向并未真正单向
 
-**证据**：Core 文件直接使用 `crate::error::AiseError`，而 `AiseError` 又导入 `llm::LlmError` 和 `persistence::StoreError`。同时 `LlmError::Transport` 暴露 `reqwest::Error`，`StoreError::Database` 暴露 `sqlx::Error`（[`llm/error.rs`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/llm/error.rs)、[`persistence/store.rs:17-31`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/persistence/store.rs#L17-L31)）。
+**证据**：turn 文件直接使用 `crate::error::AiseError`，而 `AiseError` 又导入 `llm::LlmError` 和 `persistence::StoreError`。同时 `LlmError::Transport` 暴露 `reqwest::Error`，`StoreError::Database` 暴露 `sqlx::Error`（[`llm/error.rs`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/llm/error.rs)、[`persistence/store.rs:17-31`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/persistence/store.rs#L17-L31)）。
 
-**结果**：逻辑依赖实际形成 `core -> AiseError -> llm/persistence` 的反向边；Provider/Gateway Error 和 Store Port/SQLite Adapter Error 也没有分层。当前依赖测试只扫描直接字符串，因此没有发现这条传递依赖。
+**结果**：逻辑依赖实际形成 `turn -> AiseError -> llm/persistence` 的反向边；Provider/Gateway Error 和 Store Port/SQLite Adapter Error 也没有分层。当前依赖测试只扫描直接字符串，因此没有发现这条传递依赖。
 
-**建议**：拆分 Core Turn Error、Gateway `LlmError`、Provider `LlmProviderError`、Store Port Error 和 SQLite Adapter Error；只在 Engine/Composition Root 做映射，Core Error 不得持有外层错误类型。
+**建议**：拆分 turn Turn Error、Gateway `LlmError`、Provider `LlmProviderError`、Store Port Error 和 SQLite Adapter Error；只在 Engine/Composition Root 做映射，turn Error 不得持有外层错误类型。
 
 ### P1-05：`ValidatedChangeSet` 不是封闭的可信类型
 
-**证据**：`ValidatedChangeSet` 字段虽私有，但 `new` 是公开方法（[`turn_validation.rs:98-125`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/core/turn_validation.rs#L98-L125)），集成测试也在 Validation 之外直接构造它。`ValidationResult::pass().with_issue(fatal(...))` 也能构造“Pass + Fatal Issue”的矛盾对象（[`turn_validation.rs:20-45`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/core/turn_validation.rs#L20-L45)）。
+**证据**：`ValidatedChangeSet` 字段虽私有，但 `new` 是公开方法（[`turn_validation.rs:98-125`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/turn/turn_validation.rs#L98-L125)），集成测试也在 Validation 之外直接构造它。`ValidationResult::pass().with_issue(fatal(...))` 也能构造“Pass + Fatal Issue”的矛盾对象（[`turn_validation.rs:20-45`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/turn/turn_validation.rs#L20-L45)）。
 
 **结果**：类型系统没有真正保证 ChangeSet 只能由合法 Validation 产生，也没有保证 Decision 与 Issues 一致。
 
@@ -105,7 +105,7 @@
 
 ### P1-07：Context 与 Snapshot 没有完整执行资源上限
 
-**证据**：`set_writer_plan` 和 `set_story_proposal/replace_story_proposal` 不检查集合、字符串或 token 上限；Retrieved/Thought 只检查数量、不检查内容大小（[`turn_context.rs:161-190`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/core/turn_context.rs#L161-L190)、[`turn_context.rs:228-292`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/core/turn_context.rs#L228-L292)）。`SnapshotLimits` 只限制 Recent Turns 和 Memories，不限制 Characters、World Facts 或单项内容（[`turn_data.rs:9-24`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/core/turn_data.rs#L9-L24)）。Retrieval 会先展开并收集全部候选，再排序后截断。
+**证据**：`set_writer_plan` 和 `set_story_proposal/replace_story_proposal` 不检查集合、字符串或 token 上限；Retrieved/Thought 只检查数量、不检查内容大小（[`turn_context.rs:161-190`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/turn/turn_context.rs#L161-L190)、[`turn_context.rs:228-292`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/turn/turn_context.rs#L228-L292)）。`SnapshotLimits` 只限制 Recent Turns 和 Memories，不限制 Characters、World Facts 或单项内容（[`turn_data.rs:9-24`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/turn/turn_data.rs#L9-L24)）。Retrieval 会先展开并收集全部候选，再排序后截断。
 
 此外，`TurnBudgetLimits::Default` 与 `TurnConfig::Default` 是两套数值且不一致，违反单一配置来源。
 
@@ -139,7 +139,7 @@ SSE Sink 还在 `std::sync::Mutex` 锁内执行 channel `try_send`（[`api/sse.r
 
 ### P1-11：StoryReadSnapshot/Baseline/Commit 缺少权威故事状态
 
-**证据**：`StoryReadSnapshot` 目前只有 revision、player ID、可选 World、Characters、Recent Turns 和 Player Memories（[`turn_data.rs:15-73`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/core/turn_data.rs#L15-L73)）。Baseline Builder 将 Story Instructions、Story Config、Active Constraints 设为空，并用最后一段 Story Text 近似 Current Scene、用最近一个 `summary_delta` 近似完整 Summary（[`baseline_ctx_builder.rs:50-78`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/context/baseline_ctx_builder.rs#L50-L78)）。Commit 也没有权威 Scene、Constraint、Summary 状态表的应用逻辑。
+**证据**：`StoryReadSnapshot` 目前只有 revision、player ID、可选 World、Characters、Recent Turns 和 Player Memories（[`turn_data.rs:15-73`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/turn/turn_data.rs#L15-L73)）。Baseline Builder 将 Story Instructions、Story Config、Active Constraints 设为空，并用最后一段 Story Text 近似 Current Scene、用最近一个 `summary_delta` 近似完整 Summary（[`baseline_ctx_builder.rs:50-78`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/context/baseline_ctx_builder.rs#L50-L78)）。Commit 也没有权威 Scene、Constraint、Summary 状态表的应用逻辑。
 
 **结果**：现有 Writer 虽然流程完整，但没有拿到 Spec 要求的核心故事上下文，摘要也可能被错误解释为完整状态。
 
@@ -161,7 +161,7 @@ SSE Sink 还在 `std::sync::Mutex` 锁内执行 channel `try_send`（[`api/sse.r
 
 ### P2-02：LLM Usage/Charge 没有形成持久化闭环
 
-**证据**：`CommittedTurnResult` 只保存 calls/input/output/total 聚合（[`turn_contract.rs:229-243`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/core/turn_contract.rs#L229-L243)），缺少 cached input、usage accuracy、provider、model、price version、charge 和单次调用记录；Embedding Output 也不携带 usage/charge。
+**证据**：`CommittedTurnResult` 只保存 calls/input/output/total 聚合（[`turn_contract.rs:229-243`](https://github.com/falconcali/aise/blob/bf653e5439ff04a563d50fb8be8f8492a6bd8bee/crates/aise/src/turn/turn_contract.rs#L229-L243)），缺少 cached input、usage accuracy、provider、model、price version、charge 和单次调用记录；Embedding Output 也不携带 usage/charge。
 
 **建议**：建立受限的 per-call usage ledger，并把聚合 usage/charge 与版本信息放入同一 Turn Commit 事务；幂等重放返回同一账务结果。
 
@@ -215,7 +215,7 @@ SSE Sink 还在 `std::sync::Mutex` 锁内执行 channel `try_send`（[`api/sse.r
 1. 封闭 `ValidatedChangeSet` 构造权限，强制 Decision/Issue 不变量。
 2. 补齐 Permission、Domain、Knowledge、Player Control 验证，明确 Thought → Fact 的证据协议。
 3. 将 Plan、Snapshot、Retrieved、Thought、Proposal、Validation、Trace 的数量与 byte/token 上限统一收口到 Context/Budget。
-4. 拆分 Core/Gateway/Provider/Store/Adapter Error，修复传递依赖方向。
+4. 拆分 turn/Gateway/Provider/Store/Adapter Error，修复传递依赖方向。
 
 ### 第三批：完成 Gateway 与生产生命周期
 

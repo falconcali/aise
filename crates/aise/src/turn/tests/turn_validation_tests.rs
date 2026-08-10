@@ -1,8 +1,8 @@
-use crate::core::turn_validation::{
-    StateChange, ValidatedChangeSet, ValidatedChangeSetParts, ValidationDecision, ValidationResult,
-};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::story_instance::snapshot::NarrativeConditionStateView;
+use crate::turn::turn_validation::{
+    StateChange, ValidatedChangeSet, ValidatedChangeSetParts, ValidationDecision, ValidationResult,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[test]

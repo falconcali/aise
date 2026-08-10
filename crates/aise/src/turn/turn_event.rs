@@ -1,7 +1,7 @@
-use crate::core::turn_contract::CommittedTurnResult;
-use crate::core::turn_pipeline::TurnStage;
-use crate::core::turn_trace::TurnTrace;
 use crate::domain::ids::TurnId;
+use crate::turn::turn_contract::CommittedTurnResult;
+use crate::turn::turn_pipeline::TurnStage;
+use crate::turn::turn_trace::TurnTrace;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -15,8 +15,8 @@ pub enum TurnEvent {
     ValidationCompleted {
         turn_id: TurnId,
         attempt: u32,
-        decision: crate::core::turn_validation::ValidationDecision,
-        issue_codes: Vec<crate::core::turn_validation::ValidationIssueCode>,
+        decision: crate::turn::turn_validation::ValidationDecision,
+        issue_codes: Vec<crate::turn::turn_validation::ValidationIssueCode>,
     },
 
     Committed {

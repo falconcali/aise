@@ -1,9 +1,9 @@
-use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_contract::TurnPhase;
-use crate::core::turn_error::TurnExecutionError;
-use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::domain::narrative::StoryTurn;
 use crate::persistence::store::{OutboxRecord, Store, TurnCommitSpec};
+use crate::turn::turn_context::TurnExecutionContext;
+use crate::turn::turn_contract::TurnPhase;
+use crate::turn::turn_error::TurnExecutionError;
+use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Instant;
@@ -27,7 +27,7 @@ impl TurnExecutionPipeline for TurnCommitter {
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         if ctx.phase() != TurnPhase::ReadyToCommit {
             return Err(TurnExecutionError::new(
-                crate::core::turn_error::TurnFailureKind::InvariantViolation,
+                crate::turn::turn_error::TurnFailureKind::InvariantViolation,
                 "commit_gate_rejected",
                 Some(TurnStage::TurnCommitter),
                 format!("committer requires ReadyToCommit phase, current {:?}", ctx.phase()),
@@ -37,7 +37,7 @@ impl TurnExecutionPipeline for TurnCommitter {
             .change_set()
             .ok_or_else(|| {
                 TurnExecutionError::new(
-                    crate::core::turn_error::TurnFailureKind::InvariantViolation,
+                    crate::turn::turn_error::TurnFailureKind::InvariantViolation,
                     "missing_change_set",
                     Some(TurnStage::TurnCommitter),
                     "committer requires a validated change set",
@@ -48,7 +48,7 @@ impl TurnExecutionPipeline for TurnCommitter {
             .snapshot()
             .ok_or_else(|| {
                 TurnExecutionError::new(
-                    crate::core::turn_error::TurnFailureKind::InvariantViolation,
+                    crate::turn::turn_error::TurnFailureKind::InvariantViolation,
                     "missing_snapshot",
                     Some(TurnStage::TurnCommitter),
                     "committer requires a story snapshot",
@@ -69,7 +69,7 @@ impl TurnExecutionPipeline for TurnCommitter {
                 event_type: format!("story_event.{}", event.kind.as_str()),
                 payload: serde_json::to_value(event).map_err(|_| {
                     TurnExecutionError::new(
-                        crate::core::turn_error::TurnFailureKind::InvariantViolation,
+                        crate::turn::turn_error::TurnFailureKind::InvariantViolation,
                         "outbox_serialization_failed",
                         Some(TurnStage::TurnCommitter),
                         "failed to serialize outbox event payload",
@@ -84,7 +84,7 @@ impl TurnExecutionPipeline for TurnCommitter {
                 id: turn_id.clone(),
                 sequence: snapshot.story_continuity().next_sequence().map_err(|_| {
                     TurnExecutionError::new(
-                        crate::core::turn_error::TurnFailureKind::InvariantViolation,
+                        crate::turn::turn_error::TurnFailureKind::InvariantViolation,
                         "story_sequence_overflow",
                         Some(TurnStage::TurnCommitter),
                         "failed to assign next story sequence",

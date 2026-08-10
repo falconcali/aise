@@ -1,10 +1,10 @@
 use crate::config::ContextPreparationConfig;
 use crate::context::error::ContextError;
-use crate::core::turn_data::{EntitySignal, RetrievalSignalOrigin, RetrievalSignals, TopicSignal};
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::StoryRoleKey;
 use crate::domain::asset::text_matcher::{TextMatcher, normalize_match_text, term_matches};
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
+use crate::domain::turn::{EntitySignal, RetrievalSignalOrigin, RetrievalSignals, TopicSignal};
 use std::collections::BTreeSet;
 
 pub struct RetrievalSignalBuilder {

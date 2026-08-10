@@ -18,7 +18,7 @@
 
 - Story 串行化由 `AiseEngine` 内部的 `StoryTurnCoordinator` 强制，不再依赖 `Session::lock_turn`。
 - Session 是临时连接资源，Story 是持久化领域对象，两者不构成一对一架构不变量。
-- 新增 `core` Turn Contracts 层，Runtime、Engine、LLM Gateway 和所有 Pipeline 单向依赖它。
+- 新增 `turn` Turn Contracts 层，Runtime、Engine、LLM Gateway 和所有 Pipeline 单向依赖它。
 - `TurnExecutionContext` 创建时必须已有有效的 Identity、Request、Budget、Deadline、Cancellation 和 Trace；不得存在空 ID 或半初始化对象。
 - `TurnInitializer` 只负责 Turn 内部对象准备和状态初始化，不加载 Story、World、Character、Memory 或历史；请求规范化由 `TurnRequest::try_new` 在 Context 构造前完成。
 - `StoryDraft` 改为不可信的 `StoryProposal`；只有 `ValidatedChangeSet` 可以进入 Commit。
@@ -68,41 +68,41 @@ aise-server transport / composition
           |          |
           +----+-----+
                v
-          core contracts
+          turn contracts
                |
                v
              domain
 
-persistence adapter -> persistence port -> core contracts / domain
+persistence adapter -> persistence port -> turn contracts / domain
 ```
 
 强制规则：
 
-- `core` 可以依赖 `domain` 和基础错误类型，不得依赖 `runtime`、任何 Pipeline、`llm`、`persistence`、`aise-server`。
+- `turn` 可以依赖 `domain` 和基础错误类型，不得依赖 `runtime`、任何 Pipeline、`llm`、`persistence`、`aise-server`。
 - `runtime` 只能编排，不定义被业务模块反向引用的数据模型。
 - Pipeline 之间不得互相导入、持有或调用。
-- Pipeline 可以依赖 `core`、`domain` 以及被注入的 Port/Gateway。
-- `llm` 可以依赖 `core` 中受限的 Turn LLM Scope，不得依赖 Runtime 或具体 Pipeline。
+- Pipeline 可以依赖 `turn`、`domain` 以及被注入的 Port/Gateway。
+- `llm` 可以依赖 `turn` 中受限的 Turn LLM Scope，不得依赖 Runtime 或具体 Pipeline。
 - Provider Adapter 不得依赖 Turn Context；它只处理供应商协议。
-- Store Adapter 不得被 Core 或 Domain 导入。
+- Store Adapter 不得被 turn 或 domain 导入。
 
 禁止重新出现以下依赖：
 
 ```text
-core -> runtime
-core -> planning / story / validation / character / context
+turn -> runtime
+turn -> planning / story / validation / character / context
 llm -> runtime
 pipeline A -> pipeline B
-domain -> core / runtime / adapter
+domain -> turn / runtime / adapter
 ```
 
 ## 5. 目标目录结构
 
-`core` 采用聚合文件，不为每个小结构创建独立文件：
+`turn` 采用聚合文件，不为每个小结构创建独立文件：
 
 ```text
 crates/aise/src/
-├── core/
+├── turn/
 │   ├── mod.rs
 │   ├── turn_contract.rs
 │   ├── turn_budget.rs
@@ -139,7 +139,7 @@ crates/aise/src/
 
 `mod.rs` 和 `lib.rs` 只能声明模块和 re-export，不得放置类型或逻辑。
 
-完成 Core 迁移时，必须在同一变更中删除旧定义及旧路径：
+完成 turn 迁移时，必须在同一变更中删除旧定义及旧路径：
 
 ```text
 runtime/pipeline.rs
@@ -153,24 +153,24 @@ story/story_model.rs
 validation/validation_model.rs
 ```
 
-`WriterPlan` 等类型从 `planning/writer_planner.rs` 移到 Core 后，该文件只保留 Planner 实现。不得保留 type alias、兼容 re-export、旧新双类型或转换适配层。
+`WriterPlan` 等类型从 `planning/writer_planner.rs` 移到 turn 后，该文件只保留 Planner 实现。不得保留 type alias、兼容 re-export、旧新双类型或转换适配层。
 
 迁移映射：
 
 | 当前定义 | 目标定义 |
 | --- | --- |
-| `runtime::pipeline::TurnExecutionPipeline` | `core::turn_pipeline` |
-| `runtime::turn_execution_ctx::TurnExecutionContext` | `core::turn_context` |
-| `runtime::turn_budget::TurnBudget` | `core::turn_budget` |
-| `runtime::event::*` | `core::turn_event` |
-| `runtime::trace::*` | `core::turn_trace` |
-| `context::ctx_model::*` | `core::turn_data` |
-| `planning::writer_planner::{WriterPlan, ContextRequest, StoryGoal}` | `core::turn_data` |
-| `character::character_model::CharacterThought` | `core::turn_data` |
-| `story::story_model::StoryDraft` | `core::story_proposal::StoryProposal` |
-| `validation::validation_model::*` | `core::turn_validation` |
+| `runtime::pipeline::TurnExecutionPipeline` | `turn::turn_pipeline` |
+| `runtime::turn_execution_ctx::TurnExecutionContext` | `turn::turn_context` |
+| `runtime::turn_budget::TurnBudget` | `turn::turn_budget` |
+| `runtime::event::*` | `turn::turn_event` |
+| `runtime::trace::*` | `turn::turn_trace` |
+| `context::ctx_model::*` | `domain::turn` |
+| `planning::writer_planner::{WriterPlan, ContextRequest, StoryGoal}` | `domain::turn` |
+| `character::character_model::CharacterThought` | `domain::turn` |
+| `story::story_model::StoryDraft` | `domain::turn::proposal::StoryProposal` |
+| `validation::validation_model::*` | `turn::turn_validation` |
 
-## 6. Core Turn Contracts
+## 6. turn Turn Contracts
 
 ### 6.1 文件职责
 
@@ -980,7 +980,7 @@ Backpressure
 InvariantViolation
 ```
 
-Core/Domain/LLM/Store Port 使用各自的 `thiserror` typed error。`sqlx::Error` 和 `reqwest::Error` 不得直接成为 Core API 的公开错误语义。
+turn/Domain/LLM/Store Port 使用各自的 `thiserror` typed error。`sqlx::Error` 和 `reqwest::Error` 不得直接成为 turn API 的公开错误语义。
 
 Turn 终态：
 
@@ -1034,21 +1034,21 @@ HTTP 层不得创建无所有者的 `tokio::spawn`。
 1. 将本文第 1 节列出的架构修订同步到 `2026-08-04-Architecture-gpt.md`。
 2. 更新模块图、Context 阶段表、串行化所有者和 LLM 章节。
 
-验收：两份文档（`2026-08-04-Architecture-gpt.md` 与本文）之间不存在 Session lock、Initializer、Story Proposal、Core 依赖和 LLM 所有权冲突。
+验收：两份文档（`2026-08-04-Architecture-gpt.md` 与本文）之间不存在 Session lock、Initializer、Story Proposal、turn 依赖和 LLM 所有权冲突。
 
-### Phase 1：Core Contracts 与有效 Context
+### Phase 1：turn Contracts 与有效 Context
 
-1. 创建 `core` 目录和第 5 节文件。
+1. 创建 `turn` 目录和第 5 节文件。
 2. 移动全部跨 Pipeline Contract。
 3. 删除旧 Contract 文件和旧 import path。
 4. Context 字段私有化并加入 Phase 方法。
 5. 修复 ID 空值、Clock 和 ID Generator 所有权。
 6. 将 Turn Budget 统一为配置生成的单一实例。
-7. 将 Turn Trace 移入 Core，仍保持现有非 LLM trace 行为。
+7. 将 Turn Trace 移入 turn，仍保持现有非 LLM trace 行为。
 
 本阶段是结构迁移：只创建已经有消费方的 Contract。`StoryDraft` 在迁移时直接改名为 `StoryProposal`，但其字段的信任边界在 Phase 3 一次性收敛；不得为了未来阶段加入未使用的占位类型。
 
-验收：`runtime` 和所有 Pipeline 只从 `crate::core` 导入 Turn Contract；代码可编译且不存在兼容层。
+验收：`runtime` 和所有 Pipeline 只从 `crate::turn` 导入 Turn Contract；代码可编译且不存在兼容层。
 
 ### Phase 2：Engine 执行权与统一 LlmGateway
 
@@ -1128,7 +1128,7 @@ HTTP 层不得创建无所有者的 `tokio::spawn`。
 
 ## 15. 必须实现的测试矩阵
 
-### 15.1 Core 与阶段
+### 15.1 turn 与阶段
 
 - `context_rejects_empty_identity`
 - `context_rejects_invalid_phase_transition`
@@ -1238,7 +1238,7 @@ rg "lock_turn|turn_lock" crates
 
 只有同时满足以下条件，Turn Runtime 重构才算完成：
 
-1. `core` 成为唯一 Turn Contract 定义层，依赖方向单向且无兼容旧路径。
+1. `turn` 成为唯一 Turn Contract 定义层，依赖方向单向且无兼容旧路径。
 2. Context 从创建开始有效，所有阶段输出私有、受限、可验证。
 3. Engine 内部强制 Story 串行化，Session 不再拥有执行锁。
 4. Runtime 固定八步工作流并控制可选阶段和 Repair Loop。

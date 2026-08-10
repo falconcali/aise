@@ -1,10 +1,10 @@
 use aise::config::AssetLimitsConfig;
-use aise::core::turn_data::RetrievalAudience;
 use aise::domain::asset::entity::KnowledgeEntity;
 use aise::domain::asset::ids::{PlayerId, StoryRoleKey, TopicKey};
 use aise::domain::ids::{CharacterId, StoryId};
 use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::story_instance::snapshot::KnowledgeSnapshotRef;
+use aise::domain::turn::RetrievalAudience;
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::knowledge_read_port::{
     EntityKnowledgeQuery, KnowledgeFilter, KnowledgeLookupHit, KnowledgeReadPort, TopicKnowledgeQuery,
@@ -161,7 +161,7 @@ async fn seeded_store(label: &str) -> (Arc<SqliteStore>, KnowledgeSnapshotRef, S
         })
         .await
         .expect("create");
-    let limits = aise::core::turn_data::SnapshotLimits::from_config(
+    let limits = aise::domain::turn::SnapshotLimits::from_config(
         &aise::config::TurnContentLimitsConfig::default(),
         &aise::config::ContextPreparationConfig::default(),
         &aise::config::AssetLimitsConfig::default(),
@@ -179,7 +179,7 @@ async fn character_fact_request_is_rejected_before_store_lookup() {
     };
     let counting = Arc::new(counting);
     let retriever = aise::context::EntityCandidateRetriever::new(counting.clone() as Arc<dyn KnowledgeReadPort>);
-    let request = aise::core::turn_data::RetrievalRequest {
+    let request = aise::domain::turn::RetrievalRequest {
         audience: RetrievalAudience::Character {
             character_id: CharacterId::from("c-npc"),
         },
@@ -191,7 +191,7 @@ async fn character_fact_request_is_rejected_before_store_lookup() {
         query_text: None,
         authorized_memory_owners: Vec::new(),
         reason: aise::domain::asset::validation::BoundedText::try_new("x", "r", 32).unwrap(),
-        origin: aise::core::turn_data::RetrievalRequestOrigin::Planner,
+        origin: aise::domain::turn::RetrievalRequestOrigin::Planner,
         signal_priority: 0,
     };
     use aise::context::CandidateRetriever;

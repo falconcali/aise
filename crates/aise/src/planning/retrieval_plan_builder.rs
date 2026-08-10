@@ -1,8 +1,4 @@
 use crate::config::{PlannerConfig, RetrievalConfig};
-use crate::core::turn_data::{
-    BaselineContext, CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest, RetrievalRequestOrigin,
-    WriterPlan, WriterStoryGoal,
-};
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::text_matcher::{TextMatcher, normalize_match_text, term_matches};
@@ -10,6 +6,10 @@ use crate::domain::asset::validation::BoundedText;
 use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::narrative_graph::director::NarrativePlan;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
+use crate::domain::turn::{
+    BaselineContext, CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest, RetrievalRequestOrigin,
+    WriterPlan, WriterStoryGoal,
+};
 use crate::planning::error::PlanningError;
 use crate::planning::planner_output::PlannerOutput;
 use std::collections::BTreeSet;

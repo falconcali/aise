@@ -1,8 +1,8 @@
-use crate::core::turn_data::{CharacterThinkRequest, RetrievalAudience, WriterStoryGoal};
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::knowledge::KnowledgeKind;
+use crate::domain::turn::{CharacterThinkRequest, RetrievalAudience, WriterStoryGoal};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

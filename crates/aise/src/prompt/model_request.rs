@@ -1,13 +1,13 @@
-use crate::core::story_proposal::StoryProposal;
-use crate::core::turn_contract::LlmCallPurpose;
-use crate::core::turn_data::{BaselineContext, CharacterThought, CharacterView, ContextItem, WriterPlan};
-use crate::core::turn_validation::ValidationIssue;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::knowledge::query::CurrentPerception;
 use crate::domain::narrative_graph::director::NarrativePlan;
 use crate::domain::narrative_graph::effect::CharacterImpulse;
 use crate::domain::story_instance::state::CurrentScene;
+use crate::domain::turn::proposal::StoryProposal;
+use crate::domain::turn::{BaselineContext, CharacterThought, CharacterView, ContextItem, WriterPlan};
 use crate::prompt::profile::PromptProfile;
+use crate::turn::turn_contract::LlmCallPurpose;
+use crate::turn::turn_validation::ValidationIssue;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]

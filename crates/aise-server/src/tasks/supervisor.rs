@@ -1,5 +1,5 @@
-use aise::core::turn_contract::TurnCancellation;
-use aise::core::turn_error::TurnExecutionError;
+use aise::turn::turn_contract::TurnCancellation;
+use aise::turn::turn_error::TurnExecutionError;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;

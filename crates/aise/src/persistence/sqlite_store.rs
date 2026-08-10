@@ -1,14 +1,14 @@
-use crate::core::turn_contract::{CommittedTurnResult, IdempotencyKey};
-use crate::core::turn_data::SnapshotLimits;
-use crate::core::turn_validation::StateChange;
 use crate::domain::ids::{CharacterId, StoryId, StoryRevision};
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::info::StoryInfo;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::story_instance::state::{CharacterInstanceState, RelationshipKey, RelationshipState};
+use crate::domain::turn::SnapshotLimits;
 use crate::persistence::sqlite_error::SqliteStoreError;
 use crate::persistence::sqlite_snapshot;
 use crate::persistence::store::{OutboxRecord, Store, StoreError, StoredTurnOutcome, TurnCommitSpec};
+use crate::turn::turn_contract::{CommittedTurnResult, IdempotencyKey};
+use crate::turn::turn_validation::StateChange;
 use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use std::path::Path;
@@ -271,7 +271,7 @@ impl Store for SqliteStore {
         .map_err(SqliteStoreError::from)?;
         match row {
             Some((digest, result_json)) => Ok(Some(StoredTurnOutcome {
-                request_digest: crate::core::turn_contract::RequestDigest::from_stored(digest),
+                request_digest: crate::turn::turn_contract::RequestDigest::from_stored(digest),
                 result: serde_json::from_str(&result_json).map_err(|_| StoreError::Serialization {
                     kind: crate::persistence::store::StoreSerializationErrorKind::InvalidTurnResult,
                 })?,
@@ -527,9 +527,9 @@ impl Store for SqliteStore {
 }
 
 fn aggregate_llm_usage(
-    calls: &[crate::core::turn_contract::LlmCallUsage],
-) -> Result<crate::core::turn_contract::LlmUsageAggregate, StoreError> {
-    let mut aggregate = crate::core::turn_contract::LlmUsageAggregate {
+    calls: &[crate::turn::turn_contract::LlmCallUsage],
+) -> Result<crate::turn::turn_contract::LlmUsageAggregate, StoreError> {
+    let mut aggregate = crate::turn::turn_contract::LlmUsageAggregate {
         llm_calls: 0,
         input_tokens: 0,
         output_tokens: 0,

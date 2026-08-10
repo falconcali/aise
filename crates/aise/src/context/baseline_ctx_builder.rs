@@ -1,13 +1,13 @@
 use crate::config::{AssetLimitsConfig, ContextPreparationConfig, TurnContentLimitsConfig};
 use crate::context::error::ContextError;
 use crate::context::retrieval_signal_builder::RetrievalSignalBuilder;
-use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_data::{BaselineContext, CharacterIndexEntry, CharacterView, NarrativeStateView, SnapshotLimits};
-use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
-use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::core::turn_trace::{SpanPayload, ToolCallData};
 use crate::domain::narrative::StoryContinuityLimits;
+use crate::domain::turn::{BaselineContext, CharacterIndexEntry, CharacterView, NarrativeStateView, SnapshotLimits};
 use crate::persistence::store::Store;
+use crate::turn::turn_context::TurnExecutionContext;
+use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
+use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
+use crate::turn::turn_trace::{SpanPayload, ToolCallData};
 use async_trait::async_trait;
 use std::collections::BTreeSet;
 use std::sync::Arc;

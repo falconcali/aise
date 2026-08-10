@@ -38,7 +38,7 @@ fn module_of(path: &Path) -> Option<&str> {
 
 fn forbidden_imports(module: &str) -> Vec<String> {
     match module {
-        "core" => [
+        "turn" => [
             "runtime",
             "context",
             "planning",
@@ -139,7 +139,7 @@ fn no_backwards_dependencies_or_dead_paths() {
 #[test]
 fn core_has_no_outer_transitive_dependency() {
     let mut files = Vec::new();
-    walk_rs_files(&src_root().join("core"), &mut files);
+    walk_rs_files(&src_root().join("turn"), &mut files);
     walk_rs_files(&src_root().join("domain"), &mut files);
     let mut violations = Vec::new();
     for path in files {
@@ -147,7 +147,7 @@ fn core_has_no_outer_transitive_dependency() {
         let rel = path.strip_prefix(src_root()).unwrap().display().to_string();
         for outer in ["crate::llm", "crate::persistence", "crate::runtime", "crate::server"] {
             if content.contains(&format!("{outer}::")) {
-                violations.push(format!("{rel}: core/domain must not transitively depend on {outer}"));
+                violations.push(format!("{rel}: turn/domain must not transitively depend on {outer}"));
             }
         }
         for pipeline in [
@@ -158,13 +158,13 @@ fn core_has_no_outer_transitive_dependency() {
             "crate::validation",
         ] {
             if content.contains(&format!("{pipeline}::")) {
-                violations.push(format!("{rel}: core/domain must not depend on pipeline module {pipeline}"));
+                violations.push(format!("{rel}: turn/domain must not depend on pipeline module {pipeline}"));
             }
         }
     }
     assert!(
         violations.is_empty(),
-        "core/domain transitive dependency violations:\n{}",
+        "turn/domain transitive dependency violations:\n{}",
         violations.join("\n")
     );
 }
@@ -172,7 +172,7 @@ fn core_has_no_outer_transitive_dependency() {
 #[test]
 fn adapter_transport_errors_stay_private() {
     let public_faces = [
-        "core",
+        "turn",
         "domain",
         "persistence/store.rs",
         "llm/error.rs",
@@ -215,7 +215,7 @@ fn public_error_types_are_self_contained_and_static() {
     assert_static::<aise::llm::error::LlmProviderError>();
     assert_static::<aise::llm::error::LlmError>();
     assert_static::<aise::persistence::StoreError>();
-    assert_static::<aise::core::turn_error::TurnExecutionError>();
+    assert_static::<aise::turn::turn_error::TurnExecutionError>();
 }
 
 fn server_src_root() -> PathBuf {

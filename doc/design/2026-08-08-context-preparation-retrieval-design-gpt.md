@@ -14,10 +14,10 @@ AISE 的固定 Turn 流程已经确定为：`BaselineContextBuilder -> WriterPla
 当前 Context 设计仍停留在 Story Pack v3.0 之前：
 
 - 架构文档仍将 `Story Instructions`、笼统的 `Story Configuration` 和复制后的 `Player Input` 列为 Baseline 内容。[`2026-08-04-Architecture-gpt.md`](./2026-08-04-Architecture-gpt.md):502-529
-- `BaselineContext` 仍使用 `story_instructions`、旧 `StoryConfig`、全量 `relevant_characters` 和 `Vec<String>` 形式的 `active_constraints`。[`turn_data.rs`](../../crates/aise/src/core/turn_data.rs):103-143
+- `BaselineContext` 仍使用 `story_instructions`、旧 `StoryConfig`、全量 `relevant_characters` 和 `Vec<String>` 形式的 `active_constraints`。[`turn_data.rs`](../../crates/aise/src/turn/turn_data.rs):103-143
 - `BaselineContextBuilder` 仍直接从 Snapshot 复制这些旧字段和所有角色。[`baseline_ctx_builder.rs`](../../crates/aise/src/context/baseline_ctx_builder.rs):53-78
 - `ContextRetrievalPipeline` 当前遍历已载入的历史、世界事实和玩家记忆，再进行按空格切词的文本匹配；它尚未使用 World Book 的 Entity、Topic、Audience 或稳定知识 ID。[`retrieval_pipeline.rs`](../../crates/aise/src/context/retrieval_pipeline.rs):20-96
-- 当前 Runtime 中 Retrieval 与 Character Think 处于临时关闭状态。[`turn_context.rs`](../../crates/aise/src/core/turn_context.rs):295-310
+- 当前 Runtime 中 Retrieval 与 Character Think 处于临时关闭状态。[`turn_context.rs`](../../crates/aise/src/turn/turn_context.rs):295-310
 
 Story Pack v3.0 已经建立新的硬边界：Story Pack、Character Card、World Book、玩家输入和存档都是不可信数据；System Prompt 只能由项目内部 `prompt` 模块按固定 `PromptProfile` 生成。[`2026-08-06-StoryPackDesign-gpt.md`](./2026-08-06-StoryPackDesign-gpt.md):62-107
 
@@ -128,7 +128,7 @@ ContextRetrievalPipeline= 执行受众过滤、候选召回、排名、去重和
 Prompt Module           = 选择可信 PromptProfile，并编码阶段专用的类型化 Context
 ```
 
-### 2. Core types & responsibilities
+### 2. turn types & responsibilities
 
 | Type / Module | Responsibility | Out of scope |
 |---|---|---|
@@ -409,7 +409,7 @@ characters: CharacterId -> ContextItem[]
 4. Generator 可以看到 Writer Context 与 Character Thoughts，但每个 Context Item 必须保留来源和可见范围，供 Validator 检查知识越界。
 5. 去重不能把 Fact、Rumor 和 Memory 的冲突“合并”为一个真相。
 
-当前代码已经出现带受众 Scope 和稳定 Source ID 的新版 `context::ContextItem`，但 Turn Context 仍使用旧的扁平 `core::turn_data::ContextItem`；目标实现只能保留一套模型。[`context_item.rs`](../../crates/aise/src/context/context_item.rs):6-60 [`turn_data.rs`](../../crates/aise/src/core/turn_data.rs):146-166
+当前代码已经出现带受众 Scope 和稳定 Source ID 的新版 `context::ContextItem`，但 Turn Context 仍使用旧的扁平 `domain::turn::ContextItem`；目标实现只能保留一套模型。[`context_item.rs`](../../crates/aise/src/context/context_item.rs):6-60 [`turn_data.rs`](../../crates/aise/src/turn/turn_data.rs):146-166
 
 ### 11. Snapshot consistency
 
@@ -497,7 +497,7 @@ Context 模块输出类型化数据；`prompt` 模块负责可信指令和确定
   - `domain/narrative.rs`：增加 `StorySequence`、`StorySegment` 和 Summary 覆盖边界。
   - `domain/story_instance/snapshot.rs`：收敛 Baseline 权威状态，增加 `KnowledgeSnapshotRef`，避免强制加载全部知识正文。
   - `domain/knowledge/*`：统一 Entry 的 Entity、Topic、Salience、Source ID 与 Revision 元数据。
-  - `core/turn_data.rs`：替换旧 `BaselineContext`、`ContextRequest`、扁平 `ContextItem` 和 `WriterPlan`。
+  - `domain/turn/`：替换旧 `BaselineContext`、`ContextRequest`、扁平 `ContextItem` 和 `WriterPlan`。
   - `context/`：实现 Retrieval Signals、Topic Matcher、Candidate Retriever、Audience Filter、Ranking 与 `RetrievedContext`。
   - `planning/writer_planner.rs`：在 LLM 调用前接入 `NarrativeDirector`，并合并三类 Retrieval Request。
   - `prompt/`：使用阶段专用类型化 Context，删除从 Baseline 拼接 System Prompt 的路径。

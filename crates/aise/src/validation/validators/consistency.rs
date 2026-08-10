@@ -1,8 +1,8 @@
-use crate::core::story_proposal::ProposedKnowledgeChange;
-use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_error::TurnExecutionError;
-use crate::core::turn_validation::{Repairability, ValidationIssue, ValidationIssueCode, ValidationLocation};
 use crate::domain::asset::entity::KnowledgeEntity;
+use crate::domain::turn::proposal::ProposedKnowledgeChange;
+use crate::turn::turn_context::TurnExecutionContext;
+use crate::turn::turn_error::TurnExecutionError;
+use crate::turn::turn_validation::{Repairability, ValidationIssue, ValidationIssueCode, ValidationLocation};
 use crate::validation::validators::DeterministicValidator;
 use std::collections::BTreeSet;
 
@@ -58,7 +58,7 @@ impl DeterministicValidator for ConsistencyValidator {
                     ..
                 } => {
                     let invalid_event = evidence.iter().any(|evidence| match evidence {
-                        crate::core::story_proposal::WorldFactEvidenceRef::ProposedEvent { event_index } => {
+                        crate::domain::turn::proposal::WorldFactEvidenceRef::ProposedEvent { event_index } => {
                             usize::try_from(*event_index).map_or(true, |value| value >= proposal.events.len())
                         }
                         _ => false,

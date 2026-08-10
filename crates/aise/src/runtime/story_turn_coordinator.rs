@@ -1,7 +1,7 @@
 use crate::config::CoordinatorConfig;
-use crate::core::turn_contract::TurnCancellation;
-use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::domain::ids::StoryId;
+use crate::turn::turn_contract::TurnCancellation;
+use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

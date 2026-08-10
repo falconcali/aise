@@ -1,13 +1,13 @@
 use aise::config::{RetrievalConfig, TurnConfig, TurnContentLimitsConfig};
-use aise::core::turn_budget::TurnBudget;
-use aise::core::turn_data::{
-    CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest, RetrievalRequestOrigin, WriterPlan,
-    WriterStoryGoal,
-};
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::CharacterId;
 use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::narrative_graph::director::NarrativePlan;
+use aise::domain::turn::{
+    CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest, RetrievalRequestOrigin, WriterPlan,
+    WriterStoryGoal,
+};
+use aise::turn::turn_budget::TurnBudget;
 
 fn sample_plan(with_requests: bool) -> WriterPlan {
     let mut plan = WriterPlan {

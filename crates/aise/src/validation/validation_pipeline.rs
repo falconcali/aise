@@ -1,12 +1,3 @@
-use crate::core::story_proposal::{ProposedKnowledgeChange, WorldFactEvidenceRef};
-use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_error::TurnExecutionError;
-use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::core::turn_trace::{SpanPayload, ValidationData};
-use crate::core::turn_validation::{
-    BoundedValidationIssues, CharacterInstanceStateChange, RelationshipStateChange, Repairability, StateChange,
-    ValidatedChangeSet, ValidatedChangeSetParts, ValidatedNarrativeChange, ValidationIssue, ValidationResult,
-};
 use crate::domain::asset::constraint::StoryConstraintLifecycle;
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::validation::BoundedText;
@@ -18,6 +9,15 @@ use crate::domain::knowledge::query::{CurrentPerception, KnowledgeSource};
 use crate::domain::knowledge::rumor::SharedRumor;
 use crate::domain::narrative::{StoryEvent, StorySummary};
 use crate::domain::narrative_graph::definition::NarrativeNodeState;
+use crate::domain::turn::proposal::{ProposedKnowledgeChange, WorldFactEvidenceRef};
+use crate::turn::turn_context::TurnExecutionContext;
+use crate::turn::turn_error::TurnExecutionError;
+use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
+use crate::turn::turn_trace::{SpanPayload, ValidationData};
+use crate::turn::turn_validation::{
+    BoundedValidationIssues, CharacterInstanceStateChange, RelationshipStateChange, Repairability, StateChange,
+    ValidatedChangeSet, ValidatedChangeSetParts, ValidatedNarrativeChange, ValidationIssue, ValidationResult,
+};
 use crate::validation::validators::DeterministicValidator;
 use crate::validation::validators::consistency::ConsistencyValidator;
 use crate::validation::validators::domain_invariant::DomainInvariantValidator;
@@ -413,7 +413,7 @@ fn bounded(value: &str, field: &'static str, maximum: usize) -> Result<BoundedTe
 
 fn invariant(code: &'static str, message: impl Into<String>) -> TurnExecutionError {
     TurnExecutionError::new(
-        crate::core::turn_error::TurnFailureKind::InvariantViolation,
+        crate::turn::turn_error::TurnFailureKind::InvariantViolation,
         code,
         Some(TurnStage::Validation),
         message.into(),

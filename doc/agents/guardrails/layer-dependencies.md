@@ -1,7 +1,7 @@
 # Layer Dependencies
 
 General principle: dependencies flow one way, from outer transport/entry layers
-toward inner domain/core layers. Inner layers MUST NOT know about outer layers.
+toward inner domain/turn layers. Inner layers MUST NOT know about outer layers.
 
 ```text
 transport / api / adapters
@@ -10,7 +10,7 @@ transport / api / adapters
 application / services
         |
         v
-   core contracts
+  turn contracts
         |
         +--+--+
         |     |
@@ -19,14 +19,16 @@ application / services
 ```
 
 `config` is a leaf foundation layer: it MUST NOT import any internal module,
-and `core` plus every upper layer MAY depend on it. `domain` is pure and
-self-contained: it MUST NOT depend on `core`, `config`, or any outer layer.
+and `turn` plus every upper layer MAY depend on it. `domain` is pure and
+self-contained: it MUST NOT depend on `turn`, `config`, or any outer layer.
+Turn data objects (`domain::turn`) live inside `domain`; the `turn` module only
+defines Turn execution contracts.
 
-## R-LAYER-01 - Core does not depend on the entry layer
+## R-LAYER-01 - turn does not depend on the entry layer
 
 **Level: MUST**
 
-- Core/domain modules MUST NOT import transport, API, or adapter modules.
+- turn/domain modules MUST NOT import transport, API, or adapter modules.
 - Cross-layer notifications MUST use injected traits, not concrete outer types.
 - NEVER add a backedge from an inner layer to an outer layer.
 
@@ -44,19 +46,19 @@ self-contained: it MUST NOT depend on `core`, `config`, or any outer layer.
 
 **Level: MUST**
 
-- `config` MUST NOT import any internal module (`core`, `domain`, `runtime`,
+- `config` MUST NOT import any internal module (`turn`, `domain`, `runtime`,
   pipelines, `llm`, `persistence`, `engine`); it MAY depend only on external
   crates and std.
-- `core` and every upper layer MAY depend on `config` for typed limits, content
+- `turn` and every upper layer MAY depend on `config` for typed limits, content
   policies, and settings.
 - Configuration defaults MUST have one authoritative source in `config`;
-  `core`/pipelines MUST NOT keep a second copy of the same limits.
+  `turn`/pipelines MUST NOT keep a second copy of the same limits.
 
 ## R-LAYER-04 - domain is pure and self-contained
 
 **Level: MUST**
 
-- `domain` MUST NOT import `core`, `config`, `runtime`, `llm`, `persistence`,
+- `domain` MUST NOT import `turn`, `config`, `runtime`, `llm`, `persistence`,
   `engine`, or any pipeline module; it MAY depend only on its own submodules.
 - `domain` MUST NOT reference Turn-stage concepts (`TurnStage`, `TurnBudget`,
   `TurnExecutionContext`, `LlmGateway`, `Store`, ...).
@@ -64,21 +66,22 @@ self-contained: it MUST NOT depend on `core`, `config`, or any outer layer.
   `story_instance::snapshot`) are read-only and MUST NOT carry I/O or write
   state.
 
-## R-LAYER-05 - core depends one-way on domain and config
+## R-LAYER-05 - turn depends one-way on domain and config
 
 **Level: MUST**
 
-- `core` MAY depend on `domain`, `config`, and core-internal modules.
-- `core` MUST NOT depend on `runtime`, any specific pipeline, `llm`,
+- `turn` MAY depend on `domain` (including `domain::turn` data objects),
+  `config`, and turn-internal modules.
+- `turn` MUST NOT depend on `runtime`, any specific pipeline, `llm`,
   `persistence`, or `engine`.
-- `core` is the single definition layer for Turn contracts; domain types enter
-  the Turn world only through `core`.
+- `turn` is the single definition layer for Turn execution contracts; Turn data
+  objects are owned by `domain::turn`.
 
 ## R-LAYER-06 - pipelines depend only on ports, not adapters
 
 **Level: MUST**
 
-- Pipelines MAY depend on `core`, `domain`, `config`, `llm::gateway` (the only
+- Pipelines MAY depend on `turn`, `domain`, `config`, `llm::gateway` (the only
   cross-cutting dependency), persistence ports (`store`, `asset_store`,
   `knowledge_read_port`) including their error types, and `prompt`.
 - Pipelines MUST NOT import persistence adapters (`sqlite_*`) or other pipeline
@@ -91,21 +94,21 @@ self-contained: it MUST NOT depend on `core`, `config`, or any outer layer.
 
 | module | may depend on | must not depend on |
 | --- | --- | --- |
-| `domain` | its own submodules | `core`, `config`, `runtime`, pipelines, `llm`, `persistence`, `engine` |
+| `domain` | its own submodules (incl. `turn` DTOs) | `turn`, `config`, `runtime`, pipelines, `llm`, `persistence`, `engine` |
 | `config` | external crates / std | any internal module |
-| `core` | `domain`, `config`, core-internal | `runtime`, pipelines, `llm`, `persistence`, `engine` |
-| `runtime` | `core`, `domain`, `config`, injected traits | concrete pipeline types, persistence adapters, `llm` providers |
-| `llm` | restricted `core` contracts, `config`, `prompt` | `runtime`, concrete pipelines, full `TurnExecutionContext`, `persistence` |
-| pipelines | `core`, `domain`, `config`, `llm::gateway`, persistence ports, `prompt` | other pipelines, persistence adapters, `runtime`, `engine`, `llm` internals |
-| `prompt` | `core`, `domain`, `config` | `runtime`, concrete pipelines, `persistence`, `llm` internals |
-| persistence ports | `core`, `domain`, `config`, persistence-internal | adapters, `runtime`, concrete pipelines |
-| persistence adapters | persistence ports, `domain`, `core`, `config` | reverse dependency from `core`/`domain` |
-| `engine` | `config`, `core`, `runtime`, persistence ports | concrete pipelines, persistence adapters |
+| `turn` | `domain`, `config`, turn-internal | `runtime`, pipelines, `llm`, `persistence`, `engine` |
+| `runtime` | `turn`, `domain`, `config`, injected traits | concrete pipeline types, persistence adapters, `llm` providers |
+| `llm` | restricted `turn` contracts, `config`, `prompt` | `runtime`, concrete pipelines, full `TurnExecutionContext`, `persistence` |
+| pipelines | `turn`, `domain`, `config`, `llm::gateway`, persistence ports, `prompt` | other pipelines, persistence adapters, `runtime`, `engine`, `llm` internals |
+| `prompt` | `turn`, `domain`, `config` | `runtime`, concrete pipelines, `persistence`, `llm` internals |
+| persistence ports | `turn`, `domain`, `config`, persistence-internal | adapters, `runtime`, concrete pipelines |
+| persistence adapters | persistence ports, `domain`, `turn`, `config` | reverse dependency from `turn`/`domain` |
+| `engine` | `config`, `turn`, `runtime`, persistence ports | concrete pipelines, persistence adapters |
 | aise-server (composition root) | everything | nothing (wires `TurnPipelineSetBuilder` once) |
 
-Forbidden reverse dependencies: `core -> runtime`,
-`core -> planning/story/validation/character/context`, `llm -> runtime`,
-`pipeline A -> pipeline B`, `domain -> core/config/runtime/adapter`.
+Forbidden reverse dependencies: `turn -> runtime`,
+`turn -> planning/story/validation/character/context`, `llm -> runtime`,
+`pipeline A -> pipeline B`, `domain -> turn/config/runtime/adapter`.
 
 `TurnCommitter` lives in `persistence/` but is a commit coordinator; database
 connections, SQL, and transaction implementations belong to the Store adapter.

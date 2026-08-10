@@ -1,7 +1,7 @@
 use crate::config::LlmConfig;
-pub use crate::core::turn_contract::{FinishReason, LlmCharge, LlmTokenUsage, UsageAccuracy};
 use crate::domain::text::estimate_text_tokens;
 use crate::llm::message::ChatMessage;
+pub use crate::turn::turn_contract::{FinishReason, LlmCharge, LlmTokenUsage, UsageAccuracy};
 
 #[derive(Debug, Clone)]
 pub struct LlmCompletion {

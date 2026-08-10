@@ -5,7 +5,6 @@ use aise::character::CharacterThinkPipeline;
 use aise::context::{
     BaselineContextBuilder, ContextRetrievalPipeline, EntityCandidateRetriever, TopicCandidateRetriever,
 };
-use aise::core::turn_trace::TraceSpanSink;
 use aise::engine::{SystemClock, UuidIdGenerator};
 use aise::llm::{LlmGateway, LlmProvider, OpenAiCompatProvider};
 use aise::persistence::asset_store::AssetStore;
@@ -18,6 +17,7 @@ use aise::runtime::{StoryTurnCoordinator, TurnInitializer, TurnPipelineSet, Turn
 use aise::story::instance_factory::{StoryInstanceFactory, StoryInstantiationLimits};
 use aise::story::pack_service::{NativeAssetImporter, PackService};
 use aise::story::{StoryGenerator, StoryRepairer};
+use aise::turn::turn_trace::TraceSpanSink;
 use aise::validation::ValidationPipeline;
 use std::sync::Arc;
 

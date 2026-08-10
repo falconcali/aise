@@ -1,4 +1,4 @@
-use aise::core::turn_trace::{TraceId, TraceSpan, TraceSpanSink, TurnTrace};
+use aise::turn::turn_trace::{TraceId, TraceSpan, TraceSpanSink, TurnTrace};
 use aise_server::trace::{NoopRedactor, TraceRedactor, TraceSink, TraceWriter, TraceWriterConfig};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -114,7 +114,7 @@ async fn trace_writer_applies_bounded_backpressure() {
     let mut rejected = 0;
     for _ in 0..16 {
         if sink
-            .try_write(aise::core::turn_trace::TraceRecord::Span {
+            .try_write(aise::turn::turn_trace::TraceRecord::Span {
                 trace_id: trace_id.clone(),
                 span: span.clone(),
             })
@@ -145,7 +145,7 @@ async fn trace_writer_rotates_and_enforces_retention() {
     let span = sample_span("aise.pipeline", "planner");
 
     for _ in 0..12 {
-        let _ = sink.try_write(aise::core::turn_trace::TraceRecord::Span {
+        let _ = sink.try_write(aise::turn::turn_trace::TraceRecord::Span {
             trace_id: trace_id.clone(),
             span: span.clone(),
         });
@@ -168,7 +168,7 @@ async fn shutdown_drains_trace_writer_within_grace() {
     let span = sample_span("aise.pipeline", "planner");
 
     for _ in 0..8 {
-        let _ = sink.try_write(aise::core::turn_trace::TraceRecord::Span {
+        let _ = sink.try_write(aise::turn::turn_trace::TraceRecord::Span {
             trace_id: trace_id.clone(),
             span: span.clone(),
         });

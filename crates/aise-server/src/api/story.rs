@@ -1,10 +1,10 @@
 use crate::api::state::AppState;
 use crate::error::ApiError;
-use aise::core::turn_data::SnapshotLimits;
 use aise::domain::asset::frozen_ref::FrozenCharacterAssetRef;
 use aise::domain::asset::ids::{PackId, PlayerId, StoryRoleKey};
 use aise::domain::ids::StoryId;
 use aise::domain::story_sequence::StorySequence;
+use aise::domain::turn::SnapshotLimits;
 use aise::persistence::{StoryHistoryQuery, StoryTurnView};
 use aise::story::instance_factory::{CreateStoryInstanceSpec, StoryInstantiationError};
 use axum::Json;

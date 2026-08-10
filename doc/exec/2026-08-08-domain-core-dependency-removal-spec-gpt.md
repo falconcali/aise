@@ -1,4 +1,4 @@
-# Domain-to-Core Dependency Removal — Spec
+# Domain-to-turn Dependency Removal — Spec
 
 > **Model**: GPT-5
 > **Date**: 2026-08-08
@@ -13,7 +13,7 @@
 
 ## 1. Goal
 
-Eliminate every `domain -> core` dependency by making Domain the sole owner of persistent Story identity, Turn identity, Story revision, and Story constraint identity while keeping Core-owned request and Trace errors scoped to their own contracts.
+Eliminate every `domain -> turn` dependency by making Domain the sole owner of persistent Story identity, Turn identity, Story revision, and Story constraint identity while keeping turn-owned request and Trace errors scoped to their own contracts.
 
 ---
 
@@ -21,20 +21,20 @@ Eliminate every `domain -> core` dependency by making Domain the sole owner of p
 
 ### 2.1 In Scope
 
-- Move `StoryId`, `TurnId`, and `StoryRevision` from `core::turn_contract` into `domain::ids`.
+- Move `StoryId`, `TurnId`, and `StoryRevision` from `turn::turn_contract` into `domain::ids`.
 - Replace both current `ConstraintId` definitions with one `domain::ids::ConstraintId`.
 - Add `domain::error::DomainInputError` for Domain-owned ID validation.
-- Replace `TurnInputError` with request-only `core::turn_contract::TurnRequestError`.
-- Add `core::turn_trace::TraceIdError` and return it from `TraceId::try_new`.
+- Replace `TurnInputError` with request-only `turn::turn_contract::TurnRequestError`.
+- Add `turn::turn_trace::TraceIdError` and return it from `TraceId::try_new`.
 - Delete the unused AISE library `SessionId`; keep only `aise-server::session::SessionId`.
 - Make `TurnIdentity::new` infallible because all of its inputs are validated newtypes.
-- Update all new Story Pack v3 Domain modules that currently import `core::turn_contract`.
+- Update all new Story Pack v3 Domain modules that currently import `turn::turn_contract`.
 - Update every affected production import, public re-export, constructor call, test import, and error mapping.
-- Add an integration contract test and a CI boundary check that reject any future `domain -> core` backedge.
+- Add an integration contract test and a CI boundary check that reject any future `domain -> turn` backedge.
 
 ### 2.2 Non-Goals
 
-- Does not merge `core` and `domain`.
+- Does not merge `turn` and `domain`.
 - Does not relocate, rename, merge, or re-export either existing `StoryReadSnapshot` type:
   - `domain::story_state::StoryReadSnapshot` remains the legacy Turn snapshot used by the current Runtime and Store.
   - `domain::story_instance::snapshot::StoryReadSnapshot` remains the Story Pack v3 snapshot used by Narrative Graph code.
@@ -46,14 +46,14 @@ Eliminate every `domain -> core` dependency by making Domain the sole owner of p
 - Does not restore currently disabled Context Retrieval, Character Thinking, or deterministic Validation behavior.
 - Does not change `TraceId::new_id`, `TraceId::file_stem`, Trace filename formatting, or Trace persistence behavior.
 - Does not change database schema, SQL column types, HTTP routes, HTTP response shapes, SSE event shapes, JSON field names, or persisted ID/revision values.
-- Does not remove the separate `core -> config` dependency.
+- Does not remove the separate `turn -> config` dependency.
 
 ### 2.3 Implementation Constraints
 
 - Implement the final ownership model in one change. Do not retain fallback paths, deprecated aliases, compatibility re-exports, adapter types, duplicate definitions, or dual APIs (`R-REFACTOR-01`, `R-REFACTOR-02`).
-- The final dependency direction is `core -> domain`; every Rust source under `crates/aise/src/domain/` must contain zero imports, re-exports, aliases, or qualified references to `core` (`R-ARCH-01`, `R-LAYER-01`).
+- The final dependency direction is `turn -> domain`; every Rust source under `crates/aise/src/domain/` must contain zero imports, re-exports, aliases, or qualified references to `turn` (`R-ARCH-01`, `R-LAYER-01`).
 - `mod.rs` and `lib.rs` remain index-only. Generated Rust code contains no ordinary comments. Tests use the crate integration-test directory or dedicated `tests/<source>_tests.rs` files (`R-CODE-01`, `R-CODE-02`, `R-CODE-05`).
-- Core and Domain public errors remain typed `thiserror` errors and never expose `anyhow::Error` (`R-OBS-05`).
+- turn and Domain public errors remain typed `thiserror` errors and never expose `anyhow::Error` (`R-OBS-05`).
 - Use the existing `serde`, `thiserror`, and `uuid` dependencies. Add no dependency.
 - Preserve the existing valid wire form: string IDs remain JSON strings and `StoryRevision` remains a JSON integer.
 - Preserve the input text exactly for every accepted ID. Use `trim()` only to decide whether the input is blank; do not trim a valid non-blank ID before storing it.
@@ -62,9 +62,9 @@ Eliminate every `domain -> core` dependency by making Domain the sole owner of p
 ### 2.4 Required Implementation Order
 
 1. Add `DomainInputError`; define `StoryId`, `TurnId`, `StoryRevision`, and `ConstraintId` in `domain::ids`.
-2. Convert every Domain consumer to `domain::ids`, consolidate both `ConstraintId` definitions, and delete Domain-only dead anchors tied to Core imports.
-3. Import Domain-owned types into `core::turn_contract`; add `TurnRequestError`; delete Core `SessionId`; make `TurnIdentity::new` infallible.
-4. Add `TraceIdError`; update Core, Story, Persistence, Engine, Validation, Server tests, and all integration-test call sites.
+2. Convert every Domain consumer to `domain::ids`, consolidate both `ConstraintId` definitions, and delete Domain-only dead anchors tied to turn imports.
+3. Import Domain-owned types into `turn::turn_contract`; add `TurnRequestError`; delete turn `SessionId`; make `TurnIdentity::new` infallible.
+4. Add `TraceIdError`; update turn, Story, Persistence, Engine, Validation, Server tests, and all integration-test call sites.
 5. Delete every obsolete definition, old import, old re-export, old error name, and obsolete result-handling branch.
 6. Add the integration contract tests and CI boundary check, then run the complete workspace verification matrix.
 
@@ -79,11 +79,11 @@ No intermediate state in which old and new owners coexist may be committed.
 The final compile-time dependency shape is:
 
 ```text
-aise-server -> engine/runtime/pipelines/persistence -> core -> domain
+aise-server -> engine/runtime/pipelines/persistence -> turn -> domain
                                                       |       ^
                                                       +-------+
 
-domain -X-> core
+domain -X-> turn
 domain -X-> runtime
 domain -X-> persistence
 domain -X-> aise-server
@@ -98,19 +98,19 @@ Type ownership is fixed as follows:
 | `StoryRevision` | `crates/aise/src/domain/ids.rs` | `aise::domain::ids::StoryRevision` |
 | `ConstraintId` | `crates/aise/src/domain/ids.rs` | `aise::domain::ids::ConstraintId` |
 | `DomainInputError` | `crates/aise/src/domain/error.rs` | `aise::domain::error::DomainInputError` |
-| `TurnRequestError` | `crates/aise/src/core/turn_contract.rs` | `aise::core::turn_contract::TurnRequestError` |
-| `TraceIdError` | `crates/aise/src/core/turn_trace.rs` | `aise::core::turn_trace::TraceIdError` |
+| `TurnRequestError` | `crates/aise/src/turn/turn_contract.rs` | `aise::turn::turn_contract::TurnRequestError` |
+| `TraceIdError` | `crates/aise/src/turn/turn_trace.rs` | `aise::turn::turn_trace::TraceIdError` |
 | Server `SessionId` | `crates/aise-server/src/session/model.rs` | `aise_server::session::SessionId` |
 
-`domain/mod.rs` also re-exports `StoryId`, `TurnId`, `StoryRevision`, `ConstraintId`, and `DomainInputError`. Core must not re-export any Domain-owned ID or revision type.
+`domain/mod.rs` also re-exports `StoryId`, `TurnId`, `StoryRevision`, `ConstraintId`, and `DomainInputError`. turn must not re-export any Domain-owned ID or revision type.
 
 ### 3.2 Baseline Backedge Closure Matrix
 
 Every row is mandatory for the reviewed baseline:
 
-| Current file | Current Core dependency | Required final action |
+| Current file | Current turn dependency | Required final action |
 |---|---|---|
-| `domain/ids.rs` | Re-exports `SessionId`, `StoryId`, `TurnId` from Core | Define Domain-owned IDs/revision; delete `SessionId` re-export |
+| `domain/ids.rs` | Re-exports `SessionId`, `StoryId`, `TurnId` from turn | Define Domain-owned IDs/revision; delete `SessionId` re-export |
 | `domain/story_state.rs` | Imports `StoryId`, `StoryRevision`; returns `TurnInputError` | Import IDs and `ConstraintId` from Domain; delete local `ConstraintId` |
 | `domain/knowledge/fact.rs` | Imports `StoryRevision` | Import `domain::ids::StoryRevision` |
 | `domain/knowledge/memory.rs` | Imports `StoryRevision` | Import `domain::ids::StoryRevision` |
@@ -121,7 +121,7 @@ Every row is mandatory for the reviewed baseline:
 | `domain/narrative_graph/state.rs` | Imports `TurnId` | Import `domain::ids::TurnId` |
 | `domain/narrative_graph/director.rs` | Imports `TurnId` only for a dead anchor | Delete `_director_anchor` and its anchor-only imports |
 
-After these changes, no file under `crates/aise/src/domain/` may name `crate::core`, any ancestor `super::core`, or a grouped `crate::{core::...}` import.
+After these changes, no file under `crates/aise/src/domain/` may name `crate::turn`, any ancestor `super::turn`, or a grouped `crate::{turn::...}` import.
 
 ### 3.3 Domain Input Error Contract
 
@@ -141,7 +141,7 @@ pub enum DomainInputError {
 }
 ```
 
-No Core, Store, Server, Trace, or asset-specific error variant may be added to `DomainInputError`.
+No turn, Store, Server, Trace, or asset-specific error variant may be added to `DomainInputError`.
 
 ### 3.4 Domain IDs and Revision Contract
 
@@ -240,9 +240,9 @@ pub struct StoryConstraint {
 
 Neither old module may publicly re-export `ConstraintId`. All production and test callers migrate to `crate::domain::ids::ConstraintId` or `aise::domain::ConstraintId`.
 
-### 3.6 Core Turn Request and Identity Contract
+### 3.6 turn Turn Request and Identity Contract
 
-`crates/aise/src/core/turn_contract.rs` imports, but does not define or re-export, Domain-owned types:
+`crates/aise/src/turn/turn_contract.rs` imports, but does not define or re-export, Domain-owned types:
 
 ```rust
 use crate::domain::ids::{StoryId, StoryRevision, TurnId};
@@ -289,15 +289,15 @@ impl TurnIdentity {
 }
 ```
 
-`TurnIdentity::new` performs no duplicate string validation and contains no failure branch. `CommittedTurnResult`, `ExecuteTurnSpec`, `ValidatedExecuteTurnSpec`, `TurnIdentity`, and all other Core contracts continue to use the Domain-owned types directly.
+`TurnIdentity::new` performs no duplicate string validation and contains no failure branch. `CommittedTurnResult`, `ExecuteTurnSpec`, `ValidatedExecuteTurnSpec`, `TurnIdentity`, and all other turn contracts continue to use the Domain-owned types directly.
 
-Delete the complete AISE library `SessionId` declaration and implementation from `core::turn_contract`. Do not replace it inside the `aise` crate.
+Delete the complete AISE library `SessionId` declaration and implementation from `turn::turn_contract`. Do not replace it inside the `aise` crate.
 
-`core/mod.rs` remains on its current minimal public surface. It must not add re-exports for `StoryId`, `TurnId`, `StoryRevision`, `ConstraintId`, `DomainInputError`, `TurnRequestError`, `TraceIdError`, or `SessionId`.
+`turn/mod.rs` remains on its current minimal public surface. It must not add re-exports for `StoryId`, `TurnId`, `StoryRevision`, `ConstraintId`, `DomainInputError`, `TurnRequestError`, `TraceIdError`, or `SessionId`.
 
 ### 3.7 Trace ID Error Contract
 
-`crates/aise/src/core/turn_trace.rs` owns the Trace-specific error:
+`crates/aise/src/turn/turn_trace.rs` owns the Trace-specific error:
 
 ```rust
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
@@ -331,14 +331,14 @@ The v3 snapshot must delete its unused `TurnId` import and `_snapshot_anchor`. C
 
 | Old path/name | Required final path/action |
 |---|---|
-| `aise::core::turn_contract::StoryId` | `aise::domain::ids::StoryId` or `aise::domain::StoryId` |
-| `aise::core::turn_contract::TurnId` | `aise::domain::ids::TurnId` or `aise::domain::TurnId` |
-| `aise::core::turn_contract::StoryRevision` | `aise::domain::ids::StoryRevision` or `aise::domain::StoryRevision` |
-| `crate::core::turn_contract::{StoryId, TurnId, StoryRevision}` | Import the corresponding `crate::domain::ids::*` types |
+| `aise::turn::turn_contract::StoryId` | `aise::domain::ids::StoryId` or `aise::domain::StoryId` |
+| `aise::turn::turn_contract::TurnId` | `aise::domain::ids::TurnId` or `aise::domain::TurnId` |
+| `aise::turn::turn_contract::StoryRevision` | `aise::domain::ids::StoryRevision` or `aise::domain::StoryRevision` |
+| `crate::turn::turn_contract::{StoryId, TurnId, StoryRevision}` | Import the corresponding `crate::domain::ids::*` types |
 | `domain::story_state::ConstraintId` | `domain::ids::ConstraintId` or `domain::ConstraintId` |
 | `domain::story_instance::snapshot::ConstraintId` | `domain::ids::ConstraintId` or `domain::ConstraintId` |
 | `TurnInputError` | `DomainInputError`, `TurnRequestError`, or `TraceIdError` according to ownership |
-| `aise::core::turn_contract::SessionId` | Delete; no replacement inside `aise` |
+| `aise::turn::turn_contract::SessionId` | Delete; no replacement inside `aise` |
 | `aise::domain::ids::SessionId` / `aise::domain::SessionId` | Delete; Server keeps `aise_server::session::SessionId` |
 
 Do not preserve any old path through `pub use`, a type alias, a deprecated item, a wrapper, or an adapter.
@@ -349,10 +349,10 @@ The following production changes are required in addition to Domain changes:
 
 | File | Required change |
 |---|---|
-| `core/turn_event.rs` | Import `TurnId` from `domain::ids`; keep `CommittedTurnResult` in Core |
-| `core/turn_trace.rs` | Use `TraceIdError`; keep existing Domain `StoryId`/`TurnId` imports |
+| `turn/turn_event.rs` | Import `TurnId` from `domain::ids`; keep `CommittedTurnResult` in turn |
+| `turn/turn_trace.rs` | Use `TraceIdError`; keep existing Domain `StoryId`/`TurnId` imports |
 | `story/instance_factory.rs` | Import `StoryId` and `StoryRevision` from `domain::ids` |
-| `persistence/store.rs` | Import `StoryRevision` from `domain::ids`; keep Turn request/result types in Core |
+| `persistence/store.rs` | Import `StoryRevision` from `domain::ids`; keep Turn request/result types in turn |
 | `persistence/sqlite_store.rs` | Import `StoryRevision` from `domain::ids`; map invalid persisted `TurnId` to serialization failure |
 | `validation/validation_pipeline.rs` | Construct `domain::ids::ConstraintId`; retain the existing invariant-error conversion |
 | `engine.rs` | Construct `TurnIdentity` directly; delete the impossible `Ok`/`Err` branch |
@@ -411,7 +411,7 @@ Add this step to the `check` job in `.github/workflows/ci.yml` immediately after
   run: |
     violations="$(
       rg -n -U \
-        '(?:crate|super(?:::\s*super)*)::\s*core\b|(?:crate|super)::\s*\{[^}]*\bcore(?:::|,|\})' \
+        '(?:crate|super(?:::\s*super)*)::\s*turn\b|(?:crate|super)::\s*\{[^}]*\bturn(?:::|,|\})' \
         crates/aise/src/domain \
         --glob '*.rs' || true
     )"
@@ -429,9 +429,9 @@ The expected final change set includes:
 
 ```text
 .github/workflows/ci.yml
-crates/aise/src/core/turn_contract.rs
-crates/aise/src/core/turn_event.rs
-crates/aise/src/core/turn_trace.rs
+crates/aise/src/turn/turn_contract.rs
+crates/aise/src/turn/turn_event.rs
+crates/aise/src/turn/turn_trace.rs
 crates/aise/src/domain/error.rs
 crates/aise/src/domain/ids.rs
 crates/aise/src/domain/mod.rs
@@ -468,7 +468,7 @@ This manifest is a minimum, not permission to leave compiler-reported old paths 
 
 ## 4. Behavior Rules
 
-1. **R-1 — Zero Domain Backedges**: Every Rust file under `crates/aise/src/domain/` contains zero direct, grouped, aliased, re-exported, or qualified references to Core.
+1. **R-1 — Zero Domain Backedges**: Every Rust file under `crates/aise/src/domain/` contains zero direct, grouped, aliased, re-exported, or qualified references to turn.
 2. **R-2 — Single Persistent-Type Owner**: `StoryId`, `TurnId`, `StoryRevision`, and `ConstraintId` are defined exactly once, in `domain/ids.rs`.
 3. **R-3 — No Library Session Type**: The `aise` crate contains no `SessionId`; only `aise-server::session::SessionId` remains.
 4. **R-4 — Domain ID Validation**: `StoryId::try_new`, `TurnId::try_new`, and `ConstraintId::try_new` reject `""` and whitespace-only input with their matching `DomainInputError` variant.
@@ -479,13 +479,13 @@ This manifest is a minimum, not permission to leave compiler-reported old paths 
 9. **R-9 — Turn Identity Construction**: `TurnIdentity::new` returns `Self` and cannot fail; callers contain no obsolete result branch.
 10. **R-10 — Error Ownership**: Domain ID errors use `DomainInputError`; request validation uses `TurnRequestError`; Trace ID parsing uses `TraceIdError`; Server Session parsing continues to use `SessionError`.
 11. **R-11 — Correct Error Variants**: Empty `ConstraintId` returns `EmptyConstraintId`, and empty `TraceId` returns `EmptyTraceId`; neither returns `EmptyStoryId`.
-12. **R-12 — Snapshot Stability**: Both snapshot types remain in Domain with unchanged data and accessor contracts; this refactor does not create `core::turn_data::StoryReadSnapshot`.
+12. **R-12 — Snapshot Stability**: Both snapshot types remain in Domain with unchanged data and accessor contracts; this refactor does not create `domain::turn::StoryReadSnapshot`.
 13. **R-13 — No Compatibility Layer**: Old definitions, old paths, old aliases, deprecated items, and `TurnInputError` are deleted in the same change.
 14. **R-14 — Persistence Compatibility**: Existing valid IDs and revisions load and commit without migration, conversion, normalization, or rewrite.
 15. **R-15 — Protocol Compatibility**: HTTP status classes, response fields, SSE payloads, Store result shapes, and Trace JSON shapes remain unchanged except that an empty Trace ID now reports `trace_id must not be empty`.
 16. **R-16 — No External-Input Panic**: Domain constructors, Serde implementations, Store decoding, and API parsing do not use `unwrap`, `expect`, or `panic` for external or persisted input.
 17. **R-17 — No Concurrency Change**: This refactor adds no lock, channel, task, future, `.await`, cache, queue, or shared mutable state.
-18. **R-18 — CI Enforcement**: CI fails and prints locations when Domain introduces any direct or grouped Core reference.
+18. **R-18 — CI Enforcement**: CI fails and prints locations when Domain introduces any direct or grouped turn reference.
 
 ### 4.1 Error Handling
 
@@ -520,19 +520,19 @@ This manifest is a minimum, not permission to leave compiler-reported old paths 
 - [ ] The CI regex below returns zero matches:
 
   ```bash
-  rg -n -U '(?:crate|super(?:::\s*super)*)::\s*core\b|(?:crate|super)::\s*\{[^}]*\bcore(?:::|,|\})' crates/aise/src/domain --glob '*.rs'
+  rg -n -U '(?:crate|super(?:::\s*super)*)::\s*turn\b|(?:crate|super)::\s*\{[^}]*\bturn(?:::|,|\})' crates/aise/src/domain --glob '*.rs'
   ```
 
-- [ ] `rg -n 'pub (struct|enum|type) (StoryId|TurnId|StoryRevision|SessionId)\b' crates/aise/src/core --glob '*.rs'` returns zero matches.
-- [ ] `rg -n -U 'pub use [^;]*(StoryId|TurnId|StoryRevision|SessionId)' crates/aise/src/core --glob '*.rs'` returns zero matches.
-- [ ] `rg -n '\bSessionId\b' crates/aise/src/core crates/aise/src/domain --glob '*.rs'` returns zero matches.
+- [ ] `rg -n 'pub (struct|enum|type) (StoryId|TurnId|StoryRevision|SessionId)\b' crates/aise/src/turn --glob '*.rs'` returns zero matches.
+- [ ] `rg -n -U 'pub use [^;]*(StoryId|TurnId|StoryRevision|SessionId)' crates/aise/src/turn --glob '*.rs'` returns zero matches.
+- [ ] `rg -n '\bSessionId\b' crates/aise/src/turn crates/aise/src/domain --glob '*.rs'` returns zero matches.
 - [ ] `rg -n '\bTurnInputError\b' crates --glob '*.rs'` returns zero matches.
-- [ ] `rg -n -U 'core::turn_contract::(?:\s*\{[^}]*\b(StoryId|TurnId|StoryRevision|SessionId)\b|\s*(StoryId|TurnId|StoryRevision|SessionId)\b)' crates --glob '*.rs'` returns zero matches.
+- [ ] `rg -n -U 'turn::turn_contract::(?:\s*\{[^}]*\b(StoryId|TurnId|StoryRevision|SessionId)\b|\s*(StoryId|TurnId|StoryRevision|SessionId)\b)' crates --glob '*.rs'` returns zero matches.
 - [ ] `rg -n 'pub struct (StoryId|TurnId|StoryRevision|ConstraintId)\b' crates/aise/src/domain/ids.rs` returns exactly four matches.
 - [ ] `rg -n 'pub struct ConstraintId\b' crates/aise/src/domain --glob '*.rs'` returns exactly one match, in `domain/ids.rs`.
 - [ ] `rg -n 'story_state::ConstraintId|story_instance::snapshot::ConstraintId' crates --glob '*.rs'` returns zero matches.
 - [ ] `rg -n 'pub struct StoryReadSnapshot\b' crates/aise/src/domain --glob '*.rs'` returns exactly two matches, in `domain/story_state.rs` and `domain/story_instance/snapshot.rs`.
-- [ ] `rg -n 'pub struct StoryReadSnapshot\b' crates/aise/src/core --glob '*.rs'` returns zero matches.
+- [ ] `rg -n 'pub struct StoryReadSnapshot\b' crates/aise/src/turn --glob '*.rs'` returns zero matches.
 - [ ] `rg -n '_snapshot_anchor|_director_anchor' crates/aise/src/domain --glob '*.rs'` returns zero matches.
 - [ ] `.github/workflows/ci.yml` contains the boundary check from §3.13 in every required CI path.
 
@@ -549,7 +549,7 @@ This manifest is a minimum, not permission to leave compiler-reported old paths 
 
 - [ ] All `TurnIdentity::new` call sites compile without `.unwrap()`, `.expect()`, or an `Ok`/`Err` branch.
 - [ ] All Domain files in §3.2 import IDs/revision exclusively from `domain::ids` or `super::ids`.
-- [ ] `core::turn_contract`, `core::turn_event`, `story::instance_factory`, `persistence::store`, and `persistence::sqlite_store` use Domain-owned IDs/revision.
+- [ ] `turn::turn_contract`, `turn::turn_event`, `story::instance_factory`, `persistence::store`, and `persistence::sqlite_store` use Domain-owned IDs/revision.
 - [ ] `validation_pipeline.rs` constructs `domain::ids::ConstraintId` and retains its existing invariant failure mapping.
 - [ ] `aise-server` production code continues to use only `aise_server::session::SessionId` for Sessions and `aise::domain::StoryId` for Stories.
 - [ ] Existing SQLite databases require no migration; persistence integration tests pass without fixture rewrites.
@@ -573,7 +573,7 @@ This manifest is a minimum, not permission to leave compiler-reported old paths 
 - Consolidate the legacy and Story Pack v3 snapshots only after a separate design decides the authoritative Story Instance read model and Runtime migration boundary.
 - Replace legacy Story state with the Story Pack v3 state model under a separate hard-refactor spec.
 - Move deterministic state-transition methods and invariants into Domain under a separate Domain behavior spec.
-- Remove Core dependencies on concrete configuration types under a separate configuration-boundary spec.
+- Remove turn dependencies on concrete configuration types under a separate configuration-boundary spec.
 - Harden legacy `CharacterId`, `EventId`, `MemoryId`, `FactId`, and asset-key infallible conversions under a separate ID-validation spec.
 
 ---
@@ -586,9 +586,9 @@ This manifest is a minimum, not permission to leave compiler-reported old paths 
 - Story Pack v3 snapshot contract: [Story Pack v3 Spec §3.11](./2026-08-07-story-pack-v3-spec-gpt.md#311-story-snapshot-contract)
 - Superseded dependency-removal spec: [2026-08-06 version](./2026-08-06-domain-core-dependency-removal-spec-gpt.md)
 - Superseded Turn input contract: [Turn Runtime Review Remediation Spec §3.1](./2026-08-06-turn-runtime-review-remediation-spec-gpt.md#31-validated-turn-input)
-- Current Core-owned IDs/errors: `crates/aise/src/core/turn_contract.rs:13`, `crates/aise/src/core/turn_contract.rs:29`, `crates/aise/src/core/turn_contract.rs:52`, `crates/aise/src/core/turn_contract.rs:79`, `crates/aise/src/core/turn_contract.rs:156`
+- Current turn-owned IDs/errors: `crates/aise/src/turn/turn_contract.rs:13`, `crates/aise/src/turn/turn_contract.rs:29`, `crates/aise/src/turn/turn_contract.rs:52`, `crates/aise/src/turn/turn_contract.rs:79`, `crates/aise/src/turn/turn_contract.rs:156`
 - Current Domain re-export backedge: `crates/aise/src/domain/ids.rs:5`
 - Current legacy Story-state backedge: `crates/aise/src/domain/story_state.rs:1`, `crates/aise/src/domain/story_state.rs:31`
 - Current Story Pack v3 backedges: `crates/aise/src/domain/story_instance/binding.rs:1`, `crates/aise/src/domain/story_instance/snapshot.rs:1`, `crates/aise/src/domain/knowledge/fact.rs:1`, `crates/aise/src/domain/knowledge/memory.rs:1`, `crates/aise/src/domain/knowledge/query.rs:1`, `crates/aise/src/domain/knowledge/rumor.rs:1`, `crates/aise/src/domain/narrative_graph/director.rs:1`, `crates/aise/src/domain/narrative_graph/state.rs:1`
-- Current incorrect Trace error: `crates/aise/src/core/turn_trace.rs:25`
+- Current incorrect Trace error: `crates/aise/src/turn/turn_trace.rs:25`
 - Guardrails: [Architecture and Refactor](../agents/guardrails/architecture-refactor.md), [Layer Dependencies](../agents/guardrails/layer-dependencies.md), [Code Organization](../agents/guardrails/code-organization.md), [Errors and Observability](../agents/guardrails/observability.md)

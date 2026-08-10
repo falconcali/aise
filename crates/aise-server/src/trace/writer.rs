@@ -1,5 +1,5 @@
 use crate::trace::redactor::TraceRedactor;
-use aise::core::turn_trace::{TraceId, TraceRecord, TraceSpan, TraceSpanSink, TurnTrace};
+use aise::turn::turn_trace::{TraceId, TraceRecord, TraceSpan, TraceSpanSink, TurnTrace};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};

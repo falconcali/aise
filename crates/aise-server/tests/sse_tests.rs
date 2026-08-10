@@ -125,7 +125,7 @@ async fn story_instance_snapshot_is_available_for_sse_recovery_path() {
         })
         .await
         .expect("create");
-    let limits = aise::core::turn_data::SnapshotLimits::from_config(
+    let limits = aise::domain::turn::SnapshotLimits::from_config(
         &aise::config::TurnContentLimitsConfig::default(),
         &aise::config::ContextPreparationConfig::default(),
         &aise::config::AssetLimitsConfig::default(),

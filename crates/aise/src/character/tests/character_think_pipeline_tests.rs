@@ -1,5 +1,5 @@
-use crate::core::turn_data::character::CharacterThoughtOutput;
 use crate::domain::asset::validation::BoundedText;
+use crate::domain::turn::character::CharacterThoughtOutput;
 
 #[test]
 fn character_thought_output_parses_all_fields() {

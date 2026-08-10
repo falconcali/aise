@@ -1,5 +1,5 @@
 use aise::config::{RetrievalConfig, TurnConfig, TurnContentLimitsConfig};
-use aise::core::turn_budget::TurnBudget;
+use aise::turn::turn_budget::TurnBudget;
 
 #[test]
 fn turn_budget_from_config_matches_retrieval_limits() {

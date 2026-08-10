@@ -1,7 +1,7 @@
 use aise::TurnEvent;
 use aise::TurnEventSink;
-use aise::core::turn_contract::TurnCancellation;
-use aise::core::turn_event::TurnEventDeliveryError;
+use aise::turn::turn_contract::TurnCancellation;
+use aise::turn::turn_event::TurnEventDeliveryError;
 use axum::response::sse::Event;
 use futures::stream::Stream;
 use std::convert::Infallible;

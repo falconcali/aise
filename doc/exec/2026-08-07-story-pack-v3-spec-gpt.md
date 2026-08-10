@@ -53,7 +53,7 @@ Implement AISE-native Story Pack v3 assets, immutable Story templates, role-to-c
 - Never hold a lock guard across `.await`, event emission, channel send, or I/O (`R-CONC-01`, `R-CONC-03`).
 - Route completion, streaming, embedding, Repair, and narrative-validation calls through the single application-owned `LlmGateway` limiter (`R-CONC-04`).
 - Keep `mod.rs` and `lib.rs` index-only; use directory modules; place unit tests in `tests/<source>_tests.rs`; add no ordinary code comments; keep imports contiguous (`R-CODE-01`, `R-CODE-02`, `R-CODE-05`, `R-CODE-07`).
-- Use typed `thiserror` errors in Core and Domain. Parse, reference, limit, Store, LLM, and I/O failures must be diagnosable and use structured tracing fields (`R-OBS-01`, `R-OBS-04`, `R-OBS-05`).
+- Use typed `thiserror` errors in turn and Domain. Parse, reference, limit, Store, LLM, and I/O failures must be diagnosable and use structured tracing fields (`R-OBS-01`, `R-OBS-04`, `R-OBS-05`).
 - Any archive dependency is permitted only for `.aise-pack` processing, must be declared at workspace level, must support Rust 1.85, and must be justified by bounded streaming archive inspection and symlink metadata access (`R-DEP-01`).
 
 ### 2.4 Required Implementation Order
@@ -1631,7 +1631,7 @@ Failure of either revision compare-and-swap rolls back the entire transaction an
 - Missing Pack, Character asset, World Book, Role, node, edge, Fact, Rumor, Memory, Scene, location, or event references return typed missing-reference errors with the missing stable key.
 - Limit failures report `actual`, `maximum`, and a stable limit name.
 - Archive failures report only the bounded normalized entry path, not raw archive bytes.
-- Core/Domain APIs return typed errors and never expose `anyhow::Error`, `sqlx::Error`, archive-library errors, or `serde_json::Error`.
+- turn/Domain APIs return typed errors and never expose `anyhow::Error`, `sqlx::Error`, archive-library errors, or `serde_json::Error`.
 - External input paths contain no `unwrap` or `expect`. Broken internal invariants may use the repository's existing invariant error path.
 
 ### 4.2 Concurrency

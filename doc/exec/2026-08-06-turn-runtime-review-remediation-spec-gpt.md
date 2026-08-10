@@ -24,7 +24,7 @@ Close every P1 and P2 defect identified by the Turn Runtime review so that termi
 - Validate the complete `ExecuteTurnSpec` before coordinator, Store, Trace, task, or Story side effects.
 - Route every post-validation Engine exit through one finalizer that normalizes errors, sets exactly one Context terminal phase, emits exactly one terminal event, and closes Trace.
 - Make idempotency replay observable through SSE and recoverable through a persistent result API.
-- Split Core, Gateway, Provider, Store port, and SQLite adapter errors while preserving one-way dependencies.
+- Split turn, Gateway, Provider, Store port, and SQLite adapter errors while preserving one-way dependencies.
 - Seal `ValidatedChangeSet`, make `ValidationResult` structurally consistent, and enforce permission, domain, knowledge, and player-control validators.
 - Require verifiable evidence for proposed World Facts and reject Character Thought as authority.
 - Enforce count, byte, token, protocol-buffer, queue, trace, and retention limits from one validated configuration tree.
@@ -51,7 +51,7 @@ Close every P1 and P2 defect identified by the Turn Runtime review so that termi
 
 - Implement the final form in one remediation change. Do not retain fallback paths, compatibility shims, adapter bridges, dual-write logic, deprecated constructors, or dead flags (`R-REFACTOR-01`, `R-REFACTOR-02`).
 - Preserve the already-correct fixed `TurnPipelineSet`, bounded Repair loop, Story-level serialization, revision CAS, idempotent transaction, Outbox atomicity, deterministic recent-Turn ordering, and `StateChange::Unchanged` semantics.
-- `core` and `domain` must not import `llm`, `persistence`, `runtime`, Pipeline modules, adapters, or `aise-server` (`R-LAYER-01`).
+- `turn` and `domain` must not import `llm`, `persistence`, `runtime`, Pipeline modules, adapters, or `aise-server` (`R-LAYER-01`).
 - Every runtime object and background task must have one owner, a bounded lifetime, and a shutdown path (`R-ARCH-02`).
 - No `MutexGuard` or `RwLockGuard` may cross `.await`, channel send, event emission, or I/O (`R-CONC-01`, `R-CONC-03`).
 - Every completion, streaming, embedding, and narrative-validation call must use the injected shared `LlmGateway` limiter (`R-CONC-04`).
@@ -124,7 +124,7 @@ The HTTP handler performs the same fallible parsing before returning an SSE `200
 
 ### 3.2 Layered Errors and Terminal Classification
 
-Core owns only transport-free Turn execution errors.
+turn owns only transport-free Turn execution errors.
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,7 +223,7 @@ enum SqliteStoreError {
 }
 ```
 
-`reqwest::Error`, `sqlx::Error`, `serde_json::Error`, and `std::io::Error` must not appear in Core, Domain, Gateway, or Store port public variants. Provider and SQLite adapters map concrete library errors at their own boundary. Pipelines map `LlmError` or `StoreError` to `TurnExecutionError`; Engine maps preflight, coordinator, Runtime, and commit errors to the same terminal classifier.
+`reqwest::Error`, `sqlx::Error`, `serde_json::Error`, and `std::io::Error` must not appear in turn, Domain, Gateway, or Store port public variants. Provider and SQLite adapters map concrete library errors at their own boundary. Pipelines map `LlmError` or `StoreError` to `TurnExecutionError`; Engine maps preflight, coordinator, Runtime, and commit errors to the same terminal classifier.
 
 Required classification:
 
@@ -817,7 +817,7 @@ The workspace keeps its documented `rust-version = "1.85"`. CI runs exact MSRV a
 
 ```text
 crates/aise/src/
-├── core/
+├── turn/
 │   ├── mod.rs
 │   ├── story_proposal.rs
 │   ├── turn_budget.rs
@@ -950,7 +950,7 @@ Move code from `crates/aise-server/src/tasks.rs` to `tasks/supervisor.rs` and fr
 
 ### 5.2 Validation and Resource Boundaries
 
-- [ ] `rg "pub fn new" crates/aise/src/core/turn_validation.rs` returns no public `ValidatedChangeSet` constructor.
+- [ ] `rg "pub fn new" crates/aise/src/turn/turn_validation.rs` returns no public `ValidatedChangeSet` constructor.
 - [ ] `rg "with_issue" crates` returns zero matches.
 - [ ] `pass_cannot_contain_issues` is enforced by construction and compile-fail coverage.
 - [ ] `repair_cannot_contain_fatal_issue` and `reject_requires_fatal_issue` pass.
@@ -964,10 +964,10 @@ Move code from `crates/aise-server/src/tasks.rs` to `tasks/supervisor.rs` and fr
 
 ### 5.3 Layering and Error Isolation
 
-- [ ] `core_has_no_outer_transitive_dependency` parses Rust imports or module dependencies and rejects `core -> llm|persistence|runtime|server|pipeline` paths.
+- [ ] `turn_has_no_outer_transitive_dependency` parses Rust imports or module dependencies and rejects `turn -> llm|persistence|runtime|server|pipeline` paths.
 - [ ] `provider_public_error_hides_reqwest` proves `reqwest::Error` is adapter-private.
 - [ ] `store_port_public_error_hides_sqlx` proves `sqlx::Error` is adapter-private.
-- [ ] `rg "reqwest::Error|sqlx::Error" crates/aise/src/core crates/aise/src/domain crates/aise/src/persistence/store.rs crates/aise/src/llm/error.rs` returns zero matches.
+- [ ] `rg "reqwest::Error|sqlx::Error" crates/aise/src/turn crates/aise/src/domain crates/aise/src/persistence/store.rs crates/aise/src/llm/error.rs` returns zero matches.
 - [ ] Business Pipeline directories contain no `LlmProvider` import.
 
 ### 5.4 LLM Gateway and Accounting
@@ -1041,5 +1041,5 @@ Move code from `crates/aise-server/src/tasks.rs` to `tasks/supervisor.rs` and fr
 - Source design: [AISE Technical Architecture v3.1](../design/2026-08-04-Architecture-gpt.md)
 - Source review: [Turn Runtime Code Review](../review/2026-08-05-Turn-Runtime-Code-Review-gpt.md)
 - Prior execution spec: [Turn Runtime Codegen Spec v1.0](./2026-08004-Turn-Runtime-Codegen-Spec-gpt.md)
-- Review evidence: `crates/aise/src/engine.rs:91`, `crates/aise/src/core/turn_context.rs:161`, `crates/aise/src/core/turn_validation.rs:20`, `crates/aise/src/validation/validation_pipeline.rs:19`, `crates/aise/src/llm/gateway.rs:176`, `crates/aise/src/llm/openai_compat.rs:119`, `crates/aise/src/persistence/sqlite_store.rs:112`, `crates/aise-server/src/api/turn.rs:48`, `crates/aise-server/src/tasks.rs:36`, `crates/aise-server/src/trace.rs:19`.
+- Review evidence: `crates/aise/src/engine.rs:91`, `crates/aise/src/turn/turn_context.rs:161`, `crates/aise/src/turn/turn_validation.rs:20`, `crates/aise/src/validation/validation_pipeline.rs:19`, `crates/aise/src/llm/gateway.rs:176`, `crates/aise/src/llm/openai_compat.rs:119`, `crates/aise/src/persistence/sqlite_store.rs:112`, `crates/aise-server/src/api/turn.rs:48`, `crates/aise-server/src/tasks.rs:36`, `crates/aise-server/src/trace.rs:19`.
 - Guardrails: [Architecture and Refactor](../agents/guardrails/architecture-refactor.md), [Layer Dependencies](../agents/guardrails/layer-dependencies.md), [Concurrency](../agents/guardrails/concurrency.md), [Code Organization](../agents/guardrails/code-organization.md), [Observability](../agents/guardrails/observability.md), [Toolchain](../agents/guardrails/toolchain.md).

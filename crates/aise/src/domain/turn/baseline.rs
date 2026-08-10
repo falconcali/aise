@@ -1,5 +1,3 @@
-use crate::config::{AssetLimitsConfig, ContextPreparationConfig, TurnContentLimitsConfig};
-use crate::core::turn_data::retrieval::RetrievalSignals;
 use crate::domain::asset::character_card::CharacterCard;
 use crate::domain::asset::ids::{LocationKey, NarrativeNodeKey, Sha256Digest, StoryRoleKey};
 use crate::domain::asset::story_pack::{StoryProfile, StoryRole};
@@ -11,6 +9,7 @@ use crate::domain::story_instance::binding::RoleBinding;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings};
 use crate::domain::text::estimate_text_tokens;
+use crate::domain::turn::retrieval::RetrievalSignals;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -36,42 +35,6 @@ pub struct SnapshotLimits {
     pub max_topic_aliases_per_topic: usize,
     pub max_entity_catalog: usize,
     pub continuity: StoryContinuityLimits,
-}
-
-impl SnapshotLimits {
-    pub fn from_config(
-        content: &TurnContentLimitsConfig,
-        context: &ContextPreparationConfig,
-        assets: &AssetLimitsConfig,
-    ) -> Self {
-        Self {
-            max_story_profile_bytes: content.max_story_profile_bytes,
-            max_instance_settings: content.max_instance_settings,
-            max_instance_setting_bytes: content.max_instance_setting_bytes,
-            max_roles: assets.max_roles,
-            max_characters: content.max_characters,
-            max_character_bytes: content.max_character_bytes,
-            max_scene_bytes: content.max_scene_bytes,
-            max_scene_characters: context.max_scene_characters,
-            max_relationships: context.max_relationships,
-            max_current_perceptions: context.max_current_perceptions,
-            max_perception_bytes: content.max_perception_bytes,
-            max_narrative_nodes: assets.max_graph_nodes,
-            max_condition_event_keys: context.max_condition_event_keys,
-            max_condition_fact_values: context.max_condition_fact_values,
-            max_constraints: content.max_constraints,
-            max_constraint_bytes: content.max_constraint_bytes,
-            max_topics: assets.max_topics,
-            max_topic_aliases_per_topic: assets.max_topic_aliases_per_topic,
-            max_entity_catalog: context.max_entity_catalog,
-            continuity: StoryContinuityLimits {
-                max_summary_bytes: content.max_summary_bytes,
-                max_recent_segments: content.max_recent_segments,
-                max_recent_segment_bytes: content.max_recent_segment_bytes,
-                max_recent_segment_tokens: content.max_recent_segment_tokens,
-            },
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]

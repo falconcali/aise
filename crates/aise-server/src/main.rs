@@ -1,4 +1,4 @@
-use aise::core::turn_trace::TraceSpanSink;
+use aise::turn::turn_trace::TraceSpanSink;
 use aise_server::app::build_services;
 use aise_server::session::SessionRegistry;
 use aise_server::shutdown::wait_for_shutdown_signal;

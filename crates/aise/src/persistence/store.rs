@@ -1,11 +1,11 @@
-use crate::core::turn_contract::{CommittedTurnResult, IdempotencyKey, RequestDigest};
-use crate::core::turn_data::SnapshotLimits;
 use crate::domain::ids::StoryRevision;
 use crate::domain::narrative::StoryTurn;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::info::StoryInfo;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::story_instance::state::CurrentScene;
+use crate::domain::turn::SnapshotLimits;
+use crate::turn::turn_contract::{CommittedTurnResult, IdempotencyKey, RequestDigest};
 use async_trait::async_trait;
 use thiserror::Error;
 
@@ -37,13 +37,13 @@ pub enum StoreError {
     Unavailable,
 }
 
-impl From<StoreError> for crate::core::turn_error::TurnExecutionError {
+impl From<StoreError> for crate::turn::turn_error::TurnExecutionError {
     fn from(error: StoreError) -> Self {
         match error {
             StoreError::RevisionConflict => Self::revision_conflict(None),
             StoreError::IdempotencyConflict => Self::idempotency_conflict(None),
             other => Self::new(
-                crate::core::turn_error::TurnFailureKind::Store,
+                crate::turn::turn_error::TurnFailureKind::Store,
                 "store_error",
                 None,
                 other.to_string(),
@@ -101,11 +101,11 @@ pub struct TurnCommitSpec {
     pub base_revision: StoryRevision,
     pub expected_graph_revision: u64,
     pub turn: StoryTurn,
-    pub changes: crate::core::turn_validation::ValidatedChangeSet,
+    pub changes: crate::turn::turn_validation::ValidatedChangeSet,
     pub idempotency_key: IdempotencyKey,
     pub request_digest: RequestDigest,
     pub outbox: Vec<OutboxRecord>,
-    pub llm_calls: Vec<crate::core::turn_contract::LlmCallUsage>,
+    pub llm_calls: Vec<crate::turn::turn_contract::LlmCallUsage>,
 }
 
 #[derive(Debug, Clone)]

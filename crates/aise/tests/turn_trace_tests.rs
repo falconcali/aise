@@ -1,5 +1,5 @@
-use aise::core::turn_trace::{TraceId, TraceRecorder, TraceSpan, TraceSpanSink, TurnTrace, truncate};
 use aise::domain::ids::{StoryId, TurnId};
+use aise::turn::turn_trace::{TraceId, TraceRecorder, TraceSpan, TraceSpanSink, TurnTrace, truncate};
 use std::sync::Arc;
 use std::sync::Mutex;
 

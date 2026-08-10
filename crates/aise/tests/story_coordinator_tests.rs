@@ -1,7 +1,7 @@
 use aise::CoordinatorConfig;
-use aise::core::turn_contract::TurnCancellation;
 use aise::domain::ids::StoryId;
 use aise::runtime::StoryTurnCoordinator;
+use aise::turn::turn_contract::TurnCancellation;
 use std::time::{Duration, Instant};
 
 #[tokio::test]

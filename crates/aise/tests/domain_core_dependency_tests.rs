@@ -1,9 +1,9 @@
-use aise::core::turn_contract::{
-    IdempotencyKey, MAX_IDEMPOTENCY_KEY_CHARS, MAX_PLAYER_INPUT_CHARS, TurnIdentity, TurnRequest, TurnRequestError,
-};
-use aise::core::turn_trace::{TraceId, TraceIdError};
 use aise::domain::error::DomainInputError;
 use aise::domain::ids::{ConstraintId, StoryId, StoryRevision, TurnId};
+use aise::turn::turn_contract::{
+    IdempotencyKey, MAX_IDEMPOTENCY_KEY_CHARS, MAX_PLAYER_INPUT_CHARS, TurnIdentity, TurnRequest, TurnRequestError,
+};
+use aise::turn::turn_trace::{TraceId, TraceIdError};
 
 #[test]
 fn story_id_rejects_empty_and_blank() {

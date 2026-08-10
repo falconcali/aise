@@ -1,6 +1,6 @@
-use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_error::TurnExecutionError;
-use crate::core::turn_validation::{Repairability, ValidationIssue, ValidationIssueCode, ValidationLocation};
+use crate::turn::turn_context::TurnExecutionContext;
+use crate::turn::turn_error::TurnExecutionError;
+use crate::turn::turn_validation::{Repairability, ValidationIssue, ValidationIssueCode, ValidationLocation};
 use crate::validation::validators::DeterministicValidator;
 
 #[derive(Default)]

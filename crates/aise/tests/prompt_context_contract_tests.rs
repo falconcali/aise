@@ -1,6 +1,3 @@
-use aise::core::story_proposal::StoryProposal;
-use aise::core::turn_data::{BaselineContext, CharacterView, NarrativeStateView, RetrievalSignals};
-use aise::core::{WriterPlan, WriterStoryGoal};
 use aise::domain::asset::character_card::{
     AssetSpecVersion, CharacterCard, CharacterMeta, CharacterProfile, CharacterSpec, SpeakingStyle,
 };
@@ -13,6 +10,10 @@ use aise::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySumma
 use aise::domain::narrative_graph::director::NarrativePlan;
 use aise::domain::story_instance::binding::{RoleBinding, RoleController};
 use aise::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings};
+use aise::domain::turn::proposal::StoryProposal;
+use aise::domain::turn::{
+    BaselineContext, CharacterView, NarrativeStateView, RetrievalSignals, WriterPlan, WriterStoryGoal,
+};
 use aise::prompt::profile::PromptProfile;
 use aise::prompt::{
     CatalogPromptSource, CharacterThinkContext, ModelRequest, RuntimeContextEncoder, StoryGeneratorContext,

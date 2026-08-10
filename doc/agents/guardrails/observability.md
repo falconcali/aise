@@ -90,7 +90,7 @@ tracing::info!(
 
 - `panic!`, `unwrap`, and `expect` SHOULD be used only for broken invariants.
 - Business errors MUST use `Result`.
-- Core/domain layers SHOULD define typed errors with `thiserror` so callers can
+- turn/domain layers SHOULD define typed errors with `thiserror` so callers can
   discriminate; NEVER leak `anyhow::Error` out of a domain API.
 - Binary/app/composition layers MAY use `anyhow` to aggregate and report errors.
 

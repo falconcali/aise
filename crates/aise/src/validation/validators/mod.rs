@@ -5,9 +5,9 @@ pub mod player_control;
 pub mod schema;
 pub mod world_fact_evidence;
 
-use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_error::TurnExecutionError;
-use crate::core::turn_validation::{ValidationIssue, ValidationIssueCode};
+use crate::turn::turn_context::TurnExecutionContext;
+use crate::turn::turn_error::TurnExecutionError;
+use crate::turn::turn_validation::{ValidationIssue, ValidationIssueCode};
 
 pub trait DeterministicValidator: Send + Sync {
     fn code(&self) -> ValidationIssueCode;

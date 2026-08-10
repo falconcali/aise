@@ -24,7 +24,7 @@
 
 1. Story 串行化由 `AiseEngine` 内部的 `StoryTurnCoordinator` 强制，不再依赖 `Session::lock_turn`。
 2. Session 是临时连接资源，Story 是持久化领域对象，两者不构成一对一架构不变量。
-3. 新增 `core` Turn Contracts 层，Runtime、Engine、LLM Gateway 和所有 Pipeline 单向依赖它。
+3. 新增 `turn` Turn Contracts 层，Runtime、Engine、LLM Gateway 和所有 Pipeline 单向依赖它；Turn 数据对象（`StoryProposal`、`BaselineContext`、检索/规划 DTO 等）下沉到 `domain::turn`。
 4. `TurnExecutionContext` 创建时必须已有有效的 Identity、Request、Budget、Deadline、Cancellation 和 Trace；不得存在空 ID 或半初始化对象。
 5. `TurnInitializer` 只负责 Turn 内部对象准备和状态初始化，不加载 Story、World、Character、Memory 或历史；请求规范化由 `TurnRequest::try_new` 在 Context 构造前完成。
 6. `StoryDraft` 改为不可信的 `StoryProposal`；只有 `ValidatedChangeSet` 可以进入 Commit。
@@ -35,9 +35,9 @@
 
 本版本对依赖边界规则的明确化修订（与 `layer-dependencies.md` 同步，`R-LAYER-03` 至 `R-LAYER-06`）：
 
-1. 将 `config` 正式定义为叶子基础层：零内部依赖，`core` 与所有上层均可依赖它。
-2. 明确 `domain` 必须纯净自包含：不得依赖 `core`、`config` 或任何外层模块。
-3. 明确 `core` 单向依赖 `domain`、`config` 与基础错误类型，是唯一 Turn Contract 定义层。
+1. 将 `config` 正式定义为叶子基础层：零内部依赖，`turn` 与所有上层均可依赖它。
+2. 明确 `domain` 必须纯净自包含：不得依赖 `turn`、`config` 或任何外层模块。
+3. 明确 `turn` 单向依赖 `domain`、`config` 与基础错误类型，是唯一 Turn 执行契约定义层。
 4. 明确 Pipeline 只能依赖 persistence port（trait 及其错误类型），不得导入 `sqlite_*` adapter。
 5. 明确 `llm` 只依赖受限 Turn LLM Scope 与 `prompt`，不得导入全量 `TurnExecutionContext`。
 
@@ -103,9 +103,9 @@ TurnEventSink
 - Trace、Metrics 和 Event Sink。
 - Clock、ID Generator 等运行时能力。
 
-新增 `core` Turn Contracts 层：Runtime、Engine、LLM Gateway 和所有 Pipeline 单向依赖 `core`，`core` 不得反向依赖任何业务模块或外层类型。
+新增 `turn` Turn Contracts 层：Runtime、Engine、LLM Gateway 和所有 Pipeline 单向依赖 `turn`，`turn` 不得反向依赖任何业务模块或外层类型；Turn 数据对象由 `domain::turn` 持有。
 
-`config` 是叶子基础层：零内部依赖，`core` 与所有上层均可依赖它，`domain` 必须自包含（详见第 16 节）。
+`config` 是叶子基础层：零内部依赖，`turn` 与所有上层均可依赖它，`domain` 必须自包含（详见第 16 节）。
 
 Pipeline 不得自行创建这些长生命周期服务。
 
@@ -784,31 +784,31 @@ aise-server transport / composition
           |          |
           +----+-----+
                v
-          core contracts
+          turn contracts
                |          \
                v           v
              domain     config (leaf foundation)
 
-persistence adapter -> persistence port -> core / domain
+persistence adapter -> persistence port -> turn / domain
 ```
 
-`config` 是叶子基础层：不依赖任何内部模块，`core` 与所有上层均可依赖它；`domain` 必须自包含，不依赖 `config` 或任何外层模块。配置默认值只有一个权威来源，`core` 与 Pipeline 不得保存重复的 limits 副本。
+`config` 是叶子基础层：不依赖任何内部模块，`turn` 与所有上层均可依赖它；`domain` 必须自包含，不依赖 `config` 或任何外层模块。配置默认值只有一个权威来源，`turn` 与 Pipeline 不得保存重复的 limits 副本。
 
 强制规则：
 
-- `core` 可以依赖 `domain`、`config` 和基础错误类型，不得依赖 `runtime`、任何 Pipeline、`llm`、`persistence`、`aise-server`。`core` 是唯一 Turn Contract 定义层。
+- `turn` 可以依赖 `domain`（含 `domain::turn` 数据对象）、`config` 和基础错误类型，不得依赖 `runtime`、任何 Pipeline、`llm`、`persistence`、`aise-server`。`turn` 是唯一 Turn 执行契约定义层。
 - `config` 必须保持零内部依赖，只允许依赖外部 crate 与 std。
-- `domain` 必须纯净自包含：不得依赖 `core`、`config`、`runtime`、`llm`、`persistence` 或任何 Pipeline；领域内跨子模块引用（如 `narrative_graph::director` 读取 `story_instance::snapshot`）是只读查询，不得携带 IO 或写状态。
+- `domain` 必须纯净自包含：不得依赖 `turn`、`config`、`runtime`、`llm`、`persistence` 或任何 Pipeline；领域内跨子模块引用（如 `narrative_graph::director` 读取 `story_instance::snapshot`）是只读查询，不得携带 IO 或写状态。
 - `runtime` 只负责编排，不定义被业务模块反向引用的数据模型。
 - Pipeline 之间不得互相导入、持有或调用。
-- Pipeline 可以依赖 `core`、`domain`、`config` 以及被注入的 Port/Gateway。
+- Pipeline 可以依赖 `turn`、`domain`、`config` 以及被注入的 Port/Gateway。
 - Pipeline 只能依赖 persistence port（trait 及其错误类型），不得导入 `sqlite_*` adapter。
-- `llm` 可以依赖 `core` 中受限的 Turn LLM Scope，不得依赖 Runtime 或具体 Pipeline，不得导入全量 `TurnExecutionContext`。
+- `llm` 可以依赖 `turn` 中受限的 Turn LLM Scope，不得依赖 Runtime 或具体 Pipeline，不得导入全量 `TurnExecutionContext`。
 - Provider Adapter 不得依赖 Turn Context；它只处理供应商协议。
-- Store Adapter 不得被 Core 或 Domain 导入；具体实现只在组合根装配。
+- Store Adapter 不得被 turn 或 domain 导入；具体实现只在组合根装配。
 - 反向通知通过注入的 trait 完成，内层模块不得导入外层具体类型。
 
-禁止出现反向依赖：`core -> runtime`、`core -> planning/story/validation/character/context`、`llm -> runtime`、`pipeline A -> pipeline B`、`domain -> core/config/runtime/adapter`。
+禁止出现反向依赖：`turn -> runtime`、`turn -> planning/story/validation/character/context`、`llm -> runtime`、`pipeline A -> pipeline B`、`domain -> turn/config/runtime/adapter`。
 
 `TurnCommitter` 虽位于 `persistence` 目录，但其角色是提交协调者；数据库连接、SQL 和事务实现属于 Store adapter。
 
@@ -822,16 +822,22 @@ persistence adapter -> persistence port -> core / domain
 crates/
 ├── aise/
 │   └── src/
-│       ├── core/
+│       ├── turn/
 │       │   ├── turn_contract.rs
 │       │   ├── turn_budget.rs
 │       │   ├── turn_context.rs
-│       │   ├── turn_data.rs
-│       │   ├── story_proposal.rs
 │       │   ├── turn_validation.rs
 │       │   ├── turn_pipeline.rs
 │       │   ├── turn_event.rs
-│       │   └── turn_trace.rs
+│       │   ├── turn_trace.rs
+│       │   └── snapshot_limits.rs
+│       ├── domain/
+│       │   ├── turn/
+│       │   │   ├── proposal.rs
+│       │   │   ├── baseline.rs
+│       │   │   ├── planning.rs
+│       │   │   ├── retrieval.rs
+│       │   │   └── character.rs
 │       ├── engine.rs
 │       ├── config.rs
 │       ├── error.rs
@@ -874,7 +880,7 @@ crates/
 
 `mod.rs` 和 `lib.rs` 只能声明模块和 re-export，不得放置类型或逻辑。目录只表示职责归属，真正的架构边界以依赖规则和 trait port 为准。
 
-`config.rs` 是叶子基础层：不依赖任何内部模块，`core` 与所有上层均可依赖它；配置默认值只有一个权威来源，`core` 与 Pipeline 不得保存重复的 limits 副本。`domain/` 必须自包含，不得依赖 `core`、`config` 或任何外层模块。
+`config.rs` 是叶子基础层：不依赖任何内部模块，`turn` 与所有上层均可依赖它；配置默认值只有一个权威来源，`turn` 与 Pipeline 不得保存重复的 limits 副本。`domain/` 必须自包含，不得依赖 `turn`、`config` 或任何外层模块。
 
 ---
 
@@ -1029,7 +1035,7 @@ trace_content = "metadata_only"
 9. revision 不匹配时提交失败而不是覆盖新状态。
 10. Commit 成功但响应丢失后可以通过幂等键恢复原结果。
 11. 外部派生系统失败不会破坏已经提交的权威状态。
-12. `core` 是唯一 Turn Contract 定义层，API、Runtime、Domain 和 adapter 之间不存在反向依赖；`config` 保持零内部依赖的叶子基础层，`domain` 自包含不依赖 `config`。
+12. `turn` 是唯一 Turn 执行契约定义层，API、Runtime、Domain 和 adapter 之间不存在反向依赖；`config` 保持零内部依赖的叶子基础层，`domain` 自包含不依赖 `config`。
 13. 所有 LLM 调用只经过同一个 `LlmGateway`，统一处理限流、deadline、取消、token usage、计费和 tracing。
 
 ---
@@ -1045,7 +1051,7 @@ Story-level Serialization (StoryTurnCoordinator)
 Bounded Turn Runtime
           |
           v
-Valid TurnExecutionContext (Core Contracts)
+Valid TurnExecutionContext (turn Contracts)
           |
           v
 Story Proposal (untrusted)

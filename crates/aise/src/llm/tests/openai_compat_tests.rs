@@ -1,9 +1,9 @@
 use super::*;
-use crate::core::turn_contract::LlmCallPurpose;
 use crate::llm::accounting::FinishReason;
 use crate::llm::error::{LlmProviderError, LlmResponseLimit, LlmTransportErrorKind};
 use crate::llm::message::{ChatMessage, CompletionRequest, Role};
 use crate::llm::provider::DeltaSink;
+use crate::turn::turn_contract::LlmCallPurpose;
 use std::sync::{Arc, Mutex};
 
 fn provider_with(base_url: &str) -> OpenAiCompatProvider {

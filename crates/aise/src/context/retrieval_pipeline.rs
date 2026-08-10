@@ -1,15 +1,15 @@
 use crate::config::RetrievalConfig;
 use crate::context::candidate_retriever::{CandidateRetrievalRequest, CandidateRetriever, ContextCandidate};
 use crate::context::error::ContextError;
-use crate::core::turn_context::TurnExecutionContext;
-use crate::core::turn_data::{
+use crate::domain::ids::CharacterId;
+use crate::domain::knowledge::KnowledgeSourceId;
+use crate::domain::turn::{
     CandidateMatch, CandidateRetrieverKind, ContextItem, ContextProvenance, MatchLevel, RelevanceRank,
     RetrievalAudience, RetrievedContext, RetrievedContextLimits,
 };
-use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
-use crate::core::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::domain::ids::CharacterId;
-use crate::domain::knowledge::KnowledgeSourceId;
+use crate::turn::turn_context::TurnExecutionContext;
+use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
+use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use async_trait::async_trait;
 use std::collections::BTreeMap;
 use std::sync::Arc;

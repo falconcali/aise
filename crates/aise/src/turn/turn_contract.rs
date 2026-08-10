@@ -415,7 +415,7 @@ impl LlmUsageLedger {
         Self::default()
     }
 
-    pub fn push(&mut self, usage: LlmCallUsage) -> Result<(), crate::core::turn_error::TurnExecutionError> {
+    pub fn push(&mut self, usage: LlmCallUsage) -> Result<(), crate::turn::turn_error::TurnExecutionError> {
         self.aggregate.llm_calls = self.aggregate.llm_calls.saturating_add(1);
         self.aggregate.input_tokens = self.aggregate.input_tokens.saturating_add(usage.input_tokens);
         self.aggregate.output_tokens = self.aggregate.output_tokens.saturating_add(usage.output_tokens);

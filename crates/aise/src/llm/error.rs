@@ -77,13 +77,13 @@ impl LlmProviderError {
     }
 }
 
-impl From<LlmError> for crate::core::turn_error::TurnExecutionError {
+impl From<LlmError> for crate::turn::turn_error::TurnExecutionError {
     fn from(error: LlmError) -> Self {
         match error {
             LlmError::Cancelled => Self::cancelled(None),
             LlmError::TurnDeadlineExceeded => Self::deadline_exceeded(None),
             other => Self::new(
-                crate::core::turn_error::TurnFailureKind::Llm,
+                crate::turn::turn_error::TurnFailureKind::Llm,
                 "llm_error",
                 None,
                 other.to_string(),

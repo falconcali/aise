@@ -45,7 +45,7 @@ Complete the context-preparation and retrieval refactor so a materialized Story 
 
 - This is a hard refactor under `R-REFACTOR-01/02`: no runtime fallback, dual read, dual write, compatibility DTO, or warning-and-skip path remains.
 - `StoryReadSnapshot` is the generation read model; Story API history uses a separate bounded history query.
-- Domain and Core contain no SQL or transport types. Persistence imports inward contracts and implements ports.
+- Domain and turn contain no SQL or transport types. Persistence imports inward contracts and implements ports.
 - The only production Candidate Retrievers are Entity and Topic, registered in that order.
 - Business Pipelines construct only typed `ModelRequest<C>` values and call `LlmGateway::complete_typed`.
 - No `#[allow(...)]`, dead-code anchor, inline test module, source comment, or function body in `mod.rs`/`lib.rs` is introduced or retained in touched code.
@@ -127,7 +127,7 @@ Delete these superseded production modules and symbols:
 crates/aise/src/domain/character.rs
 crates/aise/src/domain/memory.rs
 crates/aise/src/domain/world.rs
-crates/aise/src/core/token_estimator.rs
+crates/aise/src/turn/token_estimator.rs
 crates/aise/src/domain/asset/topic_matcher.rs
 crates/aise/src/context/topic_matcher.rs
 PromptProfile::NarrativeValidator
@@ -415,7 +415,7 @@ pub trait StoryHistoryReadPort: Send + Sync {
 
 ### 3.5 Continuity, Summary, Constraints, and Token Estimation
 
-The shared estimator moves inward so Domain may use it without a Domain-to-Core backedge:
+The shared estimator moves inward so Domain may use it without a Domain-to-turn backedge:
 
 ```rust
 pub fn estimate_text_tokens(text: &str) -> u64;
@@ -1066,11 +1066,11 @@ The following named integration cases are required; tests must call production b
 ### 5.5 Static Architecture and Regression Gates
 
 - [ ] `rg -n 'pub fn estimate_text_tokens\b' crates/aise/src --glob '*.rs'` returns exactly one match in `domain/text/token_estimator.rs`.
-- [ ] `test ! -e crates/aise/src/core/token_estimator.rs` succeeds.
+- [ ] `test ! -e crates/aise/src/turn/token_estimator.rs` succeeds.
 - [ ] `test ! -e crates/aise/src/domain/character.rs && test ! -e crates/aise/src/domain/memory.rs && test ! -e crates/aise/src/domain/world.rs` succeeds.
 - [ ] `rg -n '#\[allow\(' crates/aise/src/story/instance_factory.rs crates/aise/src/domain/story_instance/snapshot.rs crates/aise/src/domain/narrative_graph crates/aise/src/persistence --glob '*.rs'` returns zero matches in touched code.
 - [ ] `rg -n 'TODO\(temp-debug\)|temporarily disabled|_anchor\b' crates/aise/src --glob '*.rs'` returns zero matches.
-- [ ] `core/turn_data/mod.rs`, every touched `mod.rs`, and `lib.rs` remain index-only.
+- [ ] `domain/turn/mod.rs`, every touched `mod.rs`, and `lib.rs` remain index-only.
 - [ ] Every new unit-test module uses `#[path = "tests/<source>_tests.rs"]`; no inline test body is added.
 - [ ] Existing Runtime, Story Pack, Narrative Graph, validation, persistence, prompt, SSE, and API regression suites remain present and pass.
 - [ ] `context_retrieval_end_to_end_is_revision_consistent` uses non-empty Pack knowledge and passes.

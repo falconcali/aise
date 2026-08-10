@@ -1,10 +1,4 @@
 use crate::config::{LlmConfig, TraceContentPolicy};
-use crate::core::turn_context::TurnLlmCallScope;
-use crate::core::turn_contract::{LlmBudgetReservation, LlmCallPurpose, LlmCallStatus, LlmCallUsage, UsageAccuracy};
-use crate::core::turn_error::TurnExecutionError;
-use crate::core::turn_trace::{
-    LlmCallContent, LlmCallData, MAX_LLM_CONTENT_CHARS, MAX_LLM_RESPONSE_CHARS, MessageData, SpanPayload, truncate,
-};
 use crate::domain::text::estimate_text_tokens;
 use crate::llm::accounting::{FinishReason, LlmCompletion, TokenAccountant};
 use crate::llm::error::LlmError;
@@ -12,6 +6,12 @@ use crate::llm::limiter::LlmLimiter;
 use crate::llm::message::{ChatMessage, CompletionRequest, CompletionSpec, EmbeddingOutput, EmbeddingRequest, Role};
 use crate::llm::provider::{DeltaSink, LlmProvider};
 use crate::prompt::{ModelRequest, RuntimeContextEncoder, TrustedPromptSource};
+use crate::turn::turn_context::TurnLlmCallScope;
+use crate::turn::turn_contract::{LlmBudgetReservation, LlmCallPurpose, LlmCallStatus, LlmCallUsage, UsageAccuracy};
+use crate::turn::turn_error::TurnExecutionError;
+use crate::turn::turn_trace::{
+    LlmCallContent, LlmCallData, MAX_LLM_CONTENT_CHARS, MAX_LLM_RESPONSE_CHARS, MessageData, SpanPayload, truncate,
+};
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -33,8 +33,8 @@ impl LlmGateway {
         config: LlmConfig,
     ) -> Result<Self, TurnExecutionError> {
         config.validate().map_err(|error| {
-            crate::core::turn_error::TurnExecutionError::new(
-                crate::core::turn_error::TurnFailureKind::InvalidRequest,
+            crate::turn::turn_error::TurnExecutionError::new(
+                crate::turn::turn_error::TurnFailureKind::InvalidRequest,
                 "invalid_llm_config",
                 None,
                 error.to_string(),
@@ -597,7 +597,7 @@ impl LlmGateway {
             .as_ref()
             .and_then(|value| serde_json::from_value(value.clone()).ok());
         LlmCallUsage {
-            call_id: crate::core::turn_contract::LlmCallId::new(),
+            call_id: crate::turn::turn_contract::LlmCallId::new(),
             purpose,
             provider: self.provider.provider_name().to_owned(),
             model: self.config.model.clone(),
@@ -627,9 +627,9 @@ fn estimated_usage(text: &str, estimated_input: u64) -> crate::llm::accounting::
 
 fn budget_to_llm(error: TurnExecutionError) -> LlmError {
     match error.kind() {
-        crate::core::turn_error::TurnFailureKind::Cancelled => LlmError::Cancelled,
-        crate::core::turn_error::TurnFailureKind::DeadlineExceeded => LlmError::TurnDeadlineExceeded,
-        crate::core::turn_error::TurnFailureKind::TokenBudgetExceeded => {
+        crate::turn::turn_error::TurnFailureKind::Cancelled => LlmError::Cancelled,
+        crate::turn::turn_error::TurnFailureKind::DeadlineExceeded => LlmError::TurnDeadlineExceeded,
+        crate::turn::turn_error::TurnFailureKind::TokenBudgetExceeded => {
             LlmError::TokenBudgetExceeded(error.to_string())
         }
         _ => LlmError::Protocol {

@@ -27,9 +27,9 @@ Architecture and refactor baseline:
   tests, docs, and dead flags.
 
 Layers:
-- `R-LAYER-01` Core/domain modules MUST NOT import transport, API, or adapter
-  modules; cross-layer notifications MUST use injected traits, not concrete
-  outer types.
+- `R-LAYER-01` turn/domain modules MUST NOT import transport, API, or adapter
+ modules; cross-layer notifications MUST use injected traits, not concrete
+ outer types.
 
 Concurrency:
 - `R-CONC-01` NEVER hold a write guard (`RwLock`/`Mutex`) across `.await` and
@@ -73,8 +73,8 @@ Errors and observability:
   fields.
 - `R-OBS-04` Logs MUST use structured fields for identifiers and error data;
   NEVER interpolate identifiers into message strings.
-- `R-OBS-05` Core/domain MUST use typed (`thiserror`) errors and NEVER leak
-  `anyhow::Error`; the app layer MAY use `anyhow`.
+- `R-OBS-05` turn/domain MUST use typed (`thiserror`) errors and NEVER leak
+ `anyhow::Error`; the app layer MAY use `anyhow`.
 
 Project-specific hard constraints (see doc/design/2026-08-04-Architecture-gpt.md):
 - `R-AISE-01` Turn execution MUST be orchestrated by `TurnRuntime`; pipelines

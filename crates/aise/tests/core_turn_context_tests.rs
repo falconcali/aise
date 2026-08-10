@@ -1,13 +1,13 @@
 use aise::config::{RetrievalConfig, TurnConfig, TurnContentLimitsConfig};
-use aise::core::turn_budget::TurnBudget;
-use aise::core::turn_data::{
-    ContextItem, ContextProvenance, MatchLevel, RelevanceRank, RetrievalAudience, RetrievedContext,
-    RetrievedContextLimits,
-};
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::{CharacterId, FactId, StoryRevision};
 use aise::domain::knowledge::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use aise::domain::text::estimate_text_tokens;
+use aise::domain::turn::{
+    ContextItem, ContextProvenance, MatchLevel, RelevanceRank, RetrievalAudience, RetrievedContext,
+    RetrievedContextLimits,
+};
+use aise::turn::turn_budget::TurnBudget;
 use std::collections::BTreeMap;
 
 fn limits() -> RetrievedContextLimits {

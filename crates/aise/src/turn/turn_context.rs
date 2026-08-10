@@ -1,20 +1,20 @@
-use crate::core::story_proposal::StoryProposal;
-use crate::core::turn_budget::TurnBudget;
-use crate::core::turn_contract::{
-    CommittedTurnResult, LlmBudgetReservation, LlmCallUsage, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
-};
-use crate::core::turn_data::{
-    BaselineContext, CharacterThought, ContextItem, RetrievalAudience, RetrievedContext, RetrievedContextLimits,
-    WriterPlan,
-};
-use crate::core::turn_error::{TurnExecutionError, TurnFailureKind, TurnTerminalKind};
-use crate::core::turn_pipeline::TurnStage;
-use crate::core::turn_trace::{PendingSpan, TraceRecorder};
-use crate::core::turn_validation::{ValidatedChangeSet, ValidationResult};
 use crate::domain::ids::{CharacterId, StoryId, TurnId};
 use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::text::estimate_text_tokens;
+use crate::domain::turn::proposal::StoryProposal;
+use crate::domain::turn::{
+    BaselineContext, CharacterThought, ContextItem, RetrievalAudience, RetrievedContext, RetrievedContextLimits,
+    WriterPlan,
+};
+use crate::turn::turn_budget::TurnBudget;
+use crate::turn::turn_contract::{
+    CommittedTurnResult, LlmBudgetReservation, LlmCallUsage, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
+};
+use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind, TurnTerminalKind};
+use crate::turn::turn_pipeline::TurnStage;
+use crate::turn::turn_trace::{PendingSpan, TraceRecorder};
+use crate::turn::turn_validation::{ValidatedChangeSet, ValidationResult};
 use serde::Serialize;
 use std::time::Instant;
 
@@ -37,7 +37,7 @@ pub struct TurnExecutionContext {
     committed_result: Option<CommittedTurnResult>,
     terminal_kind: Option<TurnTerminalKind>,
     terminal_error: Option<TurnExecutionError>,
-    llm_calls: Vec<crate::core::turn_contract::LlmCallUsage>,
+    llm_calls: Vec<crate::turn::turn_contract::LlmCallUsage>,
 }
 
 impl TurnExecutionContext {
@@ -147,7 +147,7 @@ impl TurnExecutionContext {
         self.committed_result.as_ref()
     }
 
-    pub fn llm_calls(&self) -> &[crate::core::turn_contract::LlmCallUsage] {
+    pub fn llm_calls(&self) -> &[crate::turn::turn_contract::LlmCallUsage] {
         &self.llm_calls
     }
 
@@ -431,7 +431,7 @@ impl TurnExecutionContext {
         Ok(())
     }
 
-    pub fn validation_decision(&self) -> Result<crate::core::turn_validation::ValidationDecision, TurnExecutionError> {
+    pub fn validation_decision(&self) -> Result<crate::turn::turn_validation::ValidationDecision, TurnExecutionError> {
         match &self.validation {
             Some(result) => Ok(result.decision()),
             None => Err(TurnExecutionError::new(
@@ -643,7 +643,7 @@ pub struct TurnLlmCallScope<'a> {
     control: &'a TurnControl,
     budget: &'a mut TurnBudget,
     trace: &'a mut TraceRecorder,
-    llm_calls: &'a mut Vec<crate::core::turn_contract::LlmCallUsage>,
+    llm_calls: &'a mut Vec<crate::turn::turn_contract::LlmCallUsage>,
     stage: TurnStage,
 }
 
@@ -664,7 +664,7 @@ impl TurnLlmCallScope<'_> {
         self.control.deadline()
     }
 
-    pub fn cancellation(&self) -> &crate::core::turn_contract::TurnCancellation {
+    pub fn cancellation(&self) -> &crate::turn::turn_contract::TurnCancellation {
         self.control.cancellation()
     }
 

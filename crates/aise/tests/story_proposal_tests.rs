@@ -1,4 +1,4 @@
-use aise::core::story_proposal::{ProposedKnowledgeChange, StoryProposal, WorldFactEvidenceRef};
+use aise::domain::turn::proposal::{ProposedKnowledgeChange, StoryProposal, WorldFactEvidenceRef};
 
 #[test]
 fn omitted_collections_default_to_empty() {

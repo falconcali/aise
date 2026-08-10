@@ -1,4 +1,4 @@
-use crate::core::turn_contract::{LlmCharge, LlmTokenUsage};
+use crate::turn::turn_contract::{LlmCharge, LlmTokenUsage};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,14 +21,14 @@ pub struct CompletionRequest {
     pub messages: Vec<ChatMessage>,
     pub max_tokens: u32,
     pub temperature: f32,
-    pub purpose: crate::core::turn_contract::LlmCallPurpose,
+    pub purpose: crate::turn::turn_contract::LlmCallPurpose,
 }
 
 #[derive(Debug, Clone)]
 pub struct CompletionSpec {
     pub messages: Vec<ChatMessage>,
     pub max_output_tokens: u32,
-    pub purpose: crate::core::turn_contract::LlmCallPurpose,
+    pub purpose: crate::turn::turn_contract::LlmCallPurpose,
 }
 
 #[derive(Debug, Clone)]

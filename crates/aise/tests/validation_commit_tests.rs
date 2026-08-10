@@ -1,5 +1,5 @@
-use aise::core::turn_validation::{StateChange, ValidationDecision};
 use aise::domain::ids::StoryRevision;
+use aise::turn::turn_validation::{StateChange, ValidationDecision};
 
 #[test]
 fn state_change_and_validation_decision_contracts() {

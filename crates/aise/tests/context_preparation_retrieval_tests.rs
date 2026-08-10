@@ -1,9 +1,5 @@
 use aise::config::{PlannerConfig, RetrievalConfig};
 use aise::context::TextMatcher;
-use aise::core::turn_data::{
-    CandidateRetrieverKind, CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest,
-    RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
-};
 use aise::domain::asset::ids::TopicKey;
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::asset::world_book::{TopicDefinition, TopicDictionaryError, validate_topic_dictionary};
@@ -11,6 +7,10 @@ use aise::domain::ids::CharacterId;
 use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::narrative_graph::director::NarrativePlan;
 use aise::domain::text::estimate_text_tokens;
+use aise::domain::turn::{
+    CandidateRetrieverKind, CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest,
+    RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
+};
 use aise::planning::planner_output::PlannerOutput;
 use aise::planning::retrieval_plan_builder::RetrievalPlanBuilder;
 use std::collections::BTreeMap;

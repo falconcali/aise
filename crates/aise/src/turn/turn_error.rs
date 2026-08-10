@@ -1,4 +1,4 @@
-use crate::core::turn_pipeline::TurnStage;
+use crate::turn::turn_pipeline::TurnStage;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

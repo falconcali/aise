@@ -1,5 +1,3 @@
-use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
-use crate::core::turn_pipeline::TurnStage;
 use crate::domain::asset::ids::NarrativeNodeKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::CharacterId;
@@ -9,6 +7,8 @@ use crate::domain::narrative_graph::definition::NarrativeNodeState;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::snapshot::NarrativeConditionStateView;
 use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, RelationshipKey, RelationshipState};
+use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
+use crate::turn::turn_pipeline::TurnStage;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,11 +137,11 @@ impl ValidationDecision {
         }
     }
 
-    pub fn to_turn_phase(self) -> crate::core::turn_contract::TurnPhase {
+    pub fn to_turn_phase(self) -> crate::turn::turn_contract::TurnPhase {
         match self {
-            ValidationDecision::Pass => crate::core::turn_contract::TurnPhase::ReadyToCommit,
-            ValidationDecision::Repair => crate::core::turn_contract::TurnPhase::RepairRequired,
-            ValidationDecision::Reject => crate::core::turn_contract::TurnPhase::Failed,
+            ValidationDecision::Pass => crate::turn::turn_contract::TurnPhase::ReadyToCommit,
+            ValidationDecision::Repair => crate::turn::turn_contract::TurnPhase::RepairRequired,
+            ValidationDecision::Reject => crate::turn::turn_contract::TurnPhase::Failed,
         }
     }
 }

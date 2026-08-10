@@ -1,7 +1,7 @@
 use crate::context::candidate_retriever::{CandidateRetrievalRequest, CandidateRetriever, ContextCandidate};
 use crate::context::error::ContextError;
-use crate::core::turn_data::CandidateRetrieverKind;
 use crate::domain::knowledge::KnowledgeKind;
+use crate::domain::turn::CandidateRetrieverKind;
 use crate::persistence::knowledge_read_port::{EntityKnowledgeQuery, KnowledgeFilter, KnowledgeReadPort};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -60,15 +60,15 @@ impl CandidateRetriever for EntityCandidateRetriever {
     }
 }
 
-fn authorize_request(request: &crate::core::turn_data::RetrievalRequest) -> Result<(), ContextError> {
+fn authorize_request(request: &crate::domain::turn::RetrievalRequest) -> Result<(), ContextError> {
     match &request.audience {
-        crate::core::turn_data::RetrievalAudience::GlobalWriter => {
+        crate::domain::turn::RetrievalAudience::GlobalWriter => {
             if request.knowledge_kinds.contains(&KnowledgeKind::Memory) && request.authorized_memory_owners.is_empty() {
                 return Err(ContextError::KnowledgeAudienceViolation);
             }
             Ok(())
         }
-        crate::core::turn_data::RetrievalAudience::Character { .. } => {
+        crate::domain::turn::RetrievalAudience::Character { .. } => {
             if request.knowledge_kinds.contains(&KnowledgeKind::Fact) {
                 return Err(ContextError::KnowledgeAudienceViolation);
             }

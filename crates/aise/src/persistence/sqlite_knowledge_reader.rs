@@ -1,10 +1,10 @@
-use crate::core::turn_data::RetrievalAudience;
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::{CharacterId, FactId, MemoryId, StoryRevision};
 use crate::domain::knowledge::{KnowledgeIndexMatch, KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
+use crate::domain::turn::RetrievalAudience;
 use crate::persistence::knowledge_read_port::{
     EntityKnowledgeQuery, KnowledgeFilter, KnowledgeLookupHit, KnowledgeReadPort, KnowledgeRecord, TopicKnowledgeQuery,
 };

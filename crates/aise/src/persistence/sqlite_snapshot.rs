@@ -1,4 +1,3 @@
-use crate::core::turn_data::SnapshotLimits;
 use crate::domain::asset::character_card::CharacterCard;
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
@@ -16,6 +15,7 @@ use crate::domain::story_instance::snapshot::{
     KnowledgeSnapshotRef, NarrativeConditionStateView, StoryReadSnapshot, StoryReadSnapshotParts,
 };
 use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings, RelationshipState};
+use crate::domain::turn::SnapshotLimits;
 use crate::persistence::sqlite_error::SqliteStoreError;
 use crate::persistence::store::StoreError;
 use sqlx::SqlitePool;

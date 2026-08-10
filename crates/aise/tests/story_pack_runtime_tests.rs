@@ -285,7 +285,7 @@ async fn instance_snapshot_loads_with_scene_and_binding() {
         .await
         .expect("story instance creation should succeed");
     let store: Arc<dyn Store> = SqliteStore::connect(&db_url).await.unwrap();
-    let limits = aise::core::turn_data::SnapshotLimits::from_config(
+    let limits = aise::domain::turn::SnapshotLimits::from_config(
         &aise::config::TurnContentLimitsConfig::default(),
         &aise::config::ContextPreparationConfig::default(),
         &aise::config::AssetLimitsConfig::default(),

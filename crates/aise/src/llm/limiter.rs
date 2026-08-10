@@ -1,7 +1,7 @@
 use crate::config::LlmConfig;
-use crate::core::turn_contract::TurnCancellation;
-use crate::core::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::llm::error::LlmError;
+use crate::turn::turn_contract::TurnCancellation;
+use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use std::collections::VecDeque;
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};

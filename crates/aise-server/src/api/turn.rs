@@ -4,8 +4,8 @@ use crate::api::state::AppState;
 use crate::error::ApiError;
 use crate::session::SessionId;
 use aise::ExecuteTurnSpec;
-use aise::core::turn_contract::{IdempotencyKey, TurnCancellation};
 use aise::domain::ids::StoryId;
+use aise::turn::turn_contract::{IdempotencyKey, TurnCancellation};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
@@ -30,7 +30,7 @@ pub async fn run_turn(
     let story_id = session.story_id.clone();
     let include_trace = req.include_trace;
 
-    aise::core::turn_contract::TurnRequest::try_new(req.player_input.clone())
+    aise::turn::turn_contract::TurnRequest::try_new(req.player_input.clone())
         .map_err(|error| ApiError::BadRequest(error.to_string()))?;
 
     let idempotency_key = headers
