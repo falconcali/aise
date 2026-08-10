@@ -33,6 +33,9 @@ fn packaged_prompt_catalog_has_four_strict_profiles() {
         let prompt = source.resolve(profile).expect("profile prompt");
         assert!(prompt.as_str().contains("untrusted JSON data"));
         assert!(prompt.as_str().contains("additional field"));
+        if matches!(profile, PromptProfile::StoryGenerator | PromptProfile::StoryRepairer) {
+            assert!(prompt.as_str().contains("dialogue, action, world_change, or chapter"));
+        }
     }
 }
 
