@@ -437,7 +437,7 @@ LIMIT ?3;
 
 `?2` is `summary.summarized_through` or `0`; `?3` is `max_recent_segments + 1`. The Store does not select the newest `N` and then remove summarized rows.
 
-Model output contains `summary_text: Option<String>` only. `None` or trimmed-empty text produces `StateChange::Unchanged` and never erases an existing Summary. If deterministic Validation accepts non-empty Summary text, it assigns `summarized_through = snapshot.story_continuity().latest_sequence()`. Non-empty text with no pre-Turn sequence is rejected. Model JSON can never provide a boundary.
+Model output contains `summary_text: Option<String>` only. `None` or trimmed-empty text produces `StateChange::Unchanged` and never erases an existing Summary. If deterministic Validation accepts non-empty Summary text, it assigns `summarized_through = snapshot.story_continuity().latest_sequence()`. Non-empty text with no pre-Turn sequence produces a repairable Schema issue and cannot seal a change set. Model JSON can never provide a boundary.
 
 Constraint expiry is deterministic at change-set construction:
 
@@ -866,6 +866,7 @@ Every System Prompt must state all of the following in executable terms:
 - Writer Planner cannot output Narrative plans, constraints, providers, ranks, budgets, or authorization owners.
 - Character Think cannot output a Character ID and returns exactly perception, emotion, goal, and possible action.
 - Generator and Repairer return exactly `StoryProposalOutput` and contain no Summary boundary or constraint field.
+- Generator and Repairer set `summary_text` to `null` when there is no committed pre-Turn sequence.
 
 `LlmGateway::complete_typed` creates exactly one trusted System message and one untrusted User JSON message. Catalog errors retain their typed cause instead of being collapsed to `Unsupported`.
 

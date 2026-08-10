@@ -20,6 +20,19 @@ impl DeterministicValidator for SchemaValidator {
         if proposal.story_text.trim().is_empty() {
             issues.push(issue("story_text", 0, "story text is empty", Repairability::Fatal));
         }
+        if summary_requires_pre_turn_sequence(
+            proposal.summary_text.as_deref(),
+            ctx.snapshot()
+                .and_then(|snapshot| snapshot.story_continuity().latest_sequence())
+                .is_some(),
+        ) {
+            issues.push(issue(
+                "summary_text",
+                0,
+                "summary requires a pre-turn sequence",
+                Repairability::Repairable,
+            ));
+        }
         for (path, count) in [
             ("events", proposal.events.len()),
             ("character_changes", proposal.character_changes.len()),
@@ -112,3 +125,11 @@ fn issue(path: &str, index: usize, message: &str, repairability: Repairability) 
         }),
     }
 }
+
+fn summary_requires_pre_turn_sequence(summary_text: Option<&str>, has_pre_turn_sequence: bool) -> bool {
+    !has_pre_turn_sequence && summary_text.is_some_and(|text| !text.trim().is_empty())
+}
+
+#[cfg(test)]
+#[path = "tests/schema_tests.rs"]
+mod tests;

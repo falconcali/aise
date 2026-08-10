@@ -15,13 +15,13 @@ assets:
     kind: text
     source_path: files/story-generator.md.j2
     output_contract_ref: StoryProposalOutput
-    hash: sha256:422492ef51da9d2ba09630c8378174f39a761db01cd795731d1fa960e158f895
+    hash: sha256:bf506b8ee034bdb60ea0ada18d6ee9b5a38bd826e3df38127203bd71b5a8425b
     status: active
   - asset_id: context-v1/story-repairer
     kind: text
     source_path: files/story-repairer.md.j2
     output_contract_ref: StoryProposalOutput
-    hash: sha256:9ecf63b65b20626a8d8c4fe7fd7bb8e87e2850ed3870b412f5553b8f4efc2ded
+    hash: sha256:8162ebf37da33ccc49b69fb7d90b8a852e3d96d20a15bfa264dc393b0b054969
     status: active
 packs:
   - name: context-v1
