@@ -836,21 +836,25 @@ Using the Runtime Context, create the Writer Plan for the next story segment.
 
 ## MUST
 
-- Set `story_goal` to a concise description of the immediate narrative transition the next segment should make.
-- Include an entry in `context_gaps` only when missing context not already provided in the Runtime Context could materially affect that transition.
-- Set each context gap's `audience` to `{ "kind": "global_writer" }` when the context is needed by the writer-side continuation after planning, or to `{ "kind": "character", "character_id": "<stable-id>" }` when it is needed for that character's private thinking.
-- Use the `global_writer` audience for every Character Index target; use a `character` audience only for knowledge needed by Character Think.
-- If the needed context appears in an index, use its exact `target_id`; otherwise use a bounded `query_text`. Set exactly one of the two.
-- Include an entry in `character_think_requests` only for an existing AI-controlled character whose private decision could materially affect that transition.
-- For every character-scoped context gap, include a Character Think request for the same `character_id`.
-- Give every context gap and Character Think request a concise reason explaining why it matters to the transition.
-- Use empty arrays when no additional context or Character Think is needed.
+* Set `story_goal` to a concise description of the immediate narrative transition the next story segment should make.
+* Add an entry to `context_gaps` only when context not already provided in the Runtime Context could materially affect that transition.
+* If the needed context appears in an index, use its exact `target_id`; otherwise, use a bounded `query_text`. Set exactly one of the two.
+* Set each context gap's `audience` to `{ "kind": "global_writer" }` when the context is needed by the writer-side continuation, or to `{ "kind": "character", "character_id": "<stable-id>" }` when it is needed for that character's private thinking.
+* Use the `global_writer` audience for every Character Index target.
+* Determine whether Character Think is needed independently of any context gap.
+* Add an entry to `character_think_requests` only for an existing AI-controlled character whose private decision could materially affect the transition.
+* For a character already selected for Character Think, add character-scoped context gaps only when missing private context could materially affect that character's thinking.
+* Ensure every character-scoped context gap references a `character_id` already present in `character_think_requests`.
+* Give every context gap and Character Think request a concise reason explaining why it matters to the transition.
+* Use empty arrays when no additional context or Character Think is needed.
 
 ## NEVER
 
-- Treat Player Input as a guaranteed outcome.
-- Fill missing context by inventing facts or stable IDs.
-- Generate the story segment itself.
+* Treat Player Input as a guaranteed outcome.
+* Request context already provided in the Runtime Context.
+* Invent facts, stable IDs, or index entries to fill missing context.
+* Add a Character Think request merely to accompany or consume a character-scoped context gap.
+* Generate the story segment itself.
 
 # Output
 
