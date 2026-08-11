@@ -47,7 +47,7 @@ Story Pack v3.0 已经建立新的硬边界：Story Pack、Character Card、Worl
 
 1. **可信指令与故事数据分离**：`prompt` 模块生成可信 System Prompt；Context 模块只准备类型化、不可信的数据。
 2. **一个概念只有一个权威来源**：Player Input、角色状态、故事正文、约束和知识条目不得在多个对象中保存可独立变化的副本。
-3. **Baseline 确定事实，Planner 表达缺口，Retrieval 执行策略**：Planner 不选择 Tag、BM25 或 Embedding，World Book 也不控制检索行为。
+3. **代码提供显式相关上下文，Planner 表达隐式缺口，Retrieval 执行补充策略**：确定性预规划阶段加载有界的显式相关角色与知识正文；Planner 只请求额外缺失上下文，不选择 Tag、BM25、Embedding、Provider 或预算。
 4. **先隔离受众，再召回内容**：角色只能检索自己的 Memory、相关 Rumor 和 Current Perception；Writer 获得全局相关信息不代表角色知道这些信息。
 5. **段落连续、检索确定、结果有界**：历史不得重复或缺失；相同 Snapshot 与相同请求必须产生稳定的候选顺序。
 6. **索引是派生数据**：Topic、关键词和向量索引可重建；Fact、Rumor、Memory 及其稳定来源 ID 才是权威数据。
@@ -80,24 +80,24 @@ Story Pack v3.0 已经建立新的硬边界：Story Pack、Character Card、Worl
   - 第一版没有 BM25/Embedding 时，自由文本查询无法可靠映射到 Entry。
 - **Risk**：召回质量完全受 Planner 输出质量影响，并且难以诊断漏召回原因。
 
-### Option C: 自动信号与 Planner 请求合并
+### Option C: 确定性预规划上下文与 Planner 补充请求
 
-- **Idea**：Baseline 产生确定性的 Entity/Topic 信号；`NarrativeDirector` 提供当前 Narrative 引用；Planner LLM 只表达额外的语义缺口；`ContextRetrievalPipeline` 统一决定如何检索、过滤、排序和裁剪。
+- **Idea**：`BaselineContextBuilder` 使用确定性的 Entity/Topic/引用信号加载有界的显式相关角色视图与知识正文，并为其余授权目标建立索引；`NarrativeDirector` 提供当前 Narrative 引用；Planner LLM 只表达额外缺失上下文；`ContextRetrievalPipeline` 统一校验、授权、检索、过滤、排序和裁剪 Planner 补充请求。
 - **Pros**:
   - 显式实体与 Topic 不依赖 LLM 猜测。
   - Planner 仍能请求字面信号未覆盖的背景信息。
   - 第一版 Entity/Topic 召回可工作，未来可以无缝增加 BM25/Embedding。
   - 检索策略、预算和权限仍由引擎集中控制。
 - **Cons**:
-  - 需要 `RetrievalSignals`、`RetrievalPlan`、Topic Dictionary 和候选接口等明确类型。
-  - 自动请求与 Planner 请求需要去重和稳定合并。
+  - 需要 `RelevantKnowledge`、两个有界 Retrieval Index、`SupplementalRetrievalPlan`、Topic Dictionary 和候选接口等明确类型。
+  - 预规划选择结果、索引和 Planner 请求需要确定性去重。
 - **Risk**：若 Topic 与别名维护质量较差，自动召回仍会漏项。
 
 ### Choice
 
 **Adopt option C.**
 
-**Rationale**：该方案同时保留确定性召回和 LLM 的语义判断能力，并且不破坏固定 Pipeline。它比全量 Baseline 更有界，比 Planner-only 更稳定；代价是需要更清晰的数据模型和索引边界，而这些结构也是后续 BM25/Embedding 所必需的。
+**Rationale**：该方案同时保留确定性上下文准备和 LLM 的语义判断能力，并且不破坏固定 Pipeline。它比全量 Baseline 更有界，比 Planner-only 更稳定；Planner 在规划前可以直接使用显式相关知识，补充 Retrieval 仍集中执行权限、排名和预算策略。
 
 ---
 
@@ -109,22 +109,23 @@ Story Pack v3.0 已经建立新的硬边界：Story Pack、Character Card、Worl
 flowchart TD
     S["StoryReadSnapshot"] --> B["BaselineContextBuilder"]
     R["TurnRequest"] --> B
-    B --> C["BaselineContext"]
+    K["Knowledge Read Port"] --> B
+    D["NarrativeDirector"] --> B
+    B --> C["Baseline + PrePlanningContext"]
     C --> P["WriterPlanner"]
-    D["NarrativeDirector"] --> P
-    P --> W["WriterPlan + RetrievalPlan"]
+    P --> W["WriterPlan + SupplementalRetrievalPlan"]
     W --> X["ContextRetrievalPipeline"]
-    K["Knowledge Read Port"] --> X
+    K --> X
     X --> O["RetrievedContext"]
 ```
 
 职责边界如下：
 
 ```text
-BaselineContextBuilder  = 构建本 Turn 必然需要的类型化基础数据与确定性召回信号
+BaselineContextBuilder  = 构建基础数据、确定性预规划角色/知识上下文与剩余目标索引
 NarrativeDirector       = 根据 Graph Definition 与 Runtime State 计算当前 NarrativePlan
-WriterPlanner           = 生成故事目标、语义知识缺口与角色推演请求
-ContextRetrievalPipeline= 执行受众过滤、候选召回、排名、去重和预算裁剪
+WriterPlanner           = 生成故事目标、补充上下文缺口与角色推演请求
+ContextRetrievalPipeline= 校验并执行 Planner 补充请求的受众过滤、候选召回、排名、去重和预算裁剪
 Prompt Module           = 选择可信 PromptProfile，并编码阶段专用的类型化 Context
 ```
 
@@ -133,14 +134,14 @@ Prompt Module           = 选择可信 PromptProfile，并编码阶段专用的�
 | Type / Module | Responsibility | Out of scope |
 |---|---|---|
 | `StoryReadSnapshot` | 提供当前 Turn 的一致性故事视图和版本化知识读取范围 | 不保存 Prompt；不把全部知识正文强制载入内存 |
-| `BaselineContextBuilder` | 从 Snapshot 与 Request 派生固定基础数据和 `RetrievalSignals` | 不调用 LLM；不检索 World Book 正文；不更新状态 |
+| `BaselineContextBuilder` | 从 Snapshot、Request 与版本化 Knowledge Read Port 派生固定基础数据、有界预规划上下文和剩余目标索引 | 不调用 LLM；不扫描全部 World Book；不执行 Planner 补充检索；不更新状态 |
 | `BaselineContext` | 保存 Planner、Generator 等阶段共同需要的类型化基础数据 | 不保存 System Prompt、重复 Player Input 或全部场外角色详情 |
+| `PrePlanningContext` | 保存 `NarrativePlan`、已解析角色视图、确定性选中的 `RelevantKnowledge`、`CharacterIndex` 与 `KnowledgeEntryIndex` | 不保存原始检索信号、未解析引用、每目标状态或跨 Turn 缓存 |
 | `StoryContinuity` | 保证 Summary 与 Recent Segments 在故事顺序上无重叠、无缺口 | 不决定 Summary 的生成模型或调度方式 |
 | `ActiveStoryConstraint` | 表示 StoryInstance 当前必须遵守的结构化故事边界 | 不覆盖 Engine Rule；不包含 Prompt 片段 |
-| `RetrievalSignals` | 保存从当前场景、玩家输入、最近正文和显式引用中确定性提取的 Entity/Topic | 不保存召回结果；不选择检索算法 |
-| `NarrativePlan` | 保存本 Turn 的 Active Goals、Event Intents、Character Impulses 和候选状态迁移 | 不是权威 Narrative State；不能直接提交 |
-| `WriterPlan` | 保存故事目标、`NarrativePlan`、`RetrievalPlan` 和角色推演请求 | 不保存知识正文；不修改约束 |
-| `RetrievalPlan` | 合并自动请求、Narrative 请求和 Planner 语义请求 | 不执行检索；不包含 Provider 开关 |
+| `NarrativePlan` | 保存 Planner 前由纯领域 `NarrativeDirector` 生成的 Active Goals、Event Intents、Character Impulses 和候选状态迁移 | 不是权威 Narrative State；不能直接提交 |
+| `WriterPlan` | 保存故事目标、`SupplementalRetrievalPlan` 和角色推演请求 | 不复制 `NarrativePlan` 或知识正文；不修改约束 |
+| `SupplementalRetrievalPlan` | 保存通过校验的 Planner 补充请求 | 不重复预规划已提供上下文；不执行检索；不包含 Provider 开关 |
 | `CandidateRetriever` | 以统一契约返回一种检索方法的候选项 | 不执行最终权限判断、全局排名或预算裁剪 |
 | `ContextRetrievalPipeline` | 统一过滤、召回、融合、去重、排序和裁剪 | 不生成故事；不把知识升级为世界事实 |
 | `RetrievedContext` | 按 Writer 与 Character 分区保存最终 Context Item | 不跨 Turn 持久化；不混合不同角色的私有 Memory |
@@ -155,12 +156,12 @@ Prompt Module           = 选择可信 PromptProfile，并编码阶段专用的�
 | `InstanceSettings` | StoryInstance | Baseline | 只表示本次游玩实际生效的设置；不得放宽 Engine Rule |
 | Player Character | StoryInstance | Baseline | 通过稳定 ID 解析，不依赖集合顺序 |
 | Current Scene Characters | StoryInstance | Baseline | 提供当前场景需要的身份、Role 与实例状态 |
-| Off-scene Characters | StoryInstance | `CharacterIndex` 或按需读取 | Baseline 只保留轻量索引；完整状态按计划加载 |
+| Off-scene Characters | StoryInstance | Pre-planning resolution、`CharacterIndex` 或补充读取 | 显式引用角色加载有界视图；其余授权角色只进入轻量索引 |
 | `StoryContinuity` | StoryInstance 的已提交正文与 Summary 投影 | Baseline | Summary 和 Recent Segments 必须连续 |
 | `ActiveStoryConstraint[]` | StoryInstance | Baseline | 定义可来自 Story Pack 或已验证变更；当前激活集合以 Instance 为准 |
 | Narrative Definition | Frozen Story Pack | Snapshot / `NarrativeStateView` | 固定版本，不由 LLM 修改 |
 | Narrative Runtime State | StoryInstance | Snapshot / `NarrativeStateView` | 由已验证提交推进 |
-| Fact / Rumor / Memory | StoryInstance Knowledge Store | Retrieval | 逐条 Entry、按受众和当前情形召回 |
+| Fact / Rumor / Memory | StoryInstance Knowledge Store | Pre-planning selection 或 supplemental Retrieval | 显式相关知识在 Planner 前有界加载；额外缺口按 Entry、受众和当前情形召回 |
 | Player Input | `TurnRequest` | 各阶段专用 Context | 不复制进 Snapshot、Baseline 或 WriterPlan |
 
 动态生成的 Character 通过 `StoryProposal -> Validation -> ValidatedChangeSet -> Commit` 成为 StoryInstance Character。后续 Turn 与 Pack Seed Character 使用相同读取路径；任何动态 Character 都不能反向修改 Story Pack。
@@ -206,22 +207,30 @@ Current Turn      = 生成并提交 StorySegment N+1
 | `player_character` | 当前玩家扮演角色的组合视图 |
 | `current_scene` | 当前场景权威视图 |
 | `scene_characters` | 当前场景中的角色组合视图 |
-| `character_index` | 场外角色的轻量 ID、名称、Role、Location 索引 |
 | `story_continuity` | 同一 Snapshot 中的 Summary 与连续 Recent Segments |
 | `active_story_constraints` | 当前生效的结构化故事约束 |
 | `narrative_state_view` | Narrative Definition 引用与 Runtime State |
-| `retrieval_signals` | 确定性 Entity/Topic/Scene/Role 信号 |
+
+`PrePlanningContext` 包含：
+
+| Field | Content |
+|---|---|
+| `narrative_plan` | Planner 调用前由 `NarrativeDirector` 确定性生成的当前 Turn 方向 |
+| `referenced_characters` | Player Input、有界 Recent Story 或 Narrative Plan 显式引用的已解析角色视图 |
+| `relevant_knowledge` | always-on、scene-linked、显式依赖及有界 Entity/Topic/关键词命中的知识正文 |
+| `character_index` | 尚未提供详细上下文的授权现有角色目标 |
+| `knowledge_entry_index` | 尚未提供正文的授权知识目标 |
 
 Baseline 明确排除：
 
 - `story_instructions` 或任何生成后的 Prompt 字符串。
 - 含义混杂的通用 `StoryConfig`。
-- 全量 World Book、Fact、Rumor 或所有 Character Memory 正文。
+- 全量 World Book、Fact、Rumor 或所有 Character Memory 正文；只允许有界的确定性 `relevant_knowledge`。
 - 所有场外 Character 的完整状态。
 - Player Input 的第二份文本副本。
 - `Vec<String>` 形式、没有来源和生命周期的通用 `active_constraints`。
 
-`StoryReadSnapshot` 可以持有 Baseline 所需的权威状态，但不应为了“一致性读取”把全部知识正文加载到内存。它应提供 `KnowledgeSnapshotRef`，使后续 Retrieval 在相同 Pack Digest 与 `base_revision` 范围内读取 Entry。Narrative Graph 确定性条件需要的结构化状态可以放入有界的 Condition State View，不要求把所有 Lore 文本交给 Planner。
+`StoryReadSnapshot` 可以持有 Baseline 所需的权威状态，但不应为了“一致性读取”把全部知识正文加载到内存。它应提供 `KnowledgeSnapshotRef`，使预规划选择和后续补充 Retrieval 都在相同 Pack Digest 与 `base_revision` 范围内读取 Entry。Narrative Graph 确定性条件需要的结构化状态可以放入有界的 Condition State View；Planner 只接收确定性选中的知识正文和有界剩余目标索引。
 
 ### 6. Planner constraints
 
@@ -249,32 +258,19 @@ lifecycle
 
 `WriterPlanner` 的内部顺序为：
 
-1. 读取 `BaselineContext` 与原始 Player Input。
-2. 使用纯领域组件 `NarrativeDirector` 确定性评估 Graph。
-3. 组装 `PlannerContext = BaselineContext + NarrativePlan + Player Input`。
-4. 由固定的 `PromptProfile::WriterPlanner` 生成可信 System Prompt。
-5. LLM 输出 Story Goal、语义 Context Gaps 和 Character Think Requests。
-6. 引擎验证输出并与自动请求合并，形成最终 `WriterPlan`。
+1. 读取 `BaselineContext`、已包含 `NarrativePlan` 的 `PrePlanningContext` 与原始 Player Input。
+2. 组装 `PlannerContext = BaselineContext + PrePlanningContext + Player Input`。
+3. 由固定的 `PromptProfile::WriterPlanner` 生成可信 CSI、数据-only RC 与可信 FTI。
+4. LLM 输出 Story Goal、补充 Context Gaps 和 Character Think Requests。
+5. 引擎验证输出，形成最终 `WriterPlan` 与 `SupplementalRetrievalPlan`。
 
 LLM 不能创建、删除、覆盖或放宽 `ActiveStoryConstraint`。同一组约束必须继续进入 Story Generator、Story Repairer 和 Validator，不能只约束 Planner。
 
-在固定的单次 Planner 调用流程中，Planner 不读取随后才产生的 Retrieved Context。它负责表达目标和知识缺口，Story Generator 才使用召回正文完成内容生成。若未来需要“先召回、再基于证据重新规划”，应作为显式的流程变更重新设计，不能在现有 Planner 内隐藏第二次调用。
+在固定的单次 Planner 调用流程中，Planner 读取确定性预规划阶段已经提供的角色与知识上下文，但不读取随后才由其补充请求产生的 `RetrievedContext`。Planner 负责表达目标和剩余缺口，Story Generator 使用预规划上下文与补充召回结果完成内容生成。若未来需要基于补充召回结果再次规划，应作为显式流程变更重新设计，不能在现有 Planner 内隐藏第二次调用。
 
-### 7. RetrievalSignals and RetrievalPlan
+### 7. Pre-planning selection and SupplementalRetrievalPlan
 
-`RetrievalSignals` 只保存可验证的检索线索，不保存知识正文：
-
-```text
-scene key
-location key
-present character ids
-active role keys
-referenced entity keys
-resolved topic keys
-bounded source fragments with source priority
-```
-
-自动信号按以下优先级提取：
+确定性预规划选择按以下优先级提取并解析显式相关上下文：
 
 1. Player Input 中解析出的显式 Entity 与 Topic。
 2. Current Scene、Location、Present Characters 与 RoleBindings 的结构化 Key。
@@ -282,26 +278,25 @@ bounded source fragments with source priority
 4. 最近一至两个 Story Segment 中仍在延续的实体与 Topic。
 5. Story Summary 只用于背景消歧和低优先级补充，不遍历后无限扩散历史主题。
 
-最终计划为：
+匹配成功且授权的知识正文进入 `RelevantKnowledge`；已解析的显式角色进入对应角色节。已经提供的目标不得重复进入索引。其余授权目标进入有界的 `CharacterIndex` 或 `KnowledgeEntryIndex`，每个索引声明 `complete` 或 `prefiltered` scope。
+
+Planner 输出的补充计划为：
 
 ```text
-RetrievalPlan
-    = Automatic Requests from RetrievalSignals
-    + Narrative Requests from NarrativePlan
-    + Planner Requests from Context Gaps
+SupplementalRetrievalPlan
+    = validate_and_normalize(Planner Context Gaps)
 ```
 
-每个 `RetrievalRequest` 至少包含：
+每个 Planner `ContextGap` 包含：
 
 | Field | Meaning |
 |---|---|
 | `audience` | `GlobalWriter` 或具体 `CharacterId` |
-| `knowledge_kinds` | Fact、Rumor、Memory 中允许检索的集合 |
-| `entities` | 已解析的稳定 Entity Keys |
-| `topics` | 已解析的稳定 Topic Keys |
-| `query_text` | Planner 的有界语义描述，供 Topic 解析及未来全文/向量检索使用 |
+| `target_id` | 已渲染索引中的稳定目标 ID |
+| `query_text` | 没有合适索引目标时使用的单一有界语义需求 |
 | `reason` | 该信息为何是当前 Turn 所需 |
-| `origin` | Automatic、Narrative 或 Planner |
+
+`target_id` 与 `query_text` 必须恰好存在一个。角色索引目标只能使用 `GlobalWriter` audience。Character audience 只表示某个现有 AI 角色的 Character Think 所需知识，并且必须有同角色的 `CharacterThinkRequest`。
 
 Planner 只表达“需要什么、给谁使用、为什么需要”，不能输出：
 
@@ -313,7 +308,7 @@ top_k
 token_budget
 ```
 
-这些字段属于引擎 Retrieval 配置。是否执行 Retrieval 从最终 `RetrievalPlan.requests` 是否为空推导；Planner 请求为空但 Automatic Request 非空时仍必须执行 Retrieval。
+这些字段属于引擎 Retrieval 配置。是否执行补充 Retrieval 从最终 `SupplementalRetrievalPlan.requests` 是否为空推导；确定性预规划选择即使没有 Planner 补充请求也必须完成。
 
 ### 8. World Book entry and topic model
 
@@ -372,7 +367,7 @@ source revision
 
 `ContextRetrievalPipeline` 按以下顺序执行：
 
-1. 验证 `RetrievalPlan`、`KnowledgeSnapshotRef`、受众和所有数量/长度上限。
+1. 验证 `SupplementalRetrievalPlan`、`KnowledgeSnapshotRef`、受众和所有数量/长度上限。
 2. 根据 Audience 与 Knowledge Kind 先缩小允许读取的集合。
 3. 使用 Topic Dictionary 与已知实体索引规范化每个请求。
 4. 调用已配置的 Candidate Retrievers；Provider 数量和每路候选数均有上限。
@@ -440,9 +435,9 @@ Context 模块输出类型化数据；`prompt` 模块负责可信指令和确定
 
 | Stage Context | Data |
 |---|---|
-| `PlannerContext` | Baseline、NarrativePlan、Player Input |
+| `PlannerContext` | Baseline、包含 NarrativePlan 的 PrePlanningContext、Player Input |
 | `CharacterThinkContext` | 目标 Character、Current Scene、该角色的 Retrieved Context、Current Perception、Character Impulse、Player Input |
-| `GenerationContext` | Baseline、WriterPlan、Writer Retrieved Context、Character Thoughts、Player Input |
+| `GenerationContext` | Baseline、PrePlanningContext 的 NarrativePlan 与 Relevant Knowledge、WriterPlan、Writer Retrieved Context、Character Thoughts、Player Input |
 | `RepairContext` | Generation Context、被拒 Proposal、Validation Issues |
 | `ValidationContext` | Snapshot、Active Constraints、Proposal、Context provenance |
 
@@ -455,21 +450,22 @@ Context 模块输出类型化数据；`prompt` 模块负责可信指令和确定
 1. `BaselineContextBuilder` 使用一次一致性读取获得 `StoryReadSnapshot`。
 2. Builder 校验 Summary/Recent Segment 连续性和所有 Baseline 上限。
 3. Builder 从 StoryInstance 组合 Story Profile、Scene、Character、Constraints 与 Narrative State View。
-4. Builder 从 Request 与 Snapshot 派生 `RetrievalSignals`，但不读取知识正文。
-5. Builder 将 Snapshot 与 Baseline 作为唯一阶段产物写入 `TurnExecutionContext`。
+4. Builder 调用纯领域 `NarrativeDirector`，在 LLM 调用前确定性生成 `NarrativePlan`。
+5. Builder 从 Request、Current Scene、有界 Recent Story 与 Narrative Plan 显式依赖确定性解析角色和 Entity/Topic/关键词需求。
+6. Builder 通过版本化 Knowledge Read Port 加载有界、授权的 `RelevantKnowledge`，并为未提供目标建立 `CharacterIndex` 与 `KnowledgeEntryIndex`。
+7. Builder 将 Snapshot、Baseline 与包含 Narrative Plan 的 `PrePlanningContext` 作为唯一阶段产物写入 `TurnExecutionContext`。
 
 #### Planning
 
-1. `WriterPlanner` 从 Context 读取 Baseline 与 Player Input。
-2. `NarrativeDirector` 确定性生成 `NarrativePlan`。
-3. Prompt Module 使用固定 Planner Profile 组装可信指令和类型化 Planner Context。
-4. LLM 输出 Story Goal、Context Gaps 和 Character Requests。
-5. Planner 校验输出并将 Automatic、Narrative、Planner 请求合并为 `RetrievalPlan`。
-6. `WriterPlan` 一次写入 Context；Runtime 根据最终请求集合决定后续可选阶段。
+1. `WriterPlanner` 从 Context 读取 Baseline、包含 Narrative Plan 的 PrePlanningContext 与 Player Input。
+2. Prompt Module 使用固定 Planner Profile 组装 CSI、数据-only RC 与 FTI。
+3. LLM 输出 Story Goal、Context Gaps 和 Character Requests。
+4. Planner 校验 exact target、bounded query、audience、Character Think 配对与已提供上下文去重，形成 `SupplementalRetrievalPlan`。
+5. `WriterPlan` 一次写入 Context；Runtime 根据补充请求集合决定是否执行后续 Retrieval。
 
 #### Retrieval
 
-1. Pipeline 读取 `WriterPlan.retrieval_plan` 与 Snapshot Scope。
+1. Pipeline 读取 `WriterPlan.supplemental_retrieval_plan` 与 Snapshot Scope。
 2. 每个 Request 先按 Audience 与 Kind 限制候选范围。
 3. Entity 与 Topic Provider 返回有界候选。
 4. Pipeline 统一去重、保留冲突、稳定排序和预算裁剪。
@@ -482,9 +478,9 @@ Context 模块输出类型化数据；`prompt` 模块负责可信指令和确定
 - **Story Configuration 如何拆分**：Story Pack 内容使用 `StoryProfile`；实例级设置使用 `InstanceSettings`；引擎预算与模型使用 `EngineConfig` / `TurnConfig`。
 - **Summary 覆盖边界使用什么**：使用 `StorySequence`，不用 `StoryRevision`。
 - **Active Constraints 是否保留在 Baseline**：保留结构化 `ActiveStoryConstraint[]`；删除含义模糊的 `Vec<String>`。
-- **World Book 正文放在哪里**：不进入 Baseline；由 `ContextRetrievalPipeline` 按 Entry 召回。
-- **谁决定需要什么知识**：Baseline 提供确定性信号，NarrativePlan 提供显式引用，Planner 表达语义缺口。
-- **谁决定如何检索**：Retrieval Pipeline；Planner 和 Story Pack 都不能选择算法或预算。
+- **World Book 正文放在哪里**：确定性选中的有界正文进入 Turn-scoped `PrePlanningContext.relevant_knowledge`；Planner 请求的额外正文进入按受众隔离的 `RetrievedContext`；两者都不进入长期 Baseline 权威状态。
+- **谁决定需要什么知识**：确定性代码处理显式相关性并提供正文或索引；Planner 只表达仍缺失的隐式相关上下文。
+- **谁决定如何检索**：预规划选择与 Retrieval Pipeline 使用引擎策略；Planner 和 Story Pack 都不能选择算法、Provider、排名或预算。
 - **第一版实现哪些方法**：Entity + Topic；BM25 + Embedding 只预留 Provider 接口与索引边界。
 - **Retrieved Context 如何组织**：Writer 与每个 Character 分区，禁止先扁平召回再依赖 Prompt 区分权限。
 - **如何保持一致性**：Snapshot 保存版本化 `KnowledgeSnapshotRef`，不持有跨 LLM 调用的数据库事务。
@@ -497,9 +493,9 @@ Context 模块输出类型化数据；`prompt` 模块负责可信指令和确定
   - `domain/narrative.rs`：增加 `StorySequence`、`StorySegment` 和 Summary 覆盖边界。
   - `domain/story_instance/snapshot.rs`：收敛 Baseline 权威状态，增加 `KnowledgeSnapshotRef`，避免强制加载全部知识正文。
   - `domain/knowledge/*`：统一 Entry 的 Entity、Topic、Salience、Source ID 与 Revision 元数据。
-  - `domain/turn/`：替换旧 `BaselineContext`、`ContextRequest`、扁平 `ContextItem` 和 `WriterPlan`。
-  - `context/`：实现 Retrieval Signals、Topic Matcher、Candidate Retriever、Audience Filter、Ranking 与 `RetrievedContext`。
-  - `planning/writer_planner.rs`：在 LLM 调用前接入 `NarrativeDirector`，并合并三类 Retrieval Request。
+  - `domain/turn/`：替换旧 `BaselineContext`、`ContextRequest`、扁平 `ContextItem` 和 `WriterPlan`，增加 Turn-scoped `PrePlanningContext` 与补充 Retrieval 契约。
+  - `context/`：实现确定性预规划选择、两个剩余目标索引、Topic Matcher、Candidate Retriever、Audience Filter、Ranking 与 `RetrievedContext`。
+  - `planning/writer_planner.rs`：读取已准备的 `NarrativePlan`，并校验 Planner 补充请求。
   - `prompt/`：使用阶段专用类型化 Context，删除从 Baseline 拼接 System Prompt 的路径。
   - `persistence/`：提供 revision-scoped Knowledge Read Port 与 Entity/Topic 索引查询。
 - **Config**:
@@ -523,7 +519,7 @@ Context 模块输出类型化数据；`prompt` 模块负责可信指令和确定
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Planner 在 Retrieval 前看不到召回正文，Story Goal 可能缺少 Lore 细节 | Medium | Medium | 自动召回显式 Entity/Topic；Planner 只确定目标与缺口，Generator 使用最终 Retrieved Context 完成正文 |
+| 预规划选择遗漏关键 Lore，Story Goal 仍缺少细节 | Medium | Medium | 提供有界剩余目标索引和 semantic query；记录零结果、prefiltered scope 与 Planner 补充请求指标 |
 | Topic Dictionary 或别名质量不足导致漏召回 | Medium | High | 导入校验、集中维护别名、记录未解析 Query 与零结果请求指标 |
 | Summary 与 Recent Story 重复或缺段 | Low | High | 使用 `StorySequence` 与连续性不变量，在 Baseline 阶段拒绝不一致 Snapshot |
 | Writer 知识泄漏到 Character | Medium | High | Audience 过滤先于候选召回；结果按 Character 分区；Validator 使用 provenance 检查 |
@@ -536,11 +532,12 @@ Context 模块输出类型化数据；`prompt` 模块负责可信指令和确定
 
 ## Roadmap
 
-- **Phase 0 — Contract alignment**：修订总架构第 10、11 节，确定 `StoryContinuity`、`BaselineContext`、`RetrievalPlan` 和 `RetrievedContext` 的最终契约。
-- **Phase 1 — Baseline and continuity**：实现 Story Sequence、Summary 边界、结构化 Constraints、Scene Character View 与 Retrieval Signals。
-- **Phase 2 — Entry retrieval**：实现 Topic Dictionary、Entity/Topic Candidate Retrievers、Audience Filter、稳定排名和预算裁剪。
-- **Phase 3 — Planner and prompt integration**：接入 NarrativePlan、三类 Retrieval Request 合并和阶段专用 Runtime Context。
-- **Phase 4 — Optional retrieval providers**：根据真实召回指标决定是否实现 BM25、Embedding 与排名融合；它们不是第一版前置条件。
+- **Phase 0 — Contract alignment**：修订总架构第 10、11 节，确定 `StoryContinuity`、`BaselineContext`、`SupplementalRetrievalPlan` 和 `RetrievedContext` 的最终契约。
+- **Phase 1 — Baseline and continuity**：实现 Story Sequence、Summary 边界、结构化 Constraints 与 Scene Character View。
+- **Phase 2 — Pre-planning context**：实现显式角色解析、确定性 Relevant Knowledge 选择、Character Index 与 Knowledge Entry Index。
+- **Phase 3 — Supplemental retrieval**：实现 Topic Dictionary、Entity/Topic Candidate Retrievers、Audience Filter、稳定排名和预算裁剪。
+- **Phase 4 — Planner and prompt integration**：接入 NarrativePlan、补充 Context Gap 校验和阶段专用 Runtime Context。
+- **Phase 5 — Optional retrieval providers**：根据真实召回指标决定是否实现 BM25、Embedding 与排名融合；它们不是第一版前置条件。
 
 ---
 
@@ -551,8 +548,8 @@ Context 模块输出类型化数据；`prompt` 模块负责可信指令和确定
 | Term | Definition |
 |---|---|
 | Baseline | 当前 Turn 在 Planner 调用前必然可得、无需语义检索的类型化基础数据 |
-| Retrieval Signal | 从结构化状态或有界文本中确定性提取的 Entity/Topic 线索 |
-| Context Gap | Planner 对“还需要知道什么”的语义描述 |
+| Pre-planning Context | 确定性代码在 Planner 前提供的已解析角色、Relevant Knowledge 与剩余目标索引 |
+| Context Gap | Planner 对额外缺失上下文的请求，包含精确索引目标或单一有界语义查询 |
 | Candidate | 某个 Retriever 返回、尚未经过全局排序和预算裁剪的知识 Entry |
 | Retrieved Context | 完成受众过滤、去重、排序和裁剪后的当前 Turn 知识视图 |
 | Story Sequence | StoryInstance 内故事正文段落的稳定顺序 |

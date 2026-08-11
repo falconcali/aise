@@ -4,7 +4,7 @@
 > Version: 3.0 Final  
 > Status: Final  
 > Supersedes: `2026-08-11-writer-planner-csi-rc-fti-prompt-spec-v2.0-gpt.md`  
-> Parent Spec: [CSI–RC–FTI Prompt Architecture](./upload/2026-08-11-csi-rc-fti-prompt-spec-gpt.md)
+> Parent Spec: [CSI–RC–FTI Prompt Architecture](./2026-08-11-csi-rc-fti-prompt-spec-gpt.md)
 
 ---
 
@@ -1184,7 +1184,7 @@ The governing rule is:
 
 - `doc/design/2026-08-08-context-preparation-retrieval-design-gpt.md`
 - `doc/design/2026-08-04-Architecture-gpt.md`
-- `doc/exec/2026-08-11-csi-rc-fti-prompt-spec-gpt.md`
+- `doc/exec/CSI-RC-FTI/2026-08-11-csi-rc-fti-prompt-spec-gpt.md`
 - `crates/aise/src/prompt/profile.rs`
 - `crates/aise/src/prompt/model_request.rs`
 - `crates/aise/src/prompt/runtime_context_encoder.rs`

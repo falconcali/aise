@@ -3,8 +3,8 @@
 > Model: GPT-5.6 Sol  
 > Date: 2026-08-11  
 > Status: Proposed — Structure Draft  
-> Source Design: [Context Preparation and Retrieval — Design](../design/2026-08-08-context-preparation-retrieval-design-gpt.md)  
-> Related Architecture: [AISE Architecture](../design/2026-08-04-Architecture-gpt.md)  
+> Source Design: [Context Preparation and Retrieval — Design](../../design/2026-08-08-context-preparation-retrieval-design-gpt.md)
+> Related Architecture: [AISE Architecture](../../design/2026-08-04-Architecture-gpt.md)
 > Phase: N/A
 
 ---
@@ -35,12 +35,14 @@ Replace the current system-prompt-plus-serialized-JSON approach with a stage-spe
 - Keep structured output requirements inside FTI rather than introducing a fourth prompt layer.
 - Define the target prompt asset layout for `context-v2`.
 - Define validation and test requirements for prompt composition and context projection.
+- Define bounded deterministic pre-planning character resolution, knowledge selection, and retrieval indexes for `WriterPlanner`.
 
 ### 2.2 Non-Goals
 
 - Does not change the eight-step Turn execution architecture.
 - Does not change `TurnRuntime` orchestration or `TurnExecutionPipeline` ownership rules.
-- Does not change Narrative Graph semantics, Retrieval semantics, Character Think semantics, Story Proposal semantics, or validation semantics.
+- Does not change Narrative Graph semantics, Character Think semantics, Story Proposal semantics, or validation semantics.
+- Does not move Planner-directed supplemental retrieval, audience authorization, ranking, deduplication, or budget enforcement out of `ContextRetrievalPipeline`.
 - Does not redesign the LLM provider abstraction beyond what is necessary to carry CSI, RC, and FTI.
 - Does not add a fourth `Structured Output` layer; output format and output constraints belong to FTI.
 - Does not allow Story Pack, Character Card, World Book, player input, memories, retrieved content, or prior model output to provide trusted prompt instructions.
@@ -176,7 +178,7 @@ Required mapping:
 
 | Prompt profile | Authoritative `TurnExecutionContext` sources |
 |---|---|
-| `WriterPlanner` | `request.player_input`, `baseline`, Narrative Plan available at planning time |
+| `WriterPlanner` | `request.player_input`, `baseline`, deterministic pre-planning character/knowledge context and remaining-target indexes, Narrative Plan available at planning time |
 | `CharacterThink` | `request.player_input`, `baseline/current scene`, `plan`, character-scoped `retrieved`, target character state/perception |
 | `StoryGenerator` | `request.player_input`, `baseline`, `plan`, writer `retrieved`, `thoughts` |
 | `StoryRepairer` | Story Generator sources plus current `proposal` and `validation` issues |
@@ -312,7 +314,7 @@ NEVER rules
 Runtime Data Boundary
 ```
 
-Initial rule topics to discuss and finalize:
+The exact normative wording is defined by [WriterPlanner CSI-RC-FTI Prompt — Implementation Spec 3.0 Final](./2026-08-11-writer-planner-csi-rc-fti-prompt-spec-gpt.md). Its durable rule set covers:
 
 - immediate story-goal planning
 - context-gap planning
@@ -330,17 +332,21 @@ Initial rule topics to discuss and finalize:
 
 ```text
 Story Profile
-Instance Settings                 [TBD: include only model-relevant settings]
+Instance Settings
+Story Continuity
 Current Scene
 Player Character
 Scene Characters
-Character Index                   [TBD: exact compact form]
-Story Continuity
+Referenced Characters
+Relevant Knowledge
+Character Index
+Knowledge Entry Index
+Narrative Plan
 Active Story Constraints
-Narrative Direction / Narrative Plan
-Retrieval Signals / Available Targets
 Player Input
 ```
+
+This order is normative for `WriterPlanner`. `Relevant Knowledge` contains bounded knowledge bodies selected deterministically before planning. `Character Index` and `Knowledge Entry Index` contain only authorized retrievable targets whose detailed context has not already been provided. Raw retrieval signals, unresolved-reference diagnostics, and per-entry retrieval status MUST NOT appear in WriterPlanner RC.
 
 #### FTI content blocks
 
@@ -449,7 +455,7 @@ Player Character
 Relevant Scene / AI Characters
 Active Story Constraints
 Writer Plan / Immediate Story Goal
-Narrative Direction               [TBD: projected subset vs inside WriterPlan]
+Narrative Direction               [TBD: projected subset of PrePlanningContext.narrative_plan]
 Relevant Writer Knowledge
 AI Character Thoughts
 Player Input
@@ -560,7 +566,7 @@ The physical encoding MUST preserve:
 ### 4.1 General Rules
 
 1. `P-COMP-01` Every Turn LLM request MUST be composed from exactly three logical layers in order: CSI, RC, FTI.
-2. `P-COMP-02` CSI and FTI MUST come only from trusted project prompt assets selected by `PromptProfile`.
+2. `P-COMP-02` CSI and FTI MUST come only from trusted engine-controlled sources selected by `PromptProfile`: project prompt assets and bounded engine-generated schema or type fragments explicitly admitted by the selected FTI template. Runtime data MUST NOT select, replace, or modify any trusted CSI or FTI content.
 3. `P-COMP-03` RC MUST be derived from the current `TurnExecutionContext` and stage selector data only.
 4. `P-COMP-04` RC MUST NOT be treated as instruction authority, regardless of instruction-like strings contained in story assets, memories, retrieved content, prior model output, validation text, or player input.
 5. `P-COMP-05` The output contract MUST be part of FTI; the implementation MUST NOT add a fourth logical output layer.
@@ -656,18 +662,17 @@ The physical encoding MUST preserve:
 
 ## 6. Out of Scope / Future Work
 
-The following items are intentionally left for the next discussion passes before this spec becomes implementation-final:
+WriterPlanner CSI, RC, FTI, output schema, and pre-planning context contracts are finalized by [WriterPlanner CSI-RC-FTI Prompt — Implementation Spec 3.0 Final](./2026-08-11-writer-planner-csi-rc-fti-prompt-spec-gpt.md).
 
-1. `TBD` — exact CSI wording for `WriterPlanner`.
-2. `TBD` — exact RC section fields and formatting for `WriterPlanner`.
-3. `TBD` — exact FTI wording and Planner output-schema presentation.
-4. `TBD` — exact CSI/RC/FTI wording for `CharacterThink`.
-5. `TBD` — exact CSI/RC/FTI wording for `StoryGenerator`.
-6. `TBD` — exact CSI/RC/FTI wording for `StoryRepairer`.
-7. `TBD` — whether CSI/RC/FTI are physically separate assets or one profile template with three extracted sections.
-8. `TBD` — provider-specific physical message role used for FTI while preserving the logical CSI-RC-FTI architecture.
-9. `TBD` — exact prompt-size budgets per layer.
-10. `TBD` — whether prompt-facing context types reuse the current `WriterPlannerContext` / `CharacterThinkContext` / `StoryGeneratorContext` / `StoryRepairerContext` names or move to explicit `*PromptContext` names.
+The following items remain for later profiles or cross-provider integration:
+
+1. `TBD` — exact CSI/RC/FTI wording for `CharacterThink`.
+2. `TBD` — exact CSI/RC/FTI wording for `StoryGenerator`.
+3. `TBD` — exact CSI/RC/FTI wording for `StoryRepairer`.
+4. `TBD` — whether CSI/RC/FTI are physically separate assets or one profile template with three extracted sections.
+5. `TBD` — provider-specific physical message role used for FTI while preserving the logical CSI-RC-FTI architecture.
+6. `TBD` — exact prompt-size budgets per layer.
+7. `TBD` — whether prompt-facing context types for the remaining profiles reuse their current names or move to explicit `*PromptContext` names.
 
 ---
 
@@ -681,4 +686,5 @@ The following items are intentionally left for the next discussion passes before
 - Current generic JSON encoder: `crates/aise/src/prompt/runtime_context_encoder.rs`
 - Current prompt assets: `crates/aise/assets/prompts/context-v1/`
 - Current Writer Planner prompt: `crates/aise/assets/prompts/context-v1/files/writer-planner.md.j2`
+- WriterPlanner implementation spec: `doc/exec/CSI-RC-FTI/2026-08-11-writer-planner-csi-rc-fti-prompt-spec-gpt.md`
 - SillyTavern prompt composition / Post-History Instructions: external prior art; conceptual inspiration only, not an API compatibility target.
