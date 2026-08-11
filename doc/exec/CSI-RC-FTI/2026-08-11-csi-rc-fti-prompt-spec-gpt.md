@@ -296,6 +296,8 @@ FTI MUST contain the output contract for the current profile.
 
 FTI MUST NOT duplicate the full CSI rule set.
 
+FTI is the model's final execution checklist. It may intentionally reinforce critical CSI rules, but should contain only the small set of instructions whose omission or loss of attention would materially affect the current output.
+
 ### 3.7 Writer Planner Content Contract
 
 #### CSI content blocks
