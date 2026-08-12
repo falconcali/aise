@@ -1,36 +1,32 @@
 use crate::domain::turn::StoryProposal;
 use crate::llm::gateway::LlmGateway;
-use crate::prompt::{ModelRequest, PromptProfile};
-use crate::story::story_generator_prompt::{
-    DefaultStoryGeneratorPromptContextProjector, StoryGeneratorPromptContext, StoryGeneratorPromptContextProjector,
+use crate::prompt::{PromptCompositionInput, PromptProfile};
+use crate::story::story_repairer_prompt::{
+    DefaultStoryRepairerPromptContextProjector, StoryRepairerProjectionError, StoryRepairerPromptContextProjector,
 };
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::LlmCallPurpose;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::turn::turn_validation::{ValidationDecision, ValidationIssue};
 use async_trait::async_trait;
-use serde::Serialize;
 use std::sync::Arc;
-
-#[derive(Debug, Clone, Serialize)]
-struct StoryRepairerContext {
-    generation: StoryGeneratorPromptContext,
-    previous_proposal: StoryProposal,
-    issues: Vec<ValidationIssue>,
-}
+use tracing::Instrument;
 
 pub struct StoryRepairer {
     gateway: Arc<LlmGateway>,
+    projector: Arc<dyn StoryRepairerPromptContextProjector>,
 }
 
 impl StoryRepairer {
     pub fn new(gateway: Arc<LlmGateway>) -> Self {
-        Self { gateway }
+        Self {
+            gateway,
+            projector: Arc::new(DefaultStoryRepairerPromptContextProjector::default()),
+        }
     }
 
-    pub fn gateway(&self) -> &Arc<LlmGateway> {
-        &self.gateway
+    pub fn with_projector(gateway: Arc<LlmGateway>, projector: Arc<dyn StoryRepairerPromptContextProjector>) -> Self {
+        Self { gateway, projector }
     }
 }
 
@@ -41,40 +37,49 @@ impl TurnExecutionPipeline for StoryRepairer {
     }
 
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
-        let validation = ctx
-            .validation()
-            .ok_or_else(|| invariant("no validation result before repair"))?;
-        if validation.decision() != ValidationDecision::Repair {
-            return Err(invariant("repairer only runs when validation requires repair"));
-        }
-        let issues = validation.issues().to_vec();
-        let previous_proposal = ctx
-            .proposal()
-            .ok_or_else(|| invariant("proposal not set before repair"))?
-            .clone();
-        let generation = DefaultStoryGeneratorPromptContextProjector
-            .project(ctx)
-            .map_err(|error| invariant(error.to_string()))?
-            .context;
-        let request = ModelRequest::new(
-            PromptProfile::StoryRepairer,
-            StoryRepairerContext {
-                generation,
-                previous_proposal,
-                issues,
-            },
-            ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32,
-            LlmCallPurpose::StoryRepair,
+        let projection = self.projector.project(ctx).map_err(map_projection_error)?;
+        let issue_count = projection.context.validation_issues.len();
+        let issue_codes = projection
+            .context
+            .validation_issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        let proposal_revision = ctx.proposal_revision();
+        let request = PromptCompositionInput {
+            profile: PromptProfile::StoryRepairer,
+            rc_vars: projection.rc_vars,
+            fti_vars: projection.fti_vars,
+        };
+        let max_output_tokens = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
+        tracing::info!(
+            prompt_profile = "story_repairer",
+            proposal_revision,
+            issue_count,
+            issue_codes,
+            "story repairer prompt projected"
         );
         let scope = ctx.llm_call_scope(TurnStage::StoryRepairer);
-        let completion = self.gateway.complete_typed(scope, request).await.map_err(|error| {
-            TurnExecutionError::new(
-                TurnFailureKind::Llm,
-                "llm_error",
-                Some(TurnStage::StoryRepairer),
-                error.to_string(),
-            )
-        })?;
+        let span = tracing::info_span!(
+            "story_repairer.repair",
+            prompt_profile = "story_repairer",
+            proposal_revision,
+            issue_count,
+        );
+        let completion = self
+            .gateway
+            .complete_composed(scope, request, max_output_tokens, LlmCallPurpose::StoryRepair)
+            .instrument(span)
+            .await
+            .map_err(|error| {
+                TurnExecutionError::new(
+                    TurnFailureKind::Llm,
+                    "llm_error",
+                    Some(TurnStage::StoryRepairer),
+                    error.to_string(),
+                )
+            })?;
         let proposal: StoryProposal = serde_json::from_str(&completion.text).map_err(|_| {
             TurnExecutionError::new(
                 TurnFailureKind::Llm,
@@ -88,6 +93,12 @@ impl TurnExecutionPipeline for StoryRepairer {
             ctx.budget().max_item_bytes(),
             ctx.budget().max_proposal_bytes(),
         ) {
+            tracing::warn!(
+                prompt_profile = "story_repairer",
+                proposal_revision,
+                output_bytes = completion.text.len(),
+                "story repairer proposal rejected"
+            );
             return Err(TurnExecutionError::new(
                 TurnFailureKind::Llm,
                 "model_output_invalid",
@@ -95,10 +106,36 @@ impl TurnExecutionPipeline for StoryRepairer {
                 "story repair output exceeds a field or collection bound",
             ));
         }
+        tracing::info!(
+            prompt_profile = "story_repairer",
+            proposal_revision,
+            output_bytes = completion.text.len(),
+            event_count = proposal.events.len(),
+            character_change_count = proposal.character_changes.len(),
+            relationship_change_count = proposal.relationship_changes.len(),
+            knowledge_change_count = proposal.knowledge_changes.len(),
+            perception_count = proposal.perceptions.len(),
+            "story repairer proposal decoded"
+        );
         ctx.replace_story_proposal(proposal)
     }
 }
 
-fn invariant(message: impl Into<String>) -> TurnExecutionError {
-    TurnExecutionError::invariant(message)
+fn map_projection_error(error: StoryRepairerProjectionError) -> TurnExecutionError {
+    let code = match error {
+        StoryRepairerProjectionError::MissingValidation => "missing_validation",
+        StoryRepairerProjectionError::ValidationDoesNotRequireRepair => "validation_does_not_require_repair",
+        StoryRepairerProjectionError::MissingPreviousProposal => "missing_previous_proposal",
+        StoryRepairerProjectionError::EmptyValidationIssues => "empty_validation_issues",
+        StoryRepairerProjectionError::FatalValidationIssue => "fatal_validation_issue",
+        StoryRepairerProjectionError::PreviousProposalExceedsBounds => "previous_proposal_exceeds_bounds",
+        StoryRepairerProjectionError::Invariant { .. } => "story_repairer_prompt_invariant",
+        StoryRepairerProjectionError::GenerationContext(_) => "story_generator_projection_failed",
+    };
+    TurnExecutionError::new(
+        TurnFailureKind::InvariantViolation,
+        code,
+        Some(TurnStage::StoryRepairer),
+        error.to_string(),
+    )
 }

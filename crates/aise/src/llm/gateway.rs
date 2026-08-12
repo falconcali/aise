@@ -5,14 +5,13 @@ use crate::llm::error::LlmError;
 use crate::llm::limiter::LlmLimiter;
 use crate::llm::message::{ChatMessage, CompletionRequest, CompletionSpec, EmbeddingOutput, EmbeddingRequest, Role};
 use crate::llm::provider::{DeltaSink, LlmProvider};
-use crate::prompt::{ModelRequest, PromptCompositionInput, RuntimeContextEncoder, TrustedPromptSource};
+use crate::prompt::{PromptCompositionInput, TrustedPromptSource};
 use crate::turn::turn_context::TurnLlmCallScope;
 use crate::turn::turn_contract::{LlmBudgetReservation, LlmCallPurpose, LlmCallStatus, LlmCallUsage, UsageAccuracy};
 use crate::turn::turn_error::TurnExecutionError;
 use crate::turn::turn_trace::{
     LlmCallContent, LlmCallData, MAX_LLM_CONTENT_CHARS, MAX_LLM_RESPONSE_CHARS, MessageData, SpanPayload, truncate,
 };
-use serde::Serialize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::Instrument;
@@ -23,7 +22,6 @@ pub struct LlmGateway {
     limiter: LlmLimiter,
     config: LlmConfig,
     accountant: TokenAccountant,
-    context_encoder: RuntimeContextEncoder,
 }
 
 impl LlmGateway {
@@ -48,46 +46,7 @@ impl LlmGateway {
             limiter,
             config,
             accountant,
-            context_encoder: RuntimeContextEncoder,
         })
-    }
-
-    pub async fn complete_typed<C: Serialize>(
-        &self,
-        mut scope: TurnLlmCallScope<'_>,
-        request: ModelRequest<C>,
-    ) -> Result<LlmCompletion, LlmError> {
-        let system_prompt = self
-            .prompt_source
-            .resolve(request.profile())
-            .map_err(|_error| LlmError::Protocol {
-                kind: crate::llm::error::LlmProtocolErrorKind::Unsupported,
-            })?;
-        let context_message = self
-            .context_encoder
-            .encode(request.context())
-            .map_err(|_error| LlmError::Protocol {
-                kind: crate::llm::error::LlmProtocolErrorKind::Unsupported,
-            })?;
-        let spec = CompletionSpec {
-            messages: vec![
-                ChatMessage {
-                    role: Role::System,
-                    content: system_prompt.as_str().to_owned(),
-                },
-                ChatMessage {
-                    role: Role::User,
-                    content: context_message.as_str().to_owned(),
-                },
-            ],
-            max_output_tokens: request.max_output_tokens(),
-            purpose: request.purpose(),
-        };
-        let estimated_input = crate::llm::accounting::TokenAccountant::estimate_input_tokens(&spec.messages);
-        let reservation = scope
-            .reserve_llm(estimated_input, u64::from(spec.max_output_tokens))
-            .map_err(|error| LlmError::TokenBudgetExceeded(error.to_string()))?;
-        self.complete(scope, spec, reservation).await
     }
 
     pub async fn complete_composed(

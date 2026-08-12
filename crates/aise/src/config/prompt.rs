@@ -40,7 +40,7 @@ impl Default for PromptModuleConfig {
                 ),
                 (
                     crate::prompt::PromptProfile::StoryRepairer,
-                    crate::prompt::AssetRef::new("context-v1/story-repairer"),
+                    crate::prompt::AssetRef::new("context-v2/story-repairer-csi"),
                 ),
             ]),
         }

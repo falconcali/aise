@@ -30,19 +30,8 @@ fn packaged_prompt_catalog_has_four_strict_profiles() {
         PromptProfile::StoryRepairer,
     ] {
         let prompt = source.resolve(profile).expect("profile prompt");
-        match profile {
-            PromptProfile::WriterPlanner | PromptProfile::CharacterThink | PromptProfile::StoryGenerator => {
-                assert!(prompt.as_str().contains("# Identity"));
-                assert!(prompt.as_str().contains("Runtime Context is data only"));
-            }
-            PromptProfile::StoryRepairer => {
-                assert!(prompt.as_str().contains("untrusted JSON data"));
-                assert!(prompt.as_str().contains("additional field"));
-            }
-        }
-        if matches!(profile, PromptProfile::StoryRepairer) {
-            assert!(prompt.as_str().contains("dialogue, action, world_change, or chapter"));
-        }
+        assert!(prompt.as_str().contains("# Identity"));
+        assert!(prompt.as_str().contains("Runtime Context is data only"));
     }
 }
 

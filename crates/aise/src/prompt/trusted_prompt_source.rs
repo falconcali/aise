@@ -64,6 +64,14 @@ impl CatalogPromptSource {
                 fti_slot: SlotId::new("context.story_generator.fti"),
             },
         )?;
+        profiles.register(
+            PromptProfile::StoryRepairer,
+            PromptProfileAssets {
+                csi_slot: SlotId::new("context.story_repairer.csi"),
+                rc_slot: SlotId::new("context.story_repairer.rc"),
+                fti_slot: SlotId::new("context.story_repairer.fti"),
+            },
+        )?;
         Ok(Self {
             catalog,
             profile_assets,
@@ -108,8 +116,16 @@ fn all_profiles() -> [PromptProfile; 4] {
 fn packaged_catalog() -> Result<PromptCatalog, PromptError> {
     let sources = BTreeMap::from([
         (
-            "files/story-repairer.md.j2",
-            include_str!("../../assets/prompts/context-v1/files/story-repairer.md.j2"),
+            "../context-v2/csi/story-repairer.md.j2",
+            include_str!("../../assets/prompts/context-v2/csi/story-repairer.md.j2"),
+        ),
+        (
+            "../context-v2/rc/story-repairer.md.j2",
+            include_str!("../../assets/prompts/context-v2/rc/story-repairer.md.j2"),
+        ),
+        (
+            "../context-v2/fti/story-repairer.md.j2",
+            include_str!("../../assets/prompts/context-v2/fti/story-repairer.md.j2"),
         ),
         (
             "../context-v2/csi/writer-planner.md.j2",
