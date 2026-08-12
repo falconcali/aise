@@ -56,6 +56,14 @@ impl CatalogPromptSource {
                 fti_slot: SlotId::new("context.character_think.fti"),
             },
         )?;
+        profiles.register(
+            PromptProfile::StoryGenerator,
+            PromptProfileAssets {
+                csi_slot: SlotId::new("context.story_generator.csi"),
+                rc_slot: SlotId::new("context.story_generator.rc"),
+                fti_slot: SlotId::new("context.story_generator.fti"),
+            },
+        )?;
         Ok(Self {
             catalog,
             profile_assets,
@@ -100,10 +108,6 @@ fn all_profiles() -> [PromptProfile; 4] {
 fn packaged_catalog() -> Result<PromptCatalog, PromptError> {
     let sources = BTreeMap::from([
         (
-            "files/story-generator.md.j2",
-            include_str!("../../assets/prompts/context-v1/files/story-generator.md.j2"),
-        ),
-        (
             "files/story-repairer.md.j2",
             include_str!("../../assets/prompts/context-v1/files/story-repairer.md.j2"),
         ),
@@ -130,6 +134,18 @@ fn packaged_catalog() -> Result<PromptCatalog, PromptError> {
         (
             "../context-v2/fti/character-think.md.j2",
             include_str!("../../assets/prompts/context-v2/fti/character-think.md.j2"),
+        ),
+        (
+            "../context-v2/csi/story-generator.md.j2",
+            include_str!("../../assets/prompts/context-v2/csi/story-generator.md.j2"),
+        ),
+        (
+            "../context-v2/rc/story-generator.md.j2",
+            include_str!("../../assets/prompts/context-v2/rc/story-generator.md.j2"),
+        ),
+        (
+            "../context-v2/fti/story-generator.md.j2",
+            include_str!("../../assets/prompts/context-v2/fti/story-generator.md.j2"),
         ),
     ]);
     load_catalog_bundle(

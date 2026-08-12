@@ -1,6 +1,7 @@
 pub mod instance_factory;
 pub mod pack_service;
 pub mod story_generator;
+pub mod story_generator_prompt;
 pub mod story_repairer;
 
 pub use instance_factory::{
@@ -10,4 +11,8 @@ pub use pack_service::{
     AssetExportError, AssetImportError, AssetInput, NativeAssetImporter, PackExport, PackExportFormat, PackService,
 };
 pub use story_generator::StoryGenerator;
+pub use story_generator_prompt::{
+    DefaultStoryGeneratorPromptContextProjector, StoryGeneratorProjectionError, StoryGeneratorPromptContext,
+    StoryGeneratorPromptContextProjector,
+};
 pub use story_repairer::StoryRepairer;

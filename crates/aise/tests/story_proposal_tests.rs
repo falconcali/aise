@@ -21,6 +21,13 @@ fn omitted_optional_fields_default_to_none() {
 }
 
 #[test]
+fn empty_story_text_fails_proposal_bounds() {
+    let proposal: StoryProposal = serde_json::from_str(r#"{"story_text":"  "}"#).expect("proposal shape");
+
+    assert!(!proposal.is_within_bounds(8, 1024, 8192));
+}
+
+#[test]
 fn unknown_top_level_and_nested_fields_are_rejected() {
     assert!(
         serde_json::from_str::<StoryProposal>(

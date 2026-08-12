@@ -97,15 +97,21 @@ impl LlmGateway {
         max_output_tokens: u32,
         purpose: LlmCallPurpose,
     ) -> Result<LlmCompletion, LlmError> {
+        let render_started = Instant::now();
         let composition = self.prompt_source.compose(&input).map_err(|_| LlmError::Protocol {
             kind: crate::llm::error::LlmProtocolErrorKind::Unsupported,
         })?;
+        let render_ms = render_started.elapsed().as_millis() as u64;
         tracing::info!(
             prompt_profile = %composition.profile,
             prompt_pack = %composition.metadata.csi.pack,
             csi_bytes = composition.csi.as_str().len(),
+            csi_tokens = estimate_text_tokens(composition.csi.as_str()),
             rc_bytes = composition.rc.as_str().len(),
+            rc_tokens = estimate_text_tokens(composition.rc.as_str()),
             fti_bytes = composition.fti.as_str().len(),
+            fti_tokens = estimate_text_tokens(composition.fti.as_str()),
+            render_ms,
             "prompt composition rendered"
         );
         let spec = CompletionSpec {
