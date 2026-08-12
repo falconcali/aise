@@ -4,7 +4,7 @@
 > Version: 3.0 Final  
 > Status: Final  
 > Supersedes: `2026-08-11-writer-planner-csi-rc-fti-prompt-spec-v2.0-gpt.md`  
-> Parent Spec: [CSI–RC–FTI Prompt Architecture](./upload/2026-08-11-csi-rc-fti-prompt-spec-gpt.md)
+> Parent Spec: [CSI–RC–FTI Prompt Architecture](./2026-08-11-csi-rc-fti-prompt-spec-gpt.md)
 
 ---
 
@@ -832,24 +832,19 @@ The RC asset must not contain explanatory retrieval prose. Those instructions be
 ```jinja
 # Task
 
-Using the Runtime Context, create the Writer Plan for the next story segment.
+Create the Writer Plan for the next story segment using the Runtime Context.
 
 ## MUST
 
-- Set `story_goal` to a concise description of the immediate narrative transition the next segment should make.
-- Include an entry in `context_gaps` only when missing context not already provided in the Runtime Context could materially affect that transition.
-- Set each context gap's `audience` to `{ "kind": "global_writer" }` when the context is needed by the writer-side continuation after planning, or to `{ "kind": "character", "character_id": "<stable-id>" }` when it is needed for that character's private thinking.
-- Use the `global_writer` audience for every Character Index target; use a `character` audience only for knowledge needed by Character Think.
-- If the needed context appears in an index, use its exact `target_id`; otherwise use a bounded `query_text`. Set exactly one of the two.
-- Include an entry in `character_think_requests` only for an existing AI-controlled character whose private decision could materially affect that transition.
-- For every character-scoped context gap, include a Character Think request for the same `character_id`.
-- Give every context gap and Character Think request a concise reason explaining why it matters to the transition.
+- Set `story_goal` to the immediate narrative transition the next story segment should make.
+- Request only context not already provided in the Runtime Context that could materially affect that transition.
+- Request Character Think only when an AI-controlled character's private decision could materially affect that transition.
 - Use empty arrays when no additional context or Character Think is needed.
 
 ## NEVER
 
 - Treat Player Input as a guaranteed outcome.
-- Fill missing context by inventing facts or stable IDs.
+- Invent facts, IDs, or index entries.
 - Generate the story segment itself.
 
 # Output
@@ -1189,7 +1184,7 @@ The governing rule is:
 
 - `doc/design/2026-08-08-context-preparation-retrieval-design-gpt.md`
 - `doc/design/2026-08-04-Architecture-gpt.md`
-- `doc/exec/2026-08-11-csi-rc-fti-prompt-spec-gpt.md`
+- `doc/exec/CSI-RC-FTI/2026-08-11-csi-rc-fti-prompt-spec-gpt.md`
 - `crates/aise/src/prompt/profile.rs`
 - `crates/aise/src/prompt/model_request.rs`
 - `crates/aise/src/prompt/runtime_context_encoder.rs`
