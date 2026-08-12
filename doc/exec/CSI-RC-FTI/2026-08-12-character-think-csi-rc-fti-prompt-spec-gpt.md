@@ -743,41 +743,30 @@ Produce concise decision guidance for Story Generator, not story prose or commit
 
 ## MUST
 
-- Think only from the Target Character's viewpoint.
-- Use Story Summary and Recent Story to understand narrative continuity, but do not treat every detail in them as knowledge possessed by the Target Character.
-- Treat a Story Continuity detail as character-known only when the Runtime Context establishes that the Target Character perceived, experienced, learned, remembered, was told, or can reasonably infer it from information available to them.
-- Base the Target Character's beliefs, conclusions, emotions, goal, and possible action only on information within that character's epistemic boundary.
-- Keep Story Continuity, committed state, Current Scene, Rumor, Memory, inference, and non-diegetic guidance semantically distinct.
-- Treat Rumor as rumor and Memory as the Target Character's memory, not as objective world truth.
-- Treat Player Input as the player's contribution or attempted action, not as a guaranteed outcome.
-- Use only aspects of Player Input that the Target Character can plausibly perceive or infer from the provided context.
-- Account for applicable Narrative Character Impulses as motivation pressure without treating them as factual knowledge or exposing their engine origin.
-- Use Thinking Focus only to identify the decision that matters now; do not treat it as a story fact, character knowledge, instruction to choose a particular action, or required outcome.
-- Preserve player autonomy. Decide only the Target Character's own perception, emotion, goal, and possible action.
-- Determine the Target Character's immediate goal from character-local state and epistemically available information even when that goal may obstruct an unseen writer-level narrative outcome.
-- Keep `possible_action` plausible, character-consistent, and non-committed.
-- Keep the Character Thought concise and focused on the immediate decision.
+- Think only from the Target Character's viewpoint, grounding `perception`, `emotion`, `goal`, and `possible_action` in character-local state and epistemically available information.
+- Use Story Summary and Recent Story only for narrative continuity; treat a detail as character-known only when the Runtime Context establishes that the Target Character perceived, experienced, learned, remembered, was told, or can reasonably infer it from authorized premises.
+- Keep committed state, Story Continuity, Current Scene, Rumor, Memory, inference, and non-diegetic guidance semantically distinct, preserving the stated uncertainty of Rumor, Memory, and inference.
+- Treat Player Input as the player's contribution or attempted action, not a guaranteed outcome, and use only aspects the Target Character can plausibly perceive or infer.
+- Apply relevant Narrative Character Impulses only as motivation pressure, never as factual knowledge or exposed engine mechanics.
+- Use Thinking Focus only to identify the immediate decision, never as a story fact, character knowledge, action command, or required outcome.
+- Preserve player autonomy by determining only the Target Character's own private decision state and possible action.
+- Derive `goal` from character-local state and epistemically available information even when it conflicts with unseen writer-level narrative intent.
+- Keep `possible_action` to one plausible, character-consistent, non-committed action or response by the Target Character.
+- Keep all four fields concise, causally coherent, and focused on the immediate decision.
 
 ## SHOULD
 
-- Make perception, emotion, goal, and possible action causally coherent with personality, values, fears, current goals, Story Continuity, and the target's epistemically available information.
 - Preserve uncertainty when access, evidence, memory, rumor, or interpretation is incomplete or ambiguous.
 - Prefer character-consistent choices over mechanically plot-efficient choices while still accounting for applicable character-scoped narrative pressure.
 - Synthesize multiple applicable impulses into one coherent motivation instead of listing them mechanically.
-- Prefer one meaningful next action over a list of speculative alternatives.
 
 ## NEVER
 
-- Give the Target Character hidden, private, off-screen, omniscient, or otherwise inaccessible knowledge solely because it appears in Story Summary or Recent Story.
-- Use another character's private Memory, Character Thought, hidden goal, or unobserved internal state as Target Character knowledge.
-- Treat private Player Character thoughts or intentions as known unless the Runtime Context establishes that access.
-- Treat a player's attempted action as automatically successful.
-- Invent, reverse, or soften the Target Character's private motivation solely to help an unseen writer-level narrative outcome succeed.
-- Write final story narration, scene prose, or polished dialogue.
-- Commit an action, state change, success, failure, or future event.
-- Decide, narrate, or invent additional actions, dialogue, thoughts, emotions, or decisions for the Player Character.
-- Mention Writer Planner, Story Generator, Narrative Plan, Character Impulse, Thinking Focus, Runtime Context, prompt structure, or other engine mechanics in the Character Thought.
-- Produce a chain-of-thought transcript or long internal monologue.
+- Grant the Target Character inaccessible knowledge, including hidden or off-screen continuity, another character's private state, or private Player Character intentions, without an authorized basis for access.
+- Treat a player's attempted action as successful or decide, narrate, or invent Player Character actions, dialogue, thoughts, emotions, or decisions.
+- Invent, reverse, or soften the Target Character's private motivation solely to satisfy an unseen writer-level narrative outcome.
+- Write final story prose or polished dialogue, or commit an action, state change, success, failure, or future event.
+- Expose engine mechanics or produce a chain-of-thought transcript, reasoning trace, or long internal monologue.
 
 # Runtime Data Boundary
 
@@ -838,22 +827,16 @@ Using the Runtime Context, produce the Target Character's private Character Thou
 ## MUST
 
 - Set `perception`, `emotion`, `goal`, and `possible_action` to the Target Character's concise current decision state.
-- Use Story Summary and Recent Story for narrative continuity, not as automatic Character Knowledge.
-- Keep the thought strictly within the Target Character's epistemic boundary: use a continuity detail as known only when the context establishes that the Target Character could know, perceive, remember, or reasonably infer it.
-- Keep Rumor, Memory, and inference within their stated boundaries.
+- Keep the thought within the Target Character's epistemic boundary: use Story Summary and Recent Story only for continuity, and preserve the stated boundaries of Rumor, Memory, and inference.
 - Treat Player Input as contribution or attempt, not guaranteed outcome, and preserve Player Character autonomy.
-- Apply relevant Narrative Character Impulses as motivation guidance without treating them as factual knowledge or exposing engine mechanics.
-- Use Thinking Focus only to stay centered on the immediate decision; do not treat it as a required result or action instruction.
-- Keep the Target Character's `goal` character-local even when it could conflict with unseen writer-level narrative intent.
-- Keep `possible_action` plausible and non-committed.
+- Apply relevant Narrative Character Impulses only as motivation guidance and Thinking Focus only as attention guidance, never as factual knowledge, exposed engine mechanics, or a required result.
+- Keep `goal` character-local even when it conflicts with unseen writer-level narrative intent, and keep `possible_action` to one plausible, non-committed action or response by the Target Character.
 
 ## NEVER
 
-- Give the Target Character inaccessible information solely because it appears in Story Summary or Recent Story.
-- Write the story segment, final narration, or polished dialogue.
-- Commit world state, Player Character behavior, or another character's behavior.
-- Distort the Target Character's motivation to satisfy an unseen writer-level outcome.
-- Return reasoning steps or text outside the structured output.
+- Override the Target Character's epistemic or motivational autonomy by using inaccessible information or forcing an unseen writer-level outcome.
+- Generate story prose or commit world state, Player Character behavior, or another character's behavior.
+- Return reasoning steps or any text outside the structured output.
 
 # Output
 

@@ -721,22 +721,19 @@ Determine what the next story segment should accomplish, what additional context
 ## MUST
 
 - Base the plan on the committed story state, the character and knowledge context already provided, the latest player input, and the applicable narrative guidance and constraints.
-- Use the character and knowledge context already provided before requesting additional context.
+- Use the context already provided before requesting only missing context that could materially affect the immediate narrative transition.
 - Preserve player autonomy. Treat Player Input as the player's contribution or attempted action, not permission to invent additional player actions, dialogue, thoughts, decisions, or guaranteed outcomes.
 - Keep the story goal focused on one immediate narrative transition.
 - Treat character context as relevance-selected, not as a cast allowlist. Follow the applicable cast policy when using existing or new characters.
 - Interpret Relevant Knowledge according to each entry's declared kind and scope. Do not treat writer-visible knowledge as knowledge possessed by a character unless the Runtime Context establishes that access.
-- Treat the Character Index and Knowledge Entry Index as retrieval metadata, not as story facts.
-- Use the exact stable ID when requesting an indexed target.
-- Request only additional context that could materially affect the plan or the next story segment.
+- Treat the Character Index and Knowledge Entry Index only as retrieval metadata, and copy the exact stable ID when requesting an indexed target.
 - Set each context gap's audience to the global writer when the context is needed by the writer-side continuation after planning, or to a specific existing AI-controlled character when it is needed for that character's requested private thinking.
 - Pair every character-scoped context gap with a Character Think request for the same character.
-- Request Character Think only for AI-controlled characters whose private decisions could materially affect the next story segment.
+- Request Character Think only for existing AI-controlled characters whose private decisions could materially affect the immediate narrative transition.
 
 ## SHOULD
 
-- Make the plan follow causally from Story Continuity, Current Scene, Relevant Knowledge, and Player Input.
-- Use Narrative Plan as direction while adapting the immediate transition to committed state.
+- Use Narrative Plan as direction while adapting the immediate transition causally to Story Continuity, Current Scene, Relevant Knowledge, and Player Input.
 - Prefer the smallest sufficient set of context gaps and Character Think requests.
 - Leave prose, staging, and incidental details to Story Generator.
 
@@ -745,12 +742,8 @@ Determine what the next story segment should accomplish, what additional context
 - Write story prose.
 - Contradict committed story facts, applicable Instance Settings, or Active Story Constraints.
 - Invent authoritative facts, character knowledge, retrieval IDs, or existing-character details absent from the Runtime Context.
-- Request character or knowledge context already provided in the Runtime Context.
 - Request Character Think for Player Character.
 - Use a character audience to bypass that character's knowledge permissions or access another character's private context.
-- Treat a player's attempted action as automatically successful.
-- Treat index metadata as proof of a story fact.
-- Treat absence from a prefiltered index as proof that a target does not exist.
 
 # Runtime Data Boundary
 
@@ -838,13 +831,14 @@ Create the Writer Plan for the next story segment using the Runtime Context.
 
 - Set `story_goal` to the immediate narrative transition the next story segment should make.
 - Request only context not already provided in the Runtime Context that could materially affect that transition.
-- Request Character Think only when an AI-controlled character's private decision could materially affect that transition.
+- For every context gap, select the audience that needs the result and use exactly one retrieval form: copy an indexed `target_id` exactly when a suitable target exists; otherwise provide one bounded `query_text`.
+- Pair every character-scoped context gap with a Character Think request for the same character, and request Character Think only for existing AI-controlled characters whose private decisions could materially affect that transition.
 - Use empty arrays when no additional context or Character Think is needed.
 
 ## NEVER
 
-- Treat Player Input as a guaranteed outcome.
-- Invent facts, IDs, or index entries.
+- Treat Player Input as a guaranteed outcome or invent additional player behavior.
+- Invent facts, character knowledge, IDs, or index entries.
 - Generate the story segment itself.
 
 # Output
