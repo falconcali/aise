@@ -1,15 +1,8 @@
 assets:
-  - asset_id: context-v1/character-think
-    kind: text
-    source_path: files/character-think.md.j2
-    output_contract_ref: CharacterThoughtOutput
-    hash: sha256:0e4cd7aa44632bc1d38da26922272c9cf252e5e2b9df5ca864c84af2b7693761
-    status: active
   - asset_id: context-v1/story-generator
     kind: text
     source_path: files/story-generator.md.j2
     output_contract_ref: StoryProposalOutput
-    hash: sha256:ae16a5dfff3ce1b38a68b35bbd740dd5bd2990f68e0ba29b16ab8875960c89dc
     status: active
   - asset_id: context-v1/story-repairer
     kind: text
@@ -30,10 +23,22 @@ assets:
     source_path: ../context-v2/fti/writer-planner.md.j2
     output_contract_ref: PlannerOutput
     status: active
+  - asset_id: context-v2/character-think-csi
+    kind: text
+    source_path: ../context-v2/csi/character-think.md.j2
+    status: active
+  - asset_id: context-v2/character-think-rc
+    kind: text
+    source_path: ../context-v2/rc/character-think.md.j2
+    status: active
+  - asset_id: context-v2/character-think-fti
+    kind: text
+    source_path: ../context-v2/fti/character-think.md.j2
+    output_contract_ref: CharacterThoughtOutput
+    status: active
 packs:
   - name: context-v1
     slots:
-      context.character_think: context-v1/character-think
       context.story_generator: context-v1/story-generator
       context.story_repairer: context-v1/story-repairer
   - name: context-v2
@@ -42,5 +47,8 @@ packs:
       context.writer_planner.csi: context-v2/writer-planner-csi
       context.writer_planner.rc: context-v2/writer-planner-rc
       context.writer_planner.fti: context-v2/writer-planner-fti
+      context.character_think.csi: context-v2/character-think-csi
+      context.character_think.rc: context-v2/character-think-rc
+      context.character_think.fti: context-v2/character-think-fti
 resolver:
   default_pack: context-v1

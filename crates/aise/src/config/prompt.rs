@@ -32,7 +32,7 @@ impl Default for PromptModuleConfig {
                 ),
                 (
                     crate::prompt::PromptProfile::CharacterThink,
-                    crate::prompt::AssetRef::new("context-v1/character-think"),
+                    crate::prompt::AssetRef::new("context-v2/character-think-csi"),
                 ),
                 (
                     crate::prompt::PromptProfile::StoryGenerator,

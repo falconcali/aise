@@ -232,6 +232,18 @@ impl TurnExecutionContext {
             limits,
         )?;
         for (character_id, items) in context.characters() {
+            if !self.plan.as_ref().is_some_and(|plan| {
+                plan.character_think_requests
+                    .iter()
+                    .any(|request| &request.character_id == character_id)
+            }) {
+                return Err(TurnExecutionError::new(
+                    TurnFailureKind::InvariantViolation,
+                    "retrieved_character_audience_unauthorized",
+                    Some(TurnStage::Context),
+                    "retrieved character audience has no matching character think request",
+                ));
+            }
             self.validate_retrieved_partition(
                 items,
                 &RetrievalAudience::Character {

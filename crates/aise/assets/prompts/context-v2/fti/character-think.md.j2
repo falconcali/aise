@@ -1,0 +1,27 @@
+{# @asset {"asset_id":"context-v2/character-think-fti","slot_ids":["context.character_think.fti"]} #}
+# Task
+
+Using the Runtime Context, produce the Target Character's private Character Thought for this Turn.
+
+## MUST
+
+- Set `perception`, `emotion`, `goal`, and `possible_action` to the Target Character's concise current decision state.
+- Keep the thought within the Target Character's epistemic boundary: use Story Summary and Recent Story only for continuity, and preserve the stated boundaries of Rumor, Memory, and inference.
+- Treat Player Input as contribution or attempt, not guaranteed outcome, and preserve Player Character autonomy.
+- Apply relevant Narrative Character Impulses only as motivation guidance and Thinking Focus only as attention guidance, never as factual knowledge, exposed engine mechanics, or a required result.
+- Keep `goal` character-local even when it conflicts with unseen writer-level narrative intent, and keep `possible_action` to one plausible, non-committed action or response by the Target Character.
+
+## NEVER
+
+- Override the Target Character's epistemic or motivational autonomy by using inaccessible information or forcing an unseen writer-level outcome.
+- Generate story prose or commit world state, Player Character behavior, or another character's behavior.
+- Return reasoning steps or any text outside the structured output.
+
+# Output
+
+Return exactly one value matching this schema:
+
+{{ output_schema }}
+
+Return no text outside the structured output.
+{# @endasset #}

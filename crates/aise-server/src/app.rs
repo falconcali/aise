@@ -82,7 +82,7 @@ pub async fn build_services(
         .retrieval(Box::new(retrieval))
         .character_think(Box::new(CharacterThinkPipeline::new(
             gateway.clone(),
-            config.aise.content.max_character_thought_bytes,
+            config.aise.character_think.clone(),
         )))
         .story_generator(Box::new(StoryGenerator::new(gateway.clone())))
         .validation(Box::new(ValidationPipeline::default()))

@@ -1,23 +1,10 @@
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::knowledge::query::CurrentPerception;
-use crate::domain::narrative_graph::effect::CharacterImpulse;
-use crate::domain::story_instance::state::CurrentScene;
 use crate::domain::turn::proposal::StoryProposal;
-use crate::domain::turn::{BaselineContext, CharacterThought, CharacterView, ContextItem, WriterPlan};
+use crate::domain::turn::{BaselineContext, CharacterThought, ContextItem, WriterPlan};
 use crate::prompt::profile::PromptProfile;
 use crate::turn::turn_contract::LlmCallPurpose;
 use crate::turn::turn_validation::ValidationIssue;
 use serde::Serialize;
-
-#[derive(Debug, Clone, Serialize)]
-pub struct CharacterThinkContext {
-    pub character: CharacterView,
-    pub current_scene: CurrentScene,
-    pub retrieved_context: Vec<ContextItem>,
-    pub current_perception: Vec<CurrentPerception>,
-    pub impulses: Vec<CharacterImpulse>,
-    pub player_input: BoundedText,
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct StoryGeneratorContext {
@@ -62,17 +49,6 @@ impl<C> ModelRequest<C> {
 
     pub fn purpose(&self) -> LlmCallPurpose {
         self.purpose
-    }
-}
-
-impl ModelRequest<CharacterThinkContext> {
-    pub fn character_think(context: CharacterThinkContext, max_output_tokens: u32) -> Self {
-        Self {
-            profile: PromptProfile::CharacterThink,
-            context,
-            max_output_tokens,
-            purpose: LlmCallPurpose::CharacterThink,
-        }
     }
 }
 

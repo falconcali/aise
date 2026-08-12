@@ -85,6 +85,13 @@ max_proposal_bytes = 32768
 max_validation_issue_bytes = 500
 max_trace_field_bytes = 2048
 
+[aise.character_think]
+max_input_tokens = 4096
+max_output_tokens = 512
+max_thinking_focus_bytes = 256
+max_field_bytes = 512
+max_total_output_bytes = 1024
+
 [aise.context]
 max_scene_characters = 8
 max_character_index = 16
@@ -122,7 +129,7 @@ max_item_bytes = 4096
 kind = "packaged"
 
 [aise.prompt.profile_assets]
-writer_planner = "context-v1/writer-planner"
-character_think = "context-v1/character-think"
+writer_planner = "context-v2/writer-planner-csi"
+character_think = "context-v2/character-think-csi"
 story_generator = "context-v1/story-generator"
 story_repairer = "context-v1/story-repairer"

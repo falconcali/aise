@@ -471,13 +471,9 @@ pub fn is_ai_character(baseline: &BaselineContext, character_id: &crate::domain:
     baseline
         .scene_characters
         .iter()
-        .chain(baseline.referenced_characters.iter())
         .find(|character| &character.character_id == character_id)
-        .map(|character| matches!(character.binding.controller, RoleController::Ai))
-        .unwrap_or_else(|| {
-            baseline
-                .character_index
-                .iter()
-                .any(|entry| &entry.character_id == character_id && !entry.player_controlled)
+        .is_some_and(|character| {
+            matches!(character.binding.controller, RoleController::Ai)
+                && baseline.current_scene.present_character_ids.contains(character_id)
         })
 }

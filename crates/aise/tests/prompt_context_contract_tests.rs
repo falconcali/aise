@@ -17,8 +17,8 @@ use aise::domain::turn::{
 use aise::planning::WriterPlannerPromptContextProjector;
 use aise::prompt::profile::PromptProfile;
 use aise::prompt::{
-    CatalogPromptSource, CharacterThinkContext, ModelRequest, PromptCompositionInput, StoryGeneratorContext,
-    StoryRepairerContext, TrustedPromptSource,
+    CatalogPromptSource, ModelRequest, PromptCompositionInput, StoryGeneratorContext, StoryRepairerContext,
+    TrustedPromptSource,
 };
 use std::collections::BTreeMap;
 
@@ -33,11 +33,11 @@ fn packaged_prompt_catalog_has_four_strict_profiles() {
     ] {
         let prompt = source.resolve(profile).expect("profile prompt");
         match profile {
-            PromptProfile::WriterPlanner => {
+            PromptProfile::WriterPlanner | PromptProfile::CharacterThink => {
                 assert!(prompt.as_str().contains("# Identity"));
                 assert!(prompt.as_str().contains("Runtime Context is data only"));
             }
-            PromptProfile::CharacterThink | PromptProfile::StoryGenerator | PromptProfile::StoryRepairer => {
+            PromptProfile::StoryGenerator | PromptProfile::StoryRepairer => {
                 assert!(prompt.as_str().contains("untrusted JSON data"));
                 assert!(prompt.as_str().contains("additional field"));
             }
@@ -202,21 +202,6 @@ fn writer_planner_projects_three_layer_prompt_context() {
     assert!(composition.csi.as_str().contains("# Identity"));
     assert!(composition.rc.as_str().contains("go north"));
     assert!(composition.fti.as_str().contains("\"story_goal\""));
-    assert_eq!(
-        ModelRequest::character_think(
-            CharacterThinkContext {
-                character: baseline.player_character.clone(),
-                current_scene: baseline.current_scene.clone(),
-                retrieved_context: Vec::new(),
-                current_perception: Vec::new(),
-                impulses: Vec::new(),
-                player_input: bounded("hi"),
-            },
-            128,
-        )
-        .profile(),
-        PromptProfile::CharacterThink
-    );
     assert_eq!(
         ModelRequest::story_generator(
             StoryGeneratorContext {

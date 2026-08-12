@@ -1,5 +1,6 @@
 mod aise;
 mod assets;
+mod character_think;
 mod content;
 mod context;
 mod coordinator;
@@ -13,6 +14,7 @@ mod turn;
 
 pub use aise::AiseConfig;
 pub use assets::AssetLimitsConfig;
+pub use character_think::CharacterThinkConfig;
 pub use content::TurnContentLimitsConfig;
 pub use context::ContextPreparationConfig;
 pub use coordinator::CoordinatorConfig;

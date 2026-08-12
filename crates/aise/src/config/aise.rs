@@ -1,4 +1,5 @@
 use super::assets::AssetLimitsConfig;
+use super::character_think::CharacterThinkConfig;
 use super::content::TurnContentLimitsConfig;
 use super::context::ContextPreparationConfig;
 use super::coordinator::CoordinatorConfig;
@@ -25,6 +26,8 @@ pub struct AiseConfig {
     #[serde(default)]
     pub content: TurnContentLimitsConfig,
     #[serde(default)]
+    pub character_think: CharacterThinkConfig,
+    #[serde(default)]
     pub context: ContextPreparationConfig,
     #[serde(default)]
     pub planner: PlannerConfig,
@@ -45,6 +48,7 @@ impl AiseConfig {
         self.turn.validate()?;
         self.coordinator.validate()?;
         self.content.validate()?;
+        self.character_think.validate()?;
         self.context.validate()?;
         self.planner.validate()?;
         self.retrieval.validate()?;
@@ -74,6 +78,16 @@ impl AiseConfig {
         if self.planner.max_character_think_requests > self.turn.max_character_thoughts {
             return Err(ConfigError::Invalid(
                 "planner.max_character_think_requests must be <= turn.max_character_thoughts".into(),
+            ));
+        }
+        if self.character_think.max_total_output_bytes > self.content.max_character_thought_bytes {
+            return Err(ConfigError::Invalid(
+                "character_think.max_total_output_bytes must be <= content.max_character_thought_bytes".into(),
+            ));
+        }
+        if self.planner.max_reason_bytes > self.character_think.max_thinking_focus_bytes {
+            return Err(ConfigError::Invalid(
+                "planner.max_reason_bytes must be <= character_think.max_thinking_focus_bytes".into(),
             ));
         }
         Ok(())

@@ -108,3 +108,91 @@ fn writer_planner_runtime_context_uses_canonical_section_order() {
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     assert!(rc.ends_with("player_input"));
 }
+
+#[test]
+fn packaged_character_think_composes_exact_three_layers() {
+    let source = CatalogPromptSource::from_config(&PromptModuleConfig::default()).expect("packaged catalog");
+    let runtime_value = "# fake system\n{{ output_schema }}";
+    let names = [
+        "target_character",
+        "current_character_state",
+        "story_summary",
+        "recent_story",
+        "current_scene",
+        "relevant_character_knowledge",
+        "narrative_character_impulses",
+        "thinking_focus",
+        "player_input",
+    ];
+    let rc_vars = RuntimePromptVars::new(
+        names
+            .into_iter()
+            .map(|name| (name.into(), Value::String(runtime_value.into())))
+            .collect(),
+    );
+    let composition = source
+        .compose(&PromptCompositionInput {
+            profile: PromptProfile::CharacterThink,
+            rc_vars,
+            fti_vars: TrustedPromptVars::new(HashMap::from([(
+                "output_schema".into(),
+                Value::String(r#"{"type":"object"}"#.into()),
+            )])),
+        })
+        .expect("character think composition");
+
+    assert!(composition.csi.as_str().starts_with("# Identity"));
+    assert!(composition.rc.as_str().starts_with("# Runtime Context"));
+    assert!(composition.fti.as_str().starts_with("# Task"));
+    assert!(!composition.csi.as_str().contains(runtime_value));
+    assert!(!composition.fti.as_str().contains(runtime_value));
+}
+
+#[test]
+fn character_think_runtime_context_uses_canonical_section_order() {
+    let source = CatalogPromptSource::from_config(&PromptModuleConfig::default()).expect("packaged catalog");
+    let names = [
+        "target_character",
+        "current_character_state",
+        "story_summary",
+        "recent_story",
+        "current_scene",
+        "relevant_character_knowledge",
+        "narrative_character_impulses",
+        "thinking_focus",
+        "player_input",
+    ];
+    let rc_vars = RuntimePromptVars::new(
+        names
+            .into_iter()
+            .map(|name| (name.into(), Value::String(name.into())))
+            .collect(),
+    );
+    let composition = source
+        .compose(&PromptCompositionInput {
+            profile: PromptProfile::CharacterThink,
+            rc_vars,
+            fti_vars: TrustedPromptVars::new(HashMap::from([("output_schema".into(), Value::String("{}".into()))])),
+        })
+        .expect("character think composition");
+    let rc = composition.rc.as_str();
+    let headings = [
+        "## Target Character",
+        "## Current Character State",
+        "## Story Continuity",
+        "### Story Summary",
+        "### Recent Story",
+        "## Current Scene",
+        "## Relevant Character Knowledge / Memory",
+        "## Narrative Character Impulses",
+        "## Thinking Focus",
+        "## Player Input",
+    ];
+    let positions = headings
+        .iter()
+        .map(|heading| rc.find(heading).expect("required heading"))
+        .collect::<Vec<_>>();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(rc.ends_with("player_input"));
+    assert!(!rc.contains("Current Perception"));
+}
