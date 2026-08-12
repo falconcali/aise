@@ -186,9 +186,19 @@ impl PromptCatalog {
         vars: &HashMap<String, Value>,
         options: &PromptRenderOptions,
     ) -> Result<String, PromptError> {
-        let (rendered, _) = self.render_slot(slot_id, vars, options)?;
+        let (text, _) = self.render_text_with_metadata(slot_id, vars, options)?;
+        Ok(text)
+    }
+
+    pub fn render_text_with_metadata(
+        &self,
+        slot_id: &str,
+        vars: &HashMap<String, Value>,
+        options: &PromptRenderOptions,
+    ) -> Result<(String, PromptMetadata), PromptError> {
+        let (rendered, metadata) = self.render_slot(slot_id, vars, options)?;
         match rendered {
-            RenderedPrompt::Text(text) => Ok(normalize_rendered_text(&text)),
+            RenderedPrompt::Text(text) => Ok((normalize_rendered_text(&text), metadata)),
             RenderedPrompt::Messages(_) => Err(PromptError::KindMismatch {
                 slot: slot_id.to_string(),
                 expected: vec![PromptKind::Text, PromptKind::Fragment],

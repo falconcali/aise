@@ -204,6 +204,24 @@ fn render_text_on_messages_slot_returns_kind_mismatch() {
 }
 
 #[test]
+fn render_text_with_metadata_normalizes_text_and_preserves_metadata() {
+    let mut catalog = make_catalog();
+    catalog
+        .renderer
+        .add_template("intent/analysis", "\nAnalyze: {{ user_input }}\n\n\n")
+        .unwrap();
+    let vars = HashMap::from([("user_input".to_string(), json!("hello"))]);
+
+    let (text, metadata) = catalog
+        .render_text_with_metadata("intent.analysis", &vars, &PromptRenderOptions::default())
+        .unwrap();
+
+    assert_eq!(text, "Analyze: hello");
+    assert_eq!(metadata.slot, "intent.analysis");
+    assert_eq!(metadata.root.hash, Some("sha256:intent".to_string()));
+}
+
+#[test]
 fn render_slot_applies_text_policies_and_records_metadata() {
     let mut catalog = make_catalog();
     catalog.policies.push(PromptPolicy::Preamble {

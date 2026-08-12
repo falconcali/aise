@@ -41,4 +41,19 @@ pub enum PromptError {
 
     #[error("output contract violated on slot `{slot}`: {reason}")]
     OutputContractViolation { slot: String, reason: String },
+
+    #[error("prompt profile already registered: {0}")]
+    DuplicateProfileRegistration(String),
+
+    #[error("prompt profile is not registered: {0}")]
+    ProfileNotRegistered(String),
+
+    #[error("prompt profile `{profile}` reuses slot `{slot}` across CSI/RC/FTI")]
+    DuplicateLayerSlot { profile: String, slot: String },
+
+    #[error("prompt layer `{layer}` for profile `{profile}` must render as text")]
+    LayerMustRenderAsText { profile: String, layer: String },
+
+    #[error("prompt trust boundary violated: {0}")]
+    TrustBoundaryViolation(String),
 }
