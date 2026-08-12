@@ -7,7 +7,8 @@ use aise::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use aise::domain::turn::RetrievalAudience;
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::knowledge_read_port::{
-    EntityKnowledgeQuery, KnowledgeFilter, KnowledgeLookupHit, KnowledgeReadPort, TopicKnowledgeQuery,
+    EntityKnowledgeQuery, KnowledgeFilter, KnowledgeIndexQuery, KnowledgeIndexRecord, KnowledgeLookupHit,
+    KnowledgeReadPort, KnowledgeRecord, SourceKnowledgeQuery, TopicKnowledgeQuery,
 };
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
 use aise::persistence::{SqliteStore, Store};
@@ -139,6 +140,22 @@ impl KnowledgeReadPort for CountingKnowledge {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.inner.find_by_topics(query).await
     }
+
+    async fn find_by_source_ids(
+        &self,
+        query: SourceKnowledgeQuery<'_>,
+    ) -> Result<Vec<KnowledgeRecord>, aise::persistence::StoreError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.find_by_source_ids(query).await
+    }
+
+    async fn list_index(
+        &self,
+        query: KnowledgeIndexQuery<'_>,
+    ) -> Result<Vec<KnowledgeIndexRecord>, aise::persistence::StoreError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.list_index(query).await
+    }
 }
 
 async fn seeded_store(label: &str) -> (Arc<SqliteStore>, KnowledgeSnapshotRef, String) {
@@ -194,6 +211,7 @@ async fn character_fact_request_is_rejected_before_store_lookup() {
         audience: RetrievalAudience::Character {
             character_id: CharacterId::from("c-npc"),
         },
+        target_source_id: None,
         knowledge_kinds: vec![KnowledgeKind::Fact],
         entities: vec![KnowledgeEntity::Location(aise::domain::asset::ids::LocationKey::from(
             "village",
@@ -264,6 +282,38 @@ async fn sqlite_entity_query_accepts_multiple_selectors() {
         .expect("query");
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].matches.len(), 2);
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn knowledge_index_targets_support_exact_lookup() {
+    let (sqlite, snapshot, db) = seeded_store("exact_index").await;
+    let index = sqlite
+        .list_index(KnowledgeIndexQuery {
+            snapshot: &snapshot,
+            knowledge_kinds: &[KnowledgeKind::Fact, KnowledgeKind::Rumor],
+            limit: 16,
+        })
+        .await
+        .expect("index");
+    assert!(!index.is_empty());
+    let filter = KnowledgeFilter {
+        audience: RetrievalAudience::GlobalWriter,
+        knowledge_kinds: vec![index[0].kind],
+        authorized_memory_owners: Vec::new(),
+        max_item_bytes: 4096,
+    };
+    let records = sqlite
+        .find_by_source_ids(SourceKnowledgeQuery {
+            snapshot: &snapshot,
+            filter: &filter,
+            source_ids: std::slice::from_ref(&index[0].source_id),
+            limit: 1,
+        })
+        .await
+        .expect("exact lookup");
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].source_id, index[0].source_id);
     let _ = std::fs::remove_file(&db);
 }
 

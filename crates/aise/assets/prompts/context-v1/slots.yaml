@@ -1,7 +1,4 @@
 slots:
-  - slot_id: context.writer_planner
-    allowed_kinds: [text]
-    required: true
   - slot_id: context.character_think
     allowed_kinds: [text]
     required: true
@@ -11,3 +8,29 @@ slots:
   - slot_id: context.story_repairer
     allowed_kinds: [text]
     required: true
+  - slot_id: context.writer_planner.csi
+    allowed_kinds: [text]
+    required: false
+  - slot_id: context.writer_planner.rc
+    allowed_kinds: [text]
+    required: false
+    vars:
+      - { name: story_profile, var_type: string, required: true }
+      - { name: instance_settings, var_type: string, required: true }
+      - { name: story_summary, var_type: string, required: true }
+      - { name: recent_story, var_type: string, required: true }
+      - { name: current_scene, var_type: string, required: true }
+      - { name: player_character, var_type: string, required: true }
+      - { name: scene_characters, var_type: string, required: true }
+      - { name: referenced_characters, var_type: string, required: true }
+      - { name: relevant_knowledge, var_type: string, required: true }
+      - { name: character_index, var_type: string, required: true }
+      - { name: knowledge_entry_index, var_type: string, required: true }
+      - { name: narrative_plan, var_type: string, required: true }
+      - { name: active_story_constraints, var_type: string, required: true }
+      - { name: player_input, var_type: string, required: true }
+  - slot_id: context.writer_planner.fti
+    allowed_kinds: [text]
+    required: false
+    vars:
+      - { name: output_schema, var_type: string, required: true }

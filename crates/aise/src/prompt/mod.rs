@@ -31,9 +31,7 @@ pub use metadata::PromptMetadata;
 pub use model::{
     AssetRef, AssetStatus, PromptKind, PromptLineageNode, PromptMessage, PromptRole, RenderedPrompt, SlotId,
 };
-pub use model_request::{
-    CharacterThinkContext, ModelRequest, StoryGeneratorContext, StoryRepairerContext, WriterPlannerContext,
-};
+pub use model_request::{CharacterThinkContext, ModelRequest, StoryGeneratorContext, StoryRepairerContext};
 pub use pack::{PromptPack, ResolvedPack, resolve_pack};
 pub use policy::{PreamblePosition, PromptPolicy};
 pub use profile::{

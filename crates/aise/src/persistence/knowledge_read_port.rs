@@ -49,9 +49,34 @@ pub struct TopicKnowledgeQuery<'a> {
     pub limit: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct SourceKnowledgeQuery<'a> {
+    pub snapshot: &'a KnowledgeSnapshotRef,
+    pub filter: &'a KnowledgeFilter,
+    pub source_ids: &'a [KnowledgeSourceId],
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct KnowledgeIndexQuery<'a> {
+    pub snapshot: &'a KnowledgeSnapshotRef,
+    pub knowledge_kinds: &'a [KnowledgeKind],
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct KnowledgeIndexRecord {
+    pub source_id: KnowledgeSourceId,
+    pub kind: KnowledgeKind,
+}
+
 #[async_trait]
 pub trait KnowledgeReadPort: Send + Sync {
     async fn find_by_entities(&self, query: EntityKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError>;
 
     async fn find_by_topics(&self, query: TopicKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError>;
+
+    async fn find_by_source_ids(&self, query: SourceKnowledgeQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError>;
+
+    async fn list_index(&self, query: KnowledgeIndexQuery<'_>) -> Result<Vec<KnowledgeIndexRecord>, StoreError>;
 }

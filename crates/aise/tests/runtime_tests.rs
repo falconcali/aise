@@ -21,6 +21,7 @@ fn sample_plan(with_requests: bool) -> WriterPlan {
     if with_requests {
         plan.retrieval_plan.requests.push(RetrievalRequest {
             audience: RetrievalAudience::GlobalWriter,
+            target_source_id: None,
             knowledge_kinds: vec![KnowledgeKind::Fact],
             entities: Vec::new(),
             topics: Vec::new(),

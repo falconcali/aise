@@ -28,7 +28,7 @@ impl Default for PromptModuleConfig {
             profile_assets: BTreeMap::from([
                 (
                     crate::prompt::PromptProfile::WriterPlanner,
-                    crate::prompt::AssetRef::new("context-v1/writer-planner"),
+                    crate::prompt::AssetRef::new("context-v2/writer-planner-csi"),
                 ),
                 (
                     crate::prompt::PromptProfile::CharacterThink,

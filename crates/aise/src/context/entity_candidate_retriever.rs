@@ -2,7 +2,9 @@ use crate::context::candidate_retriever::{CandidateRetrievalRequest, CandidateRe
 use crate::context::error::ContextError;
 use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::turn::CandidateRetrieverKind;
-use crate::persistence::knowledge_read_port::{EntityKnowledgeQuery, KnowledgeFilter, KnowledgeReadPort};
+use crate::persistence::knowledge_read_port::{
+    EntityKnowledgeQuery, KnowledgeFilter, KnowledgeLookupHit, KnowledgeReadPort, SourceKnowledgeQuery,
+};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -23,7 +25,7 @@ impl CandidateRetriever for EntityCandidateRetriever {
     }
 
     async fn retrieve(&self, request: CandidateRetrievalRequest<'_>) -> Result<Vec<ContextCandidate>, ContextError> {
-        if request.request.entities.is_empty() || request.limit == 0 {
+        if request.limit == 0 {
             return Ok(Vec::new());
         }
         authorize_request(request.request)?;
@@ -33,15 +35,38 @@ impl CandidateRetriever for EntityCandidateRetriever {
             authorized_memory_owners: request.request.authorized_memory_owners.clone(),
             max_item_bytes: request.max_item_bytes,
         };
-        let records = self
-            .knowledge
-            .find_by_entities(EntityKnowledgeQuery {
-                snapshot: request.snapshot,
-                filter: &filter,
-                entities: &request.request.entities,
-                limit: request.limit,
-            })
-            .await?;
+        let records = if let Some(source_id) = &request.request.target_source_id {
+            self.knowledge
+                .find_by_source_ids(SourceKnowledgeQuery {
+                    snapshot: request.snapshot,
+                    filter: &filter,
+                    source_ids: std::slice::from_ref(source_id),
+                    limit: 1,
+                })
+                .await?
+                .into_iter()
+                .map(|record| KnowledgeLookupHit {
+                    record,
+                    matches: vec![crate::domain::knowledge::KnowledgeIndexMatch::Entity(
+                        crate::domain::asset::entity::KnowledgeEntity::World(
+                            crate::domain::asset::ids::EntityKey::from("exact_target"),
+                        ),
+                    )],
+                })
+                .collect()
+        } else {
+            if request.request.entities.is_empty() {
+                return Ok(Vec::new());
+            }
+            self.knowledge
+                .find_by_entities(EntityKnowledgeQuery {
+                    snapshot: request.snapshot,
+                    filter: &filter,
+                    entities: &request.request.entities,
+                    limit: request.limit,
+                })
+                .await?
+        };
         let mut candidates = Vec::with_capacity(records.len());
         for (index, hit) in records.into_iter().enumerate() {
             let provider_rank = u32::try_from(index)

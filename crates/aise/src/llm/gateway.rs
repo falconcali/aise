@@ -5,7 +5,7 @@ use crate::llm::error::LlmError;
 use crate::llm::limiter::LlmLimiter;
 use crate::llm::message::{ChatMessage, CompletionRequest, CompletionSpec, EmbeddingOutput, EmbeddingRequest, Role};
 use crate::llm::provider::{DeltaSink, LlmProvider};
-use crate::prompt::{ModelRequest, RuntimeContextEncoder, TrustedPromptSource};
+use crate::prompt::{ModelRequest, PromptCompositionInput, RuntimeContextEncoder, TrustedPromptSource};
 use crate::turn::turn_context::TurnLlmCallScope;
 use crate::turn::turn_contract::{LlmBudgetReservation, LlmCallPurpose, LlmCallStatus, LlmCallUsage, UsageAccuracy};
 use crate::turn::turn_error::TurnExecutionError;
@@ -84,6 +84,49 @@ impl LlmGateway {
             purpose: request.purpose(),
         };
         let estimated_input = crate::llm::accounting::TokenAccountant::estimate_input_tokens(&spec.messages);
+        let reservation = scope
+            .reserve_llm(estimated_input, u64::from(spec.max_output_tokens))
+            .map_err(|error| LlmError::TokenBudgetExceeded(error.to_string()))?;
+        self.complete(scope, spec, reservation).await
+    }
+
+    pub async fn complete_composed(
+        &self,
+        mut scope: TurnLlmCallScope<'_>,
+        input: PromptCompositionInput,
+        max_output_tokens: u32,
+        purpose: LlmCallPurpose,
+    ) -> Result<LlmCompletion, LlmError> {
+        let composition = self.prompt_source.compose(&input).map_err(|_| LlmError::Protocol {
+            kind: crate::llm::error::LlmProtocolErrorKind::Unsupported,
+        })?;
+        tracing::info!(
+            prompt_profile = %composition.profile,
+            prompt_pack = %composition.metadata.csi.pack,
+            csi_bytes = composition.csi.as_str().len(),
+            rc_bytes = composition.rc.as_str().len(),
+            fti_bytes = composition.fti.as_str().len(),
+            "prompt composition rendered"
+        );
+        let spec = CompletionSpec {
+            messages: vec![
+                ChatMessage {
+                    role: Role::System,
+                    content: composition.csi.as_str().to_owned(),
+                },
+                ChatMessage {
+                    role: Role::User,
+                    content: composition.rc.as_str().to_owned(),
+                },
+                ChatMessage {
+                    role: Role::System,
+                    content: composition.fti.as_str().to_owned(),
+                },
+            ],
+            max_output_tokens,
+            purpose,
+        };
+        let estimated_input = TokenAccountant::estimate_input_tokens(&spec.messages);
         let reservation = scope
             .reserve_llm(estimated_input, u64::from(spec.max_output_tokens))
             .map_err(|error| LlmError::TokenBudgetExceeded(error.to_string()))?;

@@ -5,7 +5,8 @@ use crate::llm::gateway::LlmGateway;
 use crate::planning::error::PlanningError;
 use crate::planning::planner_output::PlannerOutput;
 use crate::planning::retrieval_plan_builder::RetrievalPlanBuilder;
-use crate::prompt::{ModelRequest, WriterPlannerContext};
+use crate::planning::writer_planner_prompt::WriterPlannerPromptContextProjector;
+use crate::prompt::{PromptCompositionInput, PromptProfile};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
@@ -100,28 +101,37 @@ impl TurnExecutionPipeline for WriterPlanner {
             self.config.max_query_bytes.max(4096),
         )
         .map_err(|_| map_planning_error(PlanningError::LimitExceeded { limit: "player_input" }))?;
-        let request = ModelRequest::writer_planner(
-            WriterPlannerContext {
-                baseline: baseline.clone(),
-                narrative_plan: narrative_plan.clone(),
-                player_input,
-            },
-            ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32,
-        );
+        let projection =
+            WriterPlannerPromptContextProjector.project(&baseline, &narrative_plan, &player_input, &self.config);
+        let request = PromptCompositionInput {
+            profile: PromptProfile::WriterPlanner,
+            rc_vars: projection.rc_vars,
+            fti_vars: projection.fti_vars,
+        };
+        let max_output_tokens = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
         let scope = ctx.llm_call_scope(TurnStage::WriterPlanner);
-        let completion = self.gateway.complete_typed(scope, request).await.map_err(|error| {
-            TurnExecutionError::new(
-                TurnFailureKind::Llm,
-                "llm_error",
-                Some(TurnStage::WriterPlanner),
-                error.to_string(),
+        let completion = self
+            .gateway
+            .complete_composed(
+                scope,
+                request,
+                max_output_tokens,
+                crate::turn::turn_contract::LlmCallPurpose::WriterPlan,
             )
-        })?;
+            .await
+            .map_err(|error| {
+                TurnExecutionError::new(
+                    TurnFailureKind::Llm,
+                    "llm_error",
+                    Some(TurnStage::WriterPlanner),
+                    error.to_string(),
+                )
+            })?;
         let planner_output: PlannerOutput = serde_json::from_str(&completion.text)
             .map_err(|_| map_planning_error(PlanningError::InvalidOutput { code: "invalid_json" }))?;
         let plan = self
             .plan_builder
-            .build(&baseline, &narrative_plan, planner_output, &snapshot)
+            .build(&baseline, &narrative_plan, planner_output, &snapshot, &projection.context)
             .map_err(map_planning_error)?;
         ctx.set_writer_plan(plan)
     }
@@ -135,3 +145,7 @@ fn map_planning_error(error: PlanningError) -> TurnExecutionError {
         error.to_string(),
     )
 }
+
+#[cfg(test)]
+#[path = "tests/writer_planner_tests.rs"]
+mod tests;

@@ -12,6 +12,7 @@ use crate::domain::turn::{
 };
 use crate::planning::error::PlanningError;
 use crate::planning::planner_output::PlannerOutput;
+use crate::planning::writer_planner_prompt::{WriterPlannerPromptContext, is_ai_character};
 use std::collections::BTreeSet;
 
 pub struct RetrievalPlanBuilder {
@@ -35,6 +36,7 @@ impl RetrievalPlanBuilder {
         narrative_plan: &NarrativePlan,
         planner_output: PlannerOutput,
         snapshot: &StoryReadSnapshot,
+        prompt_context: &WriterPlannerPromptContext,
     ) -> Result<WriterPlan, PlanningError> {
         if planner_output.context_gaps.len() > self.planner.max_context_gaps {
             return Err(PlanningError::LimitExceeded {
@@ -46,40 +48,21 @@ impl RetrievalPlanBuilder {
                 limit: "max_character_think_requests",
             });
         }
-        if planner_output.story_goal.summary.as_str().len() > self.planner.max_goal_bytes {
+        if planner_output.story_goal.as_str().trim().is_empty() {
+            return Err(PlanningError::InvalidOutput {
+                code: "story_goal_empty",
+            });
+        }
+        if planner_output.story_goal.as_str().len() > self.planner.max_goal_bytes {
             return Err(PlanningError::LimitExceeded {
                 limit: "max_goal_bytes",
             });
         }
         let think_requests = self.validate_think_requests(planner_output.character_think_requests, baseline)?;
         let mut requests = Vec::new();
-        for signal in &baseline.retrieval_signals.entities {
-            requests.push(self.make_request(RequestDraft {
-                audience: RetrievalAudience::GlobalWriter,
-                knowledge_kinds: vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
-                entities: vec![signal.entity.clone()],
-                topics: Vec::new(),
-                query_text: None,
-                reason: "automatic entity signal",
-                origin: RetrievalRequestOrigin::Automatic,
-                signal_priority: signal.priority,
-            })?);
-        }
-        for signal in &baseline.retrieval_signals.topics {
-            requests.push(self.make_request(RequestDraft {
-                audience: RetrievalAudience::GlobalWriter,
-                knowledge_kinds: vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
-                entities: Vec::new(),
-                topics: vec![signal.topic.clone()],
-                query_text: None,
-                reason: "automatic topic signal",
-                origin: RetrievalRequestOrigin::Automatic,
-                signal_priority: signal.priority,
-            })?);
-        }
         requests.extend(self.narrative_requests(narrative_plan)?);
         for gap in planner_output.context_gaps {
-            requests.push(self.planner_gap_request(gap, baseline, snapshot, &think_requests)?);
+            requests.push(self.planner_gap_request(gap, baseline, snapshot, &think_requests, prompt_context)?);
         }
         let requests = dedupe_and_sort(requests);
         if requests.len() > self.retrieval.max_requests {
@@ -87,7 +70,7 @@ impl RetrievalPlanBuilder {
         }
         Ok(WriterPlan {
             story_goal: WriterStoryGoal {
-                summary: planner_output.story_goal.summary,
+                summary: planner_output.story_goal,
             },
             narrative_plan: narrative_plan.clone(),
             retrieval_plan: RetrievalPlan { requests },
@@ -108,18 +91,15 @@ impl RetrievalPlanBuilder {
                     limit: "max_reason_bytes",
                 });
             }
+            if request.reason.as_str().trim().is_empty() {
+                return Err(PlanningError::InvalidOutput {
+                    code: "character_think_reason_empty",
+                });
+            }
             if request.character_id == baseline.player_character.character_id {
                 return Err(PlanningError::PlayerCharacterRequested);
             }
-            let known = baseline
-                .scene_characters
-                .iter()
-                .any(|character| character.character_id == request.character_id)
-                || baseline
-                    .character_index
-                    .iter()
-                    .any(|entry| entry.character_id == request.character_id);
-            if !known {
+            if !is_ai_character(baseline, &request.character_id) {
                 return Err(PlanningError::UnknownCharacter);
             }
             if !seen.insert(request.character_id.clone()) {
@@ -139,6 +119,7 @@ impl RetrievalPlanBuilder {
         for entity in entities {
             requests.push(self.make_request(RequestDraft {
                 audience: RetrievalAudience::GlobalWriter,
+                target_source_id: None,
                 knowledge_kinds: vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
                 entities: vec![entity],
                 topics: Vec::new(),
@@ -157,26 +138,42 @@ impl RetrievalPlanBuilder {
         baseline: &BaselineContext,
         snapshot: &StoryReadSnapshot,
         think_requests: &[CharacterThinkRequest],
+        prompt_context: &WriterPlannerPromptContext,
     ) -> Result<RetrievalRequest, PlanningError> {
         if gap.reason.as_str().len() > self.planner.max_reason_bytes {
             return Err(PlanningError::LimitExceeded {
                 limit: "max_reason_bytes",
             });
         }
-        if gap.entities.len() > self.planner.max_entities_per_request {
-            return Err(PlanningError::LimitExceeded {
-                limit: "max_entities_per_request",
+        if gap.reason.as_str().trim().is_empty() {
+            return Err(PlanningError::InvalidOutput {
+                code: "context_gap_reason_empty",
             });
         }
-        if gap.topics.len() > self.planner.max_topics_per_request {
-            return Err(PlanningError::LimitExceeded {
-                limit: "max_topics_per_request",
+        if gap.target_id.is_some() == gap.query_text.is_some() {
+            return Err(PlanningError::InvalidOutput {
+                code: "retrieval_selector_exclusivity",
             });
         }
-        if gap.knowledge_kinds.len() > self.planner.max_kinds_per_request {
-            return Err(PlanningError::LimitExceeded {
-                limit: "max_kinds_per_request",
-            });
+        let mut entities = Vec::new();
+        let mut topics = Vec::new();
+        let mut target_source_id = None;
+        if let Some(target_id) = &gap.target_id {
+            if let Some(character_id) = prompt_context.character_targets.get(target_id) {
+                if !matches!(&gap.audience, RetrievalAudience::GlobalWriter) {
+                    return Err(PlanningError::KnowledgeAudienceViolation);
+                }
+                entities.push(KnowledgeEntity::Character(character_id.clone()));
+            } else if let Some(source_id) = prompt_context.knowledge_targets.get(target_id) {
+                if matches!(&gap.audience, RetrievalAudience::Character { .. })
+                    && matches!(source_id, crate::domain::knowledge::KnowledgeSourceId::Fact(_))
+                {
+                    return Err(PlanningError::KnowledgeAudienceViolation);
+                }
+                target_source_id = Some(source_id.clone());
+            } else {
+                return Err(PlanningError::UnknownRetrievalKey);
+            }
         }
         if let Some(query) = &gap.query_text {
             if query.as_str().len() > self.planner.max_query_bytes {
@@ -186,8 +183,8 @@ impl RetrievalPlanBuilder {
             }
             let matched_topics = self.topic_matcher.match_topics(query.as_str(), snapshot.topic_dictionary());
             for topic in matched_topics {
-                if !gap.topics.contains(&topic) {
-                    gap.topics.push(topic);
+                if !topics.contains(&topic) {
+                    topics.push(topic);
                 }
             }
             let haystack = normalize_match_text(query.as_str());
@@ -201,8 +198,8 @@ impl RetrievalPlanBuilder {
                     KnowledgeEntity::NarrativeNode(key) => key.as_str(),
                     KnowledgeEntity::Event(key) => key.as_str(),
                 };
-                if term_matches(&haystack, &normalize_match_text(key)) && !gap.entities.contains(entity) {
-                    gap.entities.push(entity.clone());
+                if term_matches(&haystack, &normalize_match_text(key)) && !entities.contains(entity) {
+                    entities.push(entity.clone());
                 }
             }
             gap.query_text = Some(
@@ -212,32 +209,37 @@ impl RetrievalPlanBuilder {
                     })?,
             );
         }
-        if gap.entities.len() > self.planner.max_entities_per_request {
+        if entities.len() > self.planner.max_entities_per_request {
             return Err(PlanningError::LimitExceeded {
                 limit: "max_entities_per_request",
             });
         }
-        if gap.topics.len() > self.planner.max_topics_per_request {
+        if topics.len() > self.planner.max_topics_per_request {
             return Err(PlanningError::LimitExceeded {
                 limit: "max_topics_per_request",
             });
         }
         authorize_gap(&gap, think_requests)?;
-        for entity in &gap.entities {
+        for entity in &entities {
             if !entity_is_known(entity, snapshot.entity_catalog(), &baseline.retrieval_signals.entities) {
                 return Err(PlanningError::UnknownRetrievalKey);
             }
         }
-        for topic in &gap.topics {
+        for topic in &topics {
             if !snapshot.topic_dictionary().contains_key(topic) {
                 return Err(PlanningError::UnknownRetrievalKey);
             }
         }
+        let knowledge_kinds = match &gap.audience {
+            RetrievalAudience::GlobalWriter => vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
+            RetrievalAudience::Character { .. } => vec![KnowledgeKind::Rumor, KnowledgeKind::Memory],
+        };
         self.make_request(RequestDraft {
             audience: gap.audience,
-            knowledge_kinds: gap.knowledge_kinds,
-            entities: gap.entities,
-            topics: gap.topics,
+            target_source_id,
+            knowledge_kinds,
+            entities,
+            topics,
             query_text: gap.query_text,
             reason: gap.reason.as_str(),
             origin: RetrievalRequestOrigin::Planner,
@@ -264,6 +266,7 @@ impl RetrievalPlanBuilder {
         let authorized_memory_owners = authorized_memory_owners(&draft.audience, &knowledge_kinds, &entities)?;
         Ok(RetrievalRequest {
             audience: draft.audience,
+            target_source_id: draft.target_source_id,
             knowledge_kinds,
             entities,
             topics,
@@ -306,6 +309,7 @@ fn authorized_memory_owners(
 
 struct RequestDraft<'a> {
     audience: RetrievalAudience,
+    target_source_id: Option<crate::domain::knowledge::KnowledgeSourceId>,
     knowledge_kinds: Vec<KnowledgeKind>,
     entities: Vec<KnowledgeEntity>,
     topics: Vec<TopicKey>,
@@ -320,25 +324,12 @@ fn authorize_gap(
     think_requests: &[CharacterThinkRequest],
 ) -> Result<(), PlanningError> {
     match &gap.audience {
-        RetrievalAudience::Character { .. } => {
-            if gap.knowledge_kinds.contains(&KnowledgeKind::Fact) {
+        RetrievalAudience::Character { character_id } => {
+            if !think_requests.iter().any(|request| &request.character_id == character_id) {
                 return Err(PlanningError::KnowledgeAudienceViolation);
             }
         }
-        RetrievalAudience::GlobalWriter => {
-            if gap.knowledge_kinds.contains(&KnowledgeKind::Memory) {
-                let owners: BTreeSet<_> = think_requests.iter().map(|req| &req.character_id).collect();
-                let requested_owners = gap.entities.iter().filter_map(|entity| match entity {
-                    KnowledgeEntity::Character(id) => Some(id),
-                    _ => None,
-                });
-                let ok = requested_owners.clone().next().is_some()
-                    && requested_owners.into_iter().all(|id| owners.contains(id));
-                if !ok {
-                    return Err(PlanningError::KnowledgeAudienceViolation);
-                }
-            }
-        }
+        RetrievalAudience::GlobalWriter => {}
     }
     Ok(())
 }
@@ -375,6 +366,7 @@ fn dedupe_and_sort(requests: Vec<RetrievalRequest>) -> Vec<RetrievalRequest> {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RetrievalRequestKey {
     audience: RetrievalAudience,
+    target_source_id: Option<crate::domain::knowledge::KnowledgeSourceId>,
     knowledge_kinds: Vec<KnowledgeKind>,
     entities: Vec<KnowledgeEntity>,
     topics: Vec<TopicKey>,
@@ -385,6 +377,7 @@ struct RetrievalRequestKey {
 fn canonical_key(request: &RetrievalRequest) -> RetrievalRequestKey {
     RetrievalRequestKey {
         audience: request.audience.clone(),
+        target_source_id: request.target_source_id.clone(),
         knowledge_kinds: request.knowledge_kinds.clone(),
         entities: request.entities.clone(),
         topics: request.topics.clone(),

@@ -62,11 +62,6 @@ impl RetrievalSignalBuilder {
                 &mut topics,
             )?;
         }
-        let summary = snapshot.story_continuity().summary().text.as_str();
-        if !summary.trim().is_empty() {
-            self.push_text_matches(summary, snapshot, RetrievalSignalOrigin::Summary, 4, &mut entities, &mut topics)?;
-        }
-
         entities.sort_by(|left, right| {
             left.priority
                 .cmp(&right.priority)

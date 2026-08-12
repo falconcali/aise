@@ -95,6 +95,7 @@ fn automatic_requests_run_when_planner_gaps_are_empty() {
         retrieval_plan: RetrievalPlan {
             requests: vec![RetrievalRequest {
                 audience: RetrievalAudience::GlobalWriter,
+                target_source_id: None,
                 knowledge_kinds: vec![KnowledgeKind::Fact],
                 entities: Vec::new(),
                 topics: vec![TopicKey::from("gate")],
@@ -117,6 +118,7 @@ fn retrieval_plan_merge_is_deterministic() {
     let mut left = vec![
         RetrievalRequest {
             audience: RetrievalAudience::GlobalWriter,
+            target_source_id: None,
             knowledge_kinds: vec![KnowledgeKind::Fact],
             entities: Vec::new(),
             topics: vec![TopicKey::from("b")],
@@ -128,6 +130,7 @@ fn retrieval_plan_merge_is_deterministic() {
         },
         RetrievalRequest {
             audience: RetrievalAudience::GlobalWriter,
+            target_source_id: None,
             knowledge_kinds: vec![KnowledgeKind::Fact],
             entities: Vec::new(),
             topics: vec![TopicKey::from("a")],
@@ -173,6 +176,7 @@ fn retrieval_and_character_think_are_enabled_from_plan_collections() {
         retrieval_plan: RetrievalPlan {
             requests: vec![RetrievalRequest {
                 audience: RetrievalAudience::GlobalWriter,
+                target_source_id: None,
                 knowledge_kinds: vec![KnowledgeKind::Rumor],
                 entities: Vec::new(),
                 topics: Vec::new(),

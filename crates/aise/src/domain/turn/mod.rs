@@ -4,11 +4,14 @@ pub mod planning;
 pub mod proposal;
 pub mod retrieval;
 
-pub use baseline::{BaselineContext, CharacterIndexEntry, CharacterView, NarrativeStateView, SnapshotLimits};
+pub use baseline::{
+    BaselineContext, CharacterIndexEntry, CharacterView, KnowledgeEntryIndexEntry, NarrativeStateView,
+    RelevantKnowledge, SnapshotLimits,
+};
 pub use character::CharacterThought;
 pub use planning::{
-    CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest, RetrievalRequestOrigin, WriterPlan,
-    WriterStoryGoal,
+    CharacterThinkRequest, RetrievalAudience, RetrievalIndexScope, RetrievalPlan, RetrievalRequest,
+    RetrievalRequestOrigin, RetrievalTargetId, WriterPlan, WriterStoryGoal,
 };
 pub use proposal::{
     ProposedCharacterChange, ProposedEvent, ProposedKnowledgeChange, ProposedPerception, ProposedRelationshipChange,

@@ -3,6 +3,7 @@ use crate::domain::asset::ids::{LocationKey, NarrativeNodeKey, Sha256Digest, Sto
 use crate::domain::asset::story_pack::{StoryProfile, StoryRole};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::CharacterId;
+use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use crate::domain::narrative::{StoryContinuity, StoryContinuityLimits};
 use crate::domain::narrative_graph::definition::NarrativeNodeState;
 use crate::domain::story_instance::binding::RoleBinding;
@@ -10,6 +11,7 @@ use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings};
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::retrieval::RetrievalSignals;
+use crate::domain::turn::{RetrievalIndexScope, RetrievalTargetId};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -58,6 +60,23 @@ pub struct CharacterIndexEntry {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct RelevantKnowledge {
+    pub entry_id: KnowledgeSourceId,
+    pub kind: KnowledgeKind,
+    pub content: BoundedText,
+    pub source_priority: u8,
+    pub salience: u8,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct KnowledgeEntryIndexEntry {
+    pub target_id: RetrievalTargetId,
+    pub entry_id: KnowledgeSourceId,
+    pub kind: KnowledgeKind,
+    pub retrieval_hint: BoundedText,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct NarrativeStateView {
     pub pack_digest: Sha256Digest,
     pub graph_revision: u64,
@@ -71,6 +90,11 @@ pub struct BaselineContext {
     pub player_character: CharacterView,
     pub current_scene: CurrentScene,
     pub scene_characters: Vec<CharacterView>,
+    pub referenced_characters: Vec<CharacterView>,
+    pub relevant_knowledge: Vec<RelevantKnowledge>,
+    pub character_index_scope: RetrievalIndexScope,
+    pub knowledge_entry_index_scope: RetrievalIndexScope,
+    pub knowledge_entry_index: Vec<KnowledgeEntryIndexEntry>,
     pub character_index: Vec<CharacterIndexEntry>,
     pub story_continuity: StoryContinuity,
     pub active_story_constraints: Vec<ActiveStoryConstraint>,
@@ -86,6 +110,12 @@ impl BaselineContext {
         total = total.saturating_add(estimate_text_tokens(self.player_character.card.meta.name.as_str()));
         for character in &self.scene_characters {
             total = total.saturating_add(estimate_text_tokens(character.card.meta.name.as_str()));
+        }
+        for character in &self.referenced_characters {
+            total = total.saturating_add(estimate_text_tokens(character.card.meta.name.as_str()));
+        }
+        for entry in &self.relevant_knowledge {
+            total = total.saturating_add(estimate_text_tokens(entry.content.as_str()));
         }
         for entry in &self.character_index {
             total = total.saturating_add(estimate_text_tokens(entry.name.as_str()));

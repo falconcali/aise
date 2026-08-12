@@ -6,7 +6,8 @@ use crate::domain::knowledge::{KnowledgeIndexMatch, KnowledgeKind, KnowledgeSour
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::domain::turn::RetrievalAudience;
 use crate::persistence::knowledge_read_port::{
-    EntityKnowledgeQuery, KnowledgeFilter, KnowledgeLookupHit, KnowledgeReadPort, KnowledgeRecord, TopicKnowledgeQuery,
+    EntityKnowledgeQuery, KnowledgeFilter, KnowledgeIndexQuery, KnowledgeIndexRecord, KnowledgeLookupHit,
+    KnowledgeReadPort, KnowledgeRecord, SourceKnowledgeQuery, TopicKnowledgeQuery,
 };
 use crate::persistence::sqlite_error::SqliteStoreError;
 use crate::persistence::sqlite_store::SqliteStore;
@@ -43,6 +44,14 @@ impl KnowledgeReadPort for SqliteStore {
         )
         .await
     }
+
+    async fn find_by_source_ids(&self, query: SourceKnowledgeQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError> {
+        load_by_source_ids(self.pool(), query).await
+    }
+
+    async fn list_index(&self, query: KnowledgeIndexQuery<'_>) -> Result<Vec<KnowledgeIndexRecord>, StoreError> {
+        load_index(self.pool(), query).await
+    }
 }
 
 #[async_trait]
@@ -54,6 +63,107 @@ impl KnowledgeReadPort for Arc<SqliteStore> {
     async fn find_by_topics(&self, query: TopicKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError> {
         KnowledgeReadPort::find_by_topics(&**self, query).await
     }
+
+    async fn find_by_source_ids(&self, query: SourceKnowledgeQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError> {
+        KnowledgeReadPort::find_by_source_ids(&**self, query).await
+    }
+
+    async fn list_index(&self, query: KnowledgeIndexQuery<'_>) -> Result<Vec<KnowledgeIndexRecord>, StoreError> {
+        KnowledgeReadPort::list_index(&**self, query).await
+    }
+}
+
+async fn load_by_source_ids(
+    pool: &sqlx::SqlitePool,
+    query: SourceKnowledgeQuery<'_>,
+) -> Result<Vec<KnowledgeRecord>, StoreError> {
+    if query.source_ids.is_empty() || query.limit == 0 {
+        return Ok(Vec::new());
+    }
+    let mut tx = pool.begin().await.map_err(SqliteStoreError::from)?;
+    verify_snapshot(&mut tx, query.snapshot).await?;
+    let mut builder = QueryBuilder::<Sqlite>::new(
+        "SELECT e.source_id, e.knowledge_kind, e.memory_owner_character_id, e.content, \
+         length(CAST(e.content AS BLOB)) AS content_bytes, e.salience, e.source_json, e.payload_json, \
+         length(CAST(e.payload_json AS BLOB)) AS payload_bytes, e.source_revision \
+         FROM knowledge_entries e WHERE e.story_id = ",
+    );
+    builder.push_bind(query.snapshot.story_id.as_str());
+    builder.push(" AND e.source_revision <= ");
+    builder.push_bind(i64::try_from(query.snapshot.base_revision.get()).map_err(|_| invalid_record())?);
+    builder.push(" AND e.knowledge_kind IN (");
+    {
+        let mut separated = builder.separated(", ");
+        for kind in &query.filter.knowledge_kinds {
+            separated.push_bind(kind_name(*kind));
+        }
+    }
+    builder.push(")");
+    builder.push(" AND (");
+    for (index, source_id) in query.source_ids.iter().enumerate() {
+        if index > 0 {
+            builder.push(" OR ");
+        }
+        builder
+            .push("(e.knowledge_kind = ")
+            .push_bind(kind_name(source_id_kind(source_id)))
+            .push(" AND e.source_id = ")
+            .push_bind(source_id.as_str())
+            .push(")");
+    }
+    builder.push(")");
+    push_authorization(&mut builder, query.filter)?;
+    builder.push(" ORDER BY e.source_id ASC LIMIT ");
+    builder.push_bind(i64::try_from(query.limit).map_err(|_| StoreError::LimitExceeded {
+        limit: "knowledge_limit",
+    })?);
+    let rows = builder.build().fetch_all(&mut *tx).await.map_err(SqliteStoreError::from)?;
+    let records = rows
+        .iter()
+        .map(|row| materialize_row(row, query.filter.max_item_bytes))
+        .collect::<Result<Vec<_>, _>>()?;
+    tx.commit().await.map_err(SqliteStoreError::from)?;
+    Ok(records)
+}
+
+async fn load_index(
+    pool: &sqlx::SqlitePool,
+    query: KnowledgeIndexQuery<'_>,
+) -> Result<Vec<KnowledgeIndexRecord>, StoreError> {
+    if query.knowledge_kinds.is_empty() || query.limit == 0 {
+        return Ok(Vec::new());
+    }
+    let mut tx = pool.begin().await.map_err(SqliteStoreError::from)?;
+    verify_snapshot(&mut tx, query.snapshot).await?;
+    let mut builder =
+        QueryBuilder::<Sqlite>::new("SELECT source_id, knowledge_kind FROM knowledge_entries WHERE story_id = ");
+    builder.push_bind(query.snapshot.story_id.as_str());
+    builder.push(" AND source_revision <= ");
+    builder.push_bind(i64::try_from(query.snapshot.base_revision.get()).map_err(|_| invalid_record())?);
+    builder.push(" AND knowledge_kind IN (");
+    {
+        let mut separated = builder.separated(", ");
+        for kind in query.knowledge_kinds {
+            separated.push_bind(kind_name(*kind));
+        }
+    }
+    builder.push(") ORDER BY source_id ASC LIMIT ");
+    builder.push_bind(i64::try_from(query.limit).map_err(|_| StoreError::LimitExceeded {
+        limit: "knowledge_index_limit",
+    })?);
+    let rows = builder.build().fetch_all(&mut *tx).await.map_err(SqliteStoreError::from)?;
+    let mut records = Vec::with_capacity(rows.len());
+    for row in rows {
+        let source_id: String = row.try_get("source_id").map_err(SqliteStoreError::from)?;
+        let kind_raw: String = row.try_get("knowledge_kind").map_err(SqliteStoreError::from)?;
+        let kind = parse_kind(&kind_raw)?;
+        records.push(KnowledgeIndexRecord {
+            source_id: make_source_id(kind, source_id),
+            kind,
+        });
+    }
+    tx.commit().await.map_err(SqliteStoreError::from)?;
+    Ok(records)
 }
 
 async fn load_hits(
@@ -319,11 +429,7 @@ fn materialize_row(row: &sqlx::sqlite::SqliteRow, max_item_bytes: usize) -> Resu
     if (kind == KnowledgeKind::Memory) != memory_owner.is_some() {
         return Err(invalid_record());
     }
-    let source_id = match kind {
-        KnowledgeKind::Fact => KnowledgeSourceId::Fact(FactId::from(source_id_raw)),
-        KnowledgeKind::Rumor => KnowledgeSourceId::Rumor(crate::domain::ids::RumorId::from(source_id_raw)),
-        KnowledgeKind::Memory => KnowledgeSourceId::Memory(MemoryId::from(source_id_raw)),
-    };
+    let source_id = make_source_id(kind, source_id_raw);
     let source = serde_json::from_str::<KnowledgeSource>(&source_json).map_err(|_| invalid_record())?;
     let content =
         BoundedText::try_new(content_raw, "knowledge_content", max_item_bytes).map_err(|_| invalid_record())?;
@@ -365,6 +471,22 @@ fn kind_name(kind: KnowledgeKind) -> &'static str {
         KnowledgeKind::Fact => "fact",
         KnowledgeKind::Rumor => "rumor",
         KnowledgeKind::Memory => "memory",
+    }
+}
+
+fn source_id_kind(source_id: &KnowledgeSourceId) -> KnowledgeKind {
+    match source_id {
+        KnowledgeSourceId::Fact(_) => KnowledgeKind::Fact,
+        KnowledgeSourceId::Rumor(_) => KnowledgeKind::Rumor,
+        KnowledgeSourceId::Memory(_) => KnowledgeKind::Memory,
+    }
+}
+
+fn make_source_id(kind: KnowledgeKind, value: String) -> KnowledgeSourceId {
+    match kind {
+        KnowledgeKind::Fact => KnowledgeSourceId::Fact(FactId::from(value)),
+        KnowledgeKind::Rumor => KnowledgeSourceId::Rumor(crate::domain::ids::RumorId::from(value)),
+        KnowledgeKind::Memory => KnowledgeSourceId::Memory(MemoryId::from(value)),
     }
 }
 

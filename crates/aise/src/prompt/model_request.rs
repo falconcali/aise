@@ -1,6 +1,5 @@
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::knowledge::query::CurrentPerception;
-use crate::domain::narrative_graph::director::NarrativePlan;
 use crate::domain::narrative_graph::effect::CharacterImpulse;
 use crate::domain::story_instance::state::CurrentScene;
 use crate::domain::turn::proposal::StoryProposal;
@@ -9,13 +8,6 @@ use crate::prompt::profile::PromptProfile;
 use crate::turn::turn_contract::LlmCallPurpose;
 use crate::turn::turn_validation::ValidationIssue;
 use serde::Serialize;
-
-#[derive(Debug, Clone, Serialize)]
-pub struct WriterPlannerContext {
-    pub baseline: BaselineContext,
-    pub narrative_plan: NarrativePlan,
-    pub player_input: BoundedText,
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CharacterThinkContext {
@@ -70,17 +62,6 @@ impl<C> ModelRequest<C> {
 
     pub fn purpose(&self) -> LlmCallPurpose {
         self.purpose
-    }
-}
-
-impl ModelRequest<WriterPlannerContext> {
-    pub fn writer_planner(context: WriterPlannerContext, max_output_tokens: u32) -> Self {
-        Self {
-            profile: PromptProfile::WriterPlanner,
-            context,
-            max_output_tokens,
-            purpose: LlmCallPurpose::WriterPlan,
-        }
     }
 }
 

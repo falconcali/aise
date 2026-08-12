@@ -6,9 +6,20 @@ use crate::domain::ids::CharacterId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CastPolicy {
+    #[default]
+    Open,
+    IncidentalOnly,
+    Closed,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InstanceSettings {
+    #[serde(default)]
+    pub cast_policy: CastPolicy,
     #[serde(default)]
     pub values: BTreeMap<InstanceSettingKey, ScalarValue>,
 }

@@ -58,7 +58,7 @@ pub async fn build_services(
         config.aise.retrieval.clone(),
         vec![
             Arc::new(EntityCandidateRetriever::new(knowledge.clone())),
-            Arc::new(TopicCandidateRetriever::new(knowledge)),
+            Arc::new(TopicCandidateRetriever::new(knowledge.clone())),
         ],
     )
     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
@@ -70,6 +70,8 @@ pub async fn build_services(
             config.aise.content.clone(),
             config.aise.context.clone(),
             config.aise.assets.clone(),
+            config.aise.retrieval.clone(),
+            knowledge,
         )))
         .writer_planner(Box::new(WriterPlanner::new(
             gateway.clone(),

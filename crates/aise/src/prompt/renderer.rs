@@ -19,6 +19,7 @@ impl PromptRenderer {
     pub fn new() -> Self {
         let mut env = minijinja::Environment::new();
         env.set_auto_escape_callback(|_| minijinja::AutoEscape::None);
+        env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
         Self { env }
     }
 
