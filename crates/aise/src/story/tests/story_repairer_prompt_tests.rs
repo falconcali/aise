@@ -12,7 +12,7 @@ fn story_repairer_assets_have_required_rule_counts() {
     assert_eq!(section_item_count(csi, "## MUST", "## SHOULD"), 10);
     assert_eq!(section_item_count(csi, "## SHOULD", "## NEVER"), 3);
     assert_eq!(section_item_count(csi, "## NEVER", "# Runtime Data Boundary"), 5);
-    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 5);
+    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 6);
     assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
     assert!(!fti.contains("## SHOULD"));
     assert_eq!(fti.matches("{{ output_schema }}").count(), 1);

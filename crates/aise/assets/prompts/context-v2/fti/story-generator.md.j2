@@ -10,6 +10,7 @@ Generate exactly one new story segment now and return the complete StoryProposal
 - Make the best causally valid progress toward the Immediate Story Goal while preserving character agency and every provided AI Character Thought as starting private-state guidance.
 - Obey Active Story Constraints, model-relevant Instance Settings, and Story Profile, while preserving established character knowledge and Fact, Rumor, and Memory scope.
 - Return exactly one complete StoryProposal matching the schema; keep `story_text` and all structured fields mutually consistent, include only changes established by the segment, and use only authorized IDs and valid references.
+- Set `summary_text` to null when Recent Story contains only the authored opening. Populate it only when prior generated story history must be compacted; never summarize the segment being generated.
 
 ## NEVER
 

@@ -306,7 +306,8 @@ function renderPackDetail(pack) {
     `<div class="kv"><span class="k">时态</span><span>${escapeHtml(style.tense || "")}</span></div>` +
     `<div class="kv"><span class="k">基调</span><span>${(style.tone || []).join("、")}</span></div>` +
     `</div>` +
-    `<div class="detail-section"><h3>开场</h3><p>${escapeHtml(start.description || "")}</p></div>` +
+    `<div class="detail-section"><h3>初始场景</h3><p>${escapeHtml(start.description || "")}</p></div>` +
+    `<div class="detail-section"><h3>故事开篇</h3><p>${escapeHtml(start.opening || "")}</p></div>` +
     characterSection +
     worldBookSection;
 
@@ -319,13 +320,11 @@ function renderPackDetail(pack) {
   for (const key of playableKeys) {
     const role = roles[key];
     if (!role) continue;
-    const opening = (start.role_openings || {})[key] || "";
     const card = document.createElement("div");
     card.className = "role-card";
     card.innerHTML =
       `<div class="role-label">${escapeHtml(role.role_label || key)}</div>` +
-      `<div class="role-fn">${escapeHtml(role.narrative_function || "")}</div>` +
-      (opening ? `<div class="role-opening">${escapeHtml(opening)}</div>` : "");
+      `<div class="role-fn">${escapeHtml(role.narrative_function || "")}</div>`;
     card.onclick = () => startGame(currentPack, key);
     roleListEl.appendChild(card);
   }
@@ -357,8 +356,12 @@ async function startGame(pack, roleKey) {
       }),
     });
     const session = await sessionRes.json();
+    await openGame(session, {
+      ...instance,
+      turns: [],
+      characters: [],
+    });
     await refreshSessions();
-    await openGame(session);
   } catch (err) {
     toast(`开始游戏失败：${err.message}`, "error", 6000);
   } finally {
@@ -366,9 +369,9 @@ async function startGame(pack, roleKey) {
   }
 }
 
-async function openGame(session) {
+async function openGame(session, initialStory = null) {
   currentSession = session;
-  currentStory = null;
+  currentStory = initialStory;
   showView("game");
   renderSessions();
   gameTitleEl.textContent = session.name;
@@ -381,13 +384,19 @@ async function openGame(session) {
   playerInput.disabled = false;
   sendBtn.disabled = false;
   playerInput.focus();
-  await loadStory(session.story_id);
+  if (currentStory) {
+    renderStory();
+  }
+  await loadStory(session.story_id, initialStory?.opening || null);
 }
 
-async function loadStory(storyId) {
+async function loadStory(storyId, initialOpening = null) {
   try {
     const res = await api(`/api/stories/${storyId}`);
     const story = await res.json();
+    if (!story.opening && initialOpening) {
+      story.opening = initialOpening;
+    }
     currentStory = story;
     renderStory();
   } catch (err) {
@@ -409,8 +418,8 @@ function renderStory() {
     gameRoleEl.textContent = `扮演：${label}`;
   }
   storyEl.textContent = "";
-  if ((story.turns || []).length === 0 && story.story_instructions) {
-    storyEl.textContent += `${story.story_instructions}\n\n`;
+  if (story.opening) {
+    storyEl.textContent += `${story.opening.story_text}\n\n`;
   }
   for (const turn of story.turns || []) {
     if (turn.player_input) {

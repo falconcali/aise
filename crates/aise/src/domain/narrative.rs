@@ -7,8 +7,15 @@ pub use crate::domain::story_sequence::{StoryContinuityError, StorySequence};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StorySegment {
     pub sequence: StorySequence,
-    pub turn_id: TurnId,
+    pub origin: StorySegmentOrigin,
     pub text: BoundedText,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StorySegmentOrigin {
+    Opening,
+    Turn { turn_id: TurnId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,6 +146,14 @@ impl StoryContinuity {
             Some(latest) => latest.next(),
             None => StorySequence::try_new(1),
         }
+    }
+
+    pub fn has_summarizable_history(&self) -> bool {
+        self.summary.summarized_through.is_some()
+            || self
+                .recent_segments
+                .iter()
+                .any(|segment| matches!(&segment.origin, StorySegmentOrigin::Turn { .. }))
     }
 
     pub fn estimate_tokens(&self) -> u64 {

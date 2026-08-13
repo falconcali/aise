@@ -141,12 +141,17 @@ impl TurnExecutionPipeline for StoryGenerator {
                     error.to_string(),
                 )
             })?;
-        let proposal: StoryProposal = serde_json::from_str(&completion.text).map_err(|_| {
+        let proposal: StoryProposal = serde_json::from_str(&completion.text).map_err(|error| {
+            tracing::warn!(
+                prompt_profile = "story_generator",
+                error = %error,
+                "story generator proposal decode failed"
+            );
             TurnExecutionError::new(
                 TurnFailureKind::Llm,
                 "model_output_invalid",
                 Some(TurnStage::StoryGenerator),
-                "story proposal output is invalid",
+                format!("story proposal output is invalid: {error}"),
             )
         })?;
         if !proposal.is_within_bounds(

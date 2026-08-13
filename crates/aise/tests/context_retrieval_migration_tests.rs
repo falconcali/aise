@@ -183,3 +183,73 @@ async fn migration_rejects_ambiguous_summary_boundary() {
     pool.close().await;
     let _ = std::fs::remove_file(db);
 }
+
+async fn opening_migration_pool(label: &str) -> (sqlx::SqlitePool, String) {
+    let db = temp_db_path(label);
+    let options = SqliteConnectOptions::from_str(&db)
+        .unwrap()
+        .create_if_missing(true)
+        .foreign_keys(true);
+    let pool = SqlitePoolOptions::new().max_connections(1).connect_with(options).await.unwrap();
+    migrator_through(12).run(&pool).await.unwrap();
+    (pool, db)
+}
+
+async fn insert_pack_with_start(pool: &sqlx::SqlitePool, start: serde_json::Value) {
+    let pack = serde_json::json!({"start": start});
+    sqlx::query(
+        "INSERT INTO story_packs \
+         (pack_id, pack_key, version, digest, pack_json, manifest_json, characters_json, world_book_json) \
+         VALUES ('pack-opening','demo','1.0.0','digest-opening',?,'','{}','{}')",
+    )
+    .bind(pack.to_string())
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn migration_converts_identical_role_openings_to_story_opening() {
+    let (pool, db) = opening_migration_pool("story_opening").await;
+    insert_pack_with_start(
+        &pool,
+        serde_json::json!({
+            "role_openings": {
+                "guardian": "The mist rises.",
+                "visitor": "The mist rises."
+            }
+        }),
+    )
+    .await;
+
+    sqlx::migrate!("./assets/persistence/mig").run(&pool).await.unwrap();
+    let pack_json: String = sqlx::query_scalar("SELECT pack_json FROM story_packs WHERE pack_id = 'pack-opening'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let pack: serde_json::Value = serde_json::from_str(&pack_json).unwrap();
+    assert_eq!(pack["start"]["opening"], "The mist rises.");
+    assert!(pack["start"].get("role_openings").is_none());
+    pool.close().await;
+    let _ = std::fs::remove_file(db);
+}
+
+#[tokio::test]
+async fn migration_rejects_conflicting_role_openings() {
+    let (pool, db) = opening_migration_pool("ambiguous_story_opening").await;
+    insert_pack_with_start(
+        &pool,
+        serde_json::json!({
+            "role_openings": {
+                "guardian": "Guard the gate.",
+                "visitor": "Approach the gate."
+            }
+        }),
+    )
+    .await;
+
+    let error = sqlx::migrate!("./assets/persistence/mig").run(&pool).await.unwrap_err();
+    assert!(error.to_string().contains("story_opening_migration_ambiguous"));
+    pool.close().await;
+    let _ = std::fs::remove_file(db);
+}

@@ -10,7 +10,9 @@ pub mod text;
 pub mod turn;
 pub use error::DomainInputError;
 pub use ids::{CharacterId, ConstraintId, EventId, FactId, MemoryId, RumorId, StoryId, StoryRevision, TurnId};
-pub use narrative::{EventKind, StoryContinuity, StoryEvent, StorySegment, StorySummary, StoryTurn};
+pub use narrative::{
+    EventKind, StoryContinuity, StoryEvent, StorySegment, StorySegmentOrigin, StorySummary, StoryTurn,
+};
 pub use story_instance::info::StoryInfo;
 pub use story_instance::snapshot::StoryReadSnapshot;
 pub use story_instance::state::CurrentScene;

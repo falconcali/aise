@@ -6,7 +6,7 @@ use crate::domain::asset::story_pack::{StoryProfile, StoryRole};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::asset::world_book::TopicDefinition;
 use crate::domain::ids::{CharacterId, StoryId, StoryRevision, TurnId};
-use crate::domain::narrative::{StoryContinuity, StorySegment, StorySummary};
+use crate::domain::narrative::{StoryContinuity, StorySegment, StorySegmentOrigin, StorySummary};
 use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::binding::RoleBinding;
@@ -329,9 +329,9 @@ pub(crate) async fn load_story_snapshot(
         .ok_or(StoreError::LimitExceeded {
             limit: "max_recent_segments",
         })?;
-    let segment_rows: Vec<(String, i64, String)> = sqlx::query_as(
-        "SELECT id, sequence, story_text FROM story_turns \
-         WHERE world_id = ? AND sequence > ? \
+    let segment_rows: Vec<(String, Option<String>, i64, String)> = sqlx::query_as(
+        "SELECT origin, turn_id, sequence, story_text FROM story_segments \
+         WHERE story_id = ? AND sequence > ? \
          ORDER BY sequence ASC LIMIT ?",
     )
     .bind(story_id.as_str())
@@ -350,10 +350,20 @@ pub(crate) async fn load_story_snapshot(
         });
     }
     let mut recent_segments = Vec::new();
-    for (id, sequence, story_text) in segment_rows {
-        let turn_id = TurnId::try_new(id).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidTurnResult,
-        })?;
+    for (origin, turn_id, sequence, story_text) in segment_rows {
+        let origin = match (origin.as_str(), turn_id) {
+            ("opening", None) => StorySegmentOrigin::Opening,
+            ("turn", Some(turn_id)) => StorySegmentOrigin::Turn {
+                turn_id: TurnId::try_new(turn_id).map_err(|_| StoreError::Serialization {
+                    kind: crate::persistence::store::StoreSerializationErrorKind::InvalidTurnResult,
+                })?,
+            },
+            _ => {
+                return Err(StoreError::Serialization {
+                    kind: crate::persistence::store::StoreSerializationErrorKind::InvalidTurnResult,
+                });
+            }
+        };
         let sequence =
             crate::domain::StorySequence::try_new(sequence as u64).map_err(|_| StoreError::Serialization {
                 kind: crate::persistence::store::StoreSerializationErrorKind::InvalidTurnResult,
@@ -362,11 +372,7 @@ pub(crate) async fn load_story_snapshot(
             .map_err(|_| StoreError::ConstraintViolation {
                 constraint: "max_recent_segment_bytes".into(),
             })?;
-        recent_segments.push(StorySegment {
-            sequence,
-            turn_id,
-            text,
-        });
+        recent_segments.push(StorySegment { sequence, origin, text });
     }
     let story_continuity = StoryContinuity::try_new(summary, recent_segments, limits.continuity).map_err(|_| {
         StoreError::ConstraintViolation {

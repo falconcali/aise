@@ -1,6 +1,6 @@
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::TurnId;
-use aise::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySegment, StorySummary};
+use aise::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySegment, StorySegmentOrigin, StorySummary};
 use aise::domain::{StoryContinuityError, StorySequence};
 
 fn limits() -> StoryContinuityLimits {
@@ -15,7 +15,9 @@ fn limits() -> StoryContinuityLimits {
 fn segment(sequence: u64, text: &str) -> StorySegment {
     StorySegment {
         sequence: StorySequence::try_new(sequence).expect("sequence"),
-        turn_id: TurnId::try_new(format!("turn-{sequence}")).expect("turn_id"),
+        origin: StorySegmentOrigin::Turn {
+            turn_id: TurnId::try_new(format!("turn-{sequence}")).expect("turn_id"),
+        },
         text: BoundedText::try_new(text.to_string(), "segment", 256).expect("text"),
     }
 }

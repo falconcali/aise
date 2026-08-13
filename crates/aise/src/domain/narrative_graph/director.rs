@@ -107,11 +107,7 @@ impl NarrativeDirector {
                 code: "max_edges_exceeded",
             });
         }
-        let turn_number = snapshot
-            .story_continuity()
-            .latest_sequence()
-            .map(|sequence| sequence.get())
-            .unwrap_or(0);
+        let turn_number = snapshot.base_revision().get();
         let mut plan = NarrativePlan::empty();
         for (node_key, node_def) in &definition.nodes {
             let current = state.node_state(node_key);

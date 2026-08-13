@@ -121,5 +121,5 @@ pub struct StoryStart {
     pub location_key: LocationKey,
     pub time: BoundedText,
     pub description: BoundedText,
-    pub role_openings: BTreeMap<StoryRoleKey, BoundedText>,
+    pub opening: BoundedText,
 }

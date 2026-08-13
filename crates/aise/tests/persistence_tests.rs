@@ -78,9 +78,7 @@ fn valid_pack_json() -> String {
             "location_key": "village",
             "time": "morning",
             "description": "The village wakes.",
-            "role_openings": {
-                "protagonist": "You open your eyes."
-            }
+            "opening": "You open your eyes."
         },
         "narrative": {
             "entry_nodes": ["node_a"],
@@ -128,6 +126,7 @@ async fn create_instance(label: &str) -> (Arc<dyn Store>, StoryId, String) {
             max_rumors: 128,
             max_memories: 128,
             max_relationships: 64,
+            max_opening_bytes: 8192,
         },
     );
     let story = factory
@@ -192,7 +191,8 @@ async fn snapshot_is_revision_consistent() {
         .expect("commit");
     let after = store.load_story_snapshot(&story_id, limits()).await.expect("load after");
     assert_eq!(after.base_revision(), StoryRevision::new(1));
-    assert_eq!(after.story_continuity().recent_segments().len(), 1);
+    assert_eq!(after.story_continuity().recent_segments().len(), 2);
+    assert_eq!(after.story_continuity().recent_segments()[1].sequence.get(), 2);
     let _ = std::fs::remove_file(&db);
 }
 
@@ -214,7 +214,7 @@ async fn recent_segments_are_returned_in_sequence_order() {
         .iter()
         .map(|segment| segment.sequence.get())
         .collect();
-    assert_eq!(sequences, vec![1, 2]);
+    assert_eq!(sequences, vec![1, 2, 3]);
     let _ = std::fs::remove_file(&db);
 }
 

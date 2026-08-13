@@ -201,6 +201,17 @@ impl Store for SqliteStore {
             )
             .await?;
         }
+        sqlx::query(
+            "INSERT INTO story_segments (id, story_id, sequence, origin, turn_id, story_text, created_at) \
+             VALUES (?, ?, 1, 'opening', NULL, ?, ?)",
+        )
+        .bind(format!("{}:opening", spec.story_id.as_str()))
+        .bind(spec.story_id.as_str())
+        .bind(spec.opening.as_str())
+        .bind(spec.created_at_ms)
+        .execute(&mut *tx)
+        .await
+        .map_err(SqliteStoreError::from)?;
         tx.commit().await.map_err(SqliteStoreError::from)?;
         Ok(StoryInfo {
             story_id: spec.story_id.clone(),
@@ -319,7 +330,7 @@ impl Store for SqliteStore {
             limit: "story_revision",
         })?;
         let sequence: i64 =
-            sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) + 1 FROM story_turns WHERE world_id = ?")
+            sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) + 1 FROM story_segments WHERE story_id = ?")
                 .bind(commit.story_id.as_str())
                 .fetch_one(&mut *tx)
                 .await
@@ -416,6 +427,20 @@ impl Store for SqliteStore {
         .bind(committed_revision as i64)
         .bind(&result_json)
         .bind(sequence)
+        .execute(&mut *tx)
+        .await
+        .map_err(SqliteStoreError::from)?;
+
+        sqlx::query(
+            "INSERT INTO story_segments (id, story_id, sequence, origin, turn_id, story_text, created_at) \
+             VALUES (?, ?, ?, 'turn', ?, ?, ?)",
+        )
+        .bind(format!("turn:{}", commit.turn.id.as_str()))
+        .bind(commit.story_id.as_str())
+        .bind(sequence)
+        .bind(commit.turn.id.as_str())
+        .bind(commit.changes.story_text())
+        .bind(commit.turn.created_at)
         .execute(&mut *tx)
         .await
         .map_err(SqliteStoreError::from)?;

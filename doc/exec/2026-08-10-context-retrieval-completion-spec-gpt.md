@@ -181,7 +181,7 @@ fn validate_manifest(
 Validation performs typed `StoryPack` deserialization before semantic checks and enforces all of the following:
 
 - Exactly one default cast per Role; no cast for an unknown Role; every cast resolves to a Character card.
-- Every playable Role exists and has exactly one opening; every opening references a defined Role.
+- Every playable Role exists, and the Story Pack has exactly one non-empty Story Opening independent of player-role selection.
 - Embedded Character map keys equal card keys; version and digest pinning is deterministic.
 - Topic labels and aliases are non-empty after normalization, byte bounded, and collision-free.
 - Fact, Rumor, and seed Memory Topic references resolve; entry Entity/Topic counts are bounded.

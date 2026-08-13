@@ -79,7 +79,7 @@ fn story_generator_assets_have_required_rule_counts() {
     assert_eq!(section_item_count(csi, "## MUST", "## SHOULD"), 10);
     assert_eq!(section_item_count(csi, "## SHOULD", "## NEVER"), 3);
     assert_eq!(section_item_count(csi, "## NEVER", "# Runtime Data Boundary"), 5);
-    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 5);
+    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 6);
     assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
     assert!(!fti.contains("## SHOULD"));
 }
@@ -150,6 +150,14 @@ fn story_proposal_schema_is_closed_and_complete() {
     assert_eq!(schema["properties"]["story_text"]["minLength"], 1);
     assert_eq!(schema["properties"]["events"]["maxItems"], 8);
     assert_eq!(schema["properties"]["scene_change"]["additionalProperties"], false);
+    assert_eq!(
+        schema["properties"]["knowledge_changes"]["items"]["oneOf"][0]["properties"]["topics"]["items"]["maxLength"],
+        1024
+    );
+    assert_eq!(
+        schema["properties"]["relationship_changes"]["items"]["properties"]["kind"]["maxLength"],
+        1024
+    );
     assert_eq!(
         schema["properties"]["knowledge_changes"]["items"]["oneOf"][0]["properties"]["evidence"]["items"]["oneOf"][1]["required"]
             [0],

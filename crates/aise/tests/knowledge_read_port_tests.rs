@@ -94,9 +94,7 @@ fn valid_pack_json() -> String {
             "location_key": "village",
             "time": "morning",
             "description": "The village wakes.",
-            "role_openings": {
-                "protagonist": "You open your eyes."
-            }
+            "opening": "You open your eyes."
         },
         "narrative": {
             "entry_nodes": ["node_a"],
@@ -177,6 +175,7 @@ async fn seeded_store(label: &str) -> (Arc<SqliteStore>, KnowledgeSnapshotRef, S
             max_rumors: 128,
             max_memories: 128,
             max_relationships: 64,
+            max_opening_bytes: 8192,
         },
     );
     let story = factory

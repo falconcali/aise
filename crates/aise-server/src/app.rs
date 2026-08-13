@@ -115,6 +115,7 @@ pub async fn build_services(
             max_rumors: config.aise.assets.max_world_rumors,
             max_memories: config.aise.assets.max_seed_memories_per_role,
             max_relationships: config.aise.assets.max_relationships_per_role,
+            max_opening_bytes: config.aise.content.max_recent_segment_bytes,
         },
     ));
 

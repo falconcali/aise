@@ -64,6 +64,67 @@ macro_rules! key_type {
     };
 }
 
+macro_rules! semantic_key_type {
+    ($name:ident) => {
+        #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub struct $name(Arc<str>);
+
+        impl $name {
+            pub fn try_new(value: impl Into<String>) -> Result<Self, AssetValidationError> {
+                let value = value.into();
+                if !is_valid_semantic_key(&value) {
+                    return Err(AssetValidationError::Invalid {
+                        code: AssetValidationCode::InvalidKey,
+                        path: value,
+                    });
+                }
+                Ok(Self(Arc::from(value)))
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl From<&str> for $name {
+            fn from(value: &str) -> Self {
+                Self(Arc::from(value))
+            }
+        }
+
+        impl From<String> for $name {
+            fn from(value: String) -> Self {
+                Self(Arc::from(value))
+            }
+        }
+
+        impl Serialize for $name {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.serialize_str(&self.0)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let value = String::deserialize(deserializer)?;
+                Self::try_new(value).map_err(serde::de::Error::custom)
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+
+        impl fmt::Debug for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_tuple(stringify!($name)).field(&self.0).finish()
+            }
+        }
+    };
+}
+
 fn is_valid_key(value: &str) -> bool {
     if value.is_empty() {
         return false;
@@ -86,6 +147,10 @@ fn is_valid_key(value: &str) -> bool {
     seen_segment
 }
 
+fn is_valid_semantic_key(value: &str) -> bool {
+    !value.trim().is_empty() && !value.chars().any(char::is_control)
+}
+
 key_type!(CharacterAssetKey);
 key_type!(WorldBookKey);
 key_type!(StoryPackKey);
@@ -93,7 +158,7 @@ key_type!(StoryRoleKey);
 key_type!(SceneKey);
 key_type!(LocationKey);
 key_type!(EntityKey);
-key_type!(TopicKey);
+semantic_key_type!(TopicKey);
 key_type!(FactKey);
 key_type!(RumorKey);
 key_type!(MemoryKey);
@@ -104,8 +169,8 @@ key_type!(AssetId);
 key_type!(PackId);
 key_type!(PlayerId);
 key_type!(AttributeKey);
-key_type!(RelationshipKind);
-key_type!(MemoryKind);
+semantic_key_type!(RelationshipKind);
+semantic_key_type!(MemoryKind);
 key_type!(ConstraintKey);
 key_type!(InstanceSettingKey);
 

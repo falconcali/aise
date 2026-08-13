@@ -1,60 +1,58 @@
 assets:
   - asset_id: context-v2/story-repairer-csi
     kind: text
-    source_path: ../context-v2/csi/story-repairer.md.j2
+    source_path: csi/story-repairer.md.j2
     status: active
   - asset_id: context-v2/story-repairer-rc
     kind: text
-    source_path: ../context-v2/rc/story-repairer.md.j2
+    source_path: rc/story-repairer.md.j2
     status: active
   - asset_id: context-v2/story-repairer-fti
     kind: text
-    source_path: ../context-v2/fti/story-repairer.md.j2
+    source_path: fti/story-repairer.md.j2
     output_contract_ref: StoryProposalOutput
     status: active
   - asset_id: context-v2/writer-planner-csi
     kind: text
-    source_path: ../context-v2/csi/writer-planner.md.j2
+    source_path: csi/writer-planner.md.j2
     status: active
   - asset_id: context-v2/writer-planner-rc
     kind: text
-    source_path: ../context-v2/rc/writer-planner.md.j2
+    source_path: rc/writer-planner.md.j2
     status: active
   - asset_id: context-v2/writer-planner-fti
     kind: text
-    source_path: ../context-v2/fti/writer-planner.md.j2
+    source_path: fti/writer-planner.md.j2
     output_contract_ref: PlannerOutput
     status: active
   - asset_id: context-v2/character-think-csi
     kind: text
-    source_path: ../context-v2/csi/character-think.md.j2
+    source_path: csi/character-think.md.j2
     status: active
   - asset_id: context-v2/character-think-rc
     kind: text
-    source_path: ../context-v2/rc/character-think.md.j2
+    source_path: rc/character-think.md.j2
     status: active
   - asset_id: context-v2/character-think-fti
     kind: text
-    source_path: ../context-v2/fti/character-think.md.j2
+    source_path: fti/character-think.md.j2
     output_contract_ref: CharacterThoughtOutput
     status: active
   - asset_id: context-v2/story-generator-csi
     kind: text
-    source_path: ../context-v2/csi/story-generator.md.j2
+    source_path: csi/story-generator.md.j2
     status: active
   - asset_id: context-v2/story-generator-rc
     kind: text
-    source_path: ../context-v2/rc/story-generator.md.j2
+    source_path: rc/story-generator.md.j2
     status: active
   - asset_id: context-v2/story-generator-fti
     kind: text
-    source_path: ../context-v2/fti/story-generator.md.j2
+    source_path: fti/story-generator.md.j2
     output_contract_ref: StoryProposalOutput
     status: active
 packs:
-  - name: context-v1
   - name: context-v2
-    extends: context-v1
     slots:
       context.story_repairer.csi: context-v2/story-repairer-csi
       context.story_repairer.rc: context-v2/story-repairer-rc
@@ -69,4 +67,4 @@ packs:
       context.story_generator.rc: context-v2/story-generator-rc
       context.story_generator.fti: context-v2/story-generator-fti
 resolver:
-  default_pack: context-v1
+  default_pack: context-v2

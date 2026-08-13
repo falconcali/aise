@@ -65,6 +65,36 @@ fn fact_changes_parse_with_typed_evidence() {
 }
 
 #[test]
+fn semantic_keys_accept_unicode_model_output() {
+    let proposal: StoryProposal = serde_json::from_str(
+        r#"{"story_text":"继续","relationship_changes":[{"source_character_id":"char-1","target_character_id":"char-2","kind":"信任关系","trust_delta":1}],"knowledge_changes":[{"kind":"memory","owner":"char-1","memory_kind":"亲眼所见","content":"发现纸条","entities":[],"topics":["木屋","纸条"],"salience":50,"source_event_index":null}],"scene_change":null,"summary_text":null}"#,
+    )
+    .expect("unicode semantic keys");
+
+    let ProposedKnowledgeChange::Memory {
+        memory_kind, topics, ..
+    } = &proposal.knowledge_changes[0]
+    else {
+        panic!("memory expected");
+    };
+    assert_eq!(proposal.relationship_changes[0].kind.as_str(), "信任关系");
+    assert_eq!(memory_kind.as_str(), "亲眼所见");
+    assert_eq!(topics.iter().map(|topic| topic.as_str()).collect::<Vec<_>>(), ["木屋", "纸条"]);
+}
+
+#[test]
+fn semantic_keys_reject_blank_and_control_characters() {
+    assert!(serde_json::from_str::<StoryProposal>(
+        r#"{"story_text":"继续","knowledge_changes":[{"kind":"fact","content":"发现纸条","proposition":null,"entities":[],"topics":["   "],"salience":50,"evidence":[]}]}"#,
+    )
+    .is_err());
+    assert!(serde_json::from_str::<StoryProposal>(
+        "{\"story_text\":\"继续\",\"knowledge_changes\":[{\"kind\":\"fact\",\"content\":\"发现纸条\",\"proposition\":null,\"entities\":[],\"topics\":[\"纸条\\u0000\"],\"salience\":50,\"evidence\":[]}]}"
+    )
+    .is_err());
+}
+
+#[test]
 fn summary_boundary_and_constraint_fields_are_rejected() {
     assert!(
         serde_json::from_str::<StoryProposal>(

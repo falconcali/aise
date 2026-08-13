@@ -1,8 +1,11 @@
 use aise::config::AssetLimitsConfig;
 use aise::domain::asset::ids::{PackId, PlayerId, StoryRoleKey};
+use aise::domain::narrative::StorySegmentOrigin;
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
-use aise::persistence::{SqliteStore, Store};
+use aise::persistence::{
+    SqliteStore, SqliteStoryHistoryReader, Store, StoryHistoryConfig, StoryHistoryQuery, StoryHistoryReadPort,
+};
 use aise::story::instance_factory::{CreateStoryInstanceSpec, StoryInstanceFactory, StoryInstantiationLimits};
 use aise::story::pack_service::{AssetInput, NativeAssetImporter, PackService};
 use std::sync::Arc;
@@ -70,9 +73,7 @@ fn valid_pack_json() -> String {
             "location_key": "village",
             "time": "morning",
             "description": "The village wakes.",
-            "role_openings": {
-                "protagonist": "You open your eyes."
-            }
+            "opening": "You open your eyes."
         },
         "narrative": {
             "entry_nodes": ["node_a"],
@@ -101,7 +102,8 @@ async fn runtime_services(label: &str) -> (Arc<PackService>, Arc<StoryInstanceFa
 
 async fn runtime_services_with_url(label: &str) -> (Arc<PackService>, Arc<StoryInstanceFactory>, String) {
     let db_url = temp_db_path(label);
-    let store: Arc<dyn Store> = SqliteStore::connect(&db_url).await.unwrap();
+    let sqlite = SqliteStore::connect(&db_url).await.unwrap();
+    let store: Arc<dyn Store> = sqlite.clone();
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&db_url).await.unwrap();
     let importer = NativeAssetImporter::new(AssetLimitsConfig::default());
     let pack_service = Arc::new(PackService::new(importer, asset_store.clone()));
@@ -114,6 +116,7 @@ async fn runtime_services_with_url(label: &str) -> (Arc<PackService>, Arc<StoryI
             max_rumors: 256,
             max_memories: 32,
             max_relationships: 32,
+            max_opening_bytes: 8192,
         },
     ));
     (pack_service, instance_factory, db_url)
@@ -295,7 +298,27 @@ async fn instance_snapshot_loads_with_scene_and_binding() {
         .await
         .expect("instance snapshot should load");
     assert_eq!(snapshot.current_scene().description.as_str(), "The village wakes.");
-    assert!(snapshot.story_continuity().recent_segments().is_empty());
+    assert!(snapshot.story_continuity().summary().text.as_str().is_empty());
+    assert_eq!(snapshot.story_continuity().recent_segments().len(), 1);
+    let opening = &snapshot.story_continuity().recent_segments()[0];
+    assert_eq!(opening.sequence.get(), 1);
+    assert_eq!(opening.origin, StorySegmentOrigin::Opening);
+    assert_eq!(opening.text.as_str(), "You open your eyes.");
+
+    let sqlite = SqliteStore::connect(&db_url).await.unwrap();
+    let history = SqliteStoryHistoryReader::new(sqlite, StoryHistoryConfig::default())
+        .unwrap()
+        .load_story_history(
+            &story_info.story_id,
+            StoryHistoryQuery {
+                after_sequence: None,
+                limit: 20,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(history.opening.unwrap().story_text, "You open your eyes.");
+    assert!(history.turns.is_empty());
 }
 
 fn now_millis() -> i64 {
