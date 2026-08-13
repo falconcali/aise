@@ -23,13 +23,12 @@ impl DeterministicValidator for SchemaValidator {
         if summary_requires_pre_turn_sequence(
             proposal.summary_text.as_deref(),
             ctx.snapshot()
-                .and_then(|snapshot| snapshot.story_continuity().latest_sequence())
-                .is_some(),
+                .is_some_and(|snapshot| snapshot.story_continuity().has_summarizable_history()),
         ) {
             issues.push(issue(
                 "summary_text",
                 0,
-                "summary requires a pre-turn sequence",
+                "summary requires prior generated story history",
                 Repairability::Repairable,
             ));
         }

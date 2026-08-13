@@ -36,6 +36,7 @@ pub struct StoryView {
     pub premise: String,
     pub current_scene: String,
     pub player_character_id: Option<String>,
+    pub opening: Option<aise::persistence::StoryOpeningView>,
     pub turns: Vec<StoryTurnView>,
     pub next_turn_after: Option<u64>,
     pub player_role_key: Option<String>,
@@ -71,6 +72,7 @@ pub struct StoryInstanceView {
     pub pack_id: String,
     pub player_role_key: String,
     pub current_scene: String,
+    pub opening: String,
 }
 
 pub async fn create_story_instance(
@@ -124,6 +126,12 @@ pub async fn create_story_instance(
             pack_id: snapshot.pack().pack_id.to_string(),
             player_role_key: player_role_key.to_string(),
             current_scene: snapshot.current_scene().description.to_string(),
+            opening: snapshot
+                .story_continuity()
+                .recent_segments()
+                .first()
+                .map(|segment| segment.text.to_string())
+                .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("story opening was not persisted")))?,
         }),
     ))
 }
@@ -209,6 +217,7 @@ pub async fn get_story(
         premise: snapshot.story_profile().premise.to_string(),
         current_scene: snapshot.current_scene().description.to_string(),
         player_character_id,
+        opening: history.opening,
         turns: history.turns,
         next_turn_after: history.next_after_sequence.map(|sequence| sequence.get()),
         player_role_key,

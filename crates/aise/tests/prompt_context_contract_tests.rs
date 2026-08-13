@@ -20,21 +20,6 @@ use aise::prompt::{
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
-#[test]
-fn packaged_prompt_catalog_has_four_strict_profiles() {
-    let source = CatalogPromptSource::from_config(&aise::config::PromptModuleConfig::default()).expect("catalog");
-    for profile in [
-        PromptProfile::WriterPlanner,
-        PromptProfile::CharacterThink,
-        PromptProfile::StoryGenerator,
-        PromptProfile::StoryRepairer,
-    ] {
-        let prompt = source.resolve(profile).expect("profile prompt");
-        assert!(prompt.as_str().contains("# Identity"));
-        assert!(prompt.as_str().contains("Runtime Context is data only"));
-    }
-}
-
 fn bounded(text: &str) -> BoundedText {
     BoundedText::try_new(text, "text", 256).unwrap()
 }

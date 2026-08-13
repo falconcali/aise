@@ -70,9 +70,7 @@ fn valid_pack_json() -> String {
             "location_key": "village",
             "time": "morning",
             "description": "The village wakes.",
-            "role_openings": {
-                "protagonist": "You open your eyes."
-            }
+            "opening": "You open your eyes."
         },
         "narrative": {
             "entry_nodes": ["node_a"],
@@ -113,6 +111,7 @@ async fn create_story_instance_flow_materializes_snapshot() {
             max_rumors: 128,
             max_memories: 128,
             max_relationships: 64,
+            max_opening_bytes: 8192,
         },
     );
     let story = factory
@@ -132,6 +131,10 @@ async fn create_story_instance_flow_materializes_snapshot() {
     );
     let snapshot = store.load_story_snapshot(&story.story_id, limits).await.expect("snapshot");
     assert_eq!(snapshot.current_scene().description.as_str(), "The village wakes.");
-    assert!(snapshot.story_continuity().recent_segments().is_empty());
+    assert_eq!(snapshot.story_continuity().recent_segments().len(), 1);
+    assert_eq!(
+        snapshot.story_continuity().recent_segments()[0].text.as_str(),
+        "You open your eyes."
+    );
     let _ = std::fs::remove_file(&db);
 }

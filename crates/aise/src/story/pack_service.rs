@@ -316,7 +316,7 @@ impl NativeAssetImporter {
                 ));
             }
         }
-        self.validate_cast_and_openings(value, report);
+        self.validate_cast_and_start(value, report);
         self.validate_graph(value, report);
         self.validate_salience(value, report);
     }
@@ -359,7 +359,7 @@ impl NativeAssetImporter {
         }
     }
 
-    fn validate_cast_and_openings(&self, value: &serde_json::Value, report: &mut ValidationReport) {
+    fn validate_cast_and_start(&self, value: &serde_json::Value, report: &mut ValidationReport) {
         let roles = match value.get("roles").and_then(serde_json::Value::as_object) {
             Some(roles) => roles,
             None => return,
@@ -411,17 +411,24 @@ impl NativeAssetImporter {
                 return;
             }
         };
-        let openings = match start.get("role_openings").and_then(serde_json::Value::as_object) {
-            Some(openings) => openings,
-            None => {
-                report.push(AssetValidationIssue::new(
-                    AssetValidationCode::MissingPlayableOpening,
-                    "/start/role_openings",
-                    "role_openings is missing",
-                ));
-                return;
-            }
-        };
+        if start.contains_key("role_openings") {
+            report.push(AssetValidationIssue::new(
+                AssetValidationCode::SchemaInvalid,
+                "/start/role_openings",
+                "role_openings is not supported; use start.opening",
+            ));
+        }
+        if start
+            .get("opening")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(|opening| opening.trim().is_empty())
+        {
+            report.push(AssetValidationIssue::new(
+                AssetValidationCode::MissingStoryOpening,
+                "/start/opening",
+                "story opening is missing or empty",
+            ));
+        }
         for playable_role in playable {
             let key = match playable_role.as_str() {
                 Some(key) => key,
@@ -432,13 +439,6 @@ impl NativeAssetImporter {
                     AssetValidationCode::MissingReference,
                     format!("/play/playable_role_keys/{key}"),
                     "playable role is not defined",
-                ));
-            }
-            if !openings.contains_key(key) {
-                report.push(AssetValidationIssue::new(
-                    AssetValidationCode::MissingPlayableOpening,
-                    format!("/start/role_openings/{key}"),
-                    "playable role is missing an opening",
                 ));
             }
         }

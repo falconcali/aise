@@ -306,7 +306,8 @@ function renderPackDetail(pack) {
     `<div class="kv"><span class="k">时态</span><span>${escapeHtml(style.tense || "")}</span></div>` +
     `<div class="kv"><span class="k">基调</span><span>${(style.tone || []).join("、")}</span></div>` +
     `</div>` +
-    `<div class="detail-section"><h3>开场</h3><p>${escapeHtml(start.description || "")}</p></div>` +
+    `<div class="detail-section"><h3>初始场景</h3><p>${escapeHtml(start.description || "")}</p></div>` +
+    `<div class="detail-section"><h3>故事开篇</h3><p>${escapeHtml(start.opening || "")}</p></div>` +
     characterSection +
     worldBookSection;
 
@@ -319,13 +320,11 @@ function renderPackDetail(pack) {
   for (const key of playableKeys) {
     const role = roles[key];
     if (!role) continue;
-    const opening = (start.role_openings || {})[key] || "";
     const card = document.createElement("div");
     card.className = "role-card";
     card.innerHTML =
       `<div class="role-label">${escapeHtml(role.role_label || key)}</div>` +
-      `<div class="role-fn">${escapeHtml(role.narrative_function || "")}</div>` +
-      (opening ? `<div class="role-opening">${escapeHtml(opening)}</div>` : "");
+      `<div class="role-fn">${escapeHtml(role.narrative_function || "")}</div>`;
     card.onclick = () => startGame(currentPack, key);
     roleListEl.appendChild(card);
   }
@@ -409,8 +408,8 @@ function renderStory() {
     gameRoleEl.textContent = `扮演：${label}`;
   }
   storyEl.textContent = "";
-  if ((story.turns || []).length === 0 && story.story_instructions) {
-    storyEl.textContent += `${story.story_instructions}\n\n`;
+  if (story.opening) {
+    storyEl.textContent += `${story.opening.story_text}\n\n`;
   }
   for (const turn of story.turns || []) {
     if (turn.player_input) {

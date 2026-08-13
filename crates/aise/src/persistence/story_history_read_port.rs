@@ -19,7 +19,15 @@ pub struct StoryTurnView {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct StoryOpeningView {
+    pub sequence: StorySequence,
+    pub story_text: String,
+    pub created_at: i64,
+}
+
 pub struct StoryHistoryPage {
+    pub opening: Option<StoryOpeningView>,
     pub turns: Vec<StoryTurnView>,
     pub next_after_sequence: Option<StorySequence>,
 }

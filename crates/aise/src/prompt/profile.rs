@@ -73,32 +73,6 @@ impl PromptProfileRegistry {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrustedSystemPrompt(String);
-
-impl TrustedSystemPrompt {
-    pub fn try_new(value: impl Into<String>) -> Result<Self, crate::prompt::error::PromptError> {
-        Ok(Self(value.into()))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UntrustedContextMessage(String);
-
-impl UntrustedContextMessage {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
 #[cfg(test)]
 #[path = "tests/profile_registry_tests.rs"]
 mod tests;

@@ -10,6 +10,7 @@ Repair the Previous StoryProposal now and return the complete replacement StoryP
 - Preserve authoritative generation context: committed continuity and hard constraints, Player Input intent and autonomy, character agency and knowledge boundaries, and the existing Immediate Story Goal.
 - Keep `story_text` and all structured fields causally consistent, using only supported changes and valid IDs, evidence, and references.
 - Return one complete replacement StoryProposal matching the output schema, including unchanged fields.
+- Set `summary_text` to null when Recent Story contains only the authored opening. Preserve or repair a non-null summary only when prior generated story history exists and requires compaction.
 
 ## NEVER
 

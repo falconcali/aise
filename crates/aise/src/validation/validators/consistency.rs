@@ -122,12 +122,12 @@ impl DeterministicValidator for ConsistencyValidator {
         if let Some(scene) = &proposal.scene_change {
             if scene.present_character_ids.iter().any(|character| !known.contains(character))
                 || has_duplicates(&scene.present_character_ids)
-                || !snapshot
-                    .entity_catalog()
-                    .contains(&KnowledgeEntity::Scene(scene.scene_key.clone()))
-                || !snapshot
-                    .entity_catalog()
-                    .contains(&KnowledgeEntity::Location(scene.location_key.clone()))
+                || !scene_key_resolves(&scene.scene_key, &snapshot.current_scene().scene_key, snapshot.entity_catalog())
+                || !location_key_resolves(
+                    &scene.location_key,
+                    &snapshot.current_scene().location_key,
+                    snapshot.entity_catalog(),
+                )
             {
                 issues.push(issue("scene_change", 0, "scene contains an invalid reference"));
             }
@@ -152,9 +152,35 @@ fn entity_resolves(
     match entity {
         KnowledgeEntity::Role(key) => snapshot.role_bindings().contains_key(key),
         KnowledgeEntity::Character(id) => snapshot.character_states().contains_key(id),
+        KnowledgeEntity::Scene(key) => {
+            scene_key_resolves(key, &snapshot.current_scene().scene_key, snapshot.entity_catalog())
+        }
+        KnowledgeEntity::Location(key) => {
+            location_key_resolves(key, &snapshot.current_scene().location_key, snapshot.entity_catalog())
+        }
         _ => snapshot.entity_catalog().contains(entity),
     }
 }
+
+fn scene_key_resolves(
+    key: &crate::domain::asset::ids::SceneKey,
+    current: &crate::domain::asset::ids::SceneKey,
+    catalog: &[KnowledgeEntity],
+) -> bool {
+    key == current || catalog.contains(&KnowledgeEntity::Scene(key.clone()))
+}
+
+fn location_key_resolves(
+    key: &crate::domain::asset::ids::LocationKey,
+    current: &crate::domain::asset::ids::LocationKey,
+    catalog: &[KnowledgeEntity],
+) -> bool {
+    key == current || catalog.contains(&KnowledgeEntity::Location(key.clone()))
+}
+
+#[cfg(test)]
+#[path = "tests/consistency_tests.rs"]
+mod tests;
 
 fn issue(path: &str, index: usize, message: &str) -> ValidationIssue {
     ValidationIssue {

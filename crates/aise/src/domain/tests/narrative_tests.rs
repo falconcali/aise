@@ -14,7 +14,17 @@ fn limits() -> StoryContinuityLimits {
 fn segment(sequence: u64, text: &str) -> StorySegment {
     StorySegment {
         sequence: StorySequence::try_new(sequence).expect("sequence"),
-        turn_id: TurnId::try_new(format!("turn-{sequence}")).expect("turn_id"),
+        origin: StorySegmentOrigin::Turn {
+            turn_id: TurnId::try_new(format!("turn-{sequence}")).expect("turn_id"),
+        },
+        text: BoundedText::try_new(text.to_string(), "segment", 256).expect("text"),
+    }
+}
+
+fn opening(text: &str) -> StorySegment {
+    StorySegment {
+        sequence: StorySequence::try_new(1).expect("sequence"),
+        origin: StorySegmentOrigin::Opening,
         text: BoundedText::try_new(text.to_string(), "segment", 256).expect("text"),
     }
 }
@@ -97,4 +107,23 @@ fn continuity_budget_never_silently_drops_segments() {
             limit: "max_recent_segment_tokens",
         })
     );
+}
+
+#[test]
+fn opening_only_history_is_not_summarizable() {
+    let continuity = StoryContinuity::try_new(StorySummary::default(), vec![opening("opening")], limits()).unwrap();
+
+    assert!(!continuity.has_summarizable_history());
+}
+
+#[test]
+fn generated_segment_makes_history_summarizable() {
+    let continuity = StoryContinuity::try_new(
+        StorySummary::default(),
+        vec![opening("opening"), segment(2, "generated")],
+        limits(),
+    )
+    .unwrap();
+
+    assert!(continuity.has_summarizable_history());
 }

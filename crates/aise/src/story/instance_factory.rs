@@ -34,6 +34,7 @@ pub struct StoryInstantiationLimits {
     pub max_rumors: usize,
     pub max_memories: usize,
     pub max_relationships: usize,
+    pub max_opening_bytes: usize,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -195,25 +196,15 @@ impl StoryInstanceFactory {
                 })
             })
             .collect::<Result<Vec<_>, StoryInstantiationError>>()?;
-        let mut present_character_ids = pack
-            .start
-            .role_openings
-            .keys()
-            .map(|role| {
-                bindings.get(role).map(|binding| binding.character_id.clone()).ok_or(
-                    StoryInstantiationError::InvalidReference {
-                        code: "start_role_binding_missing",
-                    },
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut present_character_ids = bindings
+            .values()
+            .filter(|binding| characters[&binding.character_id].location == pack.start.location_key)
+            .map(|binding| binding.character_id.clone())
+            .collect::<Vec<_>>();
         present_character_ids.sort();
         present_character_ids.dedup();
-        let opening = pack.start.role_openings.get(&spec.player_role_key).cloned().ok_or(
-            StoryInstantiationError::InvalidReference {
-                code: "player_opening_missing",
-            },
-        )?;
+        let opening = pack.start.opening.clone();
+        enforce_limit(opening.as_str().len(), self.limits.max_opening_bytes, "max_opening_bytes")?;
         Ok(MaterializedStoryInstanceSpec {
             story_id,
             pack: frozen.frozen_ref(),

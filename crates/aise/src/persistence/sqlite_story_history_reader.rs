@@ -4,7 +4,7 @@ use crate::persistence::sqlite_error::SqliteStoreError;
 use crate::persistence::sqlite_store::SqliteStore;
 use crate::persistence::store::{StoreError, StoreSerializationErrorKind};
 use crate::persistence::story_history_read_port::{
-    StoryHistoryConfig, StoryHistoryPage, StoryHistoryQuery, StoryHistoryReadPort, StoryTurnView,
+    StoryHistoryConfig, StoryHistoryPage, StoryHistoryQuery, StoryHistoryReadPort, StoryOpeningView, StoryTurnView,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -68,6 +68,29 @@ async fn load(
     let fetch_limit = query.limit.checked_add(1).ok_or(StoreError::LimitExceeded {
         limit: "story_history_page_size",
     })?;
+    let opening_row: Option<(i64, String, i64, i64)> = sqlx::query_as(
+        "SELECT sequence, story_text, created_at, length(CAST(story_text AS BLOB)) \
+         FROM story_segments WHERE story_id = ?1 AND origin = 'opening'",
+    )
+    .bind(story_id.as_str())
+    .fetch_optional(store.pool_for_tests())
+    .await
+    .map_err(SqliteStoreError::from)?;
+    let opening = opening_row
+        .map(|(sequence, story_text, created_at, story_bytes)| {
+            if usize::try_from(story_bytes).map_err(|_| invalid_turn())? > config.max_story_text_bytes {
+                return Err(StoreError::LimitExceeded {
+                    limit: "max_story_text_bytes",
+                });
+            }
+            Ok(StoryOpeningView {
+                sequence: StorySequence::try_new(u64::try_from(sequence).map_err(|_| invalid_turn())?)
+                    .map_err(|_| invalid_turn())?,
+                story_text,
+                created_at,
+            })
+        })
+        .transpose()?;
     let after = query.after_sequence.map(|sequence| sequence.get()).unwrap_or(0);
     let rows: Vec<(String, i64, String, String, i64, i64, i64)> = sqlx::query_as(
         "SELECT id, sequence, player_input, story_text, created_at, \
@@ -113,6 +136,7 @@ async fn load(
         None
     };
     Ok(StoryHistoryPage {
+        opening,
         turns,
         next_after_sequence,
     })

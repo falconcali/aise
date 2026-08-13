@@ -108,12 +108,10 @@ crates/aise/src/prompt/
 ├── runtime_context_encoder.rs
 └── trusted_prompt_source.rs
 
-crates/aise/assets/prompts/context-v1/
-├── files/
-│   ├── character-think.md.j2
-│   ├── story-generator.md.j2
-│   ├── story-repairer.md.j2
-│   └── writer-planner.md.j2
+crates/aise/assets/prompts/context-v2/
+├── csi/
+├── rc/
+├── fti/
 ├── index.yaml
 └── slots.yaml
 
@@ -849,13 +847,12 @@ pub enum PromptCatalogSourceConfig {
 
 pub struct PromptModuleConfig {
     pub source: PromptCatalogSourceConfig,
-    pub profile_assets: BTreeMap<PromptProfile, AssetRef>,
 }
 ```
 
-`Packaged` is the default and loads the four versioned assets under `crates/aise/assets/prompts/context-v1` through the same validator as a Directory catalog. `Directory` load failure fails service startup. There is no catch-all fallback to one-sentence built-ins.
+`Packaged` is the default and loads the CSI, RC, and FTI assets under `crates/aise/assets/prompts/context-v2` through the same validator as a Directory catalog. `Directory` load failure fails service startup. There is no catch-all fallback to one-sentence built-ins.
 
-`Packaged` data is compiled into the binary with `include_str!`. A `load_catalog_bundle` path validates the embedded `index.yaml`, `slots.yaml`, and four source files with the same manifest, hash, section, slot, and output-contract checks as `load_catalog(Path)`. The Packaged path does not depend on the process working directory. `profile_assets` contains exactly one known asset for each of the four profiles and rejects missing or extra mappings.
+`Packaged` data is compiled into the binary with `include_str!`. A `load_catalog_bundle` path validates the embedded `index.yaml`, `slots.yaml`, and layer source files with the same manifest, hash, section, slot, and output-contract checks as `load_catalog(Path)`. The Packaged path does not depend on the process working directory. Code owns the fixed profile-to-CSI/RC/FTI slot registry, while the catalog resolves each slot to its asset.
 
 Every System Prompt must state all of the following in executable terms:
 

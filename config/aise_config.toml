@@ -127,9 +127,3 @@ max_item_bytes = 4096
 
 [aise.prompt.source]
 kind = "packaged"
-
-[aise.prompt.profile_assets]
-writer_planner = "context-v2/writer-planner-csi"
-character_think = "context-v2/character-think-csi"
-story_generator = "context-v1/story-generator"
-story_repairer = "context-v2/story-repairer-csi"

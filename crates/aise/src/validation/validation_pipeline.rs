@@ -245,10 +245,16 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
     let summary_change = match proposal.summary_text.as_deref().map(str::trim) {
         None | Some("") => StateChange::Unchanged,
         Some(text) => {
+            if !snapshot.story_continuity().has_summarizable_history() {
+                return Err(invariant(
+                    "summary_history_missing",
+                    "summary requires prior generated story history",
+                ));
+            }
             let boundary = snapshot
                 .story_continuity()
                 .latest_sequence()
-                .ok_or_else(|| invariant("summary_boundary_missing", "summary requires a pre-turn sequence"))?;
+                .ok_or_else(|| invariant("summary_boundary_missing", "summary boundary is missing"))?;
             StateChange::Replace(StorySummary {
                 text: bounded(text, "summary", ctx.budget().max_proposal_bytes())?,
                 summarized_through: Some(boundary),

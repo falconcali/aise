@@ -1321,20 +1321,20 @@ The internal Prompt module provides the only trusted instruction source:
 
 ```rust
 pub trait TrustedPromptSource: Send + Sync {
-    fn resolve(&self, profile: PromptProfile) -> Result<TrustedSystemPrompt, PromptError>;
+    fn compose(&self, input: &PromptCompositionInput) -> Result<PromptComposition, PromptError>;
 }
 
 pub struct CatalogPromptSource {
     catalog: Arc<PromptCatalog>,
-    profile_assets: BTreeMap<PromptProfile, AssetRef>,
+    profiles: PromptProfileRegistry,
 }
 
 impl TrustedPromptSource for CatalogPromptSource {
-    fn resolve(&self, profile: PromptProfile) -> Result<TrustedSystemPrompt, PromptError>;
+    fn compose(&self, input: &PromptCompositionInput) -> Result<PromptComposition, PromptError>;
 }
 ```
 
-`resolve` accepts only `PromptProfile`; it accepts no Story, Character, World Book, save, Player Input, Retrieved Context, or LLM output value. Remove `LlmGateway::with_system_prompts` and ad hoc per-Pipeline fallback prompt construction. The composition root builds `CatalogPromptSource` from trusted `PromptModuleConfig`.
+`compose` accepts a fixed `PromptProfile`, bounded RC runtime variables, and trusted FTI variables. The code-owned profile registry selects distinct CSI, RC, and FTI slots; imported content cannot select assets or alter trusted layers. Remove `LlmGateway::with_system_prompts` and ad hoc per-Pipeline fallback prompt construction. The composition root builds `CatalogPromptSource` from trusted `PromptModuleConfig`.
 
 `LlmGateway::complete_typed` owns Prompt resolution, canonical Context encoding, message construction, token estimation/reservation, shared limiting, accounting, and tracing:
 

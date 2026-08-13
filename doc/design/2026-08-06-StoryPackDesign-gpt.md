@@ -610,10 +610,7 @@ RoleBinding 解析为 CharacterId；跨 Story Pack 复用的知识应使用稳�
     "location_key": "location.grey_forest_gate",
     "time": "黄昏",
     "description": "灰林入口被低雾覆盖，结界发出间歇性的微光。",
-    "role_openings": {
-      "role.guardian": "你守在结界边缘时，看见一个身影正从低雾中走来。",
-      "role.visitor": "你抵达灰林边缘时，最后一缕日光正从树冠间退去。"
-    }
+    "opening": "低雾覆盖着灰林入口，结界的微光映出两个在黄昏中相遇的身影。"
   },
   "narrative": {
     "entry_nodes": ["node.arrival"],
@@ -681,7 +678,7 @@ role.visitor  -> character.arin      -> AI Controller
 
 此时 `character.kai` 保留自己的姓名、人格和说话方式，同时获得 `role.guardian` 的
 故事目标、关系、初始状态和 Seed Memory。Seraphina 人物卡与 Story Pack 均不被修改。
-`role_openings` 必须覆盖每个可选玩家角色，避免开场叙述默认玩家一定扮演某个固定人物。
+`opening` 是 Story Pack 唯一的正式故事开篇，不依赖玩家选择的 Role。它必须避免替任何可玩角色作出尚未发生的选择；若不同玩家身份需要互不相容的故事开端，应拆分为不同 Story Pack，而不是提供按 Role 分叉的开篇。
 
 ## 5. 知识模型
 
@@ -1065,7 +1062,7 @@ aise save export --story <id>    -> StorySave
 - 默认拒绝未知字段和所有禁止字段。
 - 每个 StoryRole 都有唯一 RoleKey 和 `default_cast`，且引用有效的原生 Character Card。
 - StoryRole 不含姓名、外观、人格、说话方式或对话示例等人物卡字段。
-- `playable_role_keys` 全部存在，`role_openings` 覆盖所有可选玩家角色。
+- `playable_role_keys` 全部存在，`start.opening` 是唯一且非空的 Story Opening。
 - 关系、知识、事件和 Graph 中的故事角色引用使用 RoleKey，不依赖默认人物卡 Key。
 - 所有知识、资源、节点和边引用完整。
 - Key 在各自命名空间内唯一，展示名称不参与引用。

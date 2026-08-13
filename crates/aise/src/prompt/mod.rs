@@ -31,9 +31,7 @@ pub use model::{
 };
 pub use pack::{PromptPack, ResolvedPack, resolve_pack};
 pub use policy::{PreamblePosition, PromptPolicy};
-pub use profile::{
-    PromptProfile, PromptProfileAssets, PromptProfileRegistry, TrustedSystemPrompt, UntrustedContextMessage,
-};
+pub use profile::{PromptProfile, PromptProfileAssets, PromptProfileRegistry};
 pub use renderer::PromptRenderer;
 pub use renderer_helpers::{
     render_required_slot, render_required_slot_with_options, try_render_slot, try_render_slot_with_options,

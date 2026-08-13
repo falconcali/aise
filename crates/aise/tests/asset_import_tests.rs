@@ -54,9 +54,7 @@ fn valid_pack_json() -> String {
             "location_key": "village",
             "time": "morning",
             "description": "The village wakes.",
-            "role_openings": {
-                "protagonist": "You open your eyes."
-            }
+            "opening": "You open your eyes."
         },
         "narrative": {
             "entry_nodes": ["node_a"],
@@ -130,10 +128,10 @@ fn rejects_forbidden_runtime_fields() {
 }
 
 #[test]
-fn rejects_missing_playable_opening() {
+fn rejects_missing_story_opening() {
     let importer = importer();
     let mut value: serde_json::Value = serde_json::from_str(&valid_pack_json()).unwrap();
-    value["start"]["role_openings"] = serde_json::json!({});
+    value["start"]["opening"] = serde_json::json!("");
     let json = value.to_string();
     let report = importer.parse(AssetInput::Json(json.as_bytes()));
     assert!(!report.valid);
@@ -141,7 +139,25 @@ fn rejects_missing_playable_opening() {
         report
             .issues
             .iter()
-            .any(|issue| issue.code == AssetValidationCode::MissingPlayableOpening)
+            .any(|issue| issue.code == AssetValidationCode::MissingStoryOpening)
+    );
+}
+
+#[test]
+fn rejects_legacy_role_openings() {
+    let importer = importer();
+    let mut value: serde_json::Value = serde_json::from_str(&valid_pack_json()).unwrap();
+    value["start"]["role_openings"] = serde_json::json!({
+        "protagonist": "You open your eyes."
+    });
+    let json = value.to_string();
+    let report = importer.parse(AssetInput::Json(json.as_bytes()));
+    assert!(!report.valid);
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| { issue.code == AssetValidationCode::SchemaInvalid && issue.path == "/start/role_openings" })
     );
 }
 

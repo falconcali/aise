@@ -476,11 +476,11 @@ pub struct StoryStart {
     pub location_key: LocationKey,
     pub time: BoundedText,
     pub description: BoundedText,
-    pub role_openings: BTreeMap<StoryRoleKey, BoundedText>,
+    pub opening: BoundedText,
 }
 ~~~
 
-`StoryRole` must reject `name`, `description` as identity, `appearance`, `personality`, `values`, `fears`, `speaking_style`, and `dialogue_examples`. Each Role key appears exactly once in `roles` and `default_cast`; every playable Role has exactly one opening.
+`StoryRole` must reject `name`, `description` as identity, `appearance`, `personality`, `values`, `fears`, `speaking_style`, and `dialogue_examples`. Each Role key appears exactly once in `roles` and `default_cast`. Every Story Pack has exactly one non-empty Story Opening shared by all player-role selections.
 
 ### 3.6 Embedded and Frozen Asset References
 
@@ -1012,13 +1012,11 @@ impl ModelRequest<StoryGeneratorContext> {
 }
 
 pub trait TrustedPromptSource: Send + Sync {
-    fn resolve(
+    fn compose(
         &self,
-        profile: PromptProfile,
-    ) -> Result<TrustedSystemPrompt, PromptError>;
+        input: &PromptCompositionInput,
+    ) -> Result<PromptComposition, PromptError>;
 }
-
-pub struct TrustedSystemPrompt(String);
 
 pub struct UntrustedContextMessage {
     content: String,
@@ -1098,7 +1096,7 @@ pub struct StoryGeneratorContext {
 }
 ~~~
 
-`TrustedPromptSource::resolve` accepts only `PromptProfile`. It accepts no Story, Character, World, player, save, or LLM-output value. `RuntimeContextEncoder` emits one canonical JSON User message and cannot emit System, Assistant, Developer, Tool, or arbitrary-role messages. Pipelines cannot construct `ChatMessage`, `Role::System`, or raw provider message vectors.
+`TrustedPromptSource::compose` uses a code-owned profile-to-CSI/RC/FTI slot registry. Runtime content is confined to bounded RC variables, while trusted task variables are confined to FTI. Imported content cannot select Prompt assets or alter trusted layers. Pipelines cannot construct raw provider message vectors.
 
 ### 3.13 Writer Plan, Character Thought, and Proposal Contract
 
@@ -1411,7 +1409,7 @@ pub enum AssetValidationCode {
     MissingReference,
     DuplicateKey,
     MissingDefaultCast,
-    MissingPlayableOpening,
+    MissingStoryOpening,
     CharacterIdentityFieldInRole,
     InvalidSalience,
     LimitExceeded,
@@ -1471,8 +1469,7 @@ pub struct AssetLimitsConfig {
 }
 
 pub struct PromptModuleConfig {
-    pub catalog_path: PathBuf,
-    pub profile_assets: BTreeMap<PromptProfile, AssetRef>,
+    pub source: PromptCatalogSourceConfig,
 }
 
 pub struct AiseConfig {
@@ -1546,7 +1543,7 @@ Relationship seeds resolved from RoleKey to CharacterId
 Fact seeds with FactSource::Seed
 Shared Rumor seeds
 Memory seeds owned by resolved CharacterId
-Initial Scene and selected role opening
+Initial Scene and Story Opening
 NarrativeRuntimeState at graph_revision = 0
 Initial Story revision
 ~~~
@@ -1585,7 +1582,7 @@ Failure of either revision compare-and-swap rolls back the entire transaction an
 9. **SP-9 — Single-player contract**: v3 requires `play.player_count = 1` and exactly one player-controlled RoleBinding. Every other RoleBinding is AI-controlled.
 10. **SP-10 — Player substitution**: A supplied player Character replaces only the selected playable Role's default cast. All other Roles retain their default cast.
 11. **SP-11 — Role references**: Graph, relationship, knowledge, opening, and story-specific event definitions reference `StoryRoleKey`. Runtime resolves the key through current RoleBindings and never through default Character asset keys or names.
-12. **SP-12 — Apply seeds once**: Start scene, selected role opening, initial Role state, relationships, Fact seeds, Rumor seeds, Memory seeds, and Narrative initial state are written only by Story Instance creation.
+12. **SP-12 — Apply seeds once**: Start scene, Story Opening, initial Role state, relationships, Fact seeds, Rumor seeds, Memory seeds, and Narrative initial state are written only by Story Instance creation.
 13. **SP-13 — Knowledge separation**: Fact, Rumor, and Memory remain separate authoritative collections. Conflicting entries are retained; none automatically corrects, upgrades, or overwrites another.
 14. **SP-14 — Fact visibility**: Fact retrieval for Planner or Generator does not expose the Fact to Character Think. Character knowledge arises only from relevant Rumor, own Memory, or Current Perception.
 15. **SP-15 — Memory ownership**: Every persistent Memory has exactly one CharacterId owner. Character Think for character A receives no Memory owned by character B.
@@ -1668,7 +1665,7 @@ No span field records full Story text, Character profile, Memory, Prompt, player
 - [ ] Each forbidden Prompt/runtime field is rejected at every nesting depth; `cargo test -p aise --test trust_boundary_tests forbidden_asset_fields_are_rejected_recursively` passes.
 - [ ] Non-v3 and legacy formats have no fallback; `cargo test -p aise --test asset_import_tests only_native_v3_specs_are_accepted` passes.
 - [ ] Character identity fields in StoryRole fail import; `cargo test -p aise --test asset_import_tests story_role_cannot_define_character_identity` passes.
-- [ ] Every Role requires a default cast and every playable Role requires an opening; `cargo test -p aise --test asset_import_tests cast_and_opening_coverage_is_total` passes.
+- [ ] Every Role requires a default cast and every Story Pack requires one non-empty Story Opening; `cargo test -p aise --test asset_import_tests` passes.
 - [ ] Embedded and frozen Character/World references validate key, version, and digest; `cargo test -p aise --test asset_import_tests frozen_references_are_verified` passes.
 - [ ] Archive traversal, duplicate normalized paths, symlinks, MIME mismatch, digest mismatch, zip bombs, excessive ratio, file count, and size limits are rejected; `cargo test -p aise --test asset_import_tests aise_pack_security_limits_are_enforced` passes.
 - [ ] Graph cycles, unreachable nodes/terminals, invalid references, excess condition depth, and forbidden effects fail import; `cargo test -p aise --test narrative_graph_tests invalid_graphs_are_rejected` passes.

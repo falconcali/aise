@@ -18,6 +18,6 @@ pub use sqlite_store::SqliteStore;
 pub use sqlite_story_history_reader::SqliteStoryHistoryReader;
 pub use store::{OutboxRecord, Store, StoreError, StoredTurnOutcome, TurnCommitSpec};
 pub use story_history_read_port::{
-    StoryHistoryConfig, StoryHistoryPage, StoryHistoryQuery, StoryHistoryReadPort, StoryTurnView,
+    StoryHistoryConfig, StoryHistoryPage, StoryHistoryQuery, StoryHistoryReadPort, StoryOpeningView, StoryTurnView,
 };
 pub use turn_committer::TurnCommitter;

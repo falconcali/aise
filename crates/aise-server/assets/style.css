@@ -335,17 +335,6 @@ body {
   overflow: hidden;
 }
 
-.role-card .role-opening {
-  font-size: 12px;
-  color: var(--text);
-  opacity: 0.85;
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
 #game-head {
   display: flex;
   align-items: center;
