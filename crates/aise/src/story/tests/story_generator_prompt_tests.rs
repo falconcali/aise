@@ -151,6 +151,14 @@ fn story_proposal_schema_is_closed_and_complete() {
     assert_eq!(schema["properties"]["events"]["maxItems"], 8);
     assert_eq!(schema["properties"]["scene_change"]["additionalProperties"], false);
     assert_eq!(
+        schema["properties"]["knowledge_changes"]["items"]["oneOf"][0]["properties"]["topics"]["items"]["maxLength"],
+        1024
+    );
+    assert_eq!(
+        schema["properties"]["relationship_changes"]["items"]["properties"]["kind"]["maxLength"],
+        1024
+    );
+    assert_eq!(
         schema["properties"]["knowledge_changes"]["items"]["oneOf"][0]["properties"]["evidence"]["items"]["oneOf"][1]["required"]
             [0],
         "proposed_event"

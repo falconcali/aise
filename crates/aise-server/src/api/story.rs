@@ -5,7 +5,7 @@ use aise::domain::asset::ids::{PackId, PlayerId, StoryRoleKey};
 use aise::domain::ids::StoryId;
 use aise::domain::story_sequence::StorySequence;
 use aise::domain::turn::SnapshotLimits;
-use aise::persistence::{StoryHistoryQuery, StoryTurnView};
+use aise::persistence::{StoryHistoryQuery, StoryOpeningView, StoryTurnView};
 use aise::story::instance_factory::{CreateStoryInstanceSpec, StoryInstantiationError};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -72,7 +72,7 @@ pub struct StoryInstanceView {
     pub pack_id: String,
     pub player_role_key: String,
     pub current_scene: String,
-    pub opening: String,
+    pub opening: StoryOpeningView,
 }
 
 pub async fn create_story_instance(
@@ -130,7 +130,11 @@ pub async fn create_story_instance(
                 .story_continuity()
                 .recent_segments()
                 .first()
-                .map(|segment| segment.text.to_string())
+                .map(|segment| StoryOpeningView {
+                    sequence: segment.sequence,
+                    story_text: segment.text.to_string(),
+                    created_at: info.created_at_ms,
+                })
                 .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("story opening was not persisted")))?,
         }),
     ))

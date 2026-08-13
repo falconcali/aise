@@ -80,12 +80,18 @@ impl TurnExecutionPipeline for StoryRepairer {
                     error.to_string(),
                 )
             })?;
-        let proposal: StoryProposal = serde_json::from_str(&completion.text).map_err(|_| {
+        let proposal: StoryProposal = serde_json::from_str(&completion.text).map_err(|error| {
+            tracing::warn!(
+                prompt_profile = "story_repairer",
+                proposal_revision,
+                error = %error,
+                "story repairer proposal decode failed"
+            );
             TurnExecutionError::new(
                 TurnFailureKind::Llm,
                 "model_output_invalid",
                 Some(TurnStage::StoryRepairer),
-                "story repair output is invalid",
+                format!("story repair output is invalid: {error}"),
             )
         })?;
         if !proposal.is_within_bounds(

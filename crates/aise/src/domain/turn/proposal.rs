@@ -33,6 +33,7 @@ pub type StoryProposal = StoryProposalOutput;
 impl StoryProposalOutput {
     pub fn json_schema(max_items: usize, max_item_bytes: usize, max_total_bytes: usize) -> Value {
         let bounded_string = || json!({"type": "string", "maxLength": max_item_bytes});
+        let semantic_key = || json!({"type": "string", "minLength": 1, "maxLength": max_item_bytes});
         let entity = json!({
             "type": "object",
             "additionalProperties": false,
@@ -81,7 +82,7 @@ impl StoryProposalOutput {
         let knowledge_common = json!({
             "content": bounded_string(),
             "entities": {"type": "array", "maxItems": max_items, "items": entity},
-            "topics": {"type": "array", "maxItems": max_items, "items": {"type": "string", "minLength": 1}},
+            "topics": {"type": "array", "maxItems": max_items, "items": semantic_key()},
             "salience": {"type": "integer", "minimum": 0, "maximum": 255}
         });
         let scene = json!({
@@ -167,7 +168,7 @@ impl StoryProposalOutput {
                         "properties": {
                             "source_character_id": {"type": "string", "minLength": 1},
                             "target_character_id": {"type": "string", "minLength": 1},
-                            "kind": {"type": "string", "minLength": 1},
+                            "kind": semantic_key(),
                             "trust_delta": {"type": "integer", "minimum": -32768, "maximum": 32767}
                         }
                     }
@@ -220,7 +221,7 @@ impl StoryProposalOutput {
                                 "properties": {
                                     "kind": {"const": "memory"},
                                     "owner": {"type": "string", "minLength": 1},
-                                    "memory_kind": {"type": "string", "minLength": 1},
+                                    "memory_kind": semantic_key(),
                                     "content": knowledge_common["content"],
                                     "entities": knowledge_common["entities"],
                                     "topics": knowledge_common["topics"],
@@ -281,7 +282,7 @@ impl StoryProposalOutput {
             }
         }
         for change in &self.knowledge_changes {
-            let (content, entities, topics) = match change {
+            let (content, entities, topics, memory_kind) = match change {
                 ProposedKnowledgeChange::Fact {
                     content,
                     entities,
@@ -293,17 +294,30 @@ impl StoryProposalOutput {
                     entities,
                     topics,
                     ..
-                }
-                | ProposedKnowledgeChange::Memory {
+                } => (content, entities, topics, None),
+                ProposedKnowledgeChange::Memory {
+                    memory_kind,
                     content,
                     entities,
                     topics,
                     ..
-                } => (content, entities, topics),
+                } => (content, entities, topics, Some(memory_kind)),
             };
-            if content.len() > max_item_bytes || entities.len() > max_items || topics.len() > max_items {
+            if content.len() > max_item_bytes
+                || entities.len() > max_items
+                || topics.len() > max_items
+                || topics.iter().any(|topic| topic.as_str().len() > max_item_bytes)
+                || memory_kind.is_some_and(|kind| kind.as_str().len() > max_item_bytes)
+            {
                 return false;
             }
+        }
+        if self
+            .relationship_changes
+            .iter()
+            .any(|change| change.kind.as_str().len() > max_item_bytes)
+        {
+            return false;
         }
         self.scene_change.as_ref().is_none_or(|scene| {
             scene.time.as_str().len() <= max_item_bytes

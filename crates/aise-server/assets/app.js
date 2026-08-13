@@ -356,8 +356,12 @@ async function startGame(pack, roleKey) {
       }),
     });
     const session = await sessionRes.json();
+    await openGame(session, {
+      ...instance,
+      turns: [],
+      characters: [],
+    });
     await refreshSessions();
-    await openGame(session);
   } catch (err) {
     toast(`开始游戏失败：${err.message}`, "error", 6000);
   } finally {
@@ -365,9 +369,9 @@ async function startGame(pack, roleKey) {
   }
 }
 
-async function openGame(session) {
+async function openGame(session, initialStory = null) {
   currentSession = session;
-  currentStory = null;
+  currentStory = initialStory;
   showView("game");
   renderSessions();
   gameTitleEl.textContent = session.name;
@@ -380,13 +384,19 @@ async function openGame(session) {
   playerInput.disabled = false;
   sendBtn.disabled = false;
   playerInput.focus();
-  await loadStory(session.story_id);
+  if (currentStory) {
+    renderStory();
+  }
+  await loadStory(session.story_id, initialStory?.opening || null);
 }
 
-async function loadStory(storyId) {
+async function loadStory(storyId, initialOpening = null) {
   try {
     const res = await api(`/api/stories/${storyId}`);
     const story = await res.json();
+    if (!story.opening && initialOpening) {
+      story.opening = initialOpening;
+    }
     currentStory = story;
     renderStory();
   } catch (err) {
