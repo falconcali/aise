@@ -6,7 +6,7 @@ use crate::domain::asset::validation::BoundedText;
 use crate::domain::knowledge::{KnowledgeIndexMatch, KnowledgeKind};
 use crate::domain::narrative::StoryContinuityLimits;
 use crate::domain::turn::{
-    BaselineContext, CharacterIndexEntry, CharacterView, KnowledgeEntryIndexEntry, NarrativeStateView,
+    BaselineContext, CharacterIndexEntry, CharacterView, KnowledgeEntryIndexEntry, NarrativeGraphStateIndex,
     RelevantKnowledge, RetrievalAudience, RetrievalIndexScope, RetrievalTargetId, SnapshotLimits,
 };
 use crate::persistence::knowledge_read_port::{
@@ -28,6 +28,7 @@ pub struct BaselineContextBuilder {
     content_limits: TurnContentLimitsConfig,
     context_config: ContextPreparationConfig,
     asset_limits: AssetLimitsConfig,
+    narrative_limits: crate::config::NarrativeConfig,
     retrieval_config: RetrievalConfig,
     knowledge: Arc<dyn KnowledgeReadPort>,
     signal_builder: RetrievalSignalBuilder,
@@ -39,6 +40,7 @@ impl BaselineContextBuilder {
         content_limits: TurnContentLimitsConfig,
         context_config: ContextPreparationConfig,
         asset_limits: AssetLimitsConfig,
+        narrative_limits: crate::config::NarrativeConfig,
         retrieval_config: RetrievalConfig,
         knowledge: Arc<dyn KnowledgeReadPort>,
     ) -> Self {
@@ -48,6 +50,7 @@ impl BaselineContextBuilder {
             content_limits,
             context_config,
             asset_limits,
+            narrative_limits,
             retrieval_config,
             knowledge,
             signal_builder,
@@ -63,7 +66,12 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
 
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let story_id = ctx.story_id().clone();
-        let limits = SnapshotLimits::from_config(&self.content_limits, &self.context_config, &self.asset_limits);
+        let limits = SnapshotLimits::from_config(
+            &self.content_limits,
+            &self.context_config,
+            &self.asset_limits,
+            &self.narrative_limits,
+        );
         let snapshot = {
             let pending = ctx.trace().begin_span("aise.tool_call", "store.load_story_snapshot");
             let started = Instant::now();
@@ -235,7 +243,7 @@ async fn build_baseline(
         character_index,
         story_continuity: snapshot.story_continuity().clone(),
         active_story_constraints: snapshot.active_constraints().to_vec(),
-        narrative_state_view: NarrativeStateView {
+        narrative_graph_state_index: NarrativeGraphStateIndex {
             pack_digest: snapshot.pack().digest.clone(),
             graph_revision: snapshot.graph_revision(),
             node_states: snapshot.narrative_state().node_states.clone(),

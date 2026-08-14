@@ -1,4 +1,4 @@
-use aise::config::AssetLimitsConfig;
+use aise::config::{AssetLimitsConfig, NarrativeConfig};
 use aise::domain::asset::entity::KnowledgeEntity;
 use aise::domain::asset::ids::{LocationKey, PlayerId, SceneKey, StoryRoleKey, TopicKey};
 use aise::domain::ids::{CharacterId, StoryId};
@@ -101,7 +101,7 @@ fn valid_pack_json() -> String {
             "nodes": {
                 "node_a": {
                     "title": "A",
-                    "objective": "Wake up",
+                    "dramatic_focus": "Wake up",
                     "activate_when": {"type": "story_started"},
                     "complete_when": {"type": "turn_reaches", "turn": 1},
                     "skip_when": null,
@@ -161,7 +161,10 @@ async fn seeded_store(label: &str) -> (Arc<SqliteStore>, KnowledgeSnapshotRef, S
     let sqlite = SqliteStore::connect(&db).await.unwrap();
     let store: Arc<dyn Store> = sqlite.clone();
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&db).await.unwrap();
-    let pack_service = PackService::new(NativeAssetImporter::new(AssetLimitsConfig::default()), asset_store.clone());
+    let pack_service = PackService::new(
+        NativeAssetImporter::new(AssetLimitsConfig::default(), NarrativeConfig::default()),
+        asset_store.clone(),
+    );
     let pack = pack_service
         .import(AssetInput::Json(valid_pack_json().as_bytes()))
         .await
@@ -177,6 +180,7 @@ async fn seeded_store(label: &str) -> (Arc<SqliteStore>, KnowledgeSnapshotRef, S
             max_relationships: 64,
             max_opening_bytes: 8192,
         },
+        NarrativeConfig::default().as_limits(),
     );
     let story = factory
         .create(CreateStoryInstanceSpec {
@@ -192,6 +196,7 @@ async fn seeded_store(label: &str) -> (Arc<SqliteStore>, KnowledgeSnapshotRef, S
         &aise::config::TurnContentLimitsConfig::default(),
         &aise::config::ContextPreparationConfig::default(),
         &aise::config::AssetLimitsConfig::default(),
+        &NarrativeConfig::default(),
     );
     let snapshot = sqlite.load_story_snapshot(&story.story_id, limits).await.expect("snapshot");
     (sqlite, snapshot.knowledge_snapshot().clone(), db)

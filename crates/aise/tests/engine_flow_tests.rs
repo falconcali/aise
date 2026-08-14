@@ -1,4 +1,4 @@
-use aise::config::AssetLimitsConfig;
+use aise::config::{AssetLimitsConfig, NarrativeConfig};
 use aise::domain::asset::ids::{PlayerId, StoryRoleKey};
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
@@ -77,7 +77,7 @@ fn valid_pack_json() -> String {
             "nodes": {
                 "node_a": {
                     "title": "A",
-                    "objective": "Wake up",
+                    "dramatic_focus": "Wake up",
                     "activate_when": {"type": "story_started"},
                     "complete_when": {"type": "turn_reaches", "turn": 1},
                     "skip_when": null,
@@ -97,7 +97,10 @@ async fn create_story_instance_flow_materializes_snapshot() {
     let db = temp_db_path("instance");
     let store: Arc<dyn Store> = SqliteStore::connect(&db).await.unwrap();
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&db).await.unwrap();
-    let pack_service = PackService::new(NativeAssetImporter::new(AssetLimitsConfig::default()), asset_store.clone());
+    let pack_service = PackService::new(
+        NativeAssetImporter::new(AssetLimitsConfig::default(), NarrativeConfig::default()),
+        asset_store.clone(),
+    );
     let pack = pack_service
         .import(AssetInput::Json(valid_pack_json().as_bytes()))
         .await
@@ -113,6 +116,7 @@ async fn create_story_instance_flow_materializes_snapshot() {
             max_relationships: 64,
             max_opening_bytes: 8192,
         },
+        NarrativeConfig::default().as_limits(),
     );
     let story = factory
         .create(CreateStoryInstanceSpec {
@@ -128,6 +132,7 @@ async fn create_story_instance_flow_materializes_snapshot() {
         &aise::config::TurnContentLimitsConfig::default(),
         &aise::config::ContextPreparationConfig::default(),
         &aise::config::AssetLimitsConfig::default(),
+        &NarrativeConfig::default(),
     );
     let snapshot = store.load_story_snapshot(&story.story_id, limits).await.expect("snapshot");
     assert_eq!(snapshot.current_scene().description.as_str(), "The village wakes.");

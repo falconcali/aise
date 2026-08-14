@@ -5,6 +5,7 @@ use super::context::ContextPreparationConfig;
 use super::coordinator::CoordinatorConfig;
 use super::error::ConfigError;
 use super::llm::LlmConfig;
+use super::narrative::NarrativeConfig;
 use super::planner::PlannerConfig;
 use super::prompt::PromptModuleConfig;
 use super::retrieval::RetrievalConfig;
@@ -42,6 +43,8 @@ pub struct AiseConfig {
     pub story_history: StoryHistoryConfig,
     #[serde(default)]
     pub state_extractor: StateExtractorConfig,
+    #[serde(default)]
+    pub narrative: NarrativeConfig,
 }
 
 impl AiseConfig {
@@ -61,6 +64,7 @@ impl AiseConfig {
             .validate()
             .map_err(|error| ConfigError::Invalid(error.into()))?;
         self.state_extractor.validate()?;
+        self.narrative.validate()?;
         if self.context.recent_segments_for_signals > self.content.max_recent_segments {
             return Err(ConfigError::Invalid(
                 "context.recent_segments_for_signals must be <= content.max_recent_segments".into(),

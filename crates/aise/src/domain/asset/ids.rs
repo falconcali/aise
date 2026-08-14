@@ -164,6 +164,7 @@ key_type!(RumorKey);
 key_type!(MemoryKey);
 key_type!(NarrativeNodeKey);
 key_type!(NarrativeEdgeKey);
+key_type!(NarrativeConditionKey);
 key_type!(CanonicalEventKey);
 key_type!(AssetId);
 key_type!(PackId);

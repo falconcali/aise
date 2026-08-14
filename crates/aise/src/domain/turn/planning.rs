@@ -3,7 +3,6 @@ use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::CharacterId;
 use crate::domain::knowledge::KnowledgeKind;
-use crate::domain::narrative_graph::director::NarrativePlan;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -155,7 +154,6 @@ pub struct WriterStoryGoal {
 #[derive(Debug, Clone, Serialize)]
 pub struct WriterPlan {
     pub story_goal: WriterStoryGoal,
-    pub narrative_plan: NarrativePlan,
     pub retrieval_plan: RetrievalPlan,
     pub character_think_requests: Vec<CharacterThinkRequest>,
 }

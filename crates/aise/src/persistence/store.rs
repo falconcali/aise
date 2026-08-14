@@ -76,7 +76,8 @@ pub struct MaterializedStoryInstanceSpec {
     pub scene: CurrentScene,
     pub opening: crate::domain::asset::validation::BoundedText,
     pub narrative_state: crate::domain::narrative_graph::state::NarrativeRuntimeState,
-    pub condition_state: crate::domain::story_instance::snapshot::NarrativeConditionStateView,
+    pub fact_values:
+        std::collections::BTreeMap<crate::domain::asset::ids::FactKey, crate::domain::asset::validation::ScalarValue>,
     pub active_constraints: Vec<ActiveStoryConstraint>,
     pub created_at_ms: i64,
 }

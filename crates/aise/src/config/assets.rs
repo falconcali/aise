@@ -16,11 +16,6 @@ pub struct AssetLimitsConfig {
     pub max_world_rumors: usize,
     pub max_seed_memories_per_role: usize,
     pub max_relationships_per_role: usize,
-    pub max_graph_nodes: usize,
-    pub max_graph_edges: usize,
-    pub max_condition_depth: usize,
-    pub max_conditions_per_node: usize,
-    pub max_effects_per_node: usize,
     pub max_manifest_bytes: usize,
     pub max_compressed_pack_bytes: u64,
     pub max_uncompressed_pack_bytes: u64,
@@ -46,11 +41,6 @@ impl Default for AssetLimitsConfig {
             max_world_rumors: 256,
             max_seed_memories_per_role: 32,
             max_relationships_per_role: 32,
-            max_graph_nodes: 256,
-            max_graph_edges: 512,
-            max_condition_depth: 8,
-            max_conditions_per_node: 16,
-            max_effects_per_node: 16,
             max_manifest_bytes: 512 * 1024,
             max_compressed_pack_bytes: 32 * 1024 * 1024,
             max_uncompressed_pack_bytes: 128 * 1024 * 1024,
@@ -108,21 +98,6 @@ impl AssetLimitsConfig {
             return Err(ConfigError::Invalid(
                 "assets.max_relationships_per_role must be positive".into(),
             ));
-        }
-        if self.max_graph_nodes == 0 {
-            return Err(ConfigError::Invalid("assets.max_graph_nodes must be positive".into()));
-        }
-        if self.max_graph_edges == 0 {
-            return Err(ConfigError::Invalid("assets.max_graph_edges must be positive".into()));
-        }
-        if self.max_condition_depth == 0 {
-            return Err(ConfigError::Invalid("assets.max_condition_depth must be positive".into()));
-        }
-        if self.max_conditions_per_node == 0 {
-            return Err(ConfigError::Invalid("assets.max_conditions_per_node must be positive".into()));
-        }
-        if self.max_effects_per_node == 0 {
-            return Err(ConfigError::Invalid("assets.max_effects_per_node must be positive".into()));
         }
         if self.max_manifest_bytes == 0 {
             return Err(ConfigError::Invalid("assets.max_manifest_bytes must be positive".into()));

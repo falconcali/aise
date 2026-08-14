@@ -17,6 +17,7 @@ Read the generated Story Text together with the pre-turn character, relationship
 - Emit `knowledge_changes` only for Knowledge the Story Text actually establishes, contradicts, or renders obsolete. Use `add` for new Facts, Rumors, or Memories; `update` only when the target is listed in Modifiable Knowledge; `delete` only for a Rumor or Memory listed in Modifiable Knowledge. Facts can never be deleted, only added or updated.
 - Reference only known character IDs, resolvable location/scene keys, and Modifiable Knowledge targets; never invent an ID or key.
 - Always return the complete current scene: `scene_key`, `location_key`, `time`, `description`, and `present_character_ids`, even when unchanged from the pre-turn scene.
+- For every Narrative Condition Query listed in Runtime Context, return exactly one `narrative_condition_judgments` entry with that `condition_key`, a `status` of `satisfied`, `unsatisfied`, or `unknown`, supporting `evidence` quoted or paraphrased from the Story Text, and a `reason`. Use `unknown` only when the Story Text neither confirms nor denies the criterion.
 - When Validation Issues and a Previous Extraction are present, treat this as a correction pass: resolve every issue and change the output so it no longer reproduces them.
 - Return one complete structured extraction matching the required schema.
 

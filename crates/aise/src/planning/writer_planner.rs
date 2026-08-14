@@ -1,6 +1,7 @@
-use crate::config::{AssetLimitsConfig, PlannerConfig, RetrievalConfig};
+use crate::config::{NarrativeConfig, PlannerConfig, RetrievalConfig};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::narrative_graph::director::{NarrativeDirector, NarrativeEvaluation, NarrativeLimits};
+use crate::domain::narrative_graph::projector::{NarrativeProjectionInput, NarrativeProjector};
+use crate::domain::narrative_graph::state_view::CommittedNarrativeStateView;
 use crate::llm::gateway::LlmGateway;
 use crate::planning::error::PlanningError;
 use crate::planning::planner_output::PlannerOutput;
@@ -15,7 +16,7 @@ use std::sync::Arc;
 
 pub struct WriterPlanner {
     gateway: Arc<LlmGateway>,
-    narrative_director: NarrativeDirector,
+    narrative_projector: NarrativeProjector,
     plan_builder: RetrievalPlanBuilder,
     config: PlannerConfig,
 }
@@ -25,17 +26,11 @@ impl WriterPlanner {
         gateway: Arc<LlmGateway>,
         planner: PlannerConfig,
         retrieval: RetrievalConfig,
-        assets: AssetLimitsConfig,
+        narrative: &NarrativeConfig,
     ) -> Self {
         Self {
             gateway,
-            narrative_director: NarrativeDirector::new(NarrativeLimits {
-                max_nodes: assets.max_graph_nodes,
-                max_edges: assets.max_graph_edges,
-                max_condition_depth: assets.max_condition_depth,
-                max_conditions_per_node: assets.max_conditions_per_node,
-                max_effects_per_node: assets.max_effects_per_node,
-            }),
+            narrative_projector: NarrativeProjector::new(narrative.as_limits()),
             plan_builder: RetrievalPlanBuilder::new(retrieval, planner.clone()),
             config: planner,
         }
@@ -65,20 +60,23 @@ impl TurnExecutionPipeline for WriterPlanner {
                 })
             })?
             .clone();
-        let pending = ctx.trace().begin_span("narrative.evaluate", "narrative.evaluate");
-        let narrative_result = self.narrative_director.evaluate(NarrativeEvaluation {
+        let pending = ctx.trace().begin_span("narrative.project", "narrative.project");
+        let committed_view = CommittedNarrativeStateView::new(&snapshot);
+        let current_turn = snapshot.base_revision().get().saturating_add(1);
+        let projection_result = self.narrative_projector.project(NarrativeProjectionInput {
             definition: snapshot.narrative_definition(),
             state: snapshot.narrative_state(),
-            snapshot: &snapshot,
+            committed_view: &committed_view,
+            current_turn,
         });
-        let narrative_payload = match &narrative_result {
-            Ok(plan) => serde_json::json!({
+        let narrative_payload = match &projection_result {
+            Ok(projection) => serde_json::json!({
                 "story_id": ctx.story_id(),
                 "turn_id": ctx.turn_id(),
                 "graph_revision": snapshot.graph_revision(),
-                "active_node_count": plan.active_nodes.len(),
-                "transition_count": plan.proposed_transitions.len(),
-                "intent_count": plan.global_event_intents.len(),
+                "active_node_count": projection.plan.active_nodes.len(),
+                "condition_query_count": projection.condition_queries.len(),
+                "intent_count": projection.plan.world_event_intents.len(),
                 "status": "ok",
                 "error_code": null,
             }),
@@ -87,14 +85,16 @@ impl TurnExecutionPipeline for WriterPlanner {
                 "turn_id": ctx.turn_id(),
                 "graph_revision": snapshot.graph_revision(),
                 "active_node_count": 0,
-                "transition_count": 0,
+                "condition_query_count": 0,
                 "intent_count": 0,
                 "status": "error",
-                "error_code": "narrative_evaluation_failed",
+                "error_code": "narrative_projection_failed",
             }),
         };
         ctx.trace().end_span_with(pending, &narrative_payload);
-        let narrative_plan = narrative_result.map_err(PlanningError::from).map_err(map_planning_error)?;
+        let projection = projection_result.map_err(PlanningError::from).map_err(map_planning_error)?;
+        let narrative_plan = projection.plan.clone();
+        ctx.set_narrative_projection(projection)?;
         let player_input = BoundedText::try_new(
             ctx.player_input().to_owned(),
             "player_input",

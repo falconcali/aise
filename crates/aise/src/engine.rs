@@ -166,6 +166,7 @@ impl AiseEngine {
             &self.config.content,
             &self.config.retrieval,
             &self.config.state_extractor,
+            &self.config.narrative,
         ) {
             Ok(budget) => budget,
             Err(error) => return self.finalize(None, Err(error), sink, permit).await,

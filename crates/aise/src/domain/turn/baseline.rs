@@ -5,7 +5,7 @@ use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::CharacterId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use crate::domain::narrative::{StoryContinuity, StoryContinuityLimits};
-use crate::domain::narrative_graph::definition::NarrativeNodeState;
+use crate::domain::narrative_graph::condition::NarrativeNodeState;
 use crate::domain::story_instance::binding::RoleBinding;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings};
@@ -27,7 +27,6 @@ pub struct SnapshotLimits {
     pub max_scene_characters: usize,
     pub max_relationships: usize,
     pub max_narrative_nodes: usize,
-    pub max_condition_event_keys: usize,
     pub max_condition_fact_values: usize,
     pub max_constraints: usize,
     pub max_constraint_bytes: usize,
@@ -75,7 +74,7 @@ pub struct KnowledgeEntryIndexEntry {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct NarrativeStateView {
+pub struct NarrativeGraphStateIndex {
     pub pack_digest: Sha256Digest,
     pub graph_revision: u64,
     pub node_states: BTreeMap<NarrativeNodeKey, NarrativeNodeState>,
@@ -96,7 +95,7 @@ pub struct BaselineContext {
     pub character_index: Vec<CharacterIndexEntry>,
     pub story_continuity: StoryContinuity,
     pub active_story_constraints: Vec<ActiveStoryConstraint>,
-    pub narrative_state_view: NarrativeStateView,
+    pub narrative_graph_state_index: NarrativeGraphStateIndex,
     pub retrieval_signals: RetrievalSignals,
 }
 

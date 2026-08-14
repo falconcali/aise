@@ -1,7 +1,7 @@
 use crate::domain::asset::character_card::CharacterCard;
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
-use crate::domain::asset::ids::{CanonicalEventKey, FactKey, Sha256Digest, StoryRoleKey, TopicKey};
+use crate::domain::asset::ids::{FactKey, Sha256Digest, StoryRoleKey, TopicKey};
 use crate::domain::asset::story_pack::{StoryProfile, StoryRole};
 use crate::domain::asset::validation::ScalarValue;
 use crate::domain::asset::world_book::TopicDefinition;
@@ -12,7 +12,6 @@ use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::binding::RoleBinding;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings, RelationshipState};
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,13 +19,6 @@ pub struct KnowledgeSnapshotRef {
     pub story_id: StoryId,
     pub pack_digest: Sha256Digest,
     pub base_revision: StoryRevision,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NarrativeConditionStateView {
-    pub occurred_event_keys: BTreeSet<CanonicalEventKey>,
-    pub player_action_event_keys: BTreeSet<CanonicalEventKey>,
-    pub fact_values: BTreeMap<FactKey, ScalarValue>,
 }
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
@@ -50,7 +42,7 @@ pub struct StoryReadSnapshot {
     relationships: Vec<RelationshipState>,
     narrative_definition: NarrativeGraphDefinition,
     narrative_state: NarrativeRuntimeState,
-    condition_state: NarrativeConditionStateView,
+    fact_values: BTreeMap<FactKey, ScalarValue>,
     story_continuity: StoryContinuity,
     active_constraints: Vec<ActiveStoryConstraint>,
     entity_catalog: Vec<KnowledgeEntity>,
@@ -73,7 +65,7 @@ pub struct StoryReadSnapshotParts {
     pub relationships: Vec<RelationshipState>,
     pub narrative_definition: NarrativeGraphDefinition,
     pub narrative_state: NarrativeRuntimeState,
-    pub condition_state: NarrativeConditionStateView,
+    pub fact_values: BTreeMap<FactKey, ScalarValue>,
     pub story_continuity: StoryContinuity,
     pub active_constraints: Vec<ActiveStoryConstraint>,
     pub entity_catalog: Vec<KnowledgeEntity>,
@@ -97,7 +89,7 @@ impl StoryReadSnapshot {
             relationships,
             narrative_definition,
             narrative_state,
-            condition_state,
+            fact_values,
             story_continuity,
             active_constraints,
             entity_catalog,
@@ -174,6 +166,13 @@ impl StoryReadSnapshot {
         {
             return inconsistent("narrative_state_reference_invalid");
         }
+        if narrative_state
+            .pending_effects
+            .values()
+            .any(|pending| !narrative_definition.nodes.contains_key(&pending.source_node))
+        {
+            return inconsistent("narrative_pending_effect_reference_invalid");
+        }
         validate_sorted_unique(&entity_catalog, "entity_catalog_order")?;
         for entity in &entity_catalog {
             match entity {
@@ -203,7 +202,7 @@ impl StoryReadSnapshot {
             relationships,
             narrative_definition,
             narrative_state,
-            condition_state,
+            fact_values,
             story_continuity,
             active_constraints,
             entity_catalog,
@@ -268,8 +267,8 @@ impl StoryReadSnapshot {
         &self.narrative_state
     }
 
-    pub fn condition_state(&self) -> &NarrativeConditionStateView {
-        &self.condition_state
+    pub fn fact_values(&self) -> &BTreeMap<FactKey, ScalarValue> {
+        &self.fact_values
     }
 
     pub fn story_continuity(&self) -> &StoryContinuity {

@@ -1,4 +1,4 @@
-use aise::config::AssetLimitsConfig;
+use aise::config::{AssetLimitsConfig, NarrativeConfig};
 use aise::domain::asset::ids::{PackId, PlayerId, StoryRoleKey};
 use aise::domain::narrative::StorySegmentOrigin;
 use aise::persistence::asset_store::AssetStore;
@@ -80,7 +80,7 @@ fn valid_pack_json() -> String {
             "nodes": {
                 "node_a": {
                     "title": "A",
-                    "objective": "Wake up",
+                    "dramatic_focus": "Wake up",
                     "activate_when": {"type": "story_started"},
                     "complete_when": {"type": "turn_reaches", "turn": 1},
                     "skip_when": null,
@@ -105,7 +105,7 @@ async fn runtime_services_with_url(label: &str) -> (Arc<PackService>, Arc<StoryI
     let sqlite = SqliteStore::connect(&db_url).await.unwrap();
     let store: Arc<dyn Store> = sqlite.clone();
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&db_url).await.unwrap();
-    let importer = NativeAssetImporter::new(AssetLimitsConfig::default());
+    let importer = NativeAssetImporter::new(AssetLimitsConfig::default(), NarrativeConfig::default());
     let pack_service = Arc::new(PackService::new(importer, asset_store.clone()));
     let instance_factory = Arc::new(StoryInstanceFactory::new(
         asset_store,
@@ -118,6 +118,7 @@ async fn runtime_services_with_url(label: &str) -> (Arc<PackService>, Arc<StoryI
             max_relationships: 32,
             max_opening_bytes: 8192,
         },
+        NarrativeConfig::default().as_limits(),
     ));
     (pack_service, instance_factory, db_url)
 }
@@ -292,6 +293,7 @@ async fn instance_snapshot_loads_with_scene_and_binding() {
         &aise::config::TurnContentLimitsConfig::default(),
         &aise::config::ContextPreparationConfig::default(),
         &aise::config::AssetLimitsConfig::default(),
+        &NarrativeConfig::default(),
     );
     let snapshot = store
         .load_story_snapshot(&story_info.story_id, limits)

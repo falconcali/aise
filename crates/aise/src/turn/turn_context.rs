@@ -1,12 +1,13 @@
 use crate::domain::ids::{CharacterId, StoryId, TurnId};
 use crate::domain::knowledge::KnowledgeKind;
+use crate::domain::narrative_graph::projector::NarrativeProjection;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::{
     BaselineContext, CharacterThought, ContextItem, RetrievalAudience, RetrievedContext, RetrievedContextLimits,
     WriterPlan,
 };
-use crate::domain::turn::{StoryGeneratorOutput, StoryStateExtractorOutput};
+use crate::domain::turn::{StoryGeneratorOutput, StoryStateExtractionEnvelope, StoryStateExtractorOutput};
 use crate::turn::turn_budget::{CorrectionKind, TurnBudget};
 use crate::turn::turn_contract::{
     CommittedTurnResult, LlmBudgetReservation, LlmCallUsage, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
@@ -20,7 +21,7 @@ use std::time::Instant;
 
 struct BoundStateExtraction {
     story_version: u32,
-    output: StoryStateExtractorOutput,
+    envelope: StoryStateExtractionEnvelope,
 }
 
 pub struct TurnExecutionContext {
@@ -33,6 +34,7 @@ pub struct TurnExecutionContext {
     snapshot: Option<StoryReadSnapshot>,
     baseline: Option<BaselineContext>,
     plan: Option<WriterPlan>,
+    narrative_projection: Option<NarrativeProjection>,
     retrieved: RetrievedContext,
     thoughts: Vec<CharacterThought>,
     story: Option<StoryGeneratorOutput>,
@@ -72,6 +74,7 @@ impl TurnExecutionContext {
             snapshot: None,
             baseline: None,
             plan: None,
+            narrative_projection: None,
             retrieved: RetrievedContext::default(),
             thoughts: Vec::new(),
             story: None,
@@ -138,6 +141,16 @@ impl TurnExecutionContext {
         self.plan.as_ref()
     }
 
+    pub fn narrative_projection(&self) -> Option<&NarrativeProjection> {
+        self.narrative_projection.as_ref()
+    }
+
+    pub fn set_narrative_projection(&mut self, projection: NarrativeProjection) -> Result<(), TurnExecutionError> {
+        self.expect_phase(TurnPhase::Prepared)?;
+        self.narrative_projection = Some(projection);
+        Ok(())
+    }
+
     pub fn retrieved(&self) -> &RetrievedContext {
         &self.retrieved
     }
@@ -155,7 +168,11 @@ impl TurnExecutionContext {
     }
 
     pub fn extraction(&self) -> Option<&StoryStateExtractorOutput> {
-        self.extraction.as_ref().map(|bound| &bound.output)
+        self.extraction.as_ref().map(|bound| &bound.envelope.state)
+    }
+
+    pub fn extraction_envelope(&self) -> Option<&StoryStateExtractionEnvelope> {
+        self.extraction.as_ref().map(|bound| &bound.envelope)
     }
 
     pub fn extraction_story_version(&self) -> Option<u32> {
@@ -419,10 +436,10 @@ impl TurnExecutionContext {
 
     fn ensure_extraction_bound(
         &self,
-        output: &StoryStateExtractorOutput,
+        envelope: &StoryStateExtractionEnvelope,
         stage: TurnStage,
     ) -> Result<(), TurnExecutionError> {
-        let serialized = serde_json::to_string(output).map_err(|error| {
+        let serialized = serde_json::to_string(envelope).map_err(|error| {
             TurnExecutionError::new(
                 TurnFailureKind::InvariantViolation,
                 "extraction_serialization_failed",
@@ -453,12 +470,12 @@ impl TurnExecutionContext {
         Ok(())
     }
 
-    pub fn set_state_extraction(&mut self, output: StoryStateExtractorOutput) -> Result<(), TurnExecutionError> {
+    pub fn set_state_extraction(&mut self, envelope: StoryStateExtractionEnvelope) -> Result<(), TurnExecutionError> {
         self.expect_phase(TurnPhase::StoryReady)?;
-        self.ensure_extraction_bound(&output, TurnStage::StoryStateExtractor)?;
+        self.ensure_extraction_bound(&envelope, TurnStage::StoryStateExtractor)?;
         self.extraction = Some(BoundStateExtraction {
             story_version: self.story_version,
-            output,
+            envelope,
         });
         self.validation = None;
         self.change_set = None;
@@ -553,12 +570,15 @@ impl TurnExecutionContext {
         Ok(())
     }
 
-    pub fn replace_state_extraction(&mut self, output: StoryStateExtractorOutput) -> Result<(), TurnExecutionError> {
+    pub fn replace_state_extraction(
+        &mut self,
+        envelope: StoryStateExtractionEnvelope,
+    ) -> Result<(), TurnExecutionError> {
         self.expect_phase(TurnPhase::StateReextractionRequired)?;
-        self.ensure_extraction_bound(&output, TurnStage::StoryStateExtractor)?;
+        self.ensure_extraction_bound(&envelope, TurnStage::StoryStateExtractor)?;
         let no_progress = match (&self.extraction, &self.validation) {
             (Some(existing), Some(ValidationResult::ReextractState(_))) => {
-                serde_json::to_string(&existing.output).ok() == serde_json::to_string(&output).ok()
+                serde_json::to_string(&existing.envelope).ok() == serde_json::to_string(&envelope).ok()
             }
             _ => false,
         };
@@ -569,7 +589,7 @@ impl TurnExecutionContext {
         }
         self.extraction = Some(BoundStateExtraction {
             story_version: self.story_version,
-            output,
+            envelope,
         });
         self.validation = None;
         self.change_set = None;

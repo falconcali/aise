@@ -248,16 +248,17 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
             observable_conditions: Vec::new(),
         };
         let relevant_writer_knowledge = project_writer_knowledge(ctx)?;
+        let narrative_projection = ctx.narrative_projection();
         let narrative_direction = StoryGeneratorNarrativeDirectionPromptView {
-            active_goals: plan
-                .narrative_plan
-                .active_goals
+            active_goals: narrative_projection
+                .map(|projection| projection.plan.active_directions.as_slice())
+                .unwrap_or(&[])
                 .iter()
-                .map(|goal| goal.summary.clone())
+                .map(|direction| direction.dramatic_focus.clone())
                 .collect(),
-            event_intents: plan
-                .narrative_plan
-                .global_event_intents
+            event_intents: narrative_projection
+                .map(|projection| projection.plan.world_event_intents.as_slice())
+                .unwrap_or(&[])
                 .iter()
                 .map(|intent| intent.description.clone())
                 .collect(),

@@ -125,10 +125,9 @@ impl Store for SqliteStore {
         let settings_json = serde_json::to_string(&spec.settings).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
         })?;
-        let condition_state_json =
-            serde_json::to_string(&spec.condition_state).map_err(|_| StoreError::Serialization {
-                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-            })?;
+        let fact_values_json = serde_json::to_string(&spec.fact_values).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        })?;
         let scene_json = serde_json::to_string(&spec.scene).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
         })?;
@@ -158,7 +157,7 @@ impl Store for SqliteStore {
         sqlx::query(
             "INSERT INTO story_instances \
              (story_id, pack_id, settings_json, bindings_json, characters_json, relationships_json, \
-              narrative_state_json, condition_state_json, created_at_ms) \
+              narrative_state_json, fact_values_json, created_at_ms) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(spec.story_id.as_str())
@@ -168,7 +167,7 @@ impl Store for SqliteStore {
         .bind(&characters_json)
         .bind(&relationships_json)
         .bind(&narrative_state_json)
-        .bind(&condition_state_json)
+        .bind(&fact_values_json)
         .bind(spec.created_at_ms)
         .execute(&mut *tx)
         .await
@@ -365,24 +364,45 @@ impl Store for SqliteStore {
         if narrative_state.graph_revision != commit.expected_graph_revision {
             return Err(StoreError::RevisionConflict);
         }
-        for change in commit.changes.narrative_changes() {
-            if change.expected_graph_revision != commit.expected_graph_revision
-                || narrative_state.node_state(&change.node_key) != change.from
-            {
+        let resolution = commit.changes.narrative_resolution();
+        for transition in &resolution.transitions {
+            let expected_from = match transition.kind {
+                crate::domain::narrative_graph::effect::NarrativeTransitionKind::Activate => {
+                    crate::domain::narrative_graph::condition::NarrativeNodeState::Inactive
+                }
+                crate::domain::narrative_graph::effect::NarrativeTransitionKind::Complete
+                | crate::domain::narrative_graph::effect::NarrativeTransitionKind::Skip => {
+                    crate::domain::narrative_graph::condition::NarrativeNodeState::Active
+                }
+            };
+            if narrative_state.node_state(&transition.node_key) != expected_from {
                 return Err(StoreError::RevisionConflict);
             }
-            narrative_state.node_states.insert(change.node_key.clone(), change.to);
-            if change.to == crate::domain::narrative_graph::definition::NarrativeNodeState::Active {
+            let to_state = match transition.kind {
+                crate::domain::narrative_graph::effect::NarrativeTransitionKind::Activate => {
+                    crate::domain::narrative_graph::condition::NarrativeNodeState::Active
+                }
+                crate::domain::narrative_graph::effect::NarrativeTransitionKind::Complete => {
+                    crate::domain::narrative_graph::condition::NarrativeNodeState::Completed
+                }
+                crate::domain::narrative_graph::effect::NarrativeTransitionKind::Skip => {
+                    crate::domain::narrative_graph::condition::NarrativeNodeState::Skipped
+                }
+            };
+            narrative_state.node_states.insert(transition.node_key.clone(), to_state);
+            if to_state == crate::domain::narrative_graph::condition::NarrativeNodeState::Active {
                 narrative_state
                     .activation_turns
-                    .insert(change.node_key.clone(), commit.turn.id.clone());
+                    .insert(transition.node_key.clone(), commit.turn.id.clone());
             }
         }
-        if !commit.changes.narrative_changes().is_empty() {
-            narrative_state.graph_revision =
-                narrative_state.graph_revision.checked_add(1).ok_or(StoreError::LimitExceeded {
-                    limit: "narrative_graph_revision",
-                })?;
+        narrative_state.pending_effects = resolution
+            .pending_effects
+            .iter()
+            .map(|effect| (effect.effect_id.clone(), effect.clone()))
+            .collect();
+        if !resolution.transitions.is_empty() {
+            narrative_state.graph_revision = resolution.next_graph_revision;
         }
         let aggregate = aggregate_llm_usage(&commit.llm_calls)?;
         let result = CommittedTurnResult {
@@ -564,18 +584,13 @@ async fn persist_instance_state(
     let narrative_state_json = serde_json::to_string(narrative_state).map_err(|_| StoreError::Serialization {
         kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
     })?;
-    let condition_state_json =
-        serde_json::to_string(commit.changes.condition_state()).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-        })?;
     sqlx::query(
         "UPDATE story_instances SET characters_json = ?, relationships_json = ?, \
-         narrative_state_json = ?, condition_state_json = ? WHERE story_id = ?",
+         narrative_state_json = ? WHERE story_id = ?",
     )
     .bind(&characters_json)
     .bind(&relationships_json)
     .bind(&narrative_state_json)
-    .bind(&condition_state_json)
     .bind(commit.story_id.as_str())
     .execute(&mut **tx)
     .await

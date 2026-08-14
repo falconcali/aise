@@ -9,10 +9,10 @@ fn story_state_extractor_assets_have_required_rule_counts() {
     let csi = include_str!("../../../assets/prompts/context-v2/csi/story-state-extractor.md.j2");
     let fti = include_str!("../../../assets/prompts/context-v2/fti/story-state-extractor.md.j2");
 
-    assert_eq!(section_item_count(csi, "## MUST", "## NEVER"), 8);
+    assert_eq!(section_item_count(csi, "## MUST", "## NEVER"), 9);
     assert_eq!(section_item_count(csi, "## NEVER", "# Runtime Data Boundary"), 5);
     assert!(!csi.contains("## SHOULD"));
-    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 6);
+    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 7);
     assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
     assert_eq!(fti.matches("{{ output_schema }}").count(), 1);
 }
@@ -26,6 +26,7 @@ fn story_state_extractor_runtime_context_has_exact_section_order() {
         "## Pre-turn Characters",
         "## Pre-turn Relationships",
         "## Modifiable Knowledge",
+        "## Narrative Condition Queries",
         "## Previous Extraction",
         "## Validation Issues",
     ];

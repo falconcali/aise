@@ -1,4 +1,4 @@
-use crate::config::{AssetLimitsConfig, ContextPreparationConfig, TurnContentLimitsConfig};
+use crate::config::{AssetLimitsConfig, ContextPreparationConfig, NarrativeConfig, TurnContentLimitsConfig};
 use crate::domain::narrative::StoryContinuityLimits;
 use crate::domain::turn::baseline::SnapshotLimits;
 
@@ -7,6 +7,7 @@ impl SnapshotLimits {
         content: &TurnContentLimitsConfig,
         context: &ContextPreparationConfig,
         assets: &AssetLimitsConfig,
+        narrative: &NarrativeConfig,
     ) -> Self {
         Self {
             max_story_profile_bytes: content.max_story_profile_bytes,
@@ -18,8 +19,7 @@ impl SnapshotLimits {
             max_scene_bytes: content.max_scene_bytes,
             max_scene_characters: context.max_scene_characters,
             max_relationships: context.max_relationships,
-            max_narrative_nodes: assets.max_graph_nodes,
-            max_condition_event_keys: context.max_condition_event_keys,
+            max_narrative_nodes: narrative.max_graph_nodes,
             max_condition_fact_values: context.max_condition_fact_values,
             max_constraints: content.max_constraints,
             max_constraint_bytes: content.max_constraint_bytes,

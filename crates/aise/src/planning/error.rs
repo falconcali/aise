@@ -1,4 +1,4 @@
-use crate::domain::narrative_graph::director::NarrativeError;
+use crate::domain::narrative_graph::definition::NarrativeError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

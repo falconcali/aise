@@ -1,4 +1,4 @@
-use crate::config::AssetLimitsConfig;
+use crate::config::{AssetLimitsConfig, NarrativeConfig};
 use crate::domain::asset::frozen_ref::{CharacterAssetSource, WorldBookSource};
 use crate::domain::asset::ids::{PackId, SemanticVersion, Sha256Digest, StoryPackKey};
 use crate::domain::asset::story_pack::StoryPack;
@@ -69,11 +69,12 @@ const FORBIDDEN_FIELD_NAMES: &[&str] = &[
 
 pub struct NativeAssetImporter {
     limits: AssetLimitsConfig,
+    narrative: NarrativeConfig,
 }
 
 impl NativeAssetImporter {
-    pub fn new(limits: AssetLimitsConfig) -> Self {
-        Self { limits }
+    pub fn new(limits: AssetLimitsConfig, narrative: NarrativeConfig) -> Self {
+        Self { limits, narrative }
     }
 
     pub fn limits(&self) -> &AssetLimitsConfig {
@@ -328,7 +329,7 @@ impl NativeAssetImporter {
         report: &mut ValidationReport,
         depth: usize,
     ) {
-        if depth > self.limits.max_condition_depth.saturating_add(8) {
+        if depth > self.narrative.max_condition_depth.saturating_add(8) {
             report.push(AssetValidationIssue::new(
                 AssetValidationCode::LimitExceeded,
                 path,
@@ -494,7 +495,7 @@ impl NativeAssetImporter {
                 return;
             }
         };
-        if nodes.len() > self.limits.max_graph_nodes {
+        if nodes.len() > self.narrative.max_graph_nodes {
             report.push(AssetValidationIssue::new(
                 AssetValidationCode::LimitExceeded,
                 "/narrative/nodes",
@@ -505,7 +506,7 @@ impl NativeAssetImporter {
             Some(edges) => edges,
             None => return,
         };
-        if edges.len() > self.limits.max_graph_edges {
+        if edges.len() > self.narrative.max_graph_edges {
             report.push(AssetValidationIssue::new(
                 AssetValidationCode::LimitExceeded,
                 "/narrative/edges",

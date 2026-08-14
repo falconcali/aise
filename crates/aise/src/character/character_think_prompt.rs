@@ -132,7 +132,7 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
         request: &CharacterThinkRequest,
     ) -> Result<CharacterThinkPromptProjection, CharacterThinkProjectionError> {
         let baseline = ctx.baseline().ok_or(CharacterThinkProjectionError::MissingStageState)?;
-        let plan = ctx.plan().ok_or(CharacterThinkProjectionError::MissingStageState)?;
+        let _plan = ctx.plan().ok_or(CharacterThinkProjectionError::MissingStageState)?;
         if request.reason.as_str().trim().is_empty()
             || request.reason.as_str().len() > self.config.max_thinking_focus_bytes
         {
@@ -162,9 +162,10 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
         )
         .map_err(|_| CharacterThinkProjectionError::InvalidPromptField)?;
         let relevant_character_knowledge = project_knowledge(ctx, &request.character_id)?;
-        let narrative_character_impulses = plan
-            .narrative_plan
-            .character_impulses
+        let narrative_character_impulses = ctx
+            .narrative_projection()
+            .map(|projection| projection.plan.character_impulses.as_slice())
+            .unwrap_or(&[])
             .iter()
             .filter(|impulse| impulse.target_character_id == request.character_id)
             .map(|impulse| CharacterThinkImpulsePromptView {

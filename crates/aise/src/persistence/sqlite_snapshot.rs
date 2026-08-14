@@ -1,9 +1,9 @@
 use crate::domain::asset::character_card::CharacterCard;
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
-use crate::domain::asset::ids::{PackId, Sha256Digest, StoryRoleKey, TopicKey};
+use crate::domain::asset::ids::{FactKey, PackId, Sha256Digest, StoryRoleKey, TopicKey};
 use crate::domain::asset::story_pack::{StoryProfile, StoryRole};
-use crate::domain::asset::validation::BoundedText;
+use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::asset::world_book::TopicDefinition;
 use crate::domain::ids::{CharacterId, StoryId, StoryRevision, TurnId};
 use crate::domain::narrative::{StoryContinuity, StorySegment, StorySegmentOrigin, StorySummary};
@@ -11,9 +11,7 @@ use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::binding::RoleBinding;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
-use crate::domain::story_instance::snapshot::{
-    KnowledgeSnapshotRef, NarrativeConditionStateView, StoryReadSnapshot, StoryReadSnapshotParts,
-};
+use crate::domain::story_instance::snapshot::{KnowledgeSnapshotRef, StoryReadSnapshot, StoryReadSnapshotParts};
 use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings, RelationshipState};
 use crate::domain::turn::SnapshotLimits;
 use crate::persistence::sqlite_error::SqliteStoreError;
@@ -47,7 +45,7 @@ pub(crate) async fn load_story_snapshot(
     let instance_lengths: Option<InstanceProjectionLengths> = sqlx::query_as(
         "SELECT i.pack_id, length(i.settings_json), length(i.bindings_json), length(i.characters_json), \
                 length(i.relationships_json), length(i.narrative_state_json), \
-                length(i.condition_state_json), length(s.current_scene), length(s.story_summary), \
+                length(i.fact_values_json), length(s.current_scene), length(s.story_summary), \
                 length(s.active_constraints) \
          FROM stories s INNER JOIN story_instances i ON i.story_id = s.id WHERE s.id = ?",
     )
@@ -62,7 +60,7 @@ pub(crate) async fn load_story_snapshot(
         characters_len,
         relationships_len,
         narrative_state_len,
-        condition_state_len,
+        fact_values_len,
         scene_len,
         summary_len,
         constraints_len,
@@ -96,18 +94,9 @@ pub(crate) async fn load_story_snapshot(
         "narrative_state_json",
     )?;
     ensure_projection_length(
-        condition_state_len,
-        projection_limit(
-            limits
-                .max_condition_event_keys
-                .checked_add(limits.max_condition_fact_values)
-                .ok_or(StoreError::LimitExceeded {
-                    limit: "condition_state_json",
-                })?,
-            limits.max_constraint_bytes,
-            1024,
-        )?,
-        "condition_state_json",
+        fact_values_len,
+        projection_limit(limits.max_condition_fact_values, limits.max_constraint_bytes, 1024)?,
+        "fact_values_json",
     )?;
     ensure_projection_length(
         scene_len,
@@ -177,7 +166,7 @@ pub(crate) async fn load_story_snapshot(
     let row: Option<StoryInstanceRow> = sqlx::query_as(
         "SELECT s.revision, i.pack_id, i.settings_json, i.bindings_json, i.characters_json, \
                 i.relationships_json, i.narrative_state_json, \
-                i.condition_state_json, s.current_scene, s.story_summary, s.active_constraints \
+                i.fact_values_json, s.current_scene, s.story_summary, s.active_constraints \
          FROM stories s \
          INNER JOIN story_instances i ON i.story_id = s.id \
          WHERE s.id = ?",
@@ -194,7 +183,7 @@ pub(crate) async fn load_story_snapshot(
         characters_json,
         relationships_json,
         narrative_state_json,
-        condition_state_json,
+        fact_values_json,
         current_scene_json,
         story_summary_json,
         active_constraints_json,
@@ -279,8 +268,8 @@ pub(crate) async fn load_story_snapshot(
         serde_json::from_str(&narrative_state_json).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
         })?;
-    let condition_state: NarrativeConditionStateView =
-        serde_json::from_str(&condition_state_json).map_err(|_| StoreError::Serialization {
+    let fact_values: BTreeMap<FactKey, ScalarValue> =
+        serde_json::from_str(&fact_values_json).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
         })?;
     let current_scene: CurrentScene =
@@ -451,7 +440,7 @@ pub(crate) async fn load_story_snapshot(
         relationships,
         narrative_definition,
         narrative_state,
-        condition_state,
+        fact_values,
         story_continuity,
         active_constraints,
         entity_catalog,

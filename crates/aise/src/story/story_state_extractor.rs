@@ -1,4 +1,7 @@
-use crate::domain::turn::StoryStateExtractorOutput;
+use crate::domain::asset::ids::Sha256Digest;
+use crate::domain::turn::{
+    NarrativeConditionResult, StoryCandidateVersion, StoryStateExtractionEnvelope, StoryStateExtractionEnvelopeOutput,
+};
 use crate::llm::gateway::LlmGateway;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
 use crate::story::story_state_extractor_prompt::{
@@ -13,6 +16,7 @@ use crate::turn::turn_validation::{
     BoundedValidationIssues, ValidationIssue, ValidationIssueClass, ValidationIssueCode, ValidationRemedy,
 };
 use async_trait::async_trait;
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tracing::Instrument;
 
@@ -80,21 +84,45 @@ impl TurnExecutionPipeline for StoryStateExtractor {
                     error.to_string(),
                 )
             })?;
-        match serde_json::from_str::<StoryStateExtractorOutput>(&completion.text) {
+        match serde_json::from_str::<StoryStateExtractionEnvelopeOutput>(&completion.text) {
             Ok(output) => {
                 tracing::info!(
                     prompt_profile = "story_state_extractor",
                     is_reextraction,
                     output_bytes = completion.text.len(),
-                    character_state_count = output.character_states.len(),
-                    relationship_state_count = output.relationship_states.len(),
-                    knowledge_change_count = output.knowledge_changes.len(),
+                    character_state_count = output.state.character_states.len(),
+                    relationship_state_count = output.state.relationship_states.len(),
+                    knowledge_change_count = output.state.knowledge_changes.len(),
                     "story state extractor output decoded"
                 );
+                let expected_graph_revision = ctx
+                    .narrative_projection()
+                    .map(|projection| projection.expected_graph_revision)
+                    .unwrap_or_default();
+                let narrative_condition_results = output
+                    .narrative_condition_judgments
+                    .into_iter()
+                    .map(|judgment| NarrativeConditionResult {
+                        condition_key: judgment.condition_key,
+                        status: judgment.status,
+                        evidence: judgment.evidence,
+                        reason: judgment.reason,
+                    })
+                    .collect();
+                let candidate_version = StoryCandidateVersion {
+                    content_digest: Sha256Digest::from_bytes(Sha256::digest(completion.text.as_bytes()).into()),
+                    repair_attempt: u32::from(is_reextraction),
+                };
+                let envelope = StoryStateExtractionEnvelope {
+                    candidate_version,
+                    expected_graph_revision,
+                    state: output.state,
+                    narrative_condition_results,
+                };
                 if is_reextraction {
-                    ctx.replace_state_extraction(output)
+                    ctx.replace_state_extraction(envelope)
                 } else {
-                    ctx.set_state_extraction(output)
+                    ctx.set_state_extraction(envelope)
                 }
             }
             Err(error) => {

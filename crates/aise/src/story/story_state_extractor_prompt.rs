@@ -22,8 +22,15 @@ pub struct StoryStateExtractorPromptContext {
     pub characters: Vec<StoryStateExtractorCharacterPromptView>,
     pub relationships: Vec<StoryStateExtractorRelationshipPromptView>,
     pub modifiable_knowledge: Vec<StoryStateExtractorKnowledgePromptView>,
+    pub condition_queries: Vec<StoryStateExtractorConditionQueryPromptView>,
     pub previous_extraction: Option<BoundedText>,
     pub validation_issues: Vec<StoryStateExtractorValidationIssuePromptView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StoryStateExtractorConditionQueryPromptView {
+    pub condition_key: crate::domain::asset::ids::NarrativeConditionKey,
+    pub criterion: BoundedText,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -161,6 +168,20 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
 
         let modifiable_knowledge = modifiable_knowledge_view(ctx);
 
+        let condition_queries = ctx
+            .narrative_projection()
+            .map(|projection| {
+                projection
+                    .condition_queries
+                    .iter()
+                    .map(|query| StoryStateExtractorConditionQueryPromptView {
+                        condition_key: query.condition_key.clone(),
+                        criterion: query.criterion.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let (previous_extraction, validation_issues) = if ctx.phase() == TurnPhase::StateReextractionRequired {
             let validation = ctx.validation().ok_or(StoryStateExtractorProjectionError::Invariant {
                 code: "missing_validation_for_reextraction",
@@ -215,6 +236,7 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
             characters,
             relationships,
             modifiable_knowledge,
+            condition_queries,
             previous_extraction,
             validation_issues,
         };
@@ -228,8 +250,14 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
         if input_tokens > ctx.budget().state_extractor_max_context_tokens() {
             return Err(StoryStateExtractorProjectionError::RequiredPromptDataExceedsBudget);
         }
-        let output_schema =
-            crate::domain::turn::StoryStateExtractorOutput::json_schema(ctx.budget().state_extraction_limits());
+        let output_schema = crate::domain::turn::StoryStateExtractionEnvelopeOutput::json_schema(
+            crate::domain::turn::StoryStateExtractionLimits {
+                max_condition_queries: ctx.budget().max_condition_queries(),
+                max_condition_evidence_bytes: ctx.budget().max_condition_evidence_bytes(),
+                max_condition_reason_bytes: ctx.budget().max_condition_reason_bytes(),
+                ..ctx.budget().state_extraction_limits()
+            },
+        );
         let fti_vars = TrustedPromptVars::new(HashMap::from([(
             "output_schema".into(),
             Value::String(output_schema.to_string()),
@@ -326,6 +354,10 @@ fn render_runtime_vars(context: &StoryStateExtractorPromptContext) -> RuntimePro
         (
             "modifiable_knowledge".into(),
             Value::String(render_knowledge(&context.modifiable_knowledge)),
+        ),
+        (
+            "condition_queries".into(),
+            Value::String(render_condition_queries(&context.condition_queries)),
         ),
         (
             "previous_extraction".into(),
@@ -426,6 +458,23 @@ fn render_knowledge(values: &[StoryStateExtractorKnowledgePromptView]) -> String
                 "- source_id: {}\n  kind: {kind}\n  memory_owner: {owner}\n  content: {}",
                 quoted(value.source_id.as_str()),
                 quoted(value.content.as_str())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_condition_queries(values: &[StoryStateExtractorConditionQueryPromptView]) -> String {
+    if values.is_empty() {
+        return "None.".into();
+    }
+    values
+        .iter()
+        .map(|value| {
+            format!(
+                "- condition_key: {}\n  criterion: {}",
+                quoted(value.condition_key.as_str()),
+                quoted(value.criterion.as_str())
             )
         })
         .collect::<Vec<_>>()

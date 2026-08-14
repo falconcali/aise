@@ -1,8 +1,7 @@
-use aise::config::{RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
+use aise::config::{NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::CharacterId;
 use aise::domain::knowledge::KnowledgeKind;
-use aise::domain::narrative_graph::director::NarrativePlan;
 use aise::domain::turn::{
     CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest, RetrievalRequestOrigin, WriterPlan,
     WriterStoryGoal,
@@ -14,7 +13,6 @@ fn sample_plan(with_requests: bool) -> WriterPlan {
         story_goal: WriterStoryGoal {
             summary: BoundedText::try_new("goal", "goal", 256).unwrap(),
         },
-        narrative_plan: NarrativePlan::empty(),
         retrieval_plan: RetrievalPlan::default(),
         character_think_requests: Vec::new(),
     };
@@ -65,6 +63,7 @@ fn turn_budget_from_config_uses_retrieval_totals() {
         &TurnContentLimitsConfig::default(),
         &retrieval,
         &StateExtractorConfig::default(),
+        &NarrativeConfig::default(),
     )
     .unwrap();
     assert_eq!(budget.max_retrieved_tokens(), 2_000);

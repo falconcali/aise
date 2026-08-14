@@ -1,10 +1,9 @@
-use aise::config::{AssetLimitsConfig, ContextPreparationConfig, TurnContentLimitsConfig};
+use aise::config::{AssetLimitsConfig, ContextPreparationConfig, NarrativeConfig, TurnContentLimitsConfig};
 use aise::domain::StorySequence;
 use aise::domain::asset::ids::{PlayerId, StoryRoleKey};
 use aise::domain::ids::{StoryId, StoryRevision, TurnId};
 use aise::domain::narrative::StoryTurn;
-use aise::domain::story_instance::snapshot::NarrativeConditionStateView;
-use aise::domain::turn::SnapshotLimits;
+use aise::domain::turn::{SnapshotLimits, StoryCandidateVersion, ValidatedNarrativeResolution};
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
 use aise::persistence::{SqliteStore, Store, TurnCommitSpec};
@@ -12,7 +11,7 @@ use aise::story::instance_factory::{CreateStoryInstanceSpec, StoryInstanceFactor
 use aise::story::pack_service::{AssetInput, NativeAssetImporter, PackService};
 use aise::turn::turn_contract::{IdempotencyKey, RequestDigest};
 use aise::turn::turn_validation::{StateChange, ValidatedChangeSet, ValidatedChangeSetParts};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -85,7 +84,7 @@ fn valid_pack_json() -> String {
             "nodes": {
                 "node_a": {
                     "title": "A",
-                    "objective": "Wake up",
+                    "dramatic_focus": "Wake up",
                     "activate_when": {"type": "story_started"},
                     "complete_when": {"type": "turn_reaches", "turn": 1},
                     "skip_when": null,
@@ -105,6 +104,7 @@ fn limits() -> SnapshotLimits {
         &TurnContentLimitsConfig::default(),
         &ContextPreparationConfig::default(),
         &AssetLimitsConfig::default(),
+        &NarrativeConfig::default(),
     )
 }
 
@@ -112,7 +112,10 @@ async fn create_instance(label: &str) -> (Arc<dyn Store>, StoryId, String) {
     let db = temp_db_path(label);
     let store: Arc<dyn Store> = SqliteStore::connect(&db).await.unwrap();
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&db).await.unwrap();
-    let pack_service = PackService::new(NativeAssetImporter::new(AssetLimitsConfig::default()), asset_store.clone());
+    let pack_service = PackService::new(
+        NativeAssetImporter::new(AssetLimitsConfig::default(), NarrativeConfig::default()),
+        asset_store.clone(),
+    );
     let info = pack_service
         .import(AssetInput::Json(valid_pack_json().as_bytes()))
         .await
@@ -128,6 +131,7 @@ async fn create_instance(label: &str) -> (Arc<dyn Store>, StoryId, String) {
             max_relationships: 64,
             max_opening_bytes: 8192,
         },
+        NarrativeConfig::default().as_limits(),
     );
     let story = factory
         .create(CreateStoryInstanceSpec {
@@ -142,7 +146,14 @@ async fn create_instance(label: &str) -> (Arc<dyn Store>, StoryId, String) {
     (store, story.story_id, db)
 }
 
-fn commit_spec(story_id: &StoryId, base: StoryRevision, sequence: u64, key: &str, turn_id: &str) -> TurnCommitSpec {
+fn commit_spec(
+    story_id: &StoryId,
+    base: StoryRevision,
+    expected_graph_revision: u64,
+    sequence: u64,
+    key: &str,
+    turn_id: &str,
+) -> TurnCommitSpec {
     let story_text = format!("story {turn_id}");
     TurnCommitSpec {
         story_id: story_id.clone(),
@@ -154,7 +165,7 @@ fn commit_spec(story_id: &StoryId, base: StoryRevision, sequence: u64, key: &str
             created_at: 1000 + sequence as i64,
         },
         base_revision: base,
-        expected_graph_revision: 0,
+        expected_graph_revision,
         changes: ValidatedChangeSet::new(ValidatedChangeSetParts {
             story_text: aise::domain::asset::validation::BoundedText::try_new(story_text, "story_text", 1024).unwrap(),
             character_changes: Vec::new(),
@@ -169,11 +180,15 @@ fn commit_spec(story_id: &StoryId, base: StoryRevision, sequence: u64, key: &str
                 present_character_ids: Vec::new(),
             },
             narrative_events: Vec::new(),
-            narrative_changes: Vec::new(),
-            condition_state: NarrativeConditionStateView {
-                occurred_event_keys: BTreeSet::new(),
-                player_action_event_keys: BTreeSet::new(),
-                fact_values: BTreeMap::new(),
+            narrative_resolution: ValidatedNarrativeResolution {
+                candidate_version: StoryCandidateVersion {
+                    content_digest: aise::domain::asset::ids::Sha256Digest::from_bytes([0u8; 32]),
+                    repair_attempt: 0,
+                },
+                transitions: Vec::new(),
+                condition_results: BTreeMap::new(),
+                pending_effects: Vec::new(),
+                next_graph_revision: 1,
             },
             constraint_change: StateChange::Unchanged,
         })
@@ -191,7 +206,14 @@ async fn snapshot_is_revision_consistent() {
     let before = store.load_story_snapshot(&story_id, limits()).await.expect("load");
     assert_eq!(before.base_revision(), StoryRevision::new(0));
     store
-        .commit_turn(&commit_spec(&story_id, before.base_revision(), 1, "k1", "t1"))
+        .commit_turn(&commit_spec(
+            &story_id,
+            before.base_revision(),
+            before.graph_revision(),
+            1,
+            "k1",
+            "t1",
+        ))
         .await
         .expect("commit");
     let after = store.load_story_snapshot(&story_id, limits()).await.expect("load after");
@@ -204,12 +226,17 @@ async fn snapshot_is_revision_consistent() {
 #[tokio::test]
 async fn recent_segments_are_returned_in_sequence_order() {
     let (store, story_id, db) = create_instance("chrono").await;
+    let graph_revision = store
+        .load_story_snapshot(&story_id, limits())
+        .await
+        .expect("load")
+        .graph_revision();
     store
-        .commit_turn(&commit_spec(&story_id, StoryRevision::new(0), 1, "k1", "t1"))
+        .commit_turn(&commit_spec(&story_id, StoryRevision::new(0), graph_revision, 1, "k1", "t1"))
         .await
         .expect("t1");
     store
-        .commit_turn(&commit_spec(&story_id, StoryRevision::new(1), 2, "k2", "t2"))
+        .commit_turn(&commit_spec(&story_id, StoryRevision::new(1), graph_revision, 2, "k2", "t2"))
         .await
         .expect("t2");
     let snapshot = store.load_story_snapshot(&story_id, limits()).await.expect("load");
@@ -226,12 +253,17 @@ async fn recent_segments_are_returned_in_sequence_order() {
 #[tokio::test]
 async fn turn_commit_assigns_next_story_sequence() {
     let (store, story_id, db) = create_instance("seq").await;
+    let graph_revision = store
+        .load_story_snapshot(&story_id, limits())
+        .await
+        .expect("load")
+        .graph_revision();
     store
-        .commit_turn(&commit_spec(&story_id, StoryRevision::new(0), 1, "k1", "t1"))
+        .commit_turn(&commit_spec(&story_id, StoryRevision::new(0), graph_revision, 1, "k1", "t1"))
         .await
         .expect("t1");
     let second = store
-        .commit_turn(&commit_spec(&story_id, StoryRevision::new(1), 1, "k2", "t2"))
+        .commit_turn(&commit_spec(&story_id, StoryRevision::new(1), graph_revision, 1, "k2", "t2"))
         .await;
     assert!(second.is_ok(), "store assigns sequence independently of the proposal");
     let _ = std::fs::remove_file(&db);

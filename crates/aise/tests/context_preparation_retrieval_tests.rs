@@ -5,7 +5,6 @@ use aise::domain::asset::validation::BoundedText;
 use aise::domain::asset::world_book::{TopicDefinition, TopicDictionaryError, validate_topic_dictionary};
 use aise::domain::ids::CharacterId;
 use aise::domain::knowledge::KnowledgeKind;
-use aise::domain::narrative_graph::director::NarrativePlan;
 use aise::domain::text::estimate_text_tokens;
 use aise::domain::turn::{
     CandidateRetrieverKind, CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest,
@@ -91,7 +90,6 @@ fn automatic_requests_run_when_planner_gaps_are_empty() {
         story_goal: WriterStoryGoal {
             summary: BoundedText::try_new("goal", "goal", 64).unwrap(),
         },
-        narrative_plan: NarrativePlan::empty(),
         retrieval_plan: RetrievalPlan {
             requests: vec![RetrievalRequest {
                 audience: RetrievalAudience::GlobalWriter,
@@ -162,7 +160,6 @@ fn retrieval_and_character_think_are_enabled_from_plan_collections() {
         story_goal: WriterStoryGoal {
             summary: BoundedText::try_new("goal", "goal", 64).unwrap(),
         },
-        narrative_plan: NarrativePlan::empty(),
         retrieval_plan: RetrievalPlan::default(),
         character_think_requests: Vec::new(),
     };
@@ -172,7 +169,6 @@ fn retrieval_and_character_think_are_enabled_from_plan_collections() {
         story_goal: WriterStoryGoal {
             summary: BoundedText::try_new("goal", "goal", 64).unwrap(),
         },
-        narrative_plan: NarrativePlan::empty(),
         retrieval_plan: RetrievalPlan {
             requests: vec![RetrievalRequest {
                 audience: RetrievalAudience::GlobalWriter,
@@ -195,11 +191,4 @@ fn retrieval_and_character_think_are_enabled_from_plan_collections() {
     assert_eq!(filled.retrieval_plan.requests.len(), 1);
     assert_eq!(filled.character_think_requests.len(), 1);
     assert!(matches!(CandidateRetrieverKind::Bm25, CandidateRetrieverKind::Bm25));
-}
-
-#[test]
-fn narrative_director_uses_continuity_and_condition_view() {
-    let plan = NarrativePlan::empty();
-    assert!(plan.active_nodes.is_empty());
-    assert!(plan.global_event_intents.is_empty());
 }

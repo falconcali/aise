@@ -1,16 +1,22 @@
 use crate::domain::asset::frozen_ref::FrozenCharacterAssetRef;
-use crate::domain::asset::ids::{PackId, PlayerId, StoryRoleKey};
+use crate::domain::asset::ids::{AttributeKey, FactKey, PackId, PlayerId, StoryRoleKey};
+use crate::domain::asset::validation::ScalarValue;
 use crate::domain::ids::{CharacterId, ConstraintId, FactId, MemoryId, StoryId};
 use crate::domain::knowledge::KnowledgeEntry;
 use crate::domain::knowledge::fact::{Proposition, WorldFact};
 use crate::domain::knowledge::memory::MemoryEntry;
 use crate::domain::knowledge::query::KnowledgeSource;
 use crate::domain::knowledge::rumor::{Claim, SharedRumor, TruthValue};
-use crate::domain::narrative_graph::state::NarrativeRuntimeState;
+use crate::domain::narrative_graph::condition::{
+    ConditionEvalContext, NarrativeNodeState, RoleControllerKind, evaluate_condition,
+};
+use crate::domain::narrative_graph::definition::{NarrativeError, NarrativeGraphDefinition, NarrativeLimits};
+use crate::domain::narrative_graph::effect::{NarrativeEffectId, NarrativeTransitionKind};
+use crate::domain::narrative_graph::state::{NarrativeRuntimeState, PendingNarrativeEffect};
+use crate::domain::narrative_graph::state_view::{NarrativeStateView, NarrativeStateViewError};
 use crate::domain::story_instance::binding::{RoleBinding, RoleController};
 use crate::domain::story_instance::constraint::{ActiveStoryConstraint, StoryConstraintSource};
 use crate::domain::story_instance::info::StoryInfo;
-use crate::domain::story_instance::snapshot::NarrativeConditionStateView;
 use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings, RelationshipState};
 use crate::persistence::asset_store::{AssetStore, FrozenStoryPack};
 use crate::persistence::store::{MaterializedStoryInstanceSpec, Store, StoreError};
@@ -59,14 +65,21 @@ pub struct StoryInstanceFactory {
     asset_store: Arc<dyn AssetStore>,
     store: Arc<dyn Store>,
     limits: StoryInstantiationLimits,
+    narrative_limits: NarrativeLimits,
 }
 
 impl StoryInstanceFactory {
-    pub fn new(asset_store: Arc<dyn AssetStore>, store: Arc<dyn Store>, limits: StoryInstantiationLimits) -> Self {
+    pub fn new(
+        asset_store: Arc<dyn AssetStore>,
+        store: Arc<dyn Store>,
+        limits: StoryInstantiationLimits,
+        narrative_limits: NarrativeLimits,
+    ) -> Self {
         Self {
             asset_store,
             store,
             limits,
+            narrative_limits,
         }
     }
 
@@ -205,6 +218,11 @@ impl StoryInstanceFactory {
         present_character_ids.dedup();
         let opening = pack.start.opening.clone();
         enforce_limit(opening.as_str().len(), self.limits.max_opening_bytes, "max_opening_bytes")?;
+        let narrative_state =
+            bootstrap_narrative_state(&pack.narrative, &bindings, &characters, &relationships, self.narrative_limits)
+                .map_err(|_| StoryInstantiationError::InvalidReference {
+                code: "narrative_bootstrap_failed",
+            })?;
         Ok(MaterializedStoryInstanceSpec {
             story_id,
             pack: frozen.frozen_ref(),
@@ -220,17 +238,162 @@ impl StoryInstanceFactory {
                 description: pack.start.description.clone(),
                 present_character_ids,
             },
-            narrative_state: NarrativeRuntimeState::initial(),
-            condition_state: NarrativeConditionStateView {
-                occurred_event_keys: BTreeSet::new(),
-                player_action_event_keys: BTreeSet::new(),
-                fact_values: BTreeMap::new(),
-            },
+            narrative_state,
+            fact_values: BTreeMap::new(),
             active_constraints,
             opening,
             created_at_ms: spec.created_at_ms,
         })
     }
+}
+
+struct BootstrapNarrativeStateView<'a> {
+    bindings: &'a BTreeMap<StoryRoleKey, RoleBinding>,
+    characters: &'a BTreeMap<CharacterId, CharacterInstanceState>,
+    relationships: &'a [RelationshipState],
+}
+
+impl NarrativeStateView for BootstrapNarrativeStateView<'_> {
+    fn fact_value(&self, _fact_key: &FactKey) -> Result<Option<&ScalarValue>, NarrativeStateViewError> {
+        Ok(None)
+    }
+
+    fn character_attribute(
+        &self,
+        role_key: &StoryRoleKey,
+        attribute: &AttributeKey,
+    ) -> Result<Option<&ScalarValue>, NarrativeStateViewError> {
+        let binding = self
+            .bindings
+            .get(role_key)
+            .ok_or_else(|| NarrativeStateViewError::UnknownRole {
+                role_key: role_key.as_str().to_owned(),
+            })?;
+        let character =
+            self.characters
+                .get(&binding.character_id)
+                .ok_or_else(|| NarrativeStateViewError::UnknownCharacter {
+                    role_key: role_key.as_str().to_owned(),
+                })?;
+        Ok(character.attributes.get(attribute))
+    }
+
+    fn relationship_trust(
+        &self,
+        source_role_key: &StoryRoleKey,
+        target_role_key: &StoryRoleKey,
+    ) -> Result<Option<i16>, NarrativeStateViewError> {
+        let source = self
+            .bindings
+            .get(source_role_key)
+            .ok_or_else(|| NarrativeStateViewError::UnknownRole {
+                role_key: source_role_key.as_str().to_owned(),
+            })?;
+        let target = self
+            .bindings
+            .get(target_role_key)
+            .ok_or_else(|| NarrativeStateViewError::UnknownRole {
+                role_key: target_role_key.as_str().to_owned(),
+            })?;
+        Ok(self
+            .relationships
+            .iter()
+            .find(|relationship| {
+                relationship.source_character_id == source.character_id
+                    && relationship.target_character_id == target.character_id
+            })
+            .map(|relationship| relationship.trust))
+    }
+
+    fn role_controller(&self, role_key: &StoryRoleKey) -> Result<RoleControllerKind, NarrativeStateViewError> {
+        let binding = self
+            .bindings
+            .get(role_key)
+            .ok_or_else(|| NarrativeStateViewError::UnknownRole {
+                role_key: role_key.as_str().to_owned(),
+            })?;
+        Ok(if binding.is_player_controlled() {
+            RoleControllerKind::Player
+        } else {
+            RoleControllerKind::Ai
+        })
+    }
+
+    fn character_id_for_role(&self, role_key: &StoryRoleKey) -> Result<CharacterId, NarrativeStateViewError> {
+        let binding = self
+            .bindings
+            .get(role_key)
+            .ok_or_else(|| NarrativeStateViewError::UnknownRole {
+                role_key: role_key.as_str().to_owned(),
+            })?;
+        Ok(binding.character_id.clone())
+    }
+}
+
+fn bootstrap_narrative_state(
+    definition: &NarrativeGraphDefinition,
+    bindings: &BTreeMap<StoryRoleKey, RoleBinding>,
+    characters: &BTreeMap<CharacterId, CharacterInstanceState>,
+    relationships: &[RelationshipState],
+    limits: NarrativeLimits,
+) -> Result<NarrativeRuntimeState, NarrativeError> {
+    let view = BootstrapNarrativeStateView {
+        bindings,
+        characters,
+        relationships,
+    };
+    let mut state = NarrativeRuntimeState::initial();
+    let semantic_results = BTreeMap::new();
+    let mut activated = Vec::new();
+    for entry in &definition.entry_nodes {
+        let node = definition
+            .nodes
+            .get(entry)
+            .ok_or_else(|| NarrativeError::MissingReference { key: entry.to_string() })?;
+        let eval_ctx = ConditionEvalContext {
+            state: &state,
+            view: &view,
+            semantic_results: &semantic_results,
+            current_turn: 0,
+            limits,
+        };
+        if evaluate_condition(&node.activate_when, &eval_ctx, 0)?
+            == crate::domain::narrative_graph::condition::NarrativeTruthValue::Satisfied
+        {
+            activated.push(entry.clone());
+        }
+    }
+    if activated.is_empty() {
+        return Ok(state);
+    }
+    state.graph_revision = 1;
+    for node_key in activated {
+        state.node_states.insert(node_key.clone(), NarrativeNodeState::Active);
+        let node = definition
+            .nodes
+            .get(&node_key)
+            .ok_or_else(|| NarrativeError::MissingReference {
+                key: node_key.to_string(),
+            })?;
+        for (effect_index, effect_definition) in node.effects.on_activate.iter().enumerate() {
+            let effect_id =
+                NarrativeEffectId::for_transition(&node_key, NarrativeTransitionKind::Activate, 1, effect_index as u32);
+            state.pending_effects.insert(
+                effect_id.clone(),
+                PendingNarrativeEffect {
+                    effect_id,
+                    source_node: node_key.clone(),
+                    source_transition: NarrativeTransitionKind::Activate,
+                    source_graph_revision: 1,
+                    created_by_turn: None,
+                    effect_index: effect_index as u32,
+                    expires_after_turn: None,
+                    definition: effect_definition.clone(),
+                },
+            );
+        }
+    }
+    Ok(state)
 }
 
 fn materialize_relationships(

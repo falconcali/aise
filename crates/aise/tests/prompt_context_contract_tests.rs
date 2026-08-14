@@ -7,11 +7,11 @@ use aise::domain::asset::story_pack::{InitialRoleState, StoryProfile, StoryRole,
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::CharacterId;
 use aise::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySummary};
-use aise::domain::narrative_graph::director::NarrativePlan;
+use aise::domain::narrative_graph::projector::NarrativePlan;
 use aise::domain::story_instance::binding::{RoleBinding, RoleController};
 use aise::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings};
 use aise::domain::turn::StoryGeneratorOutput;
-use aise::domain::turn::{BaselineContext, CharacterView, NarrativeStateView, RetrievalSignals};
+use aise::domain::turn::{BaselineContext, CharacterView, NarrativeGraphStateIndex, RetrievalSignals};
 use aise::planning::WriterPlannerPromptContextProjector;
 use aise::prompt::profile::PromptProfile;
 use aise::prompt::{
@@ -131,7 +131,7 @@ fn minimal_baseline(adversarial: &str) -> BaselineContext {
         )
         .unwrap(),
         active_story_constraints: Vec::new(),
-        narrative_state_view: NarrativeStateView {
+        narrative_graph_state_index: NarrativeGraphStateIndex {
             pack_digest: Sha256Digest::try_new(
                 "sha256:0000000000000000000000000000000000000000000000000000000000000000",
             )

@@ -1,8 +1,61 @@
-use crate::domain::asset::ids::{CanonicalEventKey, FactKey, NarrativeEdgeKey, NarrativeNodeKey, StoryRoleKey};
-use crate::domain::asset::validation::{BoundedText, ScalarValue};
+use crate::domain::asset::ids::{NarrativeEdgeKey, NarrativeNodeKey};
+use crate::domain::asset::validation::BoundedText;
+use crate::domain::narrative_graph::condition::NarrativeCondition;
 use crate::domain::narrative_graph::effect::NarrativeEffectDefinition;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, Copy)]
+pub struct NarrativeLimits {
+    pub max_graph_nodes: usize,
+    pub max_graph_edges: usize,
+    pub max_condition_depth: usize,
+    pub max_conditions_per_node: usize,
+    pub max_effects_per_node: usize,
+    pub max_semantic_conditions: usize,
+    pub max_semantic_criterion_bytes: usize,
+    pub max_frontier_nodes: usize,
+    pub max_semantic_queries_per_turn: usize,
+    pub max_semantic_query_bytes: usize,
+    pub max_evidence_bytes: usize,
+    pub max_result_reason_bytes: usize,
+    pub max_transitions_per_turn: usize,
+    pub max_pending_effects: usize,
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum NarrativeError {
+    #[error("narrative reference is missing: {key}")]
+    MissingReference { key: String },
+    #[error("narrative condition depth limit exceeded")]
+    ConditionDepthExceeded,
+    #[error("narrative condition count limit exceeded")]
+    ConditionCountExceeded,
+    #[error("narrative graph node limit exceeded")]
+    GraphNodeLimitExceeded,
+    #[error("narrative graph edge limit exceeded")]
+    GraphEdgeLimitExceeded,
+    #[error("narrative semantic condition key {key} is reused with a different criterion")]
+    SemanticCriterionConflict { key: String },
+    #[error("narrative semantic condition count limit exceeded")]
+    SemanticConditionLimitExceeded,
+    #[error("narrative frontier node limit exceeded")]
+    FrontierLimitExceeded,
+    #[error("narrative semantic query count limit exceeded")]
+    SemanticQueryLimitExceeded,
+    #[error("narrative semantic query byte limit exceeded")]
+    SemanticQueryByteLimitExceeded,
+    #[error("narrative transition limit exceeded")]
+    TransitionLimitExceeded,
+    #[error("narrative pending effect limit exceeded")]
+    PendingEffectLimitExceeded,
+    #[error("narrative candidate version mismatch")]
+    CandidateVersionMismatch,
+    #[error("narrative graph revision mismatch")]
+    GraphRevisionMismatch,
+    #[error("narrative invariant violated: {code}")]
+    Invariant { code: &'static str },
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -16,7 +69,8 @@ pub struct NarrativeGraphDefinition {
 #[serde(deny_unknown_fields)]
 pub struct NarrativeNodeDefinition {
     pub title: BoundedText,
-    pub objective: BoundedText,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dramatic_focus: Option<BoundedText>,
     pub activate_when: NarrativeCondition,
     pub complete_when: NarrativeCondition,
     pub skip_when: Option<NarrativeCondition>,
@@ -40,66 +94,4 @@ pub struct NarrativeEdgeDefinition {
     pub from: NarrativeNodeKey,
     pub to: NarrativeNodeKey,
     pub when: NarrativeCondition,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum NarrativeCondition {
-    All {
-        conditions: Vec<NarrativeCondition>,
-    },
-    Any {
-        conditions: Vec<NarrativeCondition>,
-    },
-    Not {
-        condition: Box<NarrativeCondition>,
-    },
-    StoryStarted,
-    NodeState {
-        node_key: NarrativeNodeKey,
-        state: NarrativeNodeState,
-    },
-    EventOccurred {
-        event_key: CanonicalEventKey,
-    },
-    FactStateEquals {
-        fact_key: FactKey,
-        value: ScalarValue,
-    },
-    CharacterStateEquals {
-        role_key: StoryRoleKey,
-        attribute: BoundedText,
-        value: ScalarValue,
-    },
-    RelationshipReaches {
-        source_role_key: StoryRoleKey,
-        target_role_key: StoryRoleKey,
-        minimum_trust: i16,
-    },
-    TurnReaches {
-        turn: u64,
-    },
-    PlayerActionOccurred {
-        event_key: CanonicalEventKey,
-    },
-    RoleControllerIs {
-        role_key: StoryRoleKey,
-        controller: RoleControllerKind,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NarrativeNodeState {
-    Inactive,
-    Active,
-    Completed,
-    Skipped,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RoleControllerKind {
-    Player,
-    Ai,
 }

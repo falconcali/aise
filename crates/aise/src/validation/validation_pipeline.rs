@@ -7,17 +7,18 @@ use crate::domain::knowledge::query::KnowledgeSource;
 use crate::domain::knowledge::rumor::SharedRumor;
 use crate::domain::knowledge::{KnowledgeEntry, KnowledgeSourceId};
 use crate::domain::narrative::{EventKind, StoryEvent};
+use crate::domain::narrative_graph::resolver::{NarrativeResolutionInput, NarrativeResolver};
 use crate::domain::story_instance::state::{CharacterInstanceState, RelationshipKey, RelationshipState};
-use crate::domain::turn::{ProposedKnowledgeMutation, ProposedKnowledgeValue};
+use crate::domain::turn::{ProposedKnowledgeMutation, ProposedKnowledgeValue, ValidatedNarrativeResolution};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::TurnExecutionError;
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::turn::turn_trace::{SpanPayload, ValidationData};
 use crate::turn::turn_validation::{
     CharacterInstanceStateChange, RelationshipStateChange, StateChange, ValidatedChangeSet, ValidatedChangeSetParts,
-    ValidatedKnowledgeMutation, ValidatedKnowledgeOperation, ValidatedNarrativeChange, ValidationIssue,
-    ValidationResult,
+    ValidatedKnowledgeMutation, ValidatedKnowledgeOperation, ValidationIssue, ValidationResult,
 };
+use crate::validation::narrative_candidate_state::CandidateNarrativeStateView;
 use crate::validation::validators::DeterministicValidator;
 use crate::validation::validators::changed_only::ChangedOnlyValidator;
 use crate::validation::validators::domain_invariant::DomainInvariantValidator;
@@ -92,13 +93,17 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
     let extraction = ctx
         .extraction()
         .ok_or_else(|| invariant("missing_extraction", "no state extraction produced"))?;
+    let extraction_envelope = ctx
+        .extraction_envelope()
+        .ok_or_else(|| invariant("missing_extraction", "no state extraction produced"))?;
     let snapshot = ctx
         .snapshot()
         .ok_or_else(|| invariant("missing_snapshot", "no story snapshot available"))?;
-    let plan = ctx
-        .plan()
-        .ok_or_else(|| invariant("missing_writer_plan", "no writer plan available"))?;
+    let projection = ctx
+        .narrative_projection()
+        .ok_or_else(|| invariant("missing_narrative_projection", "no narrative projection available"))?;
     let turn_id = ctx.turn_id().clone();
+    let current_turn = snapshot.base_revision().get().saturating_add(1);
 
     let story_text = bounded(story.story_text.as_str(), "story_text", ctx.budget().max_story_text_bytes())?;
 
@@ -170,7 +175,7 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
     let current_scene = extraction.current_scene.clone();
 
     let mut narrative_events = Vec::new();
-    for intent in &plan.narrative_plan.global_event_intents {
+    for intent in &projection.plan.world_event_intents {
         let index = narrative_events.len();
         narrative_events.push(make_event(
             &turn_id,
@@ -186,26 +191,61 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
         )?);
     }
 
-    let narrative_changes = plan
-        .narrative_plan
-        .proposed_transitions
-        .iter()
-        .map(|change| ValidatedNarrativeChange {
-            node_key: change.node_key.clone(),
-            from: change.from,
-            to: change.to,
-            expected_graph_revision: change.expected_graph_revision,
+    let candidate_view = CandidateNarrativeStateView::new(snapshot, &character_changes, &relationship_changes);
+    let resolver = NarrativeResolver::new(ctx.budget().narrative_limits());
+    let resolution = resolver
+        .resolve(NarrativeResolutionInput {
+            definition: snapshot.narrative_definition(),
+            state: snapshot.narrative_state(),
+            candidate_view: &candidate_view,
+            extraction: extraction_envelope,
+            current_turn,
         })
-        .collect::<Vec<_>>();
+        .map_err(|error| invariant("narrative_resolution_failed", error.to_string()))?;
 
-    let mut condition_state = snapshot.condition_state().clone();
-    for intent in &plan.narrative_plan.global_event_intents {
-        condition_state.occurred_event_keys.insert(intent.event_key.clone());
-    }
+    let delivered_effect_ids = projection
+        .plan
+        .effect_dispositions
+        .iter()
+        .map(|disposition| match disposition {
+            crate::domain::narrative_graph::projector::NarrativeEffectDisposition::PendingDelivery { effect_id }
+            | crate::domain::narrative_graph::projector::NarrativeEffectDisposition::NotApplicable {
+                effect_id, ..
+            } => effect_id.clone(),
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+
+    let mut pending_effects = snapshot
+        .narrative_state()
+        .pending_effects
+        .values()
+        .filter(|pending| !delivered_effect_ids.contains(&pending.effect_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    pending_effects.extend(resolution.pending_effects);
+
+    let narrative_resolution = ValidatedNarrativeResolution {
+        candidate_version: extraction_envelope.candidate_version.clone(),
+        transitions: resolution.transitions,
+        condition_results: resolution.condition_results,
+        pending_effects,
+        next_graph_revision: resolution.next_graph_revision,
+    };
 
     let mut final_nodes = snapshot.narrative_state().node_states.clone();
-    for change in &narrative_changes {
-        final_nodes.insert(change.node_key.clone(), change.to);
+    for transition in &narrative_resolution.transitions {
+        let state = match transition.kind {
+            crate::domain::narrative_graph::effect::NarrativeTransitionKind::Activate => {
+                crate::domain::narrative_graph::condition::NarrativeNodeState::Active
+            }
+            crate::domain::narrative_graph::effect::NarrativeTransitionKind::Complete => {
+                crate::domain::narrative_graph::condition::NarrativeNodeState::Completed
+            }
+            crate::domain::narrative_graph::effect::NarrativeTransitionKind::Skip => {
+                crate::domain::narrative_graph::condition::NarrativeNodeState::Skipped
+            }
+        };
+        final_nodes.insert(transition.node_key.clone(), state);
     }
     let committed_sequence = snapshot
         .story_continuity()
@@ -223,8 +263,8 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
                 !matches!(
                     final_nodes.get(node_key),
                     Some(
-                        crate::domain::narrative_graph::definition::NarrativeNodeState::Completed
-                            | crate::domain::narrative_graph::definition::NarrativeNodeState::Skipped
+                        crate::domain::narrative_graph::condition::NarrativeNodeState::Completed
+                            | crate::domain::narrative_graph::condition::NarrativeNodeState::Skipped
                     )
                 )
             }
@@ -244,8 +284,7 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
         knowledge_mutations,
         current_scene,
         narrative_events,
-        narrative_changes,
-        condition_state,
+        narrative_resolution,
         constraint_change,
     })
 }

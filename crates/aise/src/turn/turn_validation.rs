@@ -1,13 +1,10 @@
-use crate::domain::asset::ids::NarrativeNodeKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::CharacterId;
 use crate::domain::knowledge::{KnowledgeEntry, KnowledgeSourceId};
 use crate::domain::narrative::StoryEvent;
-use crate::domain::narrative_graph::definition::NarrativeNodeState;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
-use crate::domain::story_instance::snapshot::NarrativeConditionStateView;
 use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, RelationshipKey, RelationshipState};
-use crate::domain::turn::DeletableKnowledgeId;
+use crate::domain::turn::{DeletableKnowledgeId, ValidatedNarrativeResolution};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::TurnStage;
 use serde::{Deserialize, Serialize};
@@ -306,14 +303,6 @@ pub struct RelationshipStateChange {
 }
 
 #[derive(Debug, Clone)]
-pub struct ValidatedNarrativeChange {
-    pub node_key: NarrativeNodeKey,
-    pub from: NarrativeNodeState,
-    pub to: NarrativeNodeState,
-    pub expected_graph_revision: u64,
-}
-
-#[derive(Debug, Clone)]
 pub enum ValidatedKnowledgeOperation {
     Add(KnowledgeEntry),
     Update {
@@ -339,8 +328,7 @@ pub struct ValidatedChangeSet {
     knowledge_mutations: Vec<ValidatedKnowledgeMutation>,
     current_scene: CurrentScene,
     narrative_events: Vec<StoryEvent>,
-    narrative_changes: Vec<ValidatedNarrativeChange>,
-    condition_state: NarrativeConditionStateView,
+    narrative_resolution: ValidatedNarrativeResolution,
     constraint_change: StateChange<Vec<ActiveStoryConstraint>>,
 }
 
@@ -361,8 +349,7 @@ impl ValidatedChangeSet {
             knowledge_mutations: parts.knowledge_mutations,
             current_scene: parts.current_scene,
             narrative_events: parts.narrative_events,
-            narrative_changes: parts.narrative_changes,
-            condition_state: parts.condition_state,
+            narrative_resolution: parts.narrative_resolution,
             constraint_change: parts.constraint_change,
         })
     }
@@ -391,12 +378,8 @@ impl ValidatedChangeSet {
         &self.narrative_events
     }
 
-    pub fn narrative_changes(&self) -> &[ValidatedNarrativeChange] {
-        &self.narrative_changes
-    }
-
-    pub fn condition_state(&self) -> &NarrativeConditionStateView {
-        &self.condition_state
+    pub fn narrative_resolution(&self) -> &ValidatedNarrativeResolution {
+        &self.narrative_resolution
     }
 
     pub fn constraint_change(&self) -> StateChange<Vec<ActiveStoryConstraint>> {
@@ -415,8 +398,7 @@ pub struct ValidatedChangeSetParts {
     pub knowledge_mutations: Vec<ValidatedKnowledgeMutation>,
     pub current_scene: CurrentScene,
     pub narrative_events: Vec<StoryEvent>,
-    pub narrative_changes: Vec<ValidatedNarrativeChange>,
-    pub condition_state: NarrativeConditionStateView,
+    pub narrative_resolution: ValidatedNarrativeResolution,
     pub constraint_change: StateChange<Vec<ActiveStoryConstraint>>,
 }
 

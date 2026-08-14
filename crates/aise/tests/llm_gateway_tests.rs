@@ -1,4 +1,4 @@
-use aise::config::{RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
+use aise::config::{NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
 use aise::turn::turn_budget::TurnBudget;
 
 #[test]
@@ -15,6 +15,7 @@ fn turn_budget_from_config_matches_retrieval_limits() {
         &TurnContentLimitsConfig::default(),
         &retrieval,
         &StateExtractorConfig::default(),
+        &NarrativeConfig::default(),
     )
     .unwrap();
     assert_eq!(budget.max_total_items(), 20);

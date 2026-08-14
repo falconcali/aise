@@ -1,10 +1,10 @@
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::story_instance::snapshot::NarrativeConditionStateView;
 use crate::domain::story_instance::state::CurrentScene;
+use crate::domain::turn::ValidatedNarrativeResolution;
 use crate::turn::turn_validation::{
     StateChange, ValidatedChangeSet, ValidatedChangeSetParts, ValidationDecision, ValidationResult,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 fn current_scene() -> CurrentScene {
     CurrentScene {
@@ -13,6 +13,19 @@ fn current_scene() -> CurrentScene {
         time: BoundedText::try_new("morning", "time", 100).expect("bounded text"),
         description: BoundedText::try_new("scene", "description", 100).expect("bounded text"),
         present_character_ids: Vec::new(),
+    }
+}
+
+fn narrative_resolution() -> ValidatedNarrativeResolution {
+    ValidatedNarrativeResolution {
+        candidate_version: crate::domain::turn::StoryCandidateVersion {
+            content_digest: crate::domain::asset::ids::Sha256Digest::from_bytes([0u8; 32]),
+            repair_attempt: 0,
+        },
+        transitions: Vec::new(),
+        condition_results: BTreeMap::new(),
+        pending_effects: Vec::new(),
+        next_graph_revision: 1,
     }
 }
 
@@ -25,12 +38,7 @@ fn pass_cannot_contain_issues() {
         knowledge_mutations: Vec::new(),
         current_scene: current_scene(),
         narrative_events: Vec::new(),
-        narrative_changes: Vec::new(),
-        condition_state: NarrativeConditionStateView {
-            occurred_event_keys: BTreeSet::new(),
-            player_action_event_keys: BTreeSet::new(),
-            fact_values: BTreeMap::new(),
-        },
+        narrative_resolution: narrative_resolution(),
         constraint_change: StateChange::Unchanged,
     })
     .expect("valid change set");

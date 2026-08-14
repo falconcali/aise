@@ -1,4 +1,5 @@
-use crate::config::{RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
+use crate::config::{NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
+use crate::domain::narrative_graph::definition::NarrativeLimits;
 use crate::domain::turn::StoryStateExtractionLimits;
 use crate::turn::turn_contract::{LlmBudgetReservation, LlmCallId, LlmCallUsage};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
@@ -53,6 +54,10 @@ pub struct TurnBudgetLimits {
     pub state_extractor_max_output_tokens: u64,
     pub state_extractor_max_knowledge_context_items: usize,
     pub state_extractor_max_knowledge_context_tokens: u64,
+    pub narrative: NarrativeLimits,
+    pub max_condition_queries: usize,
+    pub max_condition_evidence_bytes: usize,
+    pub max_condition_reason_bytes: usize,
 }
 
 impl TurnBudgetLimits {
@@ -61,6 +66,7 @@ impl TurnBudgetLimits {
         content: &TurnContentLimitsConfig,
         retrieval: &RetrievalConfig,
         state_extractor: &StateExtractorConfig,
+        narrative: &NarrativeConfig,
     ) -> Self {
         Self {
             max_repair_rounds: turn.max_repair_rounds,
@@ -95,11 +101,18 @@ impl TurnBudgetLimits {
                 max_topics_per_knowledge: state_extractor.max_topics_per_knowledge,
                 max_item_bytes: content.max_character_bytes,
                 max_knowledge_change_bytes: content.max_knowledge_change_bytes,
+                max_condition_queries: narrative.max_semantic_queries_per_turn,
+                max_condition_evidence_bytes: narrative.max_evidence_bytes,
+                max_condition_reason_bytes: narrative.max_result_reason_bytes,
             },
             state_extractor_max_context_tokens: state_extractor.max_context_tokens,
             state_extractor_max_output_tokens: state_extractor.max_output_tokens,
             state_extractor_max_knowledge_context_items: state_extractor.max_knowledge_context_items,
             state_extractor_max_knowledge_context_tokens: state_extractor.max_knowledge_context_tokens,
+            narrative: narrative.as_limits(),
+            max_condition_queries: narrative.max_semantic_queries_per_turn,
+            max_condition_evidence_bytes: narrative.max_evidence_bytes,
+            max_condition_reason_bytes: narrative.max_result_reason_bytes,
         }
     }
 }
@@ -121,6 +134,7 @@ impl TurnBudget {
         content: &TurnContentLimitsConfig,
         retrieval: &RetrievalConfig,
         state_extractor: &StateExtractorConfig,
+        narrative: &NarrativeConfig,
     ) -> Result<Self, TurnExecutionError> {
         turn.validate().map_err(|error| {
             TurnExecutionError::new(TurnFailureKind::InvalidRequest, "invalid_config", None, error.to_string())
@@ -134,8 +148,11 @@ impl TurnBudget {
         state_extractor.validate().map_err(|error| {
             TurnExecutionError::new(TurnFailureKind::InvalidRequest, "invalid_config", None, error.to_string())
         })?;
+        narrative.validate().map_err(|error| {
+            TurnExecutionError::new(TurnFailureKind::InvalidRequest, "invalid_config", None, error.to_string())
+        })?;
         Ok(Self {
-            limits: TurnBudgetLimits::from(turn, content, retrieval, state_extractor),
+            limits: TurnBudgetLimits::from(turn, content, retrieval, state_extractor, narrative),
             usage: TurnBudgetUsage::default(),
         })
     }
@@ -202,6 +219,22 @@ impl TurnBudget {
 
     pub fn state_extraction_limits(&self) -> StoryStateExtractionLimits {
         self.limits.state_extraction
+    }
+
+    pub fn narrative_limits(&self) -> NarrativeLimits {
+        self.limits.narrative
+    }
+
+    pub fn max_condition_queries(&self) -> usize {
+        self.limits.max_condition_queries
+    }
+
+    pub fn max_condition_evidence_bytes(&self) -> usize {
+        self.limits.max_condition_evidence_bytes
+    }
+
+    pub fn max_condition_reason_bytes(&self) -> usize {
+        self.limits.max_condition_reason_bytes
     }
 
     pub fn state_extractor_max_context_tokens(&self) -> u64 {

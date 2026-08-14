@@ -6,5 +6,5 @@ pub mod state;
 
 pub use constraint::{ActiveStoryConstraint, StoryConstraintDefinition, StoryConstraintSource};
 pub use info::StoryInfo;
-pub use snapshot::{KnowledgeSnapshotRef, NarrativeConditionStateView, StoryReadSnapshot, StorySnapshotError};
+pub use snapshot::{KnowledgeSnapshotRef, StoryReadSnapshot, StorySnapshotError};
 pub use state::{CharacterInstanceState, CurrentScene, InstanceSettings, RelationshipState};

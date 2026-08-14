@@ -1,9 +1,9 @@
-use aise::config::AssetLimitsConfig;
+use aise::config::{AssetLimitsConfig, NarrativeConfig};
 use aise::domain::asset::validation::AssetValidationCode;
 use aise::story::pack_service::{AssetInput, NativeAssetImporter};
 
 fn importer() -> NativeAssetImporter {
-    NativeAssetImporter::new(AssetLimitsConfig::default())
+    NativeAssetImporter::new(AssetLimitsConfig::default(), NarrativeConfig::default())
 }
 
 fn valid_pack_json() -> String {
@@ -61,7 +61,7 @@ fn valid_pack_json() -> String {
             "nodes": {
                 "node_a": {
                     "title": "A",
-                    "objective": "Wake up",
+                    "dramatic_focus": "Wake up",
                     "activate_when": {"type": "story_started"},
                     "complete_when": {"type": "turn_reaches", "turn": 1},
                     "skip_when": null,
@@ -203,7 +203,7 @@ fn rejects_graph_cycle() {
     value["narrative"]["entry_nodes"] = serde_json::json!(["node_a"]);
     value["narrative"]["nodes"]["node_b"] = serde_json::json!({
         "title": "B",
-        "objective": "B",
+        "dramatic_focus": "B",
         "activate_when": {"type": "node_state", "node_key": "node_a", "state": "completed"},
         "complete_when": {"type": "turn_reaches", "turn": 99},
         "skip_when": null,
@@ -226,7 +226,7 @@ fn rejects_unreachable_graph_node() {
     let mut value: serde_json::Value = serde_json::from_str(&valid_pack_json()).unwrap();
     value["narrative"]["nodes"]["orphan"] = serde_json::json!({
         "title": "O",
-        "objective": "O",
+        "dramatic_focus": "O",
         "activate_when": {"type": "turn_reaches", "turn": 5},
         "complete_when": {"type": "turn_reaches", "turn": 6},
         "skip_when": null,

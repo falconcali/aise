@@ -9,6 +9,7 @@ Extract the structured state established by the Story Text now and return the co
 - Emit `relationship_states` only for relationships whose trust or kind actually changed; each entry must carry the complete final values.
 - Emit `knowledge_changes` only for Knowledge the Story Text actually establishes; `update` and `delete` targets must come from Modifiable Knowledge, and Facts can only be added or updated.
 - Always return the complete `current_scene`, even when unchanged.
+- For every entry in Narrative Condition Queries, return exactly one `narrative_condition_judgments` entry with a matching `condition_key`, `status`, `evidence`, and `reason`; use `unknown` when the Story Text does not settle it.
 - If Validation Issues are present, resolve every one of them relative to the Previous Extraction; do not return output identical to the Previous Extraction.
 - Return exactly one value matching the schema below.
 

@@ -4,7 +4,7 @@ use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::text_matcher::{TextMatcher, normalize_match_text, term_matches};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::knowledge::KnowledgeKind;
-use crate::domain::narrative_graph::director::NarrativePlan;
+use crate::domain::narrative_graph::projector::NarrativePlan;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{
     BaselineContext, CharacterThinkRequest, EntitySignal, RetrievalAudience, RetrievalPlan, RetrievalRequest,
@@ -72,7 +72,6 @@ impl RetrievalPlanBuilder {
             story_goal: WriterStoryGoal {
                 summary: planner_output.story_goal,
             },
-            narrative_plan: narrative_plan.clone(),
             retrieval_plan: RetrievalPlan { requests },
             character_think_requests: think_requests,
         })

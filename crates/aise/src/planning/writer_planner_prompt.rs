@@ -1,7 +1,7 @@
 use crate::config::PlannerConfig;
 use crate::domain::asset::constraint::StoryConstraintRequirement;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
-use crate::domain::narrative_graph::director::NarrativePlan;
+use crate::domain::narrative_graph::projector::NarrativePlan;
 use crate::domain::story_instance::binding::RoleController;
 use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::turn::{BaselineContext, CharacterView, RetrievalTargetId};
@@ -363,17 +363,13 @@ fn render_knowledge_index(
 }
 
 fn render_narrative_plan(plan: &NarrativePlan) -> String {
-    if plan.active_goals.is_empty()
-        && plan.global_event_intents.is_empty()
-        && plan.character_impulses.is_empty()
-        && plan.proposed_transitions.is_empty()
-    {
+    if plan.active_directions.is_empty() && plan.world_event_intents.is_empty() && plan.character_impulses.is_empty() {
         return "None.".into();
     }
-    let goals = plan
-        .active_goals
+    let directions = plan
+        .active_directions
         .iter()
-        .map(|goal| quoted(goal.summary.as_str()))
+        .map(|direction| quoted(direction.dramatic_focus.as_str()))
         .collect::<Vec<_>>()
         .join(", ");
     let impulses = plan
@@ -389,11 +385,10 @@ fn render_narrative_plan(plan: &NarrativePlan) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "active_goals: [{}]\ncharacter_impulses: [{}]\nevent_intent_count: {}\ncandidate_transition_count: {}",
-        goals,
+        "active_directions: [{}]\ncharacter_impulses: [{}]\nworld_event_intent_count: {}",
+        directions,
         impulses,
-        plan.global_event_intents.len(),
-        plan.proposed_transitions.len()
+        plan.world_event_intents.len()
     )
 }
 
