@@ -676,8 +676,8 @@ Test both:
 ## 8. References
 
 - Source design: `doc/design/CSI-RC-FTI/2026-08-14-character-role-profile-design-gpt.md`.
-- Phase 1: `doc/exec/character-role-profile-spec/2026-08-14-character-role-profile-spec-phase-1-gpt.md`.
-- Phase 2: `doc/exec/character-role-profile-spec/2026-08-14-character-role-profile-spec-phase-2-gpt.md`.
+- Phase 1: `doc/exec/CSI-RC-FTI/2026-08-14-character-role-profile-spec-phase-1-gpt.md`.
+- Phase 2: `doc/exec/CSI-RC-FTI/2026-08-14-character-role-profile-spec-phase-2-gpt.md`.
 - Prior Story Pack contract: `doc/exec/2026-08-07-story-pack-v3-spec-gpt.md`.
 - StoryStateExtractor prerequisite: `doc/exec/CSI-RC-FTI/2026-08-14-story-state-extractor-split-spec-gpt.md`.
 - Current Card schema: `crates/aise/src/domain/asset/character_card.rs:7`.

@@ -422,6 +422,8 @@ pub(crate) struct CharacterDecisionOutput {
 - All count/order/duplicate/player-exclusion rules from the Character Decision spec compare `RoleId`.
 - Character Decisions remain Turn-local and never persist.
 - Type names retain “Character” because CharacterThink is a behavior stage; only the identity field changes.
+- `CharacterDecision` drops `Deserialize` because the engine only ever constructs it from a validated `role_id` plus normalized model output; it is never deserialized directly. `PartialEq, Eq` are added to support the ordering/duplicate assertions required by §3.4 Snapshot and Store tests.
+- The directory module from the Character Decision spec (`crates/aise/src/domain/turn/character/mod.rs` and `character/decision.rs`) is retained unchanged; this phase only edits the `character_id` field inside `decision.rs` to `role_id`. Do not flatten the module back into a sibling `character_decision.rs` file (`R-CODE-01`).
 
 ### 3.8 StoryStateExtractor Override
 
@@ -765,7 +767,9 @@ crates/aise/src/
 │   │   └── state.rs
 │   └── turn/
 │       ├── baseline.rs
-│       ├── character_decision.rs
+│       ├── character/
+│       │   ├── mod.rs
+│       │   └── decision.rs
 │       ├── planning.rs
 │       ├── retrieval.rs
 │       └── state_extraction.rs
@@ -928,8 +932,8 @@ Test default-only creation, per-Role Card selections, malformed UUID/Role/digest
 ## 8. References
 
 - Source design: `doc/design/CSI-RC-FTI/2026-08-14-character-role-profile-design-gpt.md`.
-- Phase 0: `doc/exec/character-role-profile-spec/2026-08-14-character-role-profile-spec-phase-0-gpt.md`.
-- Phase 2: `doc/exec/character-role-profile-spec/2026-08-14-character-role-profile-spec-phase-2-gpt.md`.
+- Phase 0: `doc/exec/CSI-RC-FTI/2026-08-14-character-role-profile-spec-phase-0-gpt.md`.
+- Phase 2: `doc/exec/CSI-RC-FTI/2026-08-14-character-role-profile-spec-phase-2-gpt.md`.
 - Character Decision contract overridden here only for identity: `doc/exec/CSI-RC-FTI/2026-08-14-character-think-decision-spec-gpt.md`.
 - StoryStateExtractor contract overridden here only for identity and Role naming: `doc/exec/CSI-RC-FTI/2026-08-14-story-state-extractor-split-spec-gpt.md`.
 - Current Role Binding: `crates/aise/src/domain/story_instance/binding.rs:13`.

@@ -611,8 +611,8 @@ Run these cases against configured models without adding production keyword chec
 ## 8. References
 
 - Source design: `doc/design/CSI-RC-FTI/2026-08-14-character-role-profile-design-gpt.md`.
-- Phase 0: `doc/exec/character-role-profile-spec/2026-08-14-character-role-profile-spec-phase-0-gpt.md`.
-- Phase 1: `doc/exec/character-role-profile-spec/2026-08-14-character-role-profile-spec-phase-1-gpt.md`.
+- Phase 0: `doc/exec/CSI-RC-FTI/2026-08-14-character-role-profile-spec-phase-0-gpt.md`.
+- Phase 1: `doc/exec/CSI-RC-FTI/2026-08-14-character-role-profile-spec-phase-1-gpt.md`.
 - WriterPlanner Prompt spec: `doc/exec/CSI-RC-FTI/2026-08-11-writer-planner-csi-rc-fti-prompt-spec-gpt.md`.
 - Character Decision spec: `doc/exec/CSI-RC-FTI/2026-08-14-character-think-decision-spec-gpt.md`.
 - StoryGenerator Prompt spec: `doc/exec/CSI-RC-FTI/2026-08-12-story-generator-csi-rc-fti-prompt-spec-gpt.md`.
