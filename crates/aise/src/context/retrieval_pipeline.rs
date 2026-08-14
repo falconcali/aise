@@ -227,7 +227,6 @@ fn candidate_to_item(candidate: ContextCandidate) -> Result<ContextItem, TurnExe
         source_id: candidate.record.source_id,
         knowledge_kind: candidate.record.kind,
         source: candidate.record.source,
-        source_revision: candidate.record.source_revision,
         audience: candidate.audience,
         memory_owner: candidate.record.memory_owner,
         evidence: candidate.evidence,

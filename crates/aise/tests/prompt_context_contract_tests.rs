@@ -10,7 +10,7 @@ use aise::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySumma
 use aise::domain::narrative_graph::director::NarrativePlan;
 use aise::domain::story_instance::binding::{RoleBinding, RoleController};
 use aise::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings};
-use aise::domain::turn::proposal::StoryProposalOutput;
+use aise::domain::turn::StoryGeneratorOutput;
 use aise::domain::turn::{BaselineContext, CharacterView, NarrativeStateView, RetrievalSignals};
 use aise::planning::WriterPlannerPromptContextProjector;
 use aise::prompt::profile::PromptProfile;
@@ -206,7 +206,7 @@ fn story_generator_composes_csi_runtime_context_and_fti() {
         ("character_thoughts".into(), Value::String("None.".into())),
         ("player_input".into(), Value::String(marker.into())),
     ]);
-    let schema = StoryProposalOutput::json_schema(8, 1024, 8192).to_string();
+    let schema = StoryGeneratorOutput::json_schema(8192).to_string();
     let source = CatalogPromptSource::from_config(&aise::config::PromptModuleConfig::default()).expect("catalog");
     let composition = source
         .compose(&PromptCompositionInput {

@@ -10,7 +10,7 @@ assets:
   - asset_id: context-v2/story-repairer-fti
     kind: text
     source_path: fti/story-repairer.md.j2
-    output_contract_ref: StoryProposalOutput
+    output_contract_ref: StoryGeneratorOutput
     status: active
   - asset_id: context-v2/writer-planner-csi
     kind: text
@@ -49,7 +49,20 @@ assets:
   - asset_id: context-v2/story-generator-fti
     kind: text
     source_path: fti/story-generator.md.j2
-    output_contract_ref: StoryProposalOutput
+    output_contract_ref: StoryGeneratorOutput
+    status: active
+  - asset_id: context-v2/story-state-extractor-csi
+    kind: text
+    source_path: csi/story-state-extractor.md.j2
+    status: active
+  - asset_id: context-v2/story-state-extractor-rc
+    kind: text
+    source_path: rc/story-state-extractor.md.j2
+    status: active
+  - asset_id: context-v2/story-state-extractor-fti
+    kind: text
+    source_path: fti/story-state-extractor.md.j2
+    output_contract_ref: StoryStateExtractorOutput
     status: active
 packs:
   - name: context-v2
@@ -66,5 +79,8 @@ packs:
       context.story_generator.csi: context-v2/story-generator-csi
       context.story_generator.rc: context-v2/story-generator-rc
       context.story_generator.fti: context-v2/story-generator-fti
+      context.story_state_extractor.csi: context-v2/story-state-extractor-csi
+      context.story_state_extractor.rc: context-v2/story-state-extractor-rc
+      context.story_state_extractor.fti: context-v2/story-state-extractor-fti
 resolver:
   default_pack: context-v2

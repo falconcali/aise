@@ -33,10 +33,9 @@ type StoryInstanceRow = (
     String,
     String,
     String,
-    String,
 );
 type StoryPackRow = (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>);
-type InstanceProjectionLengths = (String, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64);
+type InstanceProjectionLengths = (String, i64, i64, i64, i64, i64, i64, i64, i64, i64);
 type PackProjectionLengths = (i64, i64, i64, i64, i64);
 
 pub(crate) async fn load_story_snapshot(
@@ -47,7 +46,7 @@ pub(crate) async fn load_story_snapshot(
     let mut tx = pool.begin().await.map_err(SqliteStoreError::from)?;
     let instance_lengths: Option<InstanceProjectionLengths> = sqlx::query_as(
         "SELECT i.pack_id, length(i.settings_json), length(i.bindings_json), length(i.characters_json), \
-                length(i.relationships_json), length(i.current_perceptions_json), length(i.narrative_state_json), \
+                length(i.relationships_json), length(i.narrative_state_json), \
                 length(i.condition_state_json), length(s.current_scene), length(s.story_summary), \
                 length(s.active_constraints) \
          FROM stories s INNER JOIN story_instances i ON i.story_id = s.id WHERE s.id = ?",
@@ -62,7 +61,6 @@ pub(crate) async fn load_story_snapshot(
         bindings_len,
         characters_len,
         relationships_len,
-        perceptions_len,
         narrative_state_len,
         condition_state_len,
         scene_len,
@@ -91,11 +89,6 @@ pub(crate) async fn load_story_snapshot(
         relationships_len,
         projection_limit(limits.max_relationships, limits.max_character_bytes, 1024)?,
         "relationships_json",
-    )?;
-    ensure_projection_length(
-        perceptions_len,
-        projection_limit(limits.max_current_perceptions, limits.max_perception_bytes, 1024)?,
-        "current_perceptions_json",
     )?;
     ensure_projection_length(
         narrative_state_len,
@@ -183,7 +176,7 @@ pub(crate) async fn load_story_snapshot(
     )?;
     let row: Option<StoryInstanceRow> = sqlx::query_as(
         "SELECT s.revision, i.pack_id, i.settings_json, i.bindings_json, i.characters_json, \
-                i.relationships_json, i.current_perceptions_json, i.narrative_state_json, \
+                i.relationships_json, i.narrative_state_json, \
                 i.condition_state_json, s.current_scene, s.story_summary, s.active_constraints \
          FROM stories s \
          INNER JOIN story_instances i ON i.story_id = s.id \
@@ -200,7 +193,6 @@ pub(crate) async fn load_story_snapshot(
         bindings_json,
         characters_json,
         relationships_json,
-        current_perceptions_json,
         narrative_state_json,
         condition_state_json,
         current_scene_json,
@@ -276,10 +268,6 @@ pub(crate) async fn load_story_snapshot(
     }
     let relationships: Vec<RelationshipState> =
         serde_json::from_str(&relationships_json).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-        })?;
-    let current_perceptions =
-        serde_json::from_str(&current_perceptions_json).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
         })?;
     if relationships.len() > limits.max_relationships {
@@ -461,7 +449,6 @@ pub(crate) async fn load_story_snapshot(
         character_states,
         current_scene,
         relationships,
-        current_perceptions,
         narrative_definition,
         narrative_state,
         condition_state,

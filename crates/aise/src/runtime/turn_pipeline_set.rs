@@ -8,6 +8,7 @@ pub struct TurnPipelineSet {
     retrieval: Box<dyn TurnExecutionPipeline>,
     character_think: Box<dyn TurnExecutionPipeline>,
     story_generator: Box<dyn TurnExecutionPipeline>,
+    story_state_extractor: Box<dyn TurnExecutionPipeline>,
     validation: Box<dyn TurnExecutionPipeline>,
     story_repairer: Box<dyn TurnExecutionPipeline>,
     committer: Box<dyn TurnExecutionPipeline>,
@@ -42,6 +43,10 @@ impl TurnPipelineSet {
         self.story_generator.as_ref()
     }
 
+    pub fn story_state_extractor(&self) -> &dyn TurnExecutionPipeline {
+        self.story_state_extractor.as_ref()
+    }
+
     pub fn validation(&self) -> &dyn TurnExecutionPipeline {
         self.validation.as_ref()
     }
@@ -63,6 +68,7 @@ pub struct TurnPipelineSetBuilder {
     retrieval: Option<Box<dyn TurnExecutionPipeline>>,
     character_think: Option<Box<dyn TurnExecutionPipeline>>,
     story_generator: Option<Box<dyn TurnExecutionPipeline>>,
+    story_state_extractor: Option<Box<dyn TurnExecutionPipeline>>,
     validation: Option<Box<dyn TurnExecutionPipeline>>,
     story_repairer: Option<Box<dyn TurnExecutionPipeline>>,
     committer: Option<Box<dyn TurnExecutionPipeline>>,
@@ -99,6 +105,11 @@ impl TurnPipelineSetBuilder {
         self
     }
 
+    pub fn story_state_extractor(mut self, pipeline: Box<dyn TurnExecutionPipeline>) -> Self {
+        self.story_state_extractor = Some(pipeline);
+        self
+    }
+
     pub fn validation(mut self, pipeline: Box<dyn TurnExecutionPipeline>) -> Self {
         self.validation = Some(pipeline);
         self
@@ -121,6 +132,11 @@ impl TurnPipelineSetBuilder {
         let retrieval = bind("retrieval", self.retrieval, TurnStage::ContextRetrieval)?;
         let character_think = bind("character_think", self.character_think, TurnStage::CharacterThink)?;
         let story_generator = bind("story_generator", self.story_generator, TurnStage::StoryGenerator)?;
+        let story_state_extractor = bind(
+            "story_state_extractor",
+            self.story_state_extractor,
+            TurnStage::StoryStateExtractor,
+        )?;
         let validation = bind("validation", self.validation, TurnStage::Validation)?;
         let story_repairer = bind("story_repairer", self.story_repairer, TurnStage::StoryRepairer)?;
         let committer = bind("committer", self.committer, TurnStage::TurnCommitter)?;
@@ -131,6 +147,7 @@ impl TurnPipelineSetBuilder {
             retrieval,
             character_think,
             story_generator,
+            story_state_extractor,
             validation,
             story_repairer,
             committer,

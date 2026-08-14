@@ -76,10 +76,10 @@ fn story_generator_assets_have_required_rule_counts() {
     let csi = include_str!("../../../assets/prompts/context-v2/csi/story-generator.md.j2");
     let fti = include_str!("../../../assets/prompts/context-v2/fti/story-generator.md.j2");
 
-    assert_eq!(section_item_count(csi, "## MUST", "## SHOULD"), 10);
+    assert_eq!(section_item_count(csi, "## MUST", "## SHOULD"), 9);
     assert_eq!(section_item_count(csi, "## SHOULD", "## NEVER"), 3);
     assert_eq!(section_item_count(csi, "## NEVER", "# Runtime Data Boundary"), 5);
-    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 6);
+    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 5);
     assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
     assert!(!fti.contains("## SHOULD"));
 }
@@ -141,28 +141,14 @@ fn runtime_projection_contains_only_allowlisted_semantic_sections() {
 }
 
 #[test]
-fn story_proposal_schema_is_closed_and_complete() {
-    let schema = StoryProposalOutput::json_schema(8, 1024, 8192);
+fn story_generator_schema_is_closed_and_complete() {
+    let schema = StoryGeneratorOutput::json_schema(8192);
     let required = schema["required"].as_array().unwrap();
 
     assert_eq!(schema["additionalProperties"], false);
-    assert_eq!(required.len(), 8);
+    assert_eq!(required.len(), 1);
     assert_eq!(schema["properties"]["story_text"]["minLength"], 1);
-    assert_eq!(schema["properties"]["events"]["maxItems"], 8);
-    assert_eq!(schema["properties"]["scene_change"]["additionalProperties"], false);
-    assert_eq!(
-        schema["properties"]["knowledge_changes"]["items"]["oneOf"][0]["properties"]["topics"]["items"]["maxLength"],
-        1024
-    );
-    assert_eq!(
-        schema["properties"]["relationship_changes"]["items"]["properties"]["kind"]["maxLength"],
-        1024
-    );
-    assert_eq!(
-        schema["properties"]["knowledge_changes"]["items"]["oneOf"][0]["properties"]["evidence"]["items"]["oneOf"][1]["required"]
-            [0],
-        "proposed_event"
-    );
+    assert_eq!(schema["properties"]["story_text"]["maxLength"], 8192);
 }
 
 fn section_item_count(text: &str, start: &str, end: &str) -> usize {

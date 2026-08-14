@@ -1,7 +1,6 @@
 pub use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{PackId, Sha256Digest};
-use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{CharacterId, EventId, FactId, MemoryId, RumorId, StoryRevision, TurnId};
+use crate::domain::ids::{FactId, MemoryId, RumorId, TurnId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -23,7 +22,7 @@ pub enum KnowledgeKind {
 #[serde(rename_all = "snake_case")]
 pub enum KnowledgeSource {
     Seed { pack_id: PackId, pack_digest: Sha256Digest },
-    CommittedTurn { turn_id: TurnId, event_id: Option<EventId> },
+    CommittedTurn { turn_id: TurnId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -42,12 +41,4 @@ impl KnowledgeSourceId {
             Self::Memory(id) => id.as_str(),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CurrentPerception {
-    pub character_id: CharacterId,
-    pub source_event_id: EventId,
-    pub content: BoundedText,
-    pub story_revision: StoryRevision,
 }

@@ -75,13 +75,14 @@ max_constraints = 16
 max_constraint_bytes = 512
 max_characters = 16
 max_character_bytes = 2048
-max_perception_bytes = 512
 max_recent_segments = 20
 max_recent_segment_bytes = 8192
 max_recent_segment_tokens = 2048
 max_plan_bytes = 4096
 max_character_thought_bytes = 1024
-max_proposal_bytes = 32768
+max_story_text_bytes = 16384
+max_state_extraction_bytes = 32768
+max_knowledge_change_bytes = 4096
 max_validation_issue_bytes = 500
 max_trace_field_bytes = 2048
 
@@ -96,7 +97,6 @@ max_total_output_bytes = 1024
 max_scene_characters = 8
 max_character_index = 16
 max_relationships = 64
-max_current_perceptions = 32
 max_condition_event_keys = 256
 max_condition_fact_values = 256
 max_entity_catalog = 256
@@ -124,6 +124,19 @@ max_tokens_per_audience = 2048
 max_total_items = 20
 max_total_tokens = 4096
 max_item_bytes = 4096
+
+[aise.state_extractor]
+max_context_tokens = 4096
+max_output_tokens = 2048
+max_character_states = 16
+max_relationship_states = 64
+max_knowledge_changes = 64
+max_goals_per_character = 16
+max_attributes_per_character = 64
+max_entities_per_knowledge = 16
+max_topics_per_knowledge = 16
+max_knowledge_context_items = 128
+max_knowledge_context_tokens = 2048
 
 [aise.prompt.source]
 kind = "packaged"

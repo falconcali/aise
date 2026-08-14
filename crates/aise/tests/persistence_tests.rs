@@ -2,7 +2,7 @@ use aise::config::{AssetLimitsConfig, ContextPreparationConfig, TurnContentLimit
 use aise::domain::StorySequence;
 use aise::domain::asset::ids::{PlayerId, StoryRoleKey};
 use aise::domain::ids::{StoryId, StoryRevision, TurnId};
-use aise::domain::narrative::{StorySummary, StoryTurn};
+use aise::domain::narrative::StoryTurn;
 use aise::domain::story_instance::snapshot::NarrativeConditionStateView;
 use aise::domain::turn::SnapshotLimits;
 use aise::persistence::asset_store::AssetStore;
@@ -157,12 +157,18 @@ fn commit_spec(story_id: &StoryId, base: StoryRevision, sequence: u64, key: &str
         expected_graph_revision: 0,
         changes: ValidatedChangeSet::new(ValidatedChangeSetParts {
             story_text: aise::domain::asset::validation::BoundedText::try_new(story_text, "story_text", 1024).unwrap(),
-            events: Vec::new(),
             character_changes: Vec::new(),
             relationship_changes: Vec::new(),
-            knowledge_additions: Vec::new(),
-            current_perceptions: Vec::new(),
-            scene_change: StateChange::Unchanged,
+            knowledge_mutations: Vec::new(),
+            current_scene: aise::domain::story_instance::state::CurrentScene {
+                scene_key: aise::domain::asset::ids::SceneKey::from("scene_1"),
+                location_key: aise::domain::asset::ids::LocationKey::from("village"),
+                time: aise::domain::asset::validation::BoundedText::try_new("morning", "time", 256).unwrap(),
+                description: aise::domain::asset::validation::BoundedText::try_new("scene", "description", 1024)
+                    .unwrap(),
+                present_character_ids: Vec::new(),
+            },
+            narrative_events: Vec::new(),
             narrative_changes: Vec::new(),
             condition_state: NarrativeConditionStateView {
                 occurred_event_keys: BTreeSet::new(),
@@ -170,7 +176,6 @@ fn commit_spec(story_id: &StoryId, base: StoryRevision, sequence: u64, key: &str
                 fact_values: BTreeMap::new(),
             },
             constraint_change: StateChange::Unchanged,
-            summary_change: StateChange::Unchanged,
         })
         .unwrap(),
         idempotency_key: IdempotencyKey::try_new(key.to_string()).unwrap(),
@@ -229,39 +234,5 @@ async fn turn_commit_assigns_next_story_sequence() {
         .commit_turn(&commit_spec(&story_id, StoryRevision::new(1), 1, "k2", "t2"))
         .await;
     assert!(second.is_ok(), "store assigns sequence independently of the proposal");
-    let _ = std::fs::remove_file(&db);
-}
-
-#[tokio::test]
-async fn summary_change_updates_continuity_boundary() {
-    let (store, story_id, db) = create_instance("summary").await;
-    let mut spec = commit_spec(&story_id, StoryRevision::new(0), 1, "k1", "t1");
-    spec.changes = ValidatedChangeSet::new(ValidatedChangeSetParts {
-        story_text: aise::domain::asset::validation::BoundedText::try_new("story t1", "story_text", 1024).unwrap(),
-        events: Vec::new(),
-        character_changes: Vec::new(),
-        relationship_changes: Vec::new(),
-        knowledge_additions: Vec::new(),
-        current_perceptions: Vec::new(),
-        scene_change: StateChange::Unchanged,
-        narrative_changes: Vec::new(),
-        condition_state: NarrativeConditionStateView {
-            occurred_event_keys: BTreeSet::new(),
-            player_action_event_keys: BTreeSet::new(),
-            fact_values: BTreeMap::new(),
-        },
-        constraint_change: StateChange::Unchanged,
-        summary_change: StateChange::Replace(StorySummary {
-            text: aise::domain::asset::validation::BoundedText::try_new("past", "summary", 1024).unwrap(),
-            summarized_through: Some(StorySequence::try_new(1).unwrap()),
-        }),
-    })
-    .unwrap();
-    store.commit_turn(&spec).await.expect("commit");
-    let snapshot = store.load_story_snapshot(&story_id, limits()).await.expect("load");
-    assert_eq!(
-        snapshot.story_continuity().summary().summarized_through,
-        Some(StorySequence::try_new(1).unwrap())
-    );
     let _ = std::fs::remove_file(&db);
 }

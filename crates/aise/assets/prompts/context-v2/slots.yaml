@@ -19,7 +19,7 @@ slots:
       - { name: relevant_writer_knowledge, var_type: string, required: true }
       - { name: character_thoughts, var_type: string, required: true }
       - { name: player_input, var_type: string, required: true }
-      - { name: previous_proposal, var_type: string, required: true }
+      - { name: previous_story_text, var_type: string, required: true }
       - { name: validation_issues, var_type: string, required: true }
   - slot_id: context.story_repairer.fti
     allowed_kinds: [text]
@@ -94,6 +94,25 @@ slots:
       - { name: character_thoughts, var_type: string, required: true }
       - { name: player_input, var_type: string, required: true }
   - slot_id: context.story_generator.fti
+    allowed_kinds: [text]
+    required: false
+    vars:
+      - { name: output_schema, var_type: string, required: true }
+  - slot_id: context.story_state_extractor.csi
+    allowed_kinds: [text]
+    required: false
+  - slot_id: context.story_state_extractor.rc
+    allowed_kinds: [text]
+    required: false
+    vars:
+      - { name: story_text, var_type: string, required: true }
+      - { name: current_scene, var_type: string, required: true }
+      - { name: characters, var_type: string, required: true }
+      - { name: relationships, var_type: string, required: true }
+      - { name: modifiable_knowledge, var_type: string, required: true }
+      - { name: previous_extraction, var_type: string, required: true }
+      - { name: validation_issues, var_type: string, required: true }
+  - slot_id: context.story_state_extractor.fti
     allowed_kinds: [text]
     required: false
     vars:

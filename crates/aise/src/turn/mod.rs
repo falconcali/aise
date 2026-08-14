@@ -9,6 +9,9 @@ pub mod turn_validation;
 
 mod snapshot_limits;
 
+pub use turn_budget::CorrectionKind;
 pub use turn_context::TurnExecutionContext;
 pub use turn_error::{TurnExecutionError, TurnFailureKind, TurnTerminalKind};
-pub use turn_validation::{ValidatedChangeSet, ValidationDecision, ValidationIssue, ValidationResult};
+pub use turn_validation::{
+    ValidatedChangeSet, ValidationDecision, ValidationIssue, ValidationIssueClass, ValidationRemedy, ValidationResult,
+};

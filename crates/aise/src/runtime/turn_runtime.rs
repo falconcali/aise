@@ -1,11 +1,11 @@
 use crate::runtime::turn_pipeline_set::TurnPipelineSet;
+use crate::turn::turn_budget::CorrectionKind;
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::TurnPhase;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_event::{TurnEvent, TurnEventSink};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::turn::turn_trace::{PipelineData, SpanPayload};
-use crate::turn::turn_validation::ValidationDecision;
 use std::time::Instant;
 
 pub struct TurnRuntime {
@@ -42,37 +42,37 @@ impl TurnRuntime {
         self.execute(self.pipeline_set.story_generator(), ctx, sink).await?;
 
         loop {
-            self.execute(self.pipeline_set.validation(), ctx, sink).await?;
-            let decision = ctx.validation_decision()?;
-            let issue_codes = ctx
-                .validation()
-                .map(|result| result.issues().iter().map(|issue| issue.code).collect::<Vec<_>>())
-                .unwrap_or_default();
-            let _ = sink.emit(TurnEvent::ValidationCompleted {
-                turn_id: ctx.turn_id().clone(),
-                attempt: ctx.proposal_revision().saturating_add(1),
-                decision,
-                issue_codes,
-            });
-            match decision {
-                ValidationDecision::Pass => break,
-                ValidationDecision::Repair => {
-                    ctx.consume_repair_round()?;
+            if matches!(ctx.phase(), TurnPhase::StoryReady | TurnPhase::StateReextractionRequired) {
+                self.execute(self.pipeline_set.story_state_extractor(), ctx, sink).await?;
+            }
+            if ctx.phase() == TurnPhase::CandidateReady {
+                self.execute(self.pipeline_set.validation(), ctx, sink).await?;
+                let decision = ctx.validation_decision()?;
+                let issue_codes = ctx
+                    .validation()
+                    .map(|result| result.issues().iter().map(|issue| issue.code).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                let _ = sink.emit(TurnEvent::ValidationCompleted {
+                    turn_id: ctx.turn_id().clone(),
+                    attempt: ctx.budget().correction_rounds().saturating_add(1),
+                    decision,
+                    issue_codes,
+                });
+            }
+            match ctx.phase() {
+                TurnPhase::ReadyToCommit => break,
+                TurnPhase::Failed => {
+                    return Err(ctx.validation_rejected_error().unwrap_or_else(|error| error));
+                }
+                TurnPhase::StoryRepairRequired => {
+                    ctx.consume_correction_round(CorrectionKind::StoryRepair)?;
                     self.execute(self.pipeline_set.story_repairer(), ctx, sink).await?;
                 }
-                ValidationDecision::Reject => {
-                    let detail = ctx
-                        .validation()
-                        .map(|result| {
-                            result
-                                .issues()
-                                .iter()
-                                .map(|issue| format!("{}: {}", issue.code, issue.message))
-                                .collect::<Vec<_>>()
-                                .join("; ")
-                        })
-                        .unwrap_or_else(|| "validation rejected".into());
-                    return Err(TurnExecutionError::validation_rejected(detail));
+                TurnPhase::StateReextractionRequired => {
+                    ctx.consume_correction_round(CorrectionKind::StateReextraction)?;
+                }
+                other => {
+                    return Err(invariant(format!("unexpected turn phase in correction loop: {other:?}")));
                 }
             }
         }
@@ -90,10 +90,10 @@ impl TurnRuntime {
         sink: &dyn TurnEventSink,
     ) -> Result<(), TurnExecutionError> {
         let stage = pipeline.stage();
-        if let Some(entry) = stage_entry_phase(stage) {
-            if ctx.phase() != entry {
+        if let Some(entries) = stage_entry_phases(stage) {
+            if !entries.contains(&ctx.phase()) {
                 return Err(invariant(format!(
-                    "pipeline {} entered with unexpected phase {:?}, expected {entry:?}",
+                    "pipeline {} entered with unexpected phase {:?}, expected one of {entries:?}",
                     stage.as_str(),
                     ctx.phase()
                 )));
@@ -139,17 +139,18 @@ impl TurnRuntime {
     }
 }
 
-fn stage_entry_phase(stage: TurnStage) -> Option<TurnPhase> {
+fn stage_entry_phases(stage: TurnStage) -> Option<&'static [TurnPhase]> {
     match stage {
-        TurnStage::TurnInitializer => Some(TurnPhase::Created),
-        TurnStage::BaselineBuilder => Some(TurnPhase::Initialized),
-        TurnStage::WriterPlanner => Some(TurnPhase::Prepared),
-        TurnStage::ContextRetrieval => Some(TurnPhase::Planned),
-        TurnStage::CharacterThink => Some(TurnPhase::Planned),
-        TurnStage::StoryGenerator => Some(TurnPhase::ContextReady),
-        TurnStage::Validation => Some(TurnPhase::ProposalReady),
-        TurnStage::StoryRepairer => Some(TurnPhase::RepairRequired),
-        TurnStage::TurnCommitter => Some(TurnPhase::ReadyToCommit),
+        TurnStage::TurnInitializer => Some(&[TurnPhase::Created]),
+        TurnStage::BaselineBuilder => Some(&[TurnPhase::Initialized]),
+        TurnStage::WriterPlanner => Some(&[TurnPhase::Prepared]),
+        TurnStage::ContextRetrieval => Some(&[TurnPhase::Planned]),
+        TurnStage::CharacterThink => Some(&[TurnPhase::Planned]),
+        TurnStage::StoryGenerator => Some(&[TurnPhase::ContextReady]),
+        TurnStage::StoryStateExtractor => Some(&[TurnPhase::StoryReady, TurnPhase::StateReextractionRequired]),
+        TurnStage::Validation => Some(&[TurnPhase::CandidateReady]),
+        TurnStage::StoryRepairer => Some(&[TurnPhase::StoryRepairRequired]),
+        TurnStage::TurnCommitter => Some(&[TurnPhase::ReadyToCommit]),
         TurnStage::Context => None,
     }
 }
@@ -161,9 +162,15 @@ fn stage_exit_phases(stage: TurnStage) -> Option<&'static [TurnPhase]> {
         TurnStage::WriterPlanner => Some(&[TurnPhase::Planned]),
         TurnStage::ContextRetrieval => None,
         TurnStage::CharacterThink => None,
-        TurnStage::StoryGenerator => Some(&[TurnPhase::ProposalReady]),
-        TurnStage::Validation => Some(&[TurnPhase::RepairRequired, TurnPhase::ReadyToCommit, TurnPhase::Failed]),
-        TurnStage::StoryRepairer => Some(&[TurnPhase::ProposalReady]),
+        TurnStage::StoryGenerator => Some(&[TurnPhase::StoryReady]),
+        TurnStage::StoryStateExtractor => Some(&[TurnPhase::CandidateReady, TurnPhase::StateReextractionRequired]),
+        TurnStage::Validation => Some(&[
+            TurnPhase::ReadyToCommit,
+            TurnPhase::StoryRepairRequired,
+            TurnPhase::StateReextractionRequired,
+            TurnPhase::Failed,
+        ]),
+        TurnStage::StoryRepairer => Some(&[TurnPhase::StoryReady]),
         TurnStage::TurnCommitter => Some(&[TurnPhase::Committed]),
         TurnStage::Context => None,
     }

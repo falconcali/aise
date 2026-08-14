@@ -9,6 +9,7 @@ mod llm;
 mod planner;
 mod prompt;
 mod retrieval;
+mod state_extractor;
 mod storage;
 mod turn;
 
@@ -23,5 +24,6 @@ pub use llm::{LlmConfig, LlmProtocolLimitsConfig, ThinkingMode, TraceContentPoli
 pub use planner::PlannerConfig;
 pub use prompt::{PromptCatalogSourceConfig, PromptModuleConfig};
 pub use retrieval::RetrievalConfig;
+pub use state_extractor::StateExtractorConfig;
 pub use storage::StorageConfig;
 pub use turn::TurnConfig;

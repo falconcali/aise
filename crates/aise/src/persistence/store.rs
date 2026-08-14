@@ -74,7 +74,6 @@ pub struct MaterializedStoryInstanceSpec {
     pub relationships: Vec<crate::domain::story_instance::state::RelationshipState>,
     pub knowledge: Vec<crate::domain::knowledge::KnowledgeEntry>,
     pub scene: CurrentScene,
-    pub current_perceptions: Vec<crate::domain::knowledge::CurrentPerception>,
     pub opening: crate::domain::asset::validation::BoundedText,
     pub narrative_state: crate::domain::narrative_graph::state::NarrativeRuntimeState,
     pub condition_state: crate::domain::story_instance::snapshot::NarrativeConditionStateView,

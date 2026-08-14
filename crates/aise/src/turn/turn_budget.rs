@@ -1,6 +1,22 @@
-use crate::config::{RetrievalConfig, TurnConfig, TurnContentLimitsConfig};
+use crate::config::{RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
+use crate::domain::turn::StoryStateExtractionLimits;
 use crate::turn::turn_contract::{LlmBudgetReservation, LlmCallId, LlmCallUsage};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CorrectionKind {
+    StoryRepair,
+    StateReextraction,
+}
+
+impl CorrectionKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CorrectionKind::StoryRepair => "story_repair",
+            CorrectionKind::StateReextraction => "state_reextraction",
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct TurnBudget {
@@ -26,14 +42,26 @@ pub struct TurnBudgetLimits {
     pub max_character_thoughts: usize,
     pub max_character_thought_bytes: usize,
     pub max_plan_bytes: usize,
-    pub max_proposal_bytes: usize,
+    pub max_story_text_bytes: usize,
+    pub max_state_extraction_bytes: usize,
+    pub max_knowledge_change_bytes: usize,
     pub max_validation_issues: usize,
     pub max_validation_issue_bytes: usize,
     pub max_trace_spans: usize,
+    pub state_extraction: StoryStateExtractionLimits,
+    pub state_extractor_max_context_tokens: u64,
+    pub state_extractor_max_output_tokens: u64,
+    pub state_extractor_max_knowledge_context_items: usize,
+    pub state_extractor_max_knowledge_context_tokens: u64,
 }
 
 impl TurnBudgetLimits {
-    pub fn from(turn: &TurnConfig, content: &TurnContentLimitsConfig, retrieval: &RetrievalConfig) -> Self {
+    pub fn from(
+        turn: &TurnConfig,
+        content: &TurnContentLimitsConfig,
+        retrieval: &RetrievalConfig,
+        state_extractor: &StateExtractorConfig,
+    ) -> Self {
         Self {
             max_repair_rounds: turn.max_repair_rounds,
             max_llm_calls: turn.max_llm_calls,
@@ -51,10 +79,27 @@ impl TurnBudgetLimits {
             max_character_thoughts: turn.max_character_thoughts,
             max_character_thought_bytes: content.max_character_thought_bytes,
             max_plan_bytes: content.max_plan_bytes,
-            max_proposal_bytes: content.max_proposal_bytes,
+            max_story_text_bytes: content.max_story_text_bytes,
+            max_state_extraction_bytes: content.max_state_extraction_bytes,
+            max_knowledge_change_bytes: content.max_knowledge_change_bytes,
             max_validation_issues: turn.max_validation_issues,
             max_validation_issue_bytes: content.max_validation_issue_bytes,
             max_trace_spans: turn.max_trace_spans,
+            state_extraction: StoryStateExtractionLimits {
+                max_character_states: state_extractor.max_character_states,
+                max_relationship_states: state_extractor.max_relationship_states,
+                max_knowledge_changes: state_extractor.max_knowledge_changes,
+                max_goals_per_character: state_extractor.max_goals_per_character,
+                max_attributes_per_character: state_extractor.max_attributes_per_character,
+                max_entities_per_knowledge: state_extractor.max_entities_per_knowledge,
+                max_topics_per_knowledge: state_extractor.max_topics_per_knowledge,
+                max_item_bytes: content.max_character_bytes,
+                max_knowledge_change_bytes: content.max_knowledge_change_bytes,
+            },
+            state_extractor_max_context_tokens: state_extractor.max_context_tokens,
+            state_extractor_max_output_tokens: state_extractor.max_output_tokens,
+            state_extractor_max_knowledge_context_items: state_extractor.max_knowledge_context_items,
+            state_extractor_max_knowledge_context_tokens: state_extractor.max_knowledge_context_tokens,
         }
     }
 }
@@ -65,7 +110,9 @@ struct TurnBudgetUsage {
     input_tokens: u64,
     output_tokens: u64,
     total_tokens: u64,
-    repair_rounds: u32,
+    correction_rounds: u32,
+    story_repair_rounds: u32,
+    state_reextraction_rounds: u32,
 }
 
 impl TurnBudget {
@@ -73,6 +120,7 @@ impl TurnBudget {
         turn: &TurnConfig,
         content: &TurnContentLimitsConfig,
         retrieval: &RetrievalConfig,
+        state_extractor: &StateExtractorConfig,
     ) -> Result<Self, TurnExecutionError> {
         turn.validate().map_err(|error| {
             TurnExecutionError::new(TurnFailureKind::InvalidRequest, "invalid_config", None, error.to_string())
@@ -83,8 +131,11 @@ impl TurnBudget {
         retrieval.validate().map_err(|error| {
             TurnExecutionError::new(TurnFailureKind::InvalidRequest, "invalid_config", None, error.to_string())
         })?;
+        state_extractor.validate().map_err(|error| {
+            TurnExecutionError::new(TurnFailureKind::InvalidRequest, "invalid_config", None, error.to_string())
+        })?;
         Ok(Self {
-            limits: TurnBudgetLimits::from(turn, content, retrieval),
+            limits: TurnBudgetLimits::from(turn, content, retrieval, state_extractor),
             usage: TurnBudgetUsage::default(),
         })
     }
@@ -137,8 +188,36 @@ impl TurnBudget {
         self.limits.max_plan_bytes
     }
 
-    pub fn max_proposal_bytes(&self) -> usize {
-        self.limits.max_proposal_bytes
+    pub fn max_story_text_bytes(&self) -> usize {
+        self.limits.max_story_text_bytes
+    }
+
+    pub fn max_state_extraction_bytes(&self) -> usize {
+        self.limits.max_state_extraction_bytes
+    }
+
+    pub fn max_knowledge_change_bytes(&self) -> usize {
+        self.limits.max_knowledge_change_bytes
+    }
+
+    pub fn state_extraction_limits(&self) -> StoryStateExtractionLimits {
+        self.limits.state_extraction
+    }
+
+    pub fn state_extractor_max_context_tokens(&self) -> u64 {
+        self.limits.state_extractor_max_context_tokens
+    }
+
+    pub fn state_extractor_max_output_tokens(&self) -> u64 {
+        self.limits.state_extractor_max_output_tokens
+    }
+
+    pub fn state_extractor_max_knowledge_context_items(&self) -> usize {
+        self.limits.state_extractor_max_knowledge_context_items
+    }
+
+    pub fn state_extractor_max_knowledge_context_tokens(&self) -> u64 {
+        self.limits.state_extractor_max_knowledge_context_tokens
     }
 
     pub fn max_validation_issues(&self) -> usize {
@@ -173,20 +252,32 @@ impl TurnBudget {
         self.usage.llm_calls
     }
 
-    pub fn repair_rounds(&self) -> u32 {
-        self.usage.repair_rounds
+    pub fn correction_rounds(&self) -> u32 {
+        self.usage.correction_rounds
     }
 
-    pub fn consume_repair_round(&mut self) -> Result<(), TurnExecutionError> {
-        if self.usage.repair_rounds >= self.limits.max_repair_rounds {
+    pub fn story_repair_rounds(&self) -> u32 {
+        self.usage.story_repair_rounds
+    }
+
+    pub fn state_reextraction_rounds(&self) -> u32 {
+        self.usage.state_reextraction_rounds
+    }
+
+    pub fn consume_correction_round(&mut self, kind: CorrectionKind) -> Result<(), TurnExecutionError> {
+        if self.usage.correction_rounds >= self.limits.max_repair_rounds {
             return Err(TurnExecutionError::new(
                 TurnFailureKind::ValidationBudgetExhausted,
                 "validation_budget_exhausted",
                 None,
-                format!("validation failed after {} repair rounds", self.usage.repair_rounds),
+                format!("validation failed after {} correction rounds", self.usage.correction_rounds),
             ));
         }
-        self.usage.repair_rounds += 1;
+        self.usage.correction_rounds += 1;
+        match kind {
+            CorrectionKind::StoryRepair => self.usage.story_repair_rounds += 1,
+            CorrectionKind::StateReextraction => self.usage.state_reextraction_rounds += 1,
+        }
         Ok(())
     }
 

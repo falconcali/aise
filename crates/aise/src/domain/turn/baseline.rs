@@ -26,8 +26,6 @@ pub struct SnapshotLimits {
     pub max_scene_bytes: usize,
     pub max_scene_characters: usize,
     pub max_relationships: usize,
-    pub max_current_perceptions: usize,
-    pub max_perception_bytes: usize,
     pub max_narrative_nodes: usize,
     pub max_condition_event_keys: usize,
     pub max_condition_fact_values: usize,

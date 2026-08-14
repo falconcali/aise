@@ -161,7 +161,12 @@ impl AiseEngine {
             return self.finalize(None, Err(failure), sink, permit).await;
         }
 
-        let budget = match TurnBudget::from_config(&self.config.turn, &self.config.content, &self.config.retrieval) {
+        let budget = match TurnBudget::from_config(
+            &self.config.turn,
+            &self.config.content,
+            &self.config.retrieval,
+            &self.config.state_extractor,
+        ) {
             Ok(budget) => budget,
             Err(error) => return self.finalize(None, Err(error), sink, permit).await,
         };

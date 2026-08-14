@@ -125,10 +125,6 @@ impl Store for SqliteStore {
         let settings_json = serde_json::to_string(&spec.settings).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
         })?;
-        let current_perceptions_json =
-            serde_json::to_string(&spec.current_perceptions).map_err(|_| StoreError::Serialization {
-                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-            })?;
         let condition_state_json =
             serde_json::to_string(&spec.condition_state).map_err(|_| StoreError::Serialization {
                 kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
@@ -162,8 +158,8 @@ impl Store for SqliteStore {
         sqlx::query(
             "INSERT INTO story_instances \
              (story_id, pack_id, settings_json, bindings_json, characters_json, relationships_json, \
-              current_perceptions_json, narrative_state_json, condition_state_json, created_at_ms) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              narrative_state_json, condition_state_json, created_at_ms) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(spec.story_id.as_str())
         .bind(spec.pack.pack_id.as_str())
@@ -171,7 +167,6 @@ impl Store for SqliteStore {
         .bind(&bindings_json)
         .bind(&characters_json)
         .bind(&relationships_json)
-        .bind(&current_perceptions_json)
         .bind(&narrative_state_json)
         .bind(&condition_state_json)
         .bind(spec.created_at_ms)
@@ -193,7 +188,6 @@ impl Store for SqliteStore {
                     content: entry.content().as_str(),
                     salience: entry.salience(),
                     source: entry.source(),
-                    source_revision: entry.source_revision().get(),
                     payload_json,
                     entities: entry.entities(),
                     topics: entry.topics(),
@@ -445,7 +439,7 @@ impl Store for SqliteStore {
         .await
         .map_err(SqliteStoreError::from)?;
 
-        for (seq, event) in commit.changes.events().iter().enumerate() {
+        for (seq, event) in commit.changes.narrative_events().iter().enumerate() {
             if event.turn_id != commit.turn.id {
                 return Err(StoreError::ConstraintViolation {
                     constraint: "event_turn_reference".to_owned(),
@@ -465,10 +459,11 @@ impl Store for SqliteStore {
                 .map_err(SqliteStoreError::from)?;
         }
 
-        if let StateChange::Replace(scene) = commit.changes.scene_change() {
-            let scene_json = serde_json::to_string(&scene).map_err(|_| StoreError::Serialization {
-                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-            })?;
+        {
+            let scene_json =
+                serde_json::to_string(commit.changes.current_scene()).map_err(|_| StoreError::Serialization {
+                    kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+                })?;
             sqlx::query("UPDATE stories SET current_scene = ? WHERE id = ?")
                 .bind(&scene_json)
                 .bind(commit.story_id.as_str())
@@ -489,49 +484,12 @@ impl Store for SqliteStore {
                 .map_err(SqliteStoreError::from)?;
         }
 
-        if let StateChange::Replace(summary) = commit.changes.summary_change() {
-            let summary_json = serde_json::to_string(&summary).map_err(|_| StoreError::Serialization {
-                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-            })?;
-            sqlx::query("UPDATE stories SET story_summary = ? WHERE id = ?")
-                .bind(&summary_json)
-                .bind(commit.story_id.as_str())
-                .execute(&mut *tx)
-                .await
-                .map_err(SqliteStoreError::from)?;
-        }
-
         for record in &commit.outbox {
             write_outbox(&mut tx, record).await?;
         }
 
-        for entry in commit.changes.knowledge_additions() {
-            if entry.source_revision().get() != committed_revision {
-                return Err(StoreError::ConstraintViolation {
-                    constraint: "knowledge_source_revision".to_owned(),
-                });
-            }
-            let source_id = entry.source_id();
-            let payload_json = serde_json::to_string(entry).map_err(|_| StoreError::Serialization {
-                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-            })?;
-            insert_knowledge_entry(
-                &mut tx,
-                KnowledgeEntryWrite {
-                    story_id: &commit.story_id,
-                    knowledge_kind: knowledge_kind_str(entry.kind()),
-                    source_id: source_id.as_str(),
-                    memory_owner: entry.memory_owner().map(CharacterId::as_str),
-                    content: entry.content().as_str(),
-                    salience: entry.salience(),
-                    source: entry.source(),
-                    source_revision: committed_revision,
-                    payload_json,
-                    entities: entry.entities(),
-                    topics: entry.topics(),
-                },
-            )
-            .await?;
+        for mutation in commit.changes.knowledge_mutations() {
+            apply_knowledge_mutation(&mut tx, &commit.story_id, mutation).await?;
         }
 
         let updated = sqlx::query("UPDATE stories SET revision = ? WHERE id = ? AND revision = ?")
@@ -603,10 +561,6 @@ async fn persist_instance_state(
     let relationships_json = serde_json::to_string(&relationships).map_err(|_| StoreError::Serialization {
         kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
     })?;
-    let perceptions_json =
-        serde_json::to_string(commit.changes.current_perceptions()).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-        })?;
     let narrative_state_json = serde_json::to_string(narrative_state).map_err(|_| StoreError::Serialization {
         kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
     })?;
@@ -615,12 +569,11 @@ async fn persist_instance_state(
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
         })?;
     sqlx::query(
-        "UPDATE story_instances SET characters_json = ?, relationships_json = ?, current_perceptions_json = ?, \
+        "UPDATE story_instances SET characters_json = ?, relationships_json = ?, \
          narrative_state_json = ?, condition_state_json = ? WHERE story_id = ?",
     )
     .bind(&characters_json)
     .bind(&relationships_json)
-    .bind(&perceptions_json)
     .bind(&narrative_state_json)
     .bind(&condition_state_json)
     .bind(commit.story_id.as_str())
@@ -646,7 +599,6 @@ struct KnowledgeEntryWrite<'a> {
     content: &'a str,
     salience: u8,
     source: &'a crate::domain::knowledge::KnowledgeSource,
-    source_revision: u64,
     payload_json: String,
     entities: &'a [crate::domain::asset::entity::KnowledgeEntity],
     topics: &'a [crate::domain::asset::ids::TopicKey],
@@ -661,8 +613,8 @@ async fn insert_knowledge_entry(
     })?;
     sqlx::query(
         "INSERT INTO knowledge_entries \
-         (story_id, source_id, knowledge_kind, memory_owner_character_id, content, salience, source_json, payload_json, source_revision) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         (story_id, source_id, knowledge_kind, memory_owner_character_id, content, salience, source_json, payload_json) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(entry.story_id.as_str())
     .bind(entry.source_id)
@@ -672,11 +624,29 @@ async fn insert_knowledge_entry(
     .bind(i64::from(entry.salience))
     .bind(&source_json)
     .bind(&entry.payload_json)
-    .bind(entry.source_revision as i64)
     .execute(&mut **tx)
     .await
     .map_err(SqliteStoreError::from)?;
-    for entity in entry.entities {
+    write_knowledge_entity_and_topic_rows(
+        tx,
+        entry.story_id,
+        entry.knowledge_kind,
+        entry.source_id,
+        entry.entities,
+        entry.topics,
+    )
+    .await
+}
+
+async fn write_knowledge_entity_and_topic_rows(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    story_id: &StoryId,
+    knowledge_kind: &str,
+    source_id: &str,
+    entities: &[crate::domain::asset::entity::KnowledgeEntity],
+    topics: &[crate::domain::asset::ids::TopicKey],
+) -> Result<(), StoreError> {
+    for entity in entities {
         let (entity_kind, entity_key) = match entity {
             crate::domain::asset::entity::KnowledgeEntity::World(key) => ("world", key.as_str().to_owned()),
             crate::domain::asset::entity::KnowledgeEntity::Role(key) => ("role", key.as_str().to_owned()),
@@ -692,28 +662,215 @@ async fn insert_knowledge_entry(
             "INSERT INTO knowledge_entry_entities \
              (story_id, knowledge_kind, source_id, entity_kind, entity_key) VALUES (?, ?, ?, ?, ?)",
         )
-        .bind(entry.story_id.as_str())
-        .bind(entry.knowledge_kind)
-        .bind(entry.source_id)
+        .bind(story_id.as_str())
+        .bind(knowledge_kind)
+        .bind(source_id)
         .bind(entity_kind)
         .bind(&entity_key)
         .execute(&mut **tx)
         .await
         .map_err(SqliteStoreError::from)?;
     }
-    for topic in entry.topics {
+    for topic in topics {
         sqlx::query(
             "INSERT INTO knowledge_entry_topics (story_id, knowledge_kind, source_id, topic_key) VALUES (?, ?, ?, ?)",
         )
-        .bind(entry.story_id.as_str())
-        .bind(entry.knowledge_kind)
-        .bind(entry.source_id)
+        .bind(story_id.as_str())
+        .bind(knowledge_kind)
+        .bind(source_id)
         .bind(topic.as_str())
         .execute(&mut **tx)
         .await
         .map_err(SqliteStoreError::from)?;
     }
     Ok(())
+}
+
+async fn apply_knowledge_mutation(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    story_id: &StoryId,
+    mutation: &crate::turn::turn_validation::ValidatedKnowledgeMutation,
+) -> Result<(), StoreError> {
+    use crate::turn::turn_validation::ValidatedKnowledgeOperation;
+    match &mutation.operation {
+        ValidatedKnowledgeOperation::Add(entry) => {
+            let source_id_value = entry.source_id();
+            let payload_json = serde_json::to_string(entry).map_err(|_| StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+            })?;
+            insert_knowledge_entry(
+                tx,
+                KnowledgeEntryWrite {
+                    story_id,
+                    knowledge_kind: knowledge_kind_str(entry.kind()),
+                    source_id: source_id_value.as_str(),
+                    memory_owner: entry.memory_owner().map(CharacterId::as_str),
+                    content: entry.content().as_str(),
+                    salience: entry.salience(),
+                    source: entry.source(),
+                    payload_json,
+                    entities: entry.entities(),
+                    topics: entry.topics(),
+                },
+            )
+            .await
+        }
+        ValidatedKnowledgeOperation::Update { target, value } => {
+            let knowledge_kind = knowledge_kind_str(value.kind());
+            let source_id_str = target.as_str().to_owned();
+            let existing_payload: Option<String> = sqlx::query_scalar(
+                "SELECT payload_json FROM knowledge_entries WHERE story_id = ? AND knowledge_kind = ? AND source_id = ?",
+            )
+            .bind(story_id.as_str())
+            .bind(knowledge_kind)
+            .bind(&source_id_str)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(SqliteStoreError::from)?;
+            let Some(existing_payload) = existing_payload else {
+                return Err(StoreError::ConstraintViolation {
+                    constraint: "knowledge_update_target_missing".to_owned(),
+                });
+            };
+            let existing: crate::domain::knowledge::KnowledgeEntry =
+                serde_json::from_str(&existing_payload).map_err(|_| StoreError::Serialization {
+                    kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+                })?;
+            let merged = merge_knowledge_update(existing, value.clone())?;
+            sqlx::query(
+                "DELETE FROM knowledge_entry_entities WHERE story_id = ? AND knowledge_kind = ? AND source_id = ?",
+            )
+            .bind(story_id.as_str())
+            .bind(knowledge_kind)
+            .bind(&source_id_str)
+            .execute(&mut **tx)
+            .await
+            .map_err(SqliteStoreError::from)?;
+            sqlx::query(
+                "DELETE FROM knowledge_entry_topics WHERE story_id = ? AND knowledge_kind = ? AND source_id = ?",
+            )
+            .bind(story_id.as_str())
+            .bind(knowledge_kind)
+            .bind(&source_id_str)
+            .execute(&mut **tx)
+            .await
+            .map_err(SqliteStoreError::from)?;
+            let payload_json = serde_json::to_string(&merged).map_err(|_| StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+            })?;
+            let source_json = serde_json::to_string(merged.source()).map_err(|_| StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+            })?;
+            let updated = sqlx::query(
+                "UPDATE knowledge_entries SET content = ?, salience = ?, source_json = ?, payload_json = ? \
+                 WHERE story_id = ? AND knowledge_kind = ? AND source_id = ?",
+            )
+            .bind(merged.content().as_str())
+            .bind(i64::from(merged.salience()))
+            .bind(&source_json)
+            .bind(&payload_json)
+            .bind(story_id.as_str())
+            .bind(knowledge_kind)
+            .bind(&source_id_str)
+            .execute(&mut **tx)
+            .await
+            .map_err(SqliteStoreError::from)?
+            .rows_affected();
+            if updated != 1 {
+                return Err(StoreError::ConstraintViolation {
+                    constraint: "knowledge_update_target_missing".to_owned(),
+                });
+            }
+            write_knowledge_entity_and_topic_rows(
+                tx,
+                story_id,
+                knowledge_kind,
+                &source_id_str,
+                merged.entities(),
+                merged.topics(),
+            )
+            .await
+        }
+        ValidatedKnowledgeOperation::Delete { target } => {
+            let (knowledge_kind, source_id_str) = match target {
+                crate::domain::turn::DeletableKnowledgeId::Rumor(id) => ("rumor", id.as_str().to_owned()),
+                crate::domain::turn::DeletableKnowledgeId::Memory(id) => ("memory", id.as_str().to_owned()),
+            };
+            let deleted = sqlx::query(
+                "DELETE FROM knowledge_entries WHERE story_id = ? AND knowledge_kind = ? AND source_id = ?",
+            )
+            .bind(story_id.as_str())
+            .bind(knowledge_kind)
+            .bind(&source_id_str)
+            .execute(&mut **tx)
+            .await
+            .map_err(SqliteStoreError::from)?
+            .rows_affected();
+            if deleted != 1 {
+                return Err(StoreError::ConstraintViolation {
+                    constraint: "knowledge_delete_target_missing".to_owned(),
+                });
+            }
+            Ok(())
+        }
+    }
+}
+
+fn merge_knowledge_update(
+    existing: crate::domain::knowledge::KnowledgeEntry,
+    value: crate::domain::knowledge::KnowledgeEntry,
+) -> Result<crate::domain::knowledge::KnowledgeEntry, StoreError> {
+    use crate::domain::knowledge::KnowledgeEntry;
+    match (existing, value) {
+        (KnowledgeEntry::Fact(old), KnowledgeEntry::Fact(new)) => {
+            Ok(KnowledgeEntry::Fact(crate::domain::knowledge::fact::WorldFact {
+                id: old.id,
+                key: old.key,
+                text: new.text,
+                proposition: new.proposition,
+                entities: new.entities,
+                topics: new.topics,
+                salience: new.salience,
+                source: new.source,
+            }))
+        }
+        (KnowledgeEntry::Rumor(old), KnowledgeEntry::Rumor(new)) => {
+            Ok(KnowledgeEntry::Rumor(crate::domain::knowledge::rumor::SharedRumor {
+                id: old.id,
+                key: old.key,
+                content: new.content,
+                claim: new.claim,
+                entities: new.entities,
+                topics: new.topics,
+                salience: new.salience,
+                source_role_key: old.source_role_key,
+                source_character_id: new.source_character_id,
+                truth_value: new.truth_value,
+                source: new.source,
+            }))
+        }
+        (KnowledgeEntry::Memory(old), KnowledgeEntry::Memory(new)) => {
+            if old.owner != new.owner {
+                return Err(StoreError::ConstraintViolation {
+                    constraint: "knowledge_memory_owner_immutable".to_owned(),
+                });
+            }
+            Ok(KnowledgeEntry::Memory(crate::domain::knowledge::memory::MemoryEntry {
+                id: old.id,
+                owner: old.owner,
+                kind: new.kind,
+                content: new.content,
+                entities: new.entities,
+                topics: new.topics,
+                salience: new.salience,
+                source: new.source,
+                created_at_ms: old.created_at_ms,
+            }))
+        }
+        _ => Err(StoreError::ConstraintViolation {
+            constraint: "knowledge_update_kind_mismatch".to_owned(),
+        }),
+    }
 }
 
 async fn write_outbox(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, record: &OutboxRecord) -> Result<(), StoreError> {

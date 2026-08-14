@@ -6,7 +6,6 @@ use crate::domain::asset::story_pack::{StoryProfile, StoryRole};
 use crate::domain::asset::validation::ScalarValue;
 use crate::domain::asset::world_book::TopicDefinition;
 use crate::domain::ids::{CharacterId, StoryId, StoryRevision};
-use crate::domain::knowledge::query::CurrentPerception;
 use crate::domain::narrative::StoryContinuity;
 use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
@@ -49,7 +48,6 @@ pub struct StoryReadSnapshot {
     character_states: BTreeMap<CharacterId, CharacterInstanceState>,
     current_scene: CurrentScene,
     relationships: Vec<RelationshipState>,
-    current_perceptions: Vec<CurrentPerception>,
     narrative_definition: NarrativeGraphDefinition,
     narrative_state: NarrativeRuntimeState,
     condition_state: NarrativeConditionStateView,
@@ -73,7 +71,6 @@ pub struct StoryReadSnapshotParts {
     pub character_states: BTreeMap<CharacterId, CharacterInstanceState>,
     pub current_scene: CurrentScene,
     pub relationships: Vec<RelationshipState>,
-    pub current_perceptions: Vec<CurrentPerception>,
     pub narrative_definition: NarrativeGraphDefinition,
     pub narrative_state: NarrativeRuntimeState,
     pub condition_state: NarrativeConditionStateView,
@@ -98,7 +95,6 @@ impl StoryReadSnapshot {
             character_states,
             current_scene,
             relationships,
-            current_perceptions,
             narrative_definition,
             narrative_state,
             condition_state,
@@ -170,12 +166,6 @@ impl StoryReadSnapshot {
                 return inconsistent("relationship_invalid");
             }
         }
-        if current_perceptions.iter().any(|perception| {
-            !character_states.contains_key(&perception.character_id)
-                || perception.story_revision.get() > base_revision.get()
-        }) {
-            return inconsistent("perception_invalid");
-        }
         if narrative_state
             .node_states
             .keys()
@@ -211,7 +201,6 @@ impl StoryReadSnapshot {
             character_states,
             current_scene,
             relationships,
-            current_perceptions,
             narrative_definition,
             narrative_state,
             condition_state,
@@ -269,10 +258,6 @@ impl StoryReadSnapshot {
 
     pub fn relationships(&self) -> &[RelationshipState] {
         &self.relationships
-    }
-
-    pub fn current_perceptions(&self) -> &[CurrentPerception] {
-        &self.current_perceptions
     }
 
     pub fn narrative_definition(&self) -> &NarrativeGraphDefinition {

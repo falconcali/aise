@@ -12,13 +12,14 @@ pub struct TurnContentLimitsConfig {
     pub max_constraint_bytes: usize,
     pub max_characters: usize,
     pub max_character_bytes: usize,
-    pub max_perception_bytes: usize,
     pub max_recent_segments: usize,
     pub max_recent_segment_bytes: usize,
     pub max_recent_segment_tokens: u64,
     pub max_plan_bytes: usize,
     pub max_character_thought_bytes: usize,
-    pub max_proposal_bytes: usize,
+    pub max_story_text_bytes: usize,
+    pub max_state_extraction_bytes: usize,
+    pub max_knowledge_change_bytes: usize,
     pub max_validation_issue_bytes: usize,
     pub max_trace_field_bytes: usize,
 }
@@ -35,13 +36,14 @@ impl Default for TurnContentLimitsConfig {
             max_constraint_bytes: 512,
             max_characters: 16,
             max_character_bytes: 2048,
-            max_perception_bytes: 512,
             max_recent_segments: 20,
             max_recent_segment_bytes: 8192,
             max_recent_segment_tokens: 2048,
             max_plan_bytes: 4096,
             max_character_thought_bytes: 1024,
-            max_proposal_bytes: 32 * 1024,
+            max_story_text_bytes: 16 * 1024,
+            max_state_extraction_bytes: 32 * 1024,
+            max_knowledge_change_bytes: 4 * 1024,
             max_validation_issue_bytes: 500,
             max_trace_field_bytes: 2048,
         }
@@ -79,9 +81,6 @@ impl TurnContentLimitsConfig {
         if self.max_character_bytes == 0 {
             return Err(ConfigError::Invalid("content.max_character_bytes must be positive".into()));
         }
-        if self.max_perception_bytes == 0 {
-            return Err(ConfigError::Invalid("content.max_perception_bytes must be positive".into()));
-        }
         if self.max_recent_segments == 0 {
             return Err(ConfigError::Invalid("content.max_recent_segments must be positive".into()));
         }
@@ -101,8 +100,23 @@ impl TurnContentLimitsConfig {
                 "content.max_character_thought_bytes must be positive".into(),
             ));
         }
-        if self.max_proposal_bytes == 0 {
-            return Err(ConfigError::Invalid("content.max_proposal_bytes must be positive".into()));
+        if self.max_story_text_bytes == 0 {
+            return Err(ConfigError::Invalid("content.max_story_text_bytes must be positive".into()));
+        }
+        if self.max_state_extraction_bytes == 0 {
+            return Err(ConfigError::Invalid(
+                "content.max_state_extraction_bytes must be positive".into(),
+            ));
+        }
+        if self.max_knowledge_change_bytes == 0 {
+            return Err(ConfigError::Invalid(
+                "content.max_knowledge_change_bytes must be positive".into(),
+            ));
+        }
+        if self.max_state_extraction_bytes < self.max_knowledge_change_bytes {
+            return Err(ConfigError::Invalid(
+                "content.max_state_extraction_bytes must be >= content.max_knowledge_change_bytes".into(),
+            ));
         }
         if self.max_validation_issue_bytes == 0 {
             return Err(ConfigError::Invalid(

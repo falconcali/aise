@@ -1,4 +1,4 @@
-use crate::domain::turn::StoryProposal;
+use crate::domain::turn::StoryGeneratorOutput;
 use crate::llm::gateway::LlmGateway;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
 use crate::story::story_repairer_prompt::{
@@ -46,7 +46,7 @@ impl TurnExecutionPipeline for StoryRepairer {
             .map(|issue| issue.code.as_str())
             .collect::<Vec<_>>()
             .join(",");
-        let proposal_revision = ctx.proposal_revision();
+        let story_version = ctx.story_version();
         let request = PromptCompositionInput {
             profile: PromptProfile::StoryRepairer,
             rc_vars: projection.rc_vars,
@@ -55,7 +55,7 @@ impl TurnExecutionPipeline for StoryRepairer {
         let max_output_tokens = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
         tracing::info!(
             prompt_profile = "story_repairer",
-            proposal_revision,
+            story_version,
             issue_count,
             issue_codes,
             "story repairer prompt projected"
@@ -64,7 +64,7 @@ impl TurnExecutionPipeline for StoryRepairer {
         let span = tracing::info_span!(
             "story_repairer.repair",
             prompt_profile = "story_repairer",
-            proposal_revision,
+            story_version,
             issue_count,
         );
         let completion = self
@@ -80,12 +80,12 @@ impl TurnExecutionPipeline for StoryRepairer {
                     error.to_string(),
                 )
             })?;
-        let proposal: StoryProposal = serde_json::from_str(&completion.text).map_err(|error| {
+        let story: StoryGeneratorOutput = serde_json::from_str(&completion.text).map_err(|error| {
             tracing::warn!(
                 prompt_profile = "story_repairer",
-                proposal_revision,
+                story_version,
                 error = %error,
-                "story repairer proposal decode failed"
+                "story repairer output decode failed"
             );
             TurnExecutionError::new(
                 TurnFailureKind::Llm,
@@ -94,36 +94,14 @@ impl TurnExecutionPipeline for StoryRepairer {
                 format!("story repair output is invalid: {error}"),
             )
         })?;
-        if !proposal.is_within_bounds(
-            ctx.budget().max_total_items(),
-            ctx.budget().max_item_bytes(),
-            ctx.budget().max_proposal_bytes(),
-        ) {
-            tracing::warn!(
-                prompt_profile = "story_repairer",
-                proposal_revision,
-                output_bytes = completion.text.len(),
-                "story repairer proposal rejected"
-            );
-            return Err(TurnExecutionError::new(
-                TurnFailureKind::Llm,
-                "model_output_invalid",
-                Some(TurnStage::StoryRepairer),
-                "story repair output exceeds a field or collection bound",
-            ));
-        }
         tracing::info!(
             prompt_profile = "story_repairer",
-            proposal_revision,
+            story_version,
             output_bytes = completion.text.len(),
-            event_count = proposal.events.len(),
-            character_change_count = proposal.character_changes.len(),
-            relationship_change_count = proposal.relationship_changes.len(),
-            knowledge_change_count = proposal.knowledge_changes.len(),
-            perception_count = proposal.perceptions.len(),
-            "story repairer proposal decoded"
+            story_text_bytes = story.story_text.as_str().len(),
+            "story repairer output decoded"
         );
-        ctx.replace_story_proposal(proposal)
+        ctx.replace_story(story)
     }
 }
 
@@ -131,10 +109,9 @@ fn map_projection_error(error: StoryRepairerProjectionError) -> TurnExecutionErr
     let code = match error {
         StoryRepairerProjectionError::MissingValidation => "missing_validation",
         StoryRepairerProjectionError::ValidationDoesNotRequireRepair => "validation_does_not_require_repair",
-        StoryRepairerProjectionError::MissingPreviousProposal => "missing_previous_proposal",
+        StoryRepairerProjectionError::MissingPreviousStory => "missing_previous_story",
         StoryRepairerProjectionError::EmptyValidationIssues => "empty_validation_issues",
-        StoryRepairerProjectionError::FatalValidationIssue => "fatal_validation_issue",
-        StoryRepairerProjectionError::PreviousProposalExceedsBounds => "previous_proposal_exceeds_bounds",
+        StoryRepairerProjectionError::PreviousStoryExceedsBounds => "previous_story_exceeds_bounds",
         StoryRepairerProjectionError::Invariant { .. } => "story_repairer_prompt_invariant",
         StoryRepairerProjectionError::GenerationContext(_) => "story_generator_projection_failed",
     };

@@ -1,6 +1,6 @@
 use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::StoryProposal;
+use crate::domain::turn::StoryGeneratorOutput;
 use crate::llm::gateway::LlmGateway;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
 use crate::story::story_generator_prompt::{
@@ -141,54 +141,26 @@ impl TurnExecutionPipeline for StoryGenerator {
                     error.to_string(),
                 )
             })?;
-        let proposal: StoryProposal = serde_json::from_str(&completion.text).map_err(|error| {
+        let story: StoryGeneratorOutput = serde_json::from_str(&completion.text).map_err(|error| {
             tracing::warn!(
                 prompt_profile = "story_generator",
                 error = %error,
-                "story generator proposal decode failed"
+                "story generator output decode failed"
             );
             TurnExecutionError::new(
                 TurnFailureKind::Llm,
                 "model_output_invalid",
                 Some(TurnStage::StoryGenerator),
-                format!("story proposal output is invalid: {error}"),
+                format!("story generator output is invalid: {error}"),
             )
         })?;
-        if !proposal.is_within_bounds(
-            ctx.budget().max_total_items(),
-            ctx.budget().max_item_bytes(),
-            ctx.budget().max_proposal_bytes(),
-        ) {
-            tracing::warn!(
-                prompt_profile = "story_generator",
-                output_bytes = completion.text.len(),
-                event_count = proposal.events.len(),
-                character_change_count = proposal.character_changes.len(),
-                relationship_change_count = proposal.relationship_changes.len(),
-                knowledge_change_count = proposal.knowledge_changes.len(),
-                perception_count = proposal.perceptions.len(),
-                proposal_bounds = "invalid",
-                "story generator proposal rejected"
-            );
-            return Err(TurnExecutionError::new(
-                TurnFailureKind::Llm,
-                "model_output_invalid",
-                Some(TurnStage::StoryGenerator),
-                "story proposal output exceeds a field or collection bound",
-            ));
-        }
         tracing::info!(
             prompt_profile = "story_generator",
             output_bytes = completion.text.len(),
-            event_count = proposal.events.len(),
-            character_change_count = proposal.character_changes.len(),
-            relationship_change_count = proposal.relationship_changes.len(),
-            knowledge_change_count = proposal.knowledge_changes.len(),
-            perception_count = proposal.perceptions.len(),
-            proposal_bounds = "valid",
-            "story generator proposal decoded"
+            story_text_bytes = story.story_text.as_str().len(),
+            "story generator output decoded"
         );
-        ctx.set_story_proposal(proposal)
+        ctx.set_generated_story(story)
     }
 }
 

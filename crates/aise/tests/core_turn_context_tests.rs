@@ -1,6 +1,6 @@
-use aise::config::{RetrievalConfig, TurnConfig, TurnContentLimitsConfig};
+use aise::config::{RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
 use aise::domain::asset::validation::BoundedText;
-use aise::domain::ids::{CharacterId, FactId, StoryRevision};
+use aise::domain::ids::{CharacterId, FactId};
 use aise::domain::knowledge::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use aise::domain::text::estimate_text_tokens;
 use aise::domain::turn::{
@@ -35,7 +35,6 @@ fn item(text: &str, id: &str) -> ContextItem {
                 )
                 .unwrap(),
             },
-            source_revision: StoryRevision::new(0),
             audience: RetrievalAudience::GlobalWriter,
             memory_owner: None,
             evidence: BTreeMap::new(),
@@ -84,6 +83,7 @@ fn turn_budget_from_config_accepts_retrieval_config() {
         &TurnConfig::default(),
         &TurnContentLimitsConfig::default(),
         &RetrievalConfig::default(),
+        &StateExtractorConfig::default(),
     )
     .unwrap();
     assert!(budget.max_total_items() > 0 || budget.max_retrieved_tokens() > 0);

@@ -1,0 +1,28 @@
+{# @asset {"asset_id":"context-v2/story-state-extractor-fti","slot_ids":["context.story_state_extractor.fti"]} #}
+# Task
+
+Extract the structured state established by the Story Text now and return the complete extraction.
+
+## MUST
+
+- Emit `character_states` only for characters whose location, goals, or attributes actually changed; each entry must carry the complete final values.
+- Emit `relationship_states` only for relationships whose trust or kind actually changed; each entry must carry the complete final values.
+- Emit `knowledge_changes` only for Knowledge the Story Text actually establishes; `update` and `delete` targets must come from Modifiable Knowledge, and Facts can only be added or updated.
+- Always return the complete `current_scene`, even when unchanged.
+- If Validation Issues are present, resolve every one of them relative to the Previous Extraction; do not return output identical to the Previous Extraction.
+- Return exactly one value matching the schema below.
+
+## NEVER
+
+- Invent character, relationship, or Knowledge state the Story Text does not establish.
+- Emit an unchanged character or relationship entry, or mutate Knowledge outside Modifiable Knowledge.
+- Return prose, explanation, planning notes, or any text outside the structured output.
+
+# Output
+
+Return exactly one value matching this schema:
+
+{{ output_schema }}
+
+Return no text outside the structured output.
+{# @endasset #}

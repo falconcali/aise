@@ -61,7 +61,7 @@ impl TurnExecutionPipeline for TurnCommitter {
         let created_at = ctx.identity().started_at_ms();
         let llm_calls = ctx.llm_calls().to_vec();
         let mut outbox = Vec::new();
-        for (seq, event) in change_set.events().iter().enumerate() {
+        for (seq, event) in change_set.narrative_events().iter().enumerate() {
             outbox.push(OutboxRecord {
                 id: format!("{turn_id}#outbox#{seq}"),
                 story_id: story_id.clone(),
@@ -112,7 +112,7 @@ impl TurnExecutionPipeline for TurnCommitter {
                 "turn_id": turn_id,
                 "base_revision": snapshot.base_revision().get(),
                 "committed_revision": result.story_revision.get(),
-                "knowledge_addition_count": change_set.knowledge_additions().len(),
+                "knowledge_mutation_count": change_set.knowledge_mutations().len(),
                 "transition_count": change_set.narrative_changes().len(),
                 "status": "ok",
                 "error_code": null,
@@ -123,7 +123,7 @@ impl TurnExecutionPipeline for TurnCommitter {
                 "turn_id": turn_id,
                 "base_revision": snapshot.base_revision().get(),
                 "committed_revision": null,
-                "knowledge_addition_count": change_set.knowledge_additions().len(),
+                "knowledge_mutation_count": change_set.knowledge_mutations().len(),
                 "transition_count": change_set.narrative_changes().len(),
                 "status": "error",
                 "error_code": store_error_code(error),

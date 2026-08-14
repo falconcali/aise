@@ -18,8 +18,6 @@ impl SnapshotLimits {
             max_scene_bytes: content.max_scene_bytes,
             max_scene_characters: context.max_scene_characters,
             max_relationships: context.max_relationships,
-            max_current_perceptions: context.max_current_perceptions,
-            max_perception_bytes: content.max_perception_bytes,
             max_narrative_nodes: assets.max_graph_nodes,
             max_condition_event_keys: context.max_condition_event_keys,
             max_condition_fact_values: context.max_condition_fact_values,

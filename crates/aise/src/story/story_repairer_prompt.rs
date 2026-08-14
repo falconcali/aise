@@ -1,13 +1,12 @@
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::StoryProposal;
 use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
 use crate::story::story_generator_prompt::{
     DefaultStoryGeneratorPromptContextProjector, StoryGeneratorProjectionError, StoryGeneratorPromptContext,
     StoryGeneratorPromptContextProjector,
 };
 use crate::turn::turn_context::TurnExecutionContext;
-use crate::turn::turn_validation::{Repairability, ValidationDecision, ValidationIssueCode, ValidationLocation};
+use crate::turn::turn_validation::{ValidationDecision, ValidationIssueCode, ValidationLocation};
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
@@ -19,7 +18,7 @@ pub const STORY_REPAIRER_FTI_SLOT: &str = "context.story_repairer.fti";
 #[derive(Debug, Clone, Serialize)]
 pub struct StoryRepairerPromptContext {
     pub generation: StoryGeneratorPromptContext,
-    pub previous_proposal: StoryProposal,
+    pub previous_story_text: BoundedText,
     pub validation_issues: Vec<StoryRepairValidationIssuePromptView>,
 }
 
@@ -46,16 +45,14 @@ pub struct StoryRepairerPromptProjection {
 pub enum StoryRepairerProjectionError {
     #[error("story repairer validation result is missing")]
     MissingValidation,
-    #[error("story repairer requires ValidationDecision::Repair")]
+    #[error("story repairer requires ValidationDecision::RepairStory")]
     ValidationDoesNotRequireRepair,
-    #[error("story repairer previous proposal is missing")]
-    MissingPreviousProposal,
+    #[error("story repairer previous story is missing")]
+    MissingPreviousStory,
     #[error("story repairer validation issues are empty")]
     EmptyValidationIssues,
-    #[error("story repairer received a fatal validation issue")]
-    FatalValidationIssue,
-    #[error("story repairer previous proposal exceeds configured bounds")]
-    PreviousProposalExceedsBounds,
+    #[error("story repairer previous story exceeds configured bounds")]
+    PreviousStoryExceedsBounds,
     #[error("story repairer prompt invariant violated: {code}")]
     Invariant { code: &'static str },
     #[error(transparent)]
@@ -91,36 +88,15 @@ impl StoryRepairerPromptContextProjector for DefaultStoryRepairerPromptContextPr
         ctx: &TurnExecutionContext,
     ) -> Result<StoryRepairerPromptProjection, StoryRepairerProjectionError> {
         let validation = ctx.validation().ok_or(StoryRepairerProjectionError::MissingValidation)?;
-        if validation.decision() != ValidationDecision::Repair {
+        if validation.decision() != ValidationDecision::RepairStory {
             return Err(StoryRepairerProjectionError::ValidationDoesNotRequireRepair);
         }
         if validation.issues().is_empty() {
             return Err(StoryRepairerProjectionError::EmptyValidationIssues);
         }
-        if validation
-            .issues()
-            .iter()
-            .any(|issue| issue.repairability == Repairability::Fatal)
-        {
-            return Err(StoryRepairerProjectionError::FatalValidationIssue);
-        }
-        let previous_proposal = ctx
-            .proposal()
-            .ok_or(StoryRepairerProjectionError::MissingPreviousProposal)?
-            .clone();
-        if !previous_proposal.is_within_bounds(
-            ctx.budget().max_total_items(),
-            ctx.budget().max_item_bytes(),
-            ctx.budget().max_proposal_bytes(),
-        ) {
-            return Err(StoryRepairerProjectionError::PreviousProposalExceedsBounds);
-        }
-        let compact_proposal =
-            serde_json::to_string(&previous_proposal).map_err(|_| StoryRepairerProjectionError::Invariant {
-                code: "previous_proposal_serialization_failed",
-            })?;
-        if compact_proposal.len() > ctx.budget().max_proposal_bytes() {
-            return Err(StoryRepairerProjectionError::PreviousProposalExceedsBounds);
+        let previous_story = ctx.story().ok_or(StoryRepairerProjectionError::MissingPreviousStory)?.clone();
+        if previous_story.story_text.as_str().len() > ctx.budget().max_story_text_bytes() {
+            return Err(StoryRepairerProjectionError::PreviousStoryExceedsBounds);
         }
         let validation_issues = validation
             .issues()
@@ -147,13 +123,12 @@ impl StoryRepairerPromptContextProjector for DefaultStoryRepairerPromptContextPr
             })
             .collect::<Result<Vec<_>, StoryRepairerProjectionError>>()?;
         let generation = self.generation_projector.project(ctx)?;
-        let previous_proposal_rendered =
-            serde_json::to_string_pretty(&previous_proposal).map_err(|_| StoryRepairerProjectionError::Invariant {
-                code: "previous_proposal_serialization_failed",
-            })?;
         let validation_issues_rendered = render_validation_issues(&validation_issues);
         let mut rc_vars = generation.rc_vars.as_map().clone();
-        rc_vars.insert("previous_proposal".into(), Value::String(previous_proposal_rendered));
+        rc_vars.insert(
+            "previous_story_text".into(),
+            Value::String(quoted(previous_story.story_text.as_str())),
+        );
         rc_vars.insert("validation_issues".into(), Value::String(validation_issues_rendered));
         let input_tokens = rc_vars
             .values()
@@ -168,7 +143,7 @@ impl StoryRepairerPromptContextProjector for DefaultStoryRepairerPromptContextPr
         Ok(StoryRepairerPromptProjection {
             context: StoryRepairerPromptContext {
                 generation: generation.context,
-                previous_proposal,
+                previous_story_text: previous_story.story_text,
                 validation_issues,
             },
             rc_vars: RuntimePromptVars::new(rc_vars),

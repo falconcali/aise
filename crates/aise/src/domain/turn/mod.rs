@@ -1,8 +1,9 @@
 pub mod baseline;
 pub mod character;
 pub mod planning;
-pub mod proposal;
 pub mod retrieval;
+pub mod state_extraction;
+pub mod story_generation;
 
 pub use baseline::{
     BaselineContext, CharacterIndexEntry, CharacterView, KnowledgeEntryIndexEntry, NarrativeStateView,
@@ -13,12 +14,13 @@ pub use planning::{
     CharacterThinkRequest, RetrievalAudience, RetrievalIndexScope, RetrievalPlan, RetrievalRequest,
     RetrievalRequestOrigin, RetrievalTargetId, WriterPlan, WriterStoryGoal,
 };
-pub use proposal::{
-    ProposedCharacterChange, ProposedEvent, ProposedKnowledgeChange, ProposedPerception, ProposedRelationshipChange,
-    StoryProposal, StoryProposalOutput, WorldFactEvidenceRef,
-};
 pub use retrieval::{
     CandidateMatch, CandidateRetrieverKind, ContextItem, ContextProvenance, EntitySignal, MatchLevel, ProviderEvidence,
     RelevanceRank, RetrievalSignalOrigin, RetrievalSignals, RetrievedContext, RetrievedContextError,
     RetrievedContextLimits, TopicSignal,
 };
+pub use state_extraction::{
+    DeletableKnowledgeId, ExtractedCharacterState, ProposedKnowledgeMutation, ProposedKnowledgeValue,
+    StoryStateExtractionLimits, StoryStateExtractorOutput,
+};
+pub use story_generation::StoryGeneratorOutput;

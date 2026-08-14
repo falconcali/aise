@@ -1,7 +1,7 @@
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{MemoryKind, TopicKey};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{CharacterId, MemoryId, StoryRevision};
+use crate::domain::ids::{CharacterId, MemoryId};
 use crate::domain::knowledge::query::KnowledgeSource;
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +18,5 @@ pub struct MemoryEntry {
     pub topics: Vec<TopicKey>,
     pub salience: u8,
     pub source: KnowledgeSource,
-    pub story_revision: StoryRevision,
     pub created_at_ms: i64,
 }

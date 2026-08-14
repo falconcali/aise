@@ -2,7 +2,7 @@ pub use crate::domain::asset::entity::KnowledgeEntity;
 
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{CharacterId, StoryRevision};
+use crate::domain::ids::CharacterId;
 use crate::domain::knowledge::fact::WorldFact;
 use crate::domain::knowledge::memory::MemoryEntry;
 use crate::domain::knowledge::query::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
@@ -71,14 +71,6 @@ impl KnowledgeEntry {
             Self::Fact(value) => &value.source,
             Self::Rumor(value) => &value.source,
             Self::Memory(value) => &value.source,
-        }
-    }
-
-    pub fn source_revision(&self) -> StoryRevision {
-        match self {
-            Self::Fact(value) => value.story_revision,
-            Self::Rumor(value) => value.story_revision,
-            Self::Memory(value) => value.story_revision,
         }
     }
 

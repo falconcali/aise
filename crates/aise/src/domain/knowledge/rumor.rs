@@ -1,7 +1,7 @@
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{RumorKey, StoryRoleKey, TopicKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
-use crate::domain::ids::{CharacterId, RumorId, StoryRevision};
+use crate::domain::ids::{CharacterId, RumorId};
 use crate::domain::knowledge::query::KnowledgeSource;
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +21,6 @@ pub struct SharedRumor {
     pub source_character_id: Option<CharacterId>,
     pub truth_value: TruthValue,
     pub source: KnowledgeSource,
-    pub story_revision: StoryRevision,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -6,7 +6,6 @@ pub struct ContextPreparationConfig {
     pub max_scene_characters: usize,
     pub max_character_index: usize,
     pub max_relationships: usize,
-    pub max_current_perceptions: usize,
     pub max_condition_event_keys: usize,
     pub max_condition_fact_values: usize,
     pub max_entity_catalog: usize,
@@ -21,7 +20,6 @@ impl Default for ContextPreparationConfig {
             max_scene_characters: 8,
             max_character_index: 16,
             max_relationships: 64,
-            max_current_perceptions: 32,
             max_condition_event_keys: 256,
             max_condition_fact_values: 256,
             max_entity_catalog: 256,
@@ -42,9 +40,6 @@ impl ContextPreparationConfig {
         }
         if self.max_relationships == 0 {
             return Err(ConfigError::Invalid("context.max_relationships must be positive".into()));
-        }
-        if self.max_current_perceptions == 0 {
-            return Err(ConfigError::Invalid("context.max_current_perceptions must be positive".into()));
         }
         if self.max_condition_event_keys == 0 {
             return Err(ConfigError::Invalid("context.max_condition_event_keys must be positive".into()));

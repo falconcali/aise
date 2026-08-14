@@ -1,6 +1,6 @@
 use crate::domain::asset::frozen_ref::FrozenCharacterAssetRef;
 use crate::domain::asset::ids::{PackId, PlayerId, StoryRoleKey};
-use crate::domain::ids::{CharacterId, ConstraintId, FactId, MemoryId, StoryId, StoryRevision};
+use crate::domain::ids::{CharacterId, ConstraintId, FactId, MemoryId, StoryId};
 use crate::domain::knowledge::KnowledgeEntry;
 use crate::domain::knowledge::fact::{Proposition, WorldFact};
 use crate::domain::knowledge::memory::MemoryEntry;
@@ -220,7 +220,6 @@ impl StoryInstanceFactory {
                 description: pack.start.description.clone(),
                 present_character_ids,
             },
-            current_perceptions: Vec::new(),
             narrative_state: NarrativeRuntimeState::initial(),
             condition_state: NarrativeConditionStateView {
                 occurred_event_keys: BTreeSet::new(),
@@ -296,7 +295,6 @@ fn materialize_knowledge(
             topics: canonical(seed.topics.clone()),
             salience: seed.salience,
             source: source.clone(),
-            story_revision: StoryRevision::new(0),
         });
         insert_entry(&mut entries, &mut ids, entry)?;
     }
@@ -319,7 +317,6 @@ fn materialize_knowledge(
             source_character_id: None,
             truth_value: TruthValue::Unverified,
             source: source.clone(),
-            story_revision: StoryRevision::new(0),
         });
         insert_entry(&mut entries, &mut ids, entry)?;
     }
@@ -347,7 +344,6 @@ fn materialize_knowledge(
                 topics: canonical(seed.topics.clone()),
                 salience: seed.salience,
                 source: source.clone(),
-                story_revision: StoryRevision::new(0),
                 created_at_ms,
             });
             insert_entry(&mut entries, &mut ids, entry)?;

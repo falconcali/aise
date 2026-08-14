@@ -133,6 +133,45 @@ impl TurnExecutionError {
         Self::new(TurnFailureKind::InvalidRequest, "invalid_request", None, message.into())
     }
 
+    pub fn stale_state_extraction(stage: Option<TurnStage>) -> Self {
+        Self::new(
+            TurnFailureKind::InvariantViolation,
+            "stale_state_extraction",
+            stage,
+            "state extraction is bound to a story version older than the current candidate story",
+        )
+    }
+
+    pub fn story_repair_no_progress(stage: Option<TurnStage>) -> Self {
+        Self::new(
+            TurnFailureKind::ValidationRejected,
+            "story_repair_no_progress",
+            stage,
+            "story repair produced byte-identical prose with unresolved issues",
+        )
+    }
+
+    pub fn state_reextraction_no_progress(stage: Option<TurnStage>) -> Self {
+        Self::new(
+            TurnFailureKind::ValidationRejected,
+            "state_reextraction_no_progress",
+            stage,
+            "state re-extraction produced byte-identical output with unresolved issues",
+        )
+    }
+
+    pub fn state_extractor_required_context_exceeds_budget(
+        stage: Option<TurnStage>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::new(
+            TurnFailureKind::TokenBudgetExceeded,
+            "state_extractor_required_context_exceeds_budget",
+            stage,
+            message.into(),
+        )
+    }
+
     pub fn story_not_found(story_id: &str) -> Self {
         Self::new(
             TurnFailureKind::StoryNotFound,

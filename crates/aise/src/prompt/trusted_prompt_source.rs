@@ -44,6 +44,14 @@ impl CatalogPromptSource {
             },
         )?;
         profiles.register(
+            PromptProfile::StoryStateExtractor,
+            PromptProfileAssets {
+                csi_slot: SlotId::new("context.story_state_extractor.csi"),
+                rc_slot: SlotId::new("context.story_state_extractor.rc"),
+                fti_slot: SlotId::new("context.story_state_extractor.fti"),
+            },
+        )?;
+        profiles.register(
             PromptProfile::StoryRepairer,
             PromptProfileAssets {
                 csi_slot: SlotId::new("context.story_repairer.csi"),
@@ -118,6 +126,18 @@ fn packaged_catalog() -> Result<PromptCatalog, PromptError> {
         (
             "fti/story-generator.md.j2",
             include_str!("../../assets/prompts/context-v2/fti/story-generator.md.j2"),
+        ),
+        (
+            "csi/story-state-extractor.md.j2",
+            include_str!("../../assets/prompts/context-v2/csi/story-state-extractor.md.j2"),
+        ),
+        (
+            "rc/story-state-extractor.md.j2",
+            include_str!("../../assets/prompts/context-v2/rc/story-state-extractor.md.j2"),
+        ),
+        (
+            "fti/story-state-extractor.md.j2",
+            include_str!("../../assets/prompts/context-v2/fti/story-state-extractor.md.j2"),
         ),
     ]);
     load_catalog_bundle(

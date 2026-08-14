@@ -1,7 +1,7 @@
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{CharacterId, StoryRevision};
+use crate::domain::ids::CharacterId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::domain::turn::RetrievalAudience;
@@ -23,7 +23,6 @@ pub struct KnowledgeRecord {
     pub content: BoundedText,
     pub salience: u8,
     pub source: KnowledgeSource,
-    pub source_revision: StoryRevision,
     pub memory_owner: Option<CharacterId>,
 }
 

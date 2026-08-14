@@ -203,8 +203,10 @@ pub enum TurnPhase {
     Prepared,
     Planned,
     ContextReady,
-    ProposalReady,
-    RepairRequired,
+    StoryReady,
+    CandidateReady,
+    StoryRepairRequired,
+    StateReextractionRequired,
     ReadyToCommit,
     Committed,
     Failed,
@@ -371,6 +373,7 @@ pub enum LlmCallPurpose {
     ContextRetrieval,
     CharacterThink,
     StoryGeneration,
+    StoryStateExtraction,
     StoryRepair,
     Embedding,
 }
@@ -382,6 +385,7 @@ impl LlmCallPurpose {
             LlmCallPurpose::ContextRetrieval => "context_retrieval",
             LlmCallPurpose::CharacterThink => "character_think",
             LlmCallPurpose::StoryGeneration => "story_generation",
+            LlmCallPurpose::StoryStateExtraction => "story_state_extraction",
             LlmCallPurpose::StoryRepair => "story_repair",
             LlmCallPurpose::Embedding => "embedding",
         }

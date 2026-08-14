@@ -1,4 +1,4 @@
-use aise::config::{RetrievalConfig, TurnConfig, TurnContentLimitsConfig};
+use aise::config::{RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::CharacterId;
 use aise::domain::knowledge::KnowledgeKind;
@@ -60,7 +60,13 @@ fn turn_budget_from_config_uses_retrieval_totals() {
         max_tokens_per_audience: 500,
         ..RetrievalConfig::default()
     };
-    let budget = TurnBudget::from_config(&turn, &TurnContentLimitsConfig::default(), &retrieval).unwrap();
+    let budget = TurnBudget::from_config(
+        &turn,
+        &TurnContentLimitsConfig::default(),
+        &retrieval,
+        &StateExtractorConfig::default(),
+    )
+    .unwrap();
     assert_eq!(budget.max_retrieved_tokens(), 2_000);
     assert_eq!(budget.max_llm_calls(), 3);
 }

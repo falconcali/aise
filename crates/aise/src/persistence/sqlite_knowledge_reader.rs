@@ -1,7 +1,7 @@
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{CharacterId, FactId, MemoryId, StoryRevision};
+use crate::domain::ids::{CharacterId, FactId, MemoryId};
 use crate::domain::knowledge::{KnowledgeIndexMatch, KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::domain::turn::RetrievalAudience;
@@ -85,12 +85,10 @@ async fn load_by_source_ids(
     let mut builder = QueryBuilder::<Sqlite>::new(
         "SELECT e.source_id, e.knowledge_kind, e.memory_owner_character_id, e.content, \
          length(CAST(e.content AS BLOB)) AS content_bytes, e.salience, e.source_json, e.payload_json, \
-         length(CAST(e.payload_json AS BLOB)) AS payload_bytes, e.source_revision \
+         length(CAST(e.payload_json AS BLOB)) AS payload_bytes \
          FROM knowledge_entries e WHERE e.story_id = ",
     );
     builder.push_bind(query.snapshot.story_id.as_str());
-    builder.push(" AND e.source_revision <= ");
-    builder.push_bind(i64::try_from(query.snapshot.base_revision.get()).map_err(|_| invalid_record())?);
     builder.push(" AND e.knowledge_kind IN (");
     {
         let mut separated = builder.separated(", ");
@@ -138,8 +136,6 @@ async fn load_index(
     let mut builder =
         QueryBuilder::<Sqlite>::new("SELECT source_id, knowledge_kind FROM knowledge_entries WHERE story_id = ");
     builder.push_bind(query.snapshot.story_id.as_str());
-    builder.push(" AND source_revision <= ");
-    builder.push_bind(i64::try_from(query.snapshot.base_revision.get()).map_err(|_| invalid_record())?);
     builder.push(" AND knowledge_kind IN (");
     {
         let mut separated = builder.separated(", ");
@@ -182,12 +178,10 @@ async fn load_hits(
     let mut builder = QueryBuilder::<Sqlite>::new(
         "SELECT e.source_id, e.knowledge_kind, e.memory_owner_character_id, e.content, \
          length(CAST(e.content AS BLOB)) AS content_bytes, e.salience, e.source_json, e.payload_json, \
-         length(CAST(e.payload_json AS BLOB)) AS payload_bytes, e.source_revision \
+         length(CAST(e.payload_json AS BLOB)) AS payload_bytes \
          FROM knowledge_entries e WHERE e.story_id = ",
     );
     builder.push_bind(snapshot.story_id.as_str());
-    builder.push(" AND e.source_revision >= 0 AND e.source_revision <= ");
-    builder.push_bind(i64::try_from(snapshot.base_revision.get()).map_err(|_| invalid_record())?);
     builder.push(" AND e.knowledge_kind IN (");
     {
         let mut separated = builder.separated(", ");
@@ -405,7 +399,6 @@ fn materialize_row(row: &sqlx::sqlite::SqliteRow, max_item_bytes: usize) -> Resu
     let source_json: String = row.try_get("source_json").map_err(SqliteStoreError::from)?;
     let payload_json: String = row.try_get("payload_json").map_err(SqliteStoreError::from)?;
     let payload_bytes: i64 = row.try_get("payload_bytes").map_err(SqliteStoreError::from)?;
-    let source_revision: i64 = row.try_get("source_revision").map_err(SqliteStoreError::from)?;
     let content_bytes = usize::try_from(content_bytes).map_err(|_| invalid_record())?;
     if content_bytes > max_item_bytes {
         return Err(StoreError::LimitExceeded {
@@ -439,7 +432,6 @@ fn materialize_row(row: &sqlx::sqlite::SqliteRow, max_item_bytes: usize) -> Resu
         content,
         salience: u8::try_from(salience).map_err(|_| invalid_record())?,
         source,
-        source_revision: StoryRevision::new(u64::try_from(source_revision).map_err(|_| invalid_record())?),
         memory_owner,
     };
     let payload = serde_json::from_str::<crate::domain::knowledge::KnowledgeEntry>(&payload_json)
@@ -449,7 +441,6 @@ fn materialize_row(row: &sqlx::sqlite::SqliteRow, max_item_bytes: usize) -> Resu
         || payload.content().as_str() != record.content.as_str()
         || payload.salience() != record.salience
         || payload.source() != &record.source
-        || payload.source_revision() != record.source_revision
         || payload.memory_owner() != record.memory_owner.as_ref()
     {
         return Err(invalid_record());

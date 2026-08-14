@@ -8,6 +8,7 @@ use super::llm::LlmConfig;
 use super::planner::PlannerConfig;
 use super::prompt::PromptModuleConfig;
 use super::retrieval::RetrievalConfig;
+use super::state_extractor::StateExtractorConfig;
 use super::storage::StorageConfig;
 use super::turn::TurnConfig;
 use crate::persistence::story_history_read_port::StoryHistoryConfig;
@@ -39,6 +40,8 @@ pub struct AiseConfig {
     pub prompt: PromptModuleConfig,
     #[serde(default)]
     pub story_history: StoryHistoryConfig,
+    #[serde(default)]
+    pub state_extractor: StateExtractorConfig,
 }
 
 impl AiseConfig {
@@ -57,6 +60,7 @@ impl AiseConfig {
         self.story_history
             .validate()
             .map_err(|error| ConfigError::Invalid(error.into()))?;
+        self.state_extractor.validate()?;
         if self.context.recent_segments_for_signals > self.content.max_recent_segments {
             return Err(ConfigError::Invalid(
                 "context.recent_segments_for_signals must be <= content.max_recent_segments".into(),
@@ -88,6 +92,46 @@ impl AiseConfig {
         if self.planner.max_reason_bytes > self.character_think.max_thinking_focus_bytes {
             return Err(ConfigError::Invalid(
                 "planner.max_reason_bytes must be <= character_think.max_thinking_focus_bytes".into(),
+            ));
+        }
+        if self.state_extractor.max_character_states < self.content.max_characters {
+            return Err(ConfigError::Invalid(
+                "state_extractor.max_character_states must be >= content.max_characters".into(),
+            ));
+        }
+        if self.state_extractor.max_relationship_states < self.context.max_relationships {
+            return Err(ConfigError::Invalid(
+                "state_extractor.max_relationship_states must be >= context.max_relationships".into(),
+            ));
+        }
+        if self.state_extractor.max_context_tokens > self.turn.max_input_tokens {
+            return Err(ConfigError::Invalid(
+                "state_extractor.max_context_tokens must be <= turn.max_input_tokens".into(),
+            ));
+        }
+        if self.state_extractor.max_output_tokens > self.turn.max_output_tokens {
+            return Err(ConfigError::Invalid(
+                "state_extractor.max_output_tokens must be <= turn.max_output_tokens".into(),
+            ));
+        }
+        if self
+            .state_extractor
+            .max_context_tokens
+            .saturating_add(self.state_extractor.max_output_tokens)
+            > self.turn.max_total_tokens
+        {
+            return Err(ConfigError::Invalid(
+                "state_extractor context and output tokens must be <= turn.max_total_tokens".into(),
+            ));
+        }
+        if self.state_extractor.max_entities_per_knowledge > self.assets.max_entities_per_entry {
+            return Err(ConfigError::Invalid(
+                "state_extractor.max_entities_per_knowledge must be <= assets.max_entities_per_entry".into(),
+            ));
+        }
+        if self.state_extractor.max_topics_per_knowledge > self.assets.max_topics_per_entry {
+            return Err(ConfigError::Invalid(
+                "state_extractor.max_topics_per_knowledge must be <= assets.max_topics_per_entry".into(),
             ));
         }
         Ok(())

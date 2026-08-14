@@ -1,4 +1,4 @@
-use aise::config::{RetrievalConfig, TurnConfig, TurnContentLimitsConfig};
+use aise::config::{RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
 use aise::turn::turn_budget::TurnBudget;
 
 #[test]
@@ -10,8 +10,13 @@ fn turn_budget_from_config_matches_retrieval_limits() {
         max_tokens_per_audience: 500,
         ..RetrievalConfig::default()
     };
-    let budget =
-        TurnBudget::from_config(&TurnConfig::default(), &TurnContentLimitsConfig::default(), &retrieval).unwrap();
+    let budget = TurnBudget::from_config(
+        &TurnConfig::default(),
+        &TurnContentLimitsConfig::default(),
+        &retrieval,
+        &StateExtractorConfig::default(),
+    )
+    .unwrap();
     assert_eq!(budget.max_total_items(), 20);
     assert_eq!(budget.max_retrieved_tokens(), 2_000);
     assert_eq!(budget.max_items_per_audience(), 5);

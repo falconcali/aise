@@ -6,7 +6,7 @@ use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use crate::domain::story_instance::binding::RoleController;
 use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::{BaselineContext, CharacterView, RetrievalAudience, StoryProposalOutput};
+use crate::domain::turn::{BaselineContext, CharacterView, RetrievalAudience, StoryGeneratorOutput};
 use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
 use crate::turn::turn_context::TurnExecutionContext;
 use serde::Serialize;
@@ -291,11 +291,7 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
                 section: "runtime_context",
             });
         }
-        let output_schema = StoryProposalOutput::json_schema(
-            ctx.budget().max_total_items(),
-            ctx.budget().max_item_bytes(),
-            ctx.budget().max_proposal_bytes(),
-        );
+        let output_schema = StoryGeneratorOutput::json_schema(ctx.budget().max_story_text_bytes());
         let fti_vars = TrustedPromptVars::new(HashMap::from([(
             "output_schema".into(),
             Value::String(output_schema.to_string()),

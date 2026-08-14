@@ -9,6 +9,7 @@ pub enum PromptProfile {
     WriterPlanner,
     CharacterThink,
     StoryGenerator,
+    StoryStateExtractor,
     StoryRepairer,
 }
 
@@ -18,6 +19,7 @@ impl PromptProfile {
             PromptProfile::WriterPlanner => "writer_planner",
             PromptProfile::CharacterThink => "character_think",
             PromptProfile::StoryGenerator => "story_generator",
+            PromptProfile::StoryStateExtractor => "story_state_extractor",
             PromptProfile::StoryRepairer => "story_repairer",
         }
     }

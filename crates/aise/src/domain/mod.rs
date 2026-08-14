@@ -20,5 +20,5 @@ pub use story_sequence::{StoryContinuityError, StorySequence};
 pub use turn::{
     BaselineContext, CharacterThinkRequest, CharacterThought, CharacterView, ContextItem, NarrativeStateView,
     RetrievalAudience, RetrievalPlan, RetrievalRequest, RetrievalSignals, RetrievedContext, SnapshotLimits,
-    StoryProposal, WriterPlan, WriterStoryGoal,
+    StoryGeneratorOutput, StoryStateExtractorOutput, WriterPlan, WriterStoryGoal,
 };

@@ -215,7 +215,7 @@ fn packaged_story_repairer_composes_exact_three_layers() {
         "relevant_writer_knowledge",
         "character_thoughts",
         "player_input",
-        "previous_proposal",
+        "previous_story_text",
         "validation_issues",
     ];
     let rc_vars = RuntimePromptVars::new(

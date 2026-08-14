@@ -1,7 +1,7 @@
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{LocationKey, SceneKey, StoryRoleKey, TopicKey};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{CharacterId, StoryRevision};
+use crate::domain::ids::CharacterId;
 use crate::domain::knowledge::{KnowledgeIndexMatch, KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::planning::RetrievalAudience;
@@ -92,7 +92,6 @@ pub struct ContextProvenance {
     pub source_id: KnowledgeSourceId,
     pub knowledge_kind: KnowledgeKind,
     pub source: KnowledgeSource,
-    pub source_revision: StoryRevision,
     pub audience: RetrievalAudience,
     pub memory_owner: Option<CharacterId>,
     pub evidence: BTreeMap<CandidateRetrieverKind, ProviderEvidence>,

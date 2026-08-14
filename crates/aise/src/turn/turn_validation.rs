@@ -1,12 +1,13 @@
 use crate::domain::asset::ids::NarrativeNodeKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::CharacterId;
-use crate::domain::knowledge::{CurrentPerception, KnowledgeEntry};
-use crate::domain::narrative::{StoryEvent, StorySummary};
+use crate::domain::knowledge::{KnowledgeEntry, KnowledgeSourceId};
+use crate::domain::narrative::StoryEvent;
 use crate::domain::narrative_graph::definition::NarrativeNodeState;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::snapshot::NarrativeConditionStateView;
 use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, RelationshipKey, RelationshipState};
+use crate::domain::turn::DeletableKnowledgeId;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::TurnStage;
 use serde::{Deserialize, Serialize};
@@ -14,29 +15,43 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ValidationIssueCode {
-    SchemaInvalid,
+    StoryTextEmpty,
+    StoryTextExceedsBounds,
+    ExtractionSchemaInvalid,
+    ExtractionCountExceeded,
+    ExtractionDuplicateTarget,
     ReferenceMissing,
     ModificationForbidden,
+    UnchangedCharacterEmitted,
+    UnchangedRelationshipEmitted,
     DomainInvariantViolated,
-    KnowledgeBoundaryViolated,
-    WorldFactEvidenceMissing,
-    WorldFactEvidenceInvalid,
+    KnowledgeOperationIllegal,
+    KnowledgeTargetInvalid,
+    KnowledgeOwnerUnauthorized,
+    StaleStateExtraction,
+    StoryStateInconsistent,
     NarrativeInconsistent,
-    CharacterInconsistent,
 }
 
 impl ValidationIssueCode {
     pub fn as_str(&self) -> &'static str {
         match self {
-            ValidationIssueCode::SchemaInvalid => "schema_invalid",
+            ValidationIssueCode::StoryTextEmpty => "story_text_empty",
+            ValidationIssueCode::StoryTextExceedsBounds => "story_text_exceeds_bounds",
+            ValidationIssueCode::ExtractionSchemaInvalid => "extraction_schema_invalid",
+            ValidationIssueCode::ExtractionCountExceeded => "extraction_count_exceeded",
+            ValidationIssueCode::ExtractionDuplicateTarget => "extraction_duplicate_target",
             ValidationIssueCode::ReferenceMissing => "reference_missing",
             ValidationIssueCode::ModificationForbidden => "modification_forbidden",
+            ValidationIssueCode::UnchangedCharacterEmitted => "unchanged_character_emitted",
+            ValidationIssueCode::UnchangedRelationshipEmitted => "unchanged_relationship_emitted",
             ValidationIssueCode::DomainInvariantViolated => "domain_invariant_violated",
-            ValidationIssueCode::KnowledgeBoundaryViolated => "knowledge_boundary_violated",
-            ValidationIssueCode::WorldFactEvidenceMissing => "world_fact_evidence_missing",
-            ValidationIssueCode::WorldFactEvidenceInvalid => "world_fact_evidence_invalid",
+            ValidationIssueCode::KnowledgeOperationIllegal => "knowledge_operation_illegal",
+            ValidationIssueCode::KnowledgeTargetInvalid => "knowledge_target_invalid",
+            ValidationIssueCode::KnowledgeOwnerUnauthorized => "knowledge_owner_unauthorized",
+            ValidationIssueCode::StaleStateExtraction => "stale_state_extraction",
+            ValidationIssueCode::StoryStateInconsistent => "story_state_inconsistent",
             ValidationIssueCode::NarrativeInconsistent => "narrative_inconsistent",
-            ValidationIssueCode::CharacterInconsistent => "character_inconsistent",
         }
     }
 }
@@ -49,9 +64,38 @@ impl std::fmt::Display for ValidationIssueCode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Repairability {
-    Repairable,
-    Fatal,
+pub enum ValidationIssueClass {
+    Story,
+    Extraction,
+    CrossConsistency,
+}
+
+impl ValidationIssueClass {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ValidationIssueClass::Story => "story",
+            ValidationIssueClass::Extraction => "extraction",
+            ValidationIssueClass::CrossConsistency => "cross_consistency",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationRemedy {
+    RepairStory,
+    ReextractState,
+    Reject,
+}
+
+impl ValidationRemedy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ValidationRemedy::RepairStory => "repair_story",
+            ValidationRemedy::ReextractState => "reextract_state",
+            ValidationRemedy::Reject => "reject",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,8 +107,9 @@ pub struct ValidationLocation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValidationIssue {
     pub code: ValidationIssueCode,
+    pub class: ValidationIssueClass,
+    pub remedy: ValidationRemedy,
     pub message: String,
-    pub repairability: Repairability,
     pub location: Option<ValidationLocation>,
 }
 
@@ -81,6 +126,13 @@ impl BoundedValidationIssues {
                 "zero_issue_limit",
                 Some(TurnStage::Validation),
                 "max_issues must be positive",
+            ));
+        }
+        if issues.is_empty() {
+            return Err(invariant(
+                "empty_issue_set",
+                Some(TurnStage::Validation),
+                "a non-pass validation result requires at least one issue",
             ));
         }
         if issues.len() > max_issues {
@@ -117,12 +169,19 @@ impl BoundedValidationIssues {
     pub fn max_issues(&self) -> usize {
         self.max_issues
     }
+
+    pub fn sorted_codes(&self) -> Vec<ValidationIssueCode> {
+        let mut codes = self.issues.iter().map(|issue| issue.code).collect::<Vec<_>>();
+        codes.sort_by_key(|code| code.as_str());
+        codes
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationDecision {
     Pass,
-    Repair,
+    RepairStory,
+    ReextractState,
     Reject,
 }
 
@@ -130,7 +189,8 @@ impl ValidationDecision {
     pub fn as_str(&self) -> &'static str {
         match self {
             ValidationDecision::Pass => "pass",
-            ValidationDecision::Repair => "repair",
+            ValidationDecision::RepairStory => "repair_story",
+            ValidationDecision::ReextractState => "reextract_state",
             ValidationDecision::Reject => "reject",
         }
     }
@@ -138,7 +198,8 @@ impl ValidationDecision {
     pub fn to_turn_phase(self) -> crate::turn::turn_contract::TurnPhase {
         match self {
             ValidationDecision::Pass => crate::turn::turn_contract::TurnPhase::ReadyToCommit,
-            ValidationDecision::Repair => crate::turn::turn_contract::TurnPhase::RepairRequired,
+            ValidationDecision::RepairStory => crate::turn::turn_contract::TurnPhase::StoryRepairRequired,
+            ValidationDecision::ReextractState => crate::turn::turn_contract::TurnPhase::StateReextractionRequired,
             ValidationDecision::Reject => crate::turn::turn_contract::TurnPhase::Failed,
         }
     }
@@ -147,7 +208,8 @@ impl ValidationDecision {
 #[derive(Debug, Clone)]
 pub enum ValidationResult {
     Pass(Box<ValidatedChangeSet>),
-    Repair(BoundedValidationIssues),
+    RepairStory(BoundedValidationIssues),
+    ReextractState(BoundedValidationIssues),
     Reject(BoundedValidationIssues),
 }
 
@@ -156,41 +218,38 @@ impl ValidationResult {
         Self::Pass(Box::new(change_set))
     }
 
-    pub fn repair(issues: BoundedValidationIssues) -> Result<Self, TurnExecutionError> {
+    pub fn from_issues(issues: Vec<ValidationIssue>, max_issues: usize) -> Result<Self, TurnExecutionError> {
         if issues.is_empty() {
             return Err(invariant(
-                "empty_repair_issues",
+                "pass_requires_issue_construction",
                 Some(TurnStage::Validation),
-                "Repair requires at least one issue",
+                "use ValidationResult::pass for the empty-issue case",
             ));
         }
-        for issue in issues.issues() {
-            if issue.repairability == Repairability::Fatal {
-                return Err(invariant(
-                    "fatal_issue_in_repair",
-                    Some(TurnStage::Validation),
-                    "Repair cannot contain a fatal issue",
-                ));
-            }
+        if issues.iter().any(|issue| issue.remedy == ValidationRemedy::Reject) {
+            let bounded = BoundedValidationIssues::try_new(issues, max_issues)?;
+            return Ok(Self::Reject(bounded));
         }
-        Ok(Self::Repair(issues))
-    }
-
-    pub fn reject(issues: BoundedValidationIssues) -> Result<Self, TurnExecutionError> {
-        if !issues.issues().iter().any(|issue| issue.repairability == Repairability::Fatal) {
-            return Err(invariant(
-                "reject_requires_fatal_issue",
-                Some(TurnStage::Validation),
-                "Reject requires at least one fatal issue",
-            ));
+        if issues.iter().any(|issue| issue.remedy == ValidationRemedy::RepairStory) {
+            let bounded = BoundedValidationIssues::try_new(issues, max_issues)?;
+            return Ok(Self::RepairStory(bounded));
         }
-        Ok(Self::Reject(issues))
+        if issues.iter().all(|issue| issue.remedy == ValidationRemedy::ReextractState) {
+            let bounded = BoundedValidationIssues::try_new(issues, max_issues)?;
+            return Ok(Self::ReextractState(bounded));
+        }
+        Err(invariant(
+            "inconsistent_remedy_set",
+            Some(TurnStage::Validation),
+            "validation issue remedies are inconsistent with decision reduction",
+        ))
     }
 
     pub fn decision(&self) -> ValidationDecision {
         match self {
             ValidationResult::Pass(_) => ValidationDecision::Pass,
-            ValidationResult::Repair(_) => ValidationDecision::Repair,
+            ValidationResult::RepairStory(_) => ValidationDecision::RepairStory,
+            ValidationResult::ReextractState(_) => ValidationDecision::ReextractState,
             ValidationResult::Reject(_) => ValidationDecision::Reject,
         }
     }
@@ -198,7 +257,9 @@ impl ValidationResult {
     pub fn issues(&self) -> &[ValidationIssue] {
         match self {
             ValidationResult::Pass(_) => &[],
-            ValidationResult::Repair(issues) | ValidationResult::Reject(issues) => issues.issues(),
+            ValidationResult::RepairStory(issues)
+            | ValidationResult::ReextractState(issues)
+            | ValidationResult::Reject(issues) => issues.issues(),
         }
     }
 
@@ -253,18 +314,34 @@ pub struct ValidatedNarrativeChange {
 }
 
 #[derive(Debug, Clone)]
+pub enum ValidatedKnowledgeOperation {
+    Add(KnowledgeEntry),
+    Update {
+        target: KnowledgeSourceId,
+        value: KnowledgeEntry,
+    },
+    Delete {
+        target: DeletableKnowledgeId,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct ValidatedKnowledgeMutation {
+    pub ordinal: u32,
+    pub operation: ValidatedKnowledgeOperation,
+}
+
+#[derive(Debug, Clone)]
 pub struct ValidatedChangeSet {
     story_text: BoundedText,
-    events: Vec<StoryEvent>,
     character_changes: Vec<CharacterInstanceStateChange>,
     relationship_changes: Vec<RelationshipStateChange>,
-    knowledge_additions: Vec<KnowledgeEntry>,
-    current_perceptions: Vec<CurrentPerception>,
-    scene_change: StateChange<CurrentScene>,
+    knowledge_mutations: Vec<ValidatedKnowledgeMutation>,
+    current_scene: CurrentScene,
+    narrative_events: Vec<StoryEvent>,
     narrative_changes: Vec<ValidatedNarrativeChange>,
     condition_state: NarrativeConditionStateView,
     constraint_change: StateChange<Vec<ActiveStoryConstraint>>,
-    summary_change: StateChange<StorySummary>,
 }
 
 impl ValidatedChangeSet {
@@ -272,32 +349,26 @@ impl ValidatedChangeSet {
         if parts.story_text.as_str().trim().is_empty() {
             return Err(TurnExecutionError::new(
                 TurnFailureKind::ValidationRejected,
-                "no_story_text",
+                "story_text_empty",
                 Some(TurnStage::Validation),
                 "validated change set requires non-empty story text",
             ));
         }
         Ok(Self {
             story_text: parts.story_text,
-            events: parts.events,
             character_changes: parts.character_changes,
             relationship_changes: parts.relationship_changes,
-            knowledge_additions: parts.knowledge_additions,
-            current_perceptions: parts.current_perceptions,
-            scene_change: parts.scene_change,
+            knowledge_mutations: parts.knowledge_mutations,
+            current_scene: parts.current_scene,
+            narrative_events: parts.narrative_events,
             narrative_changes: parts.narrative_changes,
             condition_state: parts.condition_state,
             constraint_change: parts.constraint_change,
-            summary_change: parts.summary_change,
         })
     }
 
     pub fn story_text(&self) -> &str {
         self.story_text.as_str()
-    }
-
-    pub fn events(&self) -> &[StoryEvent] {
-        &self.events
     }
 
     pub fn character_changes(&self) -> &[CharacterInstanceStateChange] {
@@ -308,16 +379,16 @@ impl ValidatedChangeSet {
         &self.relationship_changes
     }
 
-    pub fn knowledge_additions(&self) -> &[KnowledgeEntry] {
-        &self.knowledge_additions
+    pub fn knowledge_mutations(&self) -> &[ValidatedKnowledgeMutation] {
+        &self.knowledge_mutations
     }
 
-    pub fn current_perceptions(&self) -> &[CurrentPerception] {
-        &self.current_perceptions
+    pub fn current_scene(&self) -> &CurrentScene {
+        &self.current_scene
     }
 
-    pub fn scene_change(&self) -> StateChange<CurrentScene> {
-        self.scene_change.clone()
+    pub fn narrative_events(&self) -> &[StoryEvent] {
+        &self.narrative_events
     }
 
     pub fn narrative_changes(&self) -> &[ValidatedNarrativeChange] {
@@ -332,18 +403,6 @@ impl ValidatedChangeSet {
         self.constraint_change.clone()
     }
 
-    pub fn summary_change(&self) -> StateChange<StorySummary> {
-        self.summary_change.clone()
-    }
-
-    pub fn has_scene_change(&self) -> bool {
-        matches!(self.scene_change, StateChange::Replace(_))
-    }
-
-    pub fn has_summary_change(&self) -> bool {
-        matches!(self.summary_change, StateChange::Replace(_))
-    }
-
     pub fn has_constraint_change(&self) -> bool {
         matches!(self.constraint_change, StateChange::Replace(_))
     }
@@ -351,16 +410,14 @@ impl ValidatedChangeSet {
 
 pub struct ValidatedChangeSetParts {
     pub story_text: BoundedText,
-    pub events: Vec<StoryEvent>,
     pub character_changes: Vec<CharacterInstanceStateChange>,
     pub relationship_changes: Vec<RelationshipStateChange>,
-    pub knowledge_additions: Vec<KnowledgeEntry>,
-    pub current_perceptions: Vec<CurrentPerception>,
-    pub scene_change: StateChange<CurrentScene>,
+    pub knowledge_mutations: Vec<ValidatedKnowledgeMutation>,
+    pub current_scene: CurrentScene,
+    pub narrative_events: Vec<StoryEvent>,
     pub narrative_changes: Vec<ValidatedNarrativeChange>,
     pub condition_state: NarrativeConditionStateView,
     pub constraint_change: StateChange<Vec<ActiveStoryConstraint>>,
-    pub summary_change: StateChange<StorySummary>,
 }
 
 fn invariant(code: &'static str, stage: Option<TurnStage>, message: impl Into<String>) -> TurnExecutionError {

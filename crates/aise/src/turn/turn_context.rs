@@ -2,21 +2,26 @@ use crate::domain::ids::{CharacterId, StoryId, TurnId};
 use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::proposal::StoryProposal;
 use crate::domain::turn::{
     BaselineContext, CharacterThought, ContextItem, RetrievalAudience, RetrievedContext, RetrievedContextLimits,
     WriterPlan,
 };
-use crate::turn::turn_budget::TurnBudget;
+use crate::domain::turn::{StoryGeneratorOutput, StoryStateExtractorOutput};
+use crate::turn::turn_budget::{CorrectionKind, TurnBudget};
 use crate::turn::turn_contract::{
     CommittedTurnResult, LlmBudgetReservation, LlmCallUsage, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
 };
-use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind, TurnTerminalKind};
+use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::TurnStage;
 use crate::turn::turn_trace::{PendingSpan, TraceRecorder};
-use crate::turn::turn_validation::{ValidatedChangeSet, ValidationResult};
+use crate::turn::turn_validation::{BoundedValidationIssues, ValidatedChangeSet, ValidationDecision, ValidationResult};
 use serde::Serialize;
 use std::time::Instant;
+
+struct BoundStateExtraction {
+    story_version: u32,
+    output: StoryStateExtractorOutput,
+}
 
 pub struct TurnExecutionContext {
     identity: TurnIdentity,
@@ -30,14 +35,15 @@ pub struct TurnExecutionContext {
     plan: Option<WriterPlan>,
     retrieved: RetrievedContext,
     thoughts: Vec<CharacterThought>,
-    proposal: Option<StoryProposal>,
-    proposal_revision: u32,
+    story: Option<StoryGeneratorOutput>,
+    story_version: u32,
+    extraction: Option<BoundStateExtraction>,
     validation: Option<ValidationResult>,
     change_set: Option<ValidatedChangeSet>,
     committed_result: Option<CommittedTurnResult>,
-    terminal_kind: Option<TurnTerminalKind>,
+    terminal_kind: Option<crate::turn::turn_error::TurnTerminalKind>,
     terminal_error: Option<TurnExecutionError>,
-    llm_calls: Vec<crate::turn::turn_contract::LlmCallUsage>,
+    llm_calls: Vec<LlmCallUsage>,
 }
 
 impl TurnExecutionContext {
@@ -68,8 +74,9 @@ impl TurnExecutionContext {
             plan: None,
             retrieved: RetrievedContext::default(),
             thoughts: Vec::new(),
-            proposal: None,
-            proposal_revision: 0,
+            story: None,
+            story_version: 0,
+            extraction: None,
             validation: None,
             change_set: None,
             committed_result: None,
@@ -97,6 +104,10 @@ impl TurnExecutionContext {
 
     pub fn budget(&self) -> &TurnBudget {
         &self.budget
+    }
+
+    pub fn budget_mut(&mut self) -> &mut TurnBudget {
+        &mut self.budget
     }
 
     pub fn trace(&mut self) -> &mut TraceRecorder {
@@ -135,8 +146,20 @@ impl TurnExecutionContext {
         &self.thoughts
     }
 
-    pub fn proposal(&self) -> Option<&StoryProposal> {
-        self.proposal.as_ref()
+    pub fn story(&self) -> Option<&StoryGeneratorOutput> {
+        self.story.as_ref()
+    }
+
+    pub fn story_version(&self) -> u32 {
+        self.story_version
+    }
+
+    pub fn extraction(&self) -> Option<&StoryStateExtractorOutput> {
+        self.extraction.as_ref().map(|bound| &bound.output)
+    }
+
+    pub fn extraction_story_version(&self) -> Option<u32> {
+        self.extraction.as_ref().map(|bound| bound.story_version)
     }
 
     pub fn validation(&self) -> Option<&ValidationResult> {
@@ -147,7 +170,7 @@ impl TurnExecutionContext {
         self.committed_result.as_ref()
     }
 
-    pub fn llm_calls(&self) -> &[crate::turn::turn_contract::LlmCallUsage] {
+    pub fn llm_calls(&self) -> &[LlmCallUsage] {
         &self.llm_calls
     }
 
@@ -374,36 +397,103 @@ impl TurnExecutionContext {
         Ok(())
     }
 
-    pub fn set_story_proposal(&mut self, proposal: StoryProposal) -> Result<(), TurnExecutionError> {
-        self.expect_phase(TurnPhase::ContextReady)?;
-        self.ensure_proposal_bound(&proposal, TurnStage::StoryGenerator)?;
-        self.proposal = Some(proposal);
-        self.phase = TurnPhase::ProposalReady;
-        Ok(())
-    }
-
-    fn ensure_proposal_bound(&self, proposal: &StoryProposal, stage: TurnStage) -> Result<(), TurnExecutionError> {
-        let serialized = serde_json::to_string(proposal).map_err(|error| {
-            TurnExecutionError::new(
-                TurnFailureKind::InvariantViolation,
-                "proposal_serialization_failed",
-                Some(stage),
-                error.to_string(),
-            )
-        })?;
-        if serialized.len() > self.budget.max_proposal_bytes() {
+    fn ensure_story_bound(&self, story: &StoryGeneratorOutput, stage: TurnStage) -> Result<(), TurnExecutionError> {
+        if story.story_text.as_str().trim().is_empty() {
             return Err(TurnExecutionError::new(
                 TurnFailureKind::Llm,
-                "model_output_invalid",
+                "story_text_empty",
                 Some(stage),
-                "story proposal exceeds its byte bound",
+                "story text must not be empty",
+            ));
+        }
+        if story.story_text.as_str().len() > self.budget.max_story_text_bytes() {
+            return Err(TurnExecutionError::new(
+                TurnFailureKind::Llm,
+                "story_text_exceeds_bounds",
+                Some(stage),
+                "story text exceeds its byte bound",
             ));
         }
         Ok(())
     }
 
+    fn ensure_extraction_bound(
+        &self,
+        output: &StoryStateExtractorOutput,
+        stage: TurnStage,
+    ) -> Result<(), TurnExecutionError> {
+        let serialized = serde_json::to_string(output).map_err(|error| {
+            TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "extraction_serialization_failed",
+                Some(stage),
+                error.to_string(),
+            )
+        })?;
+        if serialized.len() > self.budget.max_state_extraction_bytes() {
+            return Err(TurnExecutionError::new(
+                TurnFailureKind::Llm,
+                "state_extraction_exceeds_bounds",
+                Some(stage),
+                "state extraction output exceeds its byte bound",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn set_generated_story(&mut self, story: StoryGeneratorOutput) -> Result<(), TurnExecutionError> {
+        self.expect_phase(TurnPhase::ContextReady)?;
+        self.ensure_story_bound(&story, TurnStage::StoryGenerator)?;
+        self.story = Some(story);
+        self.story_version = 1;
+        self.extraction = None;
+        self.validation = None;
+        self.change_set = None;
+        self.phase = TurnPhase::StoryReady;
+        Ok(())
+    }
+
+    pub fn set_state_extraction(&mut self, output: StoryStateExtractorOutput) -> Result<(), TurnExecutionError> {
+        self.expect_phase(TurnPhase::StoryReady)?;
+        self.ensure_extraction_bound(&output, TurnStage::StoryStateExtractor)?;
+        self.extraction = Some(BoundStateExtraction {
+            story_version: self.story_version,
+            output,
+        });
+        self.validation = None;
+        self.change_set = None;
+        self.phase = TurnPhase::CandidateReady;
+        Ok(())
+    }
+
+    pub fn record_state_extraction_failure(
+        &mut self,
+        issues: BoundedValidationIssues,
+    ) -> Result<(), TurnExecutionError> {
+        self.expect_phase_one_of(&[TurnPhase::StoryReady, TurnPhase::StateReextractionRequired])?;
+        for issue in issues.issues() {
+            if issue.message.len() > self.budget.max_validation_issue_bytes() {
+                return Err(TurnExecutionError::new(
+                    TurnFailureKind::InvariantViolation,
+                    "validation_issue_byte_limit",
+                    Some(TurnStage::StoryStateExtractor),
+                    format!(
+                        "validation issue message {} bytes exceeds budget {}",
+                        issue.message.len(),
+                        self.budget.max_validation_issue_bytes()
+                    ),
+                ));
+            }
+        }
+        self.extraction = None;
+        self.change_set = None;
+        self.validation = Some(ValidationResult::ReextractState(issues));
+        self.phase = TurnPhase::StateReextractionRequired;
+        Ok(())
+    }
+
     pub fn set_validation_result(&mut self, result: ValidationResult) -> Result<(), TurnExecutionError> {
-        self.expect_phase(TurnPhase::ProposalReady)?;
+        self.expect_phase(TurnPhase::CandidateReady)?;
         for issue in result.issues() {
             if issue.message.len() > self.budget.max_validation_issue_bytes() {
                 return Err(TurnExecutionError::new(
@@ -419,31 +509,75 @@ impl TurnExecutionContext {
             }
         }
         let decision = result.decision();
-        self.change_set = result.clone().into_change_set();
+        match decision {
+            ValidationDecision::Pass => {
+                self.change_set = result.clone().into_change_set();
+            }
+            ValidationDecision::RepairStory => {
+                self.extraction = None;
+                self.change_set = None;
+            }
+            ValidationDecision::ReextractState => {
+                self.change_set = None;
+            }
+            ValidationDecision::Reject => {
+                self.change_set = None;
+            }
+        }
         self.phase = decision.to_turn_phase();
         self.validation = Some(result);
         Ok(())
     }
 
-    pub fn replace_story_proposal(&mut self, proposal: StoryProposal) -> Result<(), TurnExecutionError> {
-        self.expect_phase(TurnPhase::RepairRequired)?;
-        self.ensure_proposal_bound(&proposal, TurnStage::StoryRepairer)?;
-        self.proposal = Some(proposal);
-        self.validation = None;
-        self.change_set = None;
-        self.proposal_revision = self.proposal_revision.checked_add(1).ok_or_else(|| {
+    pub fn replace_story(&mut self, story: StoryGeneratorOutput) -> Result<(), TurnExecutionError> {
+        self.expect_phase(TurnPhase::StoryRepairRequired)?;
+        self.ensure_story_bound(&story, TurnStage::StoryRepairer)?;
+        if let Some(current) = &self.story {
+            if current.story_text == story.story_text {
+                return Err(TurnExecutionError::story_repair_no_progress(Some(TurnStage::StoryRepairer)));
+            }
+        }
+        self.story_version = self.story_version.checked_add(1).ok_or_else(|| {
             TurnExecutionError::new(
                 TurnFailureKind::InvariantViolation,
-                "proposal_revision_overflow",
+                "story_version_overflow",
                 Some(TurnStage::StoryRepairer),
-                "proposal revision overflow",
+                "candidate story version overflow",
             )
         })?;
-        self.phase = TurnPhase::ProposalReady;
+        self.story = Some(story);
+        self.extraction = None;
+        self.validation = None;
+        self.change_set = None;
+        self.phase = TurnPhase::StoryReady;
         Ok(())
     }
 
-    pub fn validation_decision(&self) -> Result<crate::turn::turn_validation::ValidationDecision, TurnExecutionError> {
+    pub fn replace_state_extraction(&mut self, output: StoryStateExtractorOutput) -> Result<(), TurnExecutionError> {
+        self.expect_phase(TurnPhase::StateReextractionRequired)?;
+        self.ensure_extraction_bound(&output, TurnStage::StoryStateExtractor)?;
+        let no_progress = match (&self.extraction, &self.validation) {
+            (Some(existing), Some(ValidationResult::ReextractState(_))) => {
+                serde_json::to_string(&existing.output).ok() == serde_json::to_string(&output).ok()
+            }
+            _ => false,
+        };
+        if no_progress {
+            return Err(TurnExecutionError::state_reextraction_no_progress(Some(
+                TurnStage::StoryStateExtractor,
+            )));
+        }
+        self.extraction = Some(BoundStateExtraction {
+            story_version: self.story_version,
+            output,
+        });
+        self.validation = None;
+        self.change_set = None;
+        self.phase = TurnPhase::CandidateReady;
+        Ok(())
+    }
+
+    pub fn validation_decision(&self) -> Result<ValidationDecision, TurnExecutionError> {
         match &self.validation {
             Some(result) => Ok(result.decision()),
             None => Err(TurnExecutionError::new(
@@ -455,16 +589,32 @@ impl TurnExecutionContext {
         }
     }
 
-    pub fn consume_repair_round(&mut self) -> Result<(), TurnExecutionError> {
-        self.budget.consume_repair_round()
+    pub fn validation_rejected_error(&self) -> Result<TurnExecutionError, TurnExecutionError> {
+        match &self.validation {
+            Some(ValidationResult::Reject(issues)) => {
+                let detail = issues
+                    .issues()
+                    .iter()
+                    .map(|issue| issue.code.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                Ok(TurnExecutionError::validation_rejected(detail))
+            }
+            _ => Err(TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "no_rejected_validation_result",
+                None,
+                "validation result is not a rejection",
+            )),
+        }
+    }
+
+    pub fn consume_correction_round(&mut self, kind: CorrectionKind) -> Result<(), TurnExecutionError> {
+        self.budget.consume_correction_round(kind)
     }
 
     pub fn change_set(&self) -> Option<&ValidatedChangeSet> {
         self.change_set.as_ref()
-    }
-
-    pub fn proposal_revision(&self) -> u32 {
-        self.proposal_revision
     }
 
     pub fn set_committed_result(&mut self, result: CommittedTurnResult) -> Result<(), TurnExecutionError> {
@@ -475,30 +625,30 @@ impl TurnExecutionContext {
     }
 
     pub fn mark_failed(&mut self, failure: &TurnExecutionError) -> Result<(), TurnExecutionError> {
-        self.expect_terminal(TurnTerminalKind::Failed)?;
-        self.terminal_kind = Some(TurnTerminalKind::Failed);
+        self.expect_terminal(crate::turn::turn_error::TurnTerminalKind::Failed)?;
+        self.terminal_kind = Some(crate::turn::turn_error::TurnTerminalKind::Failed);
         self.phase = TurnPhase::Failed;
         self.terminal_error = Some(failure.clone());
         Ok(())
     }
 
     pub fn mark_cancelled(&mut self, failure: &TurnExecutionError) -> Result<(), TurnExecutionError> {
-        self.expect_terminal(TurnTerminalKind::Cancelled)?;
-        self.terminal_kind = Some(TurnTerminalKind::Cancelled);
+        self.expect_terminal(crate::turn::turn_error::TurnTerminalKind::Cancelled)?;
+        self.terminal_kind = Some(crate::turn::turn_error::TurnTerminalKind::Cancelled);
         self.phase = TurnPhase::Cancelled;
         self.terminal_error = Some(failure.clone());
         Ok(())
     }
 
     pub fn mark_conflict(&mut self, failure: &TurnExecutionError) -> Result<(), TurnExecutionError> {
-        self.expect_terminal(TurnTerminalKind::Conflict)?;
-        self.terminal_kind = Some(TurnTerminalKind::Conflict);
+        self.expect_terminal(crate::turn::turn_error::TurnTerminalKind::Conflict)?;
+        self.terminal_kind = Some(crate::turn::turn_error::TurnTerminalKind::Conflict);
         self.phase = TurnPhase::Conflict;
         self.terminal_error = Some(failure.clone());
         Ok(())
     }
 
-    pub fn terminal_kind(&self) -> Option<TurnTerminalKind> {
+    pub fn terminal_kind(&self) -> Option<crate::turn::turn_error::TurnTerminalKind> {
         self.terminal_kind
     }
 
@@ -613,7 +763,7 @@ impl TurnExecutionContext {
         Ok(())
     }
 
-    fn expect_terminal(&self, expected: TurnTerminalKind) -> Result<(), TurnExecutionError> {
+    fn expect_terminal(&self, expected: crate::turn::turn_error::TurnTerminalKind) -> Result<(), TurnExecutionError> {
         match self.terminal_kind {
             None => Ok(()),
             Some(actual) if actual == expected => Ok(()),
@@ -638,6 +788,21 @@ impl TurnExecutionContext {
         Ok(())
     }
 
+    fn expect_phase_one_of(&self, expected: &[TurnPhase]) -> Result<(), TurnExecutionError> {
+        if !expected.contains(&self.phase) {
+            return Err(TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "invalid_phase_transition",
+                None,
+                format!(
+                    "invalid phase transition: expected one of {expected:?}, current {:?}",
+                    self.phase
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn llm_call_scope(&mut self, stage: TurnStage) -> TurnLlmCallScope<'_> {
         TurnLlmCallScope {
             identity: &self.identity,
@@ -655,7 +820,7 @@ pub struct TurnLlmCallScope<'a> {
     control: &'a TurnControl,
     budget: &'a mut TurnBudget,
     trace: &'a mut TraceRecorder,
-    llm_calls: &'a mut Vec<crate::turn::turn_contract::LlmCallUsage>,
+    llm_calls: &'a mut Vec<LlmCallUsage>,
     stage: TurnStage,
 }
 

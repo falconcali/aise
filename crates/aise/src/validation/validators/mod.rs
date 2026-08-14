@@ -1,15 +1,14 @@
-pub mod consistency;
+pub mod changed_only;
 pub mod domain_invariant;
-pub mod knowledge_boundary;
-pub mod schema;
-pub mod world_fact_evidence;
+pub mod extraction_schema;
+pub mod reference;
+pub mod story_bounds;
+pub mod story_state_consistency;
 
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::TurnExecutionError;
-use crate::turn::turn_validation::{ValidationIssue, ValidationIssueCode};
+use crate::turn::turn_validation::ValidationIssue;
 
 pub trait DeterministicValidator: Send + Sync {
-    fn code(&self) -> ValidationIssueCode;
-
     fn validate(&self, ctx: &TurnExecutionContext) -> Result<Vec<ValidationIssue>, TurnExecutionError>;
 }
