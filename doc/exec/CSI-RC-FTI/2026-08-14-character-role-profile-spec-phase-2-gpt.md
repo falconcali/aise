@@ -424,6 +424,16 @@ pub enum StoryGeneratorProjectionError {
 
 All existing non-role projection-error variants remain unchanged.
 
+Rename the Character Decision spec's `StoryGeneratorProjectionError` string codes to match the Role-renamed variants above, with no alias accepted:
+
+| Old code (Character Decision spec §3.7) | New code |
+|---|---|
+| `unknown_decision_character` | `unknown_decision_role` |
+| `player_character_decision` | `player_role_decision` |
+| `duplicate_character_decision` | `duplicate_role_decision` |
+
+`character_decision_count_mismatch` and `character_decision_order_mismatch` are unaffected by this rename: they remain `TurnExecutionContext`/`TurnFailureKind` codes owned by the Character Decision spec §3.11 and §4.4 (`CD-CTX-03`), not `StoryGeneratorProjectionError` variants, so they keep the `character_decision_*` spelling.
+
 No error message includes Profile, background, Dialogue Example, Memory, Decision, Story Continuity, or Player Input text.
 
 ### 3.12 File and Directory Layout
@@ -497,7 +507,7 @@ Use the extractor module created by the StoryStateExtractor split spec; do not c
 
 ### 4.3 Observability
 
-- Rename story-runtime trace fields to `role_id`, `role_count`, `provided_role_count`, `decision_role_count`, and `role_audience_count`.
+- Rename story-runtime trace fields to `role_id`, `role_count`, `provided_role_count`, `decision_role_count`, and `role_audience_count`. This includes the Character Decision spec's CharacterThink decode metadata field `target_character_id` (CD-OBS-02), which becomes `target_role_id`; the sibling fields `decision_bytes`, `suggested_utterance_present`, `suggested_utterance_bytes`, and `output_bytes` keep their names.
 - Character Card service traces may retain `character_id`; Prompt/Pipeline traces may not.
 - Record selected Dialogue Example count/token cost, omitted example count, Prompt section byte counts, projection duration, render duration, model duration, and parse status.
 - Never record Profile text, Role background, Dialogue Example text, Memory, Decision text, Story Continuity, Player Input, or full rendered RC in production telemetry.
