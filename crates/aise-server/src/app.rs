@@ -14,6 +14,7 @@ use aise::persistence::{SqliteStore, SqliteStoryHistoryReader, Store, StoryHisto
 use aise::planning::WriterPlanner;
 use aise::prompt::{CatalogPromptSource, TrustedPromptSource};
 use aise::runtime::{StoryTurnCoordinator, TurnInitializer, TurnPipelineSet, TurnRuntime};
+use aise::story::character_card_service::CharacterCardService;
 use aise::story::instance_factory::{StoryInstanceFactory, StoryInstantiationLimits};
 use aise::story::pack_service::{NativeAssetImporter, PackService};
 use aise::story::{StoryGenerator, StoryRepairer};
@@ -30,6 +31,7 @@ pub fn new_trace_writer(config: &ServerConfig) -> Result<Arc<TraceWriter>, Trace
 pub struct EngineServices {
     pub engine: Arc<AiseEngine>,
     pub pack_service: Arc<PackService>,
+    pub character_card_service: Arc<CharacterCardService>,
     pub instance_factory: Arc<StoryInstanceFactory>,
     pub story_history_reader: Arc<dyn StoryHistoryReadPort>,
 }
@@ -107,6 +109,7 @@ pub async fn build_services(
         .map_err(|error| anyhow::anyhow!("asset store connect failed: {error}"))?;
     let importer = NativeAssetImporter::new(config.aise.assets.clone(), config.aise.narrative.clone());
     let pack_service = Arc::new(PackService::new(importer, asset_store.clone()));
+    let character_card_service = Arc::new(CharacterCardService::new(asset_store.clone(), config.aise.assets.clone()));
     let instance_factory = Arc::new(StoryInstanceFactory::new(
         asset_store,
         store,
@@ -124,6 +127,7 @@ pub async fn build_services(
     Ok(EngineServices {
         engine: Arc::new(engine),
         pack_service,
+        character_card_service,
         instance_factory,
         story_history_reader,
     })

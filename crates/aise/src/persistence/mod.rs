@@ -10,7 +10,10 @@ pub mod store;
 pub mod story_history_read_port;
 pub mod turn_committer;
 
-pub use asset_store::{AssetStore, FrozenStoryPack, PackInfo, ValidatedStoryPack};
+pub use asset_store::{
+    AssetStore, CharacterCardInfo, FrozenCharacterCard, FrozenStoryPack, PackInfo, ValidatedCharacterCard,
+    ValidatedStoryPack,
+};
 pub use knowledge_read_port::{
     EntityKnowledgeQuery, KnowledgeFilter, KnowledgeReadPort, KnowledgeRecord, TopicKnowledgeQuery,
 };

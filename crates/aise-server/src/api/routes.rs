@@ -1,4 +1,5 @@
 use crate::api::bind::bind_story;
+use crate::api::character_card::{import_character_card, list_character_cards, validate_character_card};
 use crate::api::pack::{delete_pack, export_pack, import_pack, list_packs, validate_pack};
 use crate::api::session::{create_session, delete_session, list_sessions};
 use crate::api::state::AppState;
@@ -27,6 +28,8 @@ pub fn router(state: Arc<AppState>, config: &ServerConfig) -> Router {
         .route("/api/packs/validate", post(validate_pack))
         .route("/api/packs", get(list_packs).post(import_pack))
         .route("/api/packs/{id}", get(export_pack).delete(delete_pack))
+        .route("/api/character-cards/validate", post(validate_character_card))
+        .route("/api/character-cards", get(list_character_cards).post(import_character_card))
         .route("/api/story-instances", post(create_story_instance))
         .with_state(state)
 }

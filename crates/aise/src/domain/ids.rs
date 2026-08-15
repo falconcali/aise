@@ -53,11 +53,123 @@ macro_rules! id_type {
     };
 }
 
-id_type!(CharacterId);
 id_type!(EventId);
 id_type!(MemoryId);
 id_type!(FactId);
 id_type!(RumorId);
+
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CharacterId(Arc<str>);
+
+impl CharacterId {
+    pub fn new_uuid() -> Self {
+        Self(Arc::from(Uuid::new_v4().to_string()))
+    }
+
+    pub fn try_new(value: impl Into<String>) -> Result<Self, DomainInputError> {
+        let value = value.into();
+        let parsed = Uuid::parse_str(&value).map_err(|_| DomainInputError::InvalidCharacterId)?;
+        if parsed.is_nil() {
+            return Err(DomainInputError::InvalidCharacterId);
+        }
+        Ok(Self(Arc::from(parsed.hyphenated().to_string())))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for CharacterId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl fmt::Debug for CharacterId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("CharacterId").field(&self.0).finish()
+    }
+}
+
+impl Serialize for CharacterId {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for CharacterId {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Self::try_new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RoleId(Arc<str>);
+
+impl RoleId {
+    pub const MAX_BYTES: usize = 128;
+
+    pub fn try_new(value: impl Into<String>) -> Result<Self, DomainInputError> {
+        let value = value.into();
+        if !is_valid_role_id(&value) {
+            return Err(DomainInputError::InvalidRoleId);
+        }
+        Ok(Self(Arc::from(value)))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+fn is_valid_role_id(value: &str) -> bool {
+    if value.is_empty() || value.len() > RoleId::MAX_BYTES {
+        return false;
+    }
+    let mut seen_segment = false;
+    for ch in value.chars() {
+        match ch {
+            'a'..='z' | '0'..='9' => {
+                seen_segment = true;
+            }
+            '.' | '_' | '-' => {
+                if !seen_segment {
+                    return false;
+                }
+                seen_segment = false;
+            }
+            _ => return false,
+        }
+    }
+    seen_segment
+}
+
+impl fmt::Display for RoleId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl fmt::Debug for RoleId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("RoleId").field(&self.0).finish()
+    }
+}
+
+impl Serialize for RoleId {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for RoleId {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Self::try_new(value).map_err(serde::de::Error::custom)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StoryId(Arc<str>);
@@ -189,3 +301,7 @@ impl fmt::Display for StoryRevision {
         write!(f, "{}", self.0)
     }
 }
+
+#[cfg(test)]
+#[path = "tests/ids_tests.rs"]
+mod tests;

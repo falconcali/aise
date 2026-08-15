@@ -1,3 +1,4 @@
+pub mod character_card_service;
 pub mod instance_factory;
 pub mod pack_service;
 pub mod story_generator;
@@ -7,6 +8,7 @@ pub mod story_repairer_prompt;
 pub mod story_state_extractor;
 pub mod story_state_extractor_prompt;
 
+pub use character_card_service::{CharacterCardImportError, CharacterCardService};
 pub use instance_factory::{
     CreateStoryInstanceSpec, StoryInstanceFactory, StoryInstantiationError, StoryInstantiationLimits,
 };

@@ -151,10 +151,8 @@ fn is_valid_semantic_key(value: &str) -> bool {
     !value.trim().is_empty() && !value.chars().any(char::is_control)
 }
 
-key_type!(CharacterAssetKey);
 key_type!(WorldBookKey);
 key_type!(StoryPackKey);
-key_type!(StoryRoleKey);
 key_type!(SceneKey);
 key_type!(LocationKey);
 key_type!(EntityKey);

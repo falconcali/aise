@@ -1,8 +1,10 @@
 use crate::config::{AssetLimitsConfig, NarrativeConfig};
-use crate::domain::asset::frozen_ref::{CharacterAssetSource, WorldBookSource};
+use crate::domain::asset::character_card::CharacterProfile;
+use crate::domain::asset::frozen_ref::WorldBookSource;
 use crate::domain::asset::ids::{PackId, SemanticVersion, Sha256Digest, StoryPackKey};
 use crate::domain::asset::story_pack::StoryPack;
-use crate::domain::asset::validation::{AssetValidationCode, AssetValidationIssue, ValidationReport};
+use crate::domain::asset::validation::{AssetValidationCode, AssetValidationIssue, BoundedText, ValidationReport};
+use crate::domain::ids::RoleId;
 use crate::persistence::asset_store::{AssetStore, PackInfo, ValidatedStoryPack};
 use crate::persistence::store::StoreError;
 use sha2::{Digest, Sha256};
@@ -66,6 +68,145 @@ const FORBIDDEN_FIELD_NAMES: &[&str] = &[
     "temperature",
     "max_tokens",
 ];
+
+const NARRATIVE_ROLE_REFERENCE_FIELDS: &[&str] = &["role_key", "source_role_key", "target_role_key"];
+
+pub fn check_forbidden_fields(
+    value: &serde_json::Value,
+    path: &str,
+    report: &mut ValidationReport,
+    depth: usize,
+    max_depth: usize,
+) {
+    if depth > max_depth {
+        report.push(AssetValidationIssue::new(
+            AssetValidationCode::LimitExceeded,
+            path,
+            "asset nesting depth exceeds limit",
+        ));
+        return;
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                let child_path = format!("{path}/{key}");
+                if FORBIDDEN_FIELD_NAMES.contains(&key.as_str()) {
+                    report.push(AssetValidationIssue::new(
+                        AssetValidationCode::ForbiddenField,
+                        child_path.clone(),
+                        "forbidden runtime field",
+                    ));
+                }
+                check_forbidden_fields(child, &child_path, report, depth + 1, max_depth);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                check_forbidden_fields(item, &format!("{path}/{index}"), report, depth + 1, max_depth);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn validate_character_profile(
+    profile: &CharacterProfile,
+    path: &str,
+    limits: &AssetLimitsConfig,
+    report: &mut ValidationReport,
+) {
+    validate_required_profile_text(&profile.name, &format!("{path}/name"), limits.max_profile_name_bytes, report);
+    validate_optional_profile_text(
+        profile.appearance.as_ref(),
+        &format!("{path}/appearance"),
+        limits.max_profile_appearance_bytes,
+        report,
+    );
+    validate_optional_profile_text(
+        profile.personality.as_ref(),
+        &format!("{path}/personality"),
+        limits.max_profile_personality_bytes,
+        report,
+    );
+    validate_optional_profile_text(
+        profile.speaking_style.as_ref(),
+        &format!("{path}/speaking_style"),
+        limits.max_profile_speaking_style_bytes,
+        report,
+    );
+    if profile.dialogue_examples.len() > limits.max_dialogue_examples_per_profile {
+        report.push(AssetValidationIssue::new(
+            AssetValidationCode::LimitExceeded,
+            format!("{path}/dialogue_examples"),
+            format!(
+                "dialogue example count {} exceeds limit {}",
+                profile.dialogue_examples.len(),
+                limits.max_dialogue_examples_per_profile
+            ),
+        ));
+    }
+    for (index, example) in profile.dialogue_examples.iter().enumerate() {
+        let example_path = format!("{path}/dialogue_examples/{index}");
+        validate_required_profile_text(
+            &example.situation,
+            &format!("{example_path}/situation"),
+            limits.max_dialogue_situation_bytes,
+            report,
+        );
+        validate_required_profile_text(
+            &example.response,
+            &format!("{example_path}/response"),
+            limits.max_dialogue_response_bytes,
+            report,
+        );
+    }
+    match serde_json::to_vec(profile) {
+        Ok(bytes) => {
+            if bytes.len() > limits.max_profile_total_bytes {
+                report.push(AssetValidationIssue::new(
+                    AssetValidationCode::LimitExceeded,
+                    path,
+                    format!("profile bytes {} exceed limit {}", bytes.len(), limits.max_profile_total_bytes),
+                ));
+            }
+        }
+        Err(_) => {
+            report.push(AssetValidationIssue::new(
+                AssetValidationCode::SchemaInvalid,
+                path,
+                "profile failed to serialize",
+            ));
+        }
+    }
+}
+
+fn validate_required_profile_text(text: &BoundedText, path: &str, max_bytes: usize, report: &mut ValidationReport) {
+    if text.as_str().trim().is_empty() {
+        report.push(AssetValidationIssue::new(
+            AssetValidationCode::EmptyText,
+            path.to_owned(),
+            "text must not be empty",
+        ));
+    }
+    if text.as_str().len() > max_bytes {
+        report.push(AssetValidationIssue::new(
+            AssetValidationCode::LimitExceeded,
+            path.to_owned(),
+            format!("text bytes {} exceed limit {}", text.as_str().len(), max_bytes),
+        ));
+    }
+}
+
+fn validate_optional_profile_text(
+    text: Option<&BoundedText>,
+    path: &str,
+    max_bytes: usize,
+    report: &mut ValidationReport,
+) {
+    if let Some(text) = text {
+        validate_required_profile_text(text, path, max_bytes, report);
+    }
+}
 
 pub struct NativeAssetImporter {
     limits: AssetLimitsConfig,
@@ -261,7 +402,7 @@ impl NativeAssetImporter {
 
     pub fn validate_pack_value(&self, value: &serde_json::Value, report: &mut ValidationReport) {
         match value.get("spec").and_then(serde_json::Value::as_str) {
-            Some("aise_story_v3") => {}
+            Some("aise_story_v4") => {}
             Some(other) => {
                 report.push(AssetValidationIssue::new(
                     AssetValidationCode::UnsupportedSpec,
@@ -280,7 +421,7 @@ impl NativeAssetImporter {
             }
         }
         match value.get("spec_version").and_then(serde_json::Value::as_str) {
-            Some("3.0") => {}
+            Some("4.0") => {}
             Some(other) => {
                 report.push(AssetValidationIssue::new(
                     AssetValidationCode::UnsupportedSpecVersion,
@@ -299,27 +440,103 @@ impl NativeAssetImporter {
             }
         }
         self.check_forbidden_fields(value, "/", report, 0);
-        if let Some(roles) = value.get("roles").and_then(serde_json::Value::as_object) {
-            if roles.len() > self.limits.max_roles {
-                report.push(AssetValidationIssue::new(
-                    AssetValidationCode::LimitExceeded,
-                    "/roles",
-                    format!("role count {} exceeds limit", roles.len()),
-                ));
-            }
-        }
-        if let Some(assets) = value.get("character_assets").and_then(serde_json::Value::as_object) {
-            if assets.len() > self.limits.max_character_assets {
-                report.push(AssetValidationIssue::new(
-                    AssetValidationCode::LimitExceeded,
-                    "/character_assets",
-                    format!("character asset count {} exceeds limit", assets.len()),
-                ));
-            }
-        }
-        self.validate_cast_and_start(value, report);
+        let role_ids = self.validate_roles(value, report);
+        self.validate_play_and_start(value, &role_ids, report);
+        self.validate_narrative_role_references(value, &role_ids, report);
         self.validate_graph(value, report);
         self.validate_salience(value, report);
+    }
+
+    fn validate_roles(&self, value: &serde_json::Value, report: &mut ValidationReport) -> BTreeSet<String> {
+        let mut role_ids = BTreeSet::new();
+        let roles = match value.get("roles").and_then(serde_json::Value::as_object) {
+            Some(roles) => roles,
+            None => return role_ids,
+        };
+        if roles.len() > self.limits.max_roles {
+            report.push(AssetValidationIssue::new(
+                AssetValidationCode::LimitExceeded,
+                "/roles",
+                format!("role count {} exceeds limit", roles.len()),
+            ));
+        }
+        for (role_key, role_value) in roles {
+            let role_path = format!("/roles/{role_key}");
+            if RoleId::try_new(role_key.clone()).is_err() {
+                report.push(AssetValidationIssue::new(
+                    AssetValidationCode::InvalidKey,
+                    role_path.clone(),
+                    "role id does not match the required syntax",
+                ));
+            }
+            role_ids.insert(role_key.clone());
+            let profile_path = format!("{role_path}/default_profile");
+            match role_value.get("default_profile") {
+                None => {
+                    report.push(AssetValidationIssue::new(
+                        AssetValidationCode::SchemaInvalid,
+                        profile_path,
+                        "default_profile is missing",
+                    ));
+                }
+                Some(profile_value) => match serde_json::from_value::<CharacterProfile>(profile_value.clone()) {
+                    Ok(profile) => validate_character_profile(&profile, &profile_path, &self.limits, report),
+                    Err(_) => {
+                        report.push(AssetValidationIssue::new(
+                            AssetValidationCode::SchemaInvalid,
+                            profile_path,
+                            "default_profile does not match the character profile schema",
+                        ));
+                    }
+                },
+            }
+            let background_path = format!("{role_path}/background");
+            match role_value.get("background") {
+                None | Some(serde_json::Value::Null) => {}
+                Some(serde_json::Value::String(text)) => {
+                    if text.trim().is_empty() {
+                        report.push(AssetValidationIssue::new(
+                            AssetValidationCode::EmptyText,
+                            background_path.clone(),
+                            "background must not be empty",
+                        ));
+                    }
+                    if text.len() > self.limits.max_role_background_bytes {
+                        report.push(AssetValidationIssue::new(
+                            AssetValidationCode::LimitExceeded,
+                            background_path,
+                            format!(
+                                "background bytes {} exceed limit {}",
+                                text.len(),
+                                self.limits.max_role_background_bytes
+                            ),
+                        ));
+                    }
+                }
+                Some(_) => {
+                    report.push(AssetValidationIssue::new(
+                        AssetValidationCode::SchemaInvalid,
+                        background_path,
+                        "background must be a string",
+                    ));
+                }
+            }
+            if let Some(relationships) = role_value.get("initial_relationships").and_then(serde_json::Value::as_array) {
+                for (index, relationship) in relationships.iter().enumerate() {
+                    let target_path = format!("{role_path}/initial_relationships/{index}/target_role_id");
+                    if let Some(target) = relationship.get("target_role_id").and_then(serde_json::Value::as_str) {
+                        if !roles.contains_key(target) {
+                            report.push(AssetValidationIssue::new(
+                                AssetValidationCode::MissingReference,
+                                target_path,
+                                "relationship target role is not defined",
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        role_ids
     }
 
     fn check_forbidden_fields(
@@ -329,63 +546,15 @@ impl NativeAssetImporter {
         report: &mut ValidationReport,
         depth: usize,
     ) {
-        if depth > self.narrative.max_condition_depth.saturating_add(8) {
-            report.push(AssetValidationIssue::new(
-                AssetValidationCode::LimitExceeded,
-                path,
-                "asset nesting depth exceeds limit",
-            ));
-            return;
-        }
-        match value {
-            serde_json::Value::Object(map) => {
-                for (key, child) in map {
-                    let child_path = format!("{path}/{key}");
-                    if FORBIDDEN_FIELD_NAMES.contains(&key.as_str()) {
-                        report.push(AssetValidationIssue::new(
-                            AssetValidationCode::ForbiddenField,
-                            child_path.clone(),
-                            "forbidden runtime field",
-                        ));
-                    }
-                    self.check_forbidden_fields(child, &child_path, report, depth + 1);
-                }
-            }
-            serde_json::Value::Array(items) => {
-                for (index, item) in items.iter().enumerate() {
-                    self.check_forbidden_fields(item, &format!("{path}/{index}"), report, depth + 1);
-                }
-            }
-            _ => {}
-        }
+        check_forbidden_fields(value, path, report, depth, self.narrative.max_condition_depth.saturating_add(8));
     }
 
-    fn validate_cast_and_start(&self, value: &serde_json::Value, report: &mut ValidationReport) {
-        let roles = match value.get("roles").and_then(serde_json::Value::as_object) {
-            Some(roles) => roles,
-            None => return,
-        };
-        let default_cast = match value.get("default_cast").and_then(serde_json::Value::as_object) {
-            Some(cast) => cast,
-            None => {
-                report.push(AssetValidationIssue::new(
-                    AssetValidationCode::MissingDefaultCast,
-                    "/default_cast",
-                    "default_cast is missing",
-                ));
-                return;
-            }
-        };
-        for role_key in roles.keys() {
-            let cast_path = format!("/default_cast/{role_key}");
-            if !default_cast.contains_key(role_key) {
-                report.push(AssetValidationIssue::new(
-                    AssetValidationCode::MissingDefaultCast,
-                    cast_path,
-                    "role is missing a default cast",
-                ));
-            }
-        }
+    fn validate_play_and_start(
+        &self,
+        value: &serde_json::Value,
+        role_ids: &BTreeSet<String>,
+        report: &mut ValidationReport,
+    ) {
         let play = match value.get("play").and_then(serde_json::Value::as_object) {
             Some(play) => play,
             None => {
@@ -396,10 +565,6 @@ impl NativeAssetImporter {
                 ));
                 return;
             }
-        };
-        let playable = match play.get("playable_role_keys").and_then(serde_json::Value::as_array) {
-            Some(playable) => playable,
-            None => return,
         };
         let start = match value.get("start").and_then(serde_json::Value::as_object) {
             Some(start) => start,
@@ -430,18 +595,69 @@ impl NativeAssetImporter {
                 "story opening is missing or empty",
             ));
         }
+        let playable = match play.get("playable_role_ids").and_then(serde_json::Value::as_array) {
+            Some(playable) => playable,
+            None => return,
+        };
         for playable_role in playable {
             let key = match playable_role.as_str() {
                 Some(key) => key,
                 None => continue,
             };
-            if !roles.contains_key(key) {
+            if !role_ids.contains(key) {
                 report.push(AssetValidationIssue::new(
                     AssetValidationCode::MissingReference,
-                    format!("/play/playable_role_keys/{key}"),
+                    format!("/play/playable_role_ids/{key}"),
                     "playable role is not defined",
                 ));
             }
+        }
+    }
+
+    fn validate_narrative_role_references(
+        &self,
+        value: &serde_json::Value,
+        role_ids: &BTreeSet<String>,
+        report: &mut ValidationReport,
+    ) {
+        let narrative = match value.get("narrative") {
+            Some(narrative) => narrative,
+            None => return,
+        };
+        self.scan_role_references(narrative, "/narrative", role_ids, report);
+    }
+
+    fn scan_role_references(
+        &self,
+        value: &serde_json::Value,
+        path: &str,
+        role_ids: &BTreeSet<String>,
+        report: &mut ValidationReport,
+    ) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, child) in map {
+                    let child_path = format!("{path}/{key}");
+                    if NARRATIVE_ROLE_REFERENCE_FIELDS.contains(&key.as_str()) {
+                        if let Some(role_key) = child.as_str() {
+                            if !role_ids.is_empty() && !role_ids.contains(role_key) {
+                                report.push(AssetValidationIssue::new(
+                                    AssetValidationCode::MissingReference,
+                                    child_path.clone(),
+                                    "narrative role reference is not defined",
+                                ));
+                            }
+                        }
+                    }
+                    self.scan_role_references(child, &child_path, role_ids, report);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    self.scan_role_references(item, &format!("{path}/{index}"), role_ids, report);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -734,42 +950,10 @@ impl PackService {
                 ));
             }
         };
-        let mut resolved_characters = BTreeMap::new();
-        for (key, source) in &pack.character_assets {
-            match source {
-                CharacterAssetSource::Embedded(card) if card.character_key == *key => {
-                    resolved_characters.insert(key.clone(), (**card).clone());
-                }
-                CharacterAssetSource::Embedded(_) => {
-                    return Err(invalid_import(
-                        AssetValidationCode::MissingReference,
-                        format!("/character_assets/{}", key.as_str()),
-                        "embedded character key does not match its dependency key",
-                    ));
-                }
-                CharacterAssetSource::Frozen(_) => {
-                    return Err(invalid_import(
-                        AssetValidationCode::MissingReference,
-                        format!("/character_assets/{}", key.as_str()),
-                        "frozen character is not present in the imported dependency set",
-                    ));
-                }
-            }
-        }
-        for (role_key, cast) in &pack.default_cast {
-            if !resolved_characters.contains_key(&cast.character_ref) {
-                return Err(invalid_import(
-                    AssetValidationCode::MissingDefaultCast,
-                    format!("/default_cast/{}", role_key.as_str()),
-                    "default cast does not resolve to a stored character card",
-                ));
-            }
-        }
         let validated = ValidatedStoryPack {
             pack,
             canonical_manifest,
             digest,
-            resolved_characters,
             resolved_world_book,
         };
         let frozen = self.asset_store.import_pack(validated).await.map_err(AssetImportError::Store)?;

@@ -1,4 +1,5 @@
 pub mod bind;
+pub mod character_card;
 pub mod dto;
 pub mod pack;
 pub mod routes;

@@ -1,5 +1,6 @@
-use crate::domain::asset::ids::{NarrativeNodeKey, SceneKey, StoryRoleKey};
+use crate::domain::asset::ids::{NarrativeNodeKey, SceneKey};
 use crate::domain::asset::validation::BoundedText;
+use crate::domain::ids::RoleId;
 use crate::domain::story_sequence::StorySequence;
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +17,7 @@ pub struct StoryConstraintDefinition {
 pub enum StoryConstraintScope {
     Story,
     Scene { scene_key: SceneKey },
-    Role { role_key: StoryRoleKey },
+    Role { role_id: RoleId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

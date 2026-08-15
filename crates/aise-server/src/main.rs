@@ -33,6 +33,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(
         AppState::new(services.engine, registry, task_supervisor.clone(), config.clone()).with_services(
             services.pack_service,
+            services.character_card_service,
             services.instance_factory,
             services.story_history_reader,
         ),

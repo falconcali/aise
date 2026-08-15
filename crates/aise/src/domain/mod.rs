@@ -9,7 +9,7 @@ pub mod story_sequence;
 pub mod text;
 pub mod turn;
 pub use error::DomainInputError;
-pub use ids::{CharacterId, ConstraintId, EventId, FactId, MemoryId, RumorId, StoryId, StoryRevision, TurnId};
+pub use ids::{CharacterId, ConstraintId, EventId, FactId, MemoryId, RoleId, RumorId, StoryId, StoryRevision, TurnId};
 pub use narrative::{
     EventKind, StoryContinuity, StoryEvent, StorySegment, StorySegmentOrigin, StorySummary, StoryTurn,
 };

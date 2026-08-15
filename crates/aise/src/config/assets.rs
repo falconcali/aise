@@ -1,4 +1,5 @@
 use super::error::ConfigError;
+use crate::domain::ids::RoleId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,7 +12,15 @@ pub struct AssetLimitsConfig {
     pub max_entities_per_entry: usize,
     pub max_topics_per_entry: usize,
     pub max_roles: usize,
-    pub max_character_assets: usize,
+    pub max_profile_name_bytes: usize,
+    pub max_profile_appearance_bytes: usize,
+    pub max_profile_personality_bytes: usize,
+    pub max_profile_speaking_style_bytes: usize,
+    pub max_profile_total_bytes: usize,
+    pub max_dialogue_examples_per_profile: usize,
+    pub max_dialogue_situation_bytes: usize,
+    pub max_dialogue_response_bytes: usize,
+    pub max_role_background_bytes: usize,
     pub max_world_facts: usize,
     pub max_world_rumors: usize,
     pub max_seed_memories_per_role: usize,
@@ -36,7 +45,15 @@ impl Default for AssetLimitsConfig {
             max_entities_per_entry: 16,
             max_topics_per_entry: 16,
             max_roles: 32,
-            max_character_assets: 64,
+            max_profile_name_bytes: 256,
+            max_profile_appearance_bytes: 2_048,
+            max_profile_personality_bytes: 4_096,
+            max_profile_speaking_style_bytes: 2_048,
+            max_profile_total_bytes: 65_536,
+            max_dialogue_examples_per_profile: 16,
+            max_dialogue_situation_bytes: 1_024,
+            max_dialogue_response_bytes: 2_048,
+            max_role_background_bytes: 16_384,
             max_world_facts: 512,
             max_world_rumors: 256,
             max_seed_memories_per_role: 32,
@@ -56,6 +73,11 @@ impl AssetLimitsConfig {
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.max_key_bytes == 0 {
             return Err(ConfigError::Invalid("assets.max_key_bytes must be positive".into()));
+        }
+        if self.max_key_bytes > RoleId::MAX_BYTES {
+            return Err(ConfigError::Invalid(
+                "assets.max_key_bytes must be at most RoleId::MAX_BYTES".into(),
+            ));
         }
         if self.max_text_bytes == 0 {
             return Err(ConfigError::Invalid("assets.max_text_bytes must be positive".into()));
@@ -80,8 +102,44 @@ impl AssetLimitsConfig {
         if self.max_roles == 0 {
             return Err(ConfigError::Invalid("assets.max_roles must be positive".into()));
         }
-        if self.max_character_assets == 0 {
-            return Err(ConfigError::Invalid("assets.max_character_assets must be positive".into()));
+        if self.max_profile_name_bytes == 0 {
+            return Err(ConfigError::Invalid("assets.max_profile_name_bytes must be positive".into()));
+        }
+        if self.max_profile_appearance_bytes == 0 {
+            return Err(ConfigError::Invalid(
+                "assets.max_profile_appearance_bytes must be positive".into(),
+            ));
+        }
+        if self.max_profile_personality_bytes == 0 {
+            return Err(ConfigError::Invalid(
+                "assets.max_profile_personality_bytes must be positive".into(),
+            ));
+        }
+        if self.max_profile_speaking_style_bytes == 0 {
+            return Err(ConfigError::Invalid(
+                "assets.max_profile_speaking_style_bytes must be positive".into(),
+            ));
+        }
+        if self.max_profile_total_bytes == 0 {
+            return Err(ConfigError::Invalid("assets.max_profile_total_bytes must be positive".into()));
+        }
+        if self.max_dialogue_examples_per_profile == 0 {
+            return Err(ConfigError::Invalid(
+                "assets.max_dialogue_examples_per_profile must be positive".into(),
+            ));
+        }
+        if self.max_dialogue_situation_bytes == 0 {
+            return Err(ConfigError::Invalid(
+                "assets.max_dialogue_situation_bytes must be positive".into(),
+            ));
+        }
+        if self.max_dialogue_response_bytes == 0 {
+            return Err(ConfigError::Invalid(
+                "assets.max_dialogue_response_bytes must be positive".into(),
+            ));
+        }
+        if self.max_role_background_bytes == 0 {
+            return Err(ConfigError::Invalid("assets.max_role_background_bytes must be positive".into()));
         }
         if self.max_world_facts == 0 {
             return Err(ConfigError::Invalid("assets.max_world_facts must be positive".into()));

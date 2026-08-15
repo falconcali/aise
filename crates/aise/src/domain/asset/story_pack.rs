@@ -1,11 +1,12 @@
-use crate::domain::asset::character_card::AssetSpecVersion;
+use crate::domain::asset::character_card::{AssetSpecVersion, CharacterProfile};
 use crate::domain::asset::constraint::StoryConstraintDefinition;
-use crate::domain::asset::frozen_ref::{DefaultCast, StaticAssetDescriptor, WorldBookSource};
+use crate::domain::asset::frozen_ref::{StaticAssetDescriptor, WorldBookSource};
 use crate::domain::asset::ids::{
-    AssetId, AttributeKey, CharacterAssetKey, ConstraintKey, LocationKey, MemoryKey, RelationshipKind, SceneKey,
-    SemanticVersion, StoryPackKey, StoryRoleKey, TopicKey,
+    AssetId, AttributeKey, ConstraintKey, LocationKey, MemoryKey, RelationshipKind, SceneKey, SemanticVersion,
+    StoryPackKey, TopicKey,
 };
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
+use crate::domain::ids::RoleId;
 use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -17,9 +18,7 @@ pub struct StoryPack {
     pub spec_version: AssetSpecVersion,
     pub meta: StoryPackMeta,
     pub story: StoryProfile,
-    pub character_assets: BTreeMap<CharacterAssetKey, crate::domain::asset::frozen_ref::CharacterAssetSource>,
-    pub roles: BTreeMap<StoryRoleKey, StoryRole>,
-    pub default_cast: BTreeMap<StoryRoleKey, DefaultCast>,
+    pub roles: BTreeMap<RoleId, StoryRoleDefinition>,
     pub play: PlayDefinition,
     pub world_book: WorldBookSource,
     pub start: StoryStart,
@@ -32,8 +31,8 @@ pub struct StoryPack {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StorySpec {
-    #[serde(rename = "aise_story_v3")]
-    V3,
+    #[serde(rename = "aise_story_v4")]
+    V4,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,9 +68,11 @@ pub struct StoryStyle {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StoryRole {
+pub struct StoryRoleDefinition {
     pub role_label: BoundedText,
     pub narrative_function: BoundedText,
+    pub default_profile: CharacterProfile,
+    pub background: Option<BoundedText>,
     pub initial_state: InitialRoleState,
     #[serde(default)]
     pub initial_relationships: Vec<RelationshipSeed>,
@@ -91,7 +92,7 @@ pub struct InitialRoleState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RelationshipSeed {
-    pub target_role_key: StoryRoleKey,
+    pub target_role_id: RoleId,
     pub kind: RelationshipKind,
     pub trust: i16,
 }
@@ -111,7 +112,7 @@ pub struct MemorySeed {
 #[serde(deny_unknown_fields)]
 pub struct PlayDefinition {
     pub player_count: u16,
-    pub playable_role_keys: Vec<StoryRoleKey>,
+    pub playable_role_ids: Vec<RoleId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
