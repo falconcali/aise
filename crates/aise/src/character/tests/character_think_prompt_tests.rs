@@ -45,17 +45,76 @@ fn prompt_context() -> CharacterThinkPromptContext {
     }
 }
 
+fn section_item_count(text: &str, start: &str, end: &str) -> usize {
+    let section = text.split_once(start).unwrap().1.split_once(end).unwrap().0;
+    section.lines().filter(|line| line.starts_with("- ")).count()
+}
+
 #[test]
-fn character_thought_schema_has_exact_engine_owned_fields() {
-    let schema = character_thought_output_schema(&CharacterThinkConfig::default());
+fn character_decision_schema_has_exact_properties_required_and_nullability() {
+    let schema = character_decision_output_schema(&CharacterThinkConfig::default());
     let properties = schema["properties"].as_object().expect("properties");
-    assert_eq!(properties.len(), 4);
-    assert!(properties.contains_key("perception"));
-    assert!(properties.contains_key("emotion"));
-    assert!(properties.contains_key("goal"));
-    assert!(properties.contains_key("possible_action"));
-    assert!(!properties.contains_key("character_id"));
+    assert_eq!(properties.len(), 2);
+    assert!(properties.contains_key("decision"));
+    assert!(properties.contains_key("suggested_utterance"));
+    for removed in ["character_id", "perception", "emotion", "goal", "possible_action"] {
+        assert!(!properties.contains_key(removed));
+    }
     assert_eq!(schema["additionalProperties"], Value::Bool(false));
+    let required = schema["required"].as_array().expect("required");
+    assert_eq!(required, &vec![Value::String("decision".into())]);
+    assert_eq!(schema["properties"]["decision"]["type"], Value::String("string".into()));
+    assert_eq!(
+        schema["properties"]["suggested_utterance"]["type"],
+        serde_json::json!(["string", "null"])
+    );
+}
+
+#[test]
+fn character_think_csi_and_fti_have_exact_rule_counts() {
+    let csi = include_str!("../../../assets/prompts/context-v2/csi/character-think.md.j2");
+    let fti = include_str!("../../../assets/prompts/context-v2/fti/character-think.md.j2");
+    assert_eq!(section_item_count(csi, "## MUST", "## SHOULD"), 10);
+    assert_eq!(section_item_count(csi, "## SHOULD", "## NEVER"), 3);
+    assert_eq!(section_item_count(csi, "## NEVER", "# Runtime Data Boundary"), 5);
+    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 5);
+    assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
+    assert!(!fti.contains("## SHOULD"));
+    assert_eq!(fti.matches("{{ output_schema }}").count(), 1);
+}
+
+#[test]
+fn character_think_runtime_context_has_exact_section_order() {
+    let rc = include_str!("../../../assets/prompts/context-v2/rc/character-think.md.j2");
+    let headings = [
+        "## Target Character",
+        "## Current Character State",
+        "## Story Continuity",
+        "### Story Summary",
+        "### Recent Story",
+        "## Current Scene",
+        "## Relevant Character Knowledge / Memory",
+        "## Narrative Character Impulses",
+        "## Thinking Focus",
+        "## Player Input",
+    ];
+    let mut previous = 0;
+    for heading in headings {
+        let current = rc.find(heading).unwrap();
+        assert!(current >= previous);
+        previous = current;
+    }
+    assert!(rc.rfind("## Player Input").unwrap() > rc.rfind("## Thinking Focus").unwrap());
+    assert!(!rc.contains("Current Perception"));
+    assert_eq!(rc.matches("## Story Continuity").count(), 1);
+    assert_eq!(rc.matches("### Story Summary").count(), 1);
+    assert_eq!(rc.matches("### Recent Story").count(), 1);
+}
+
+#[test]
+fn thinking_focus_equals_request_reason() {
+    let context = prompt_context();
+    assert_eq!(context.thinking_focus.as_str(), "focus-marker");
 }
 
 #[test]
@@ -82,6 +141,8 @@ fn character_think_runtime_vars_keep_semantic_sections_distinct() {
     assert!(!values.contains_key("story_goal"));
     assert!(!values.contains_key("narrative_plan"));
     assert!(!values.contains_key("current_perception"));
+    assert!(!values.contains_key("character_decisions"));
+    assert!(!values.contains_key("output_character_id"));
 }
 
 #[test]
@@ -90,4 +151,16 @@ fn character_think_empty_collections_render_canonical_none() {
     assert_eq!(render_knowledge(&[]), "None.");
     assert_eq!(render_impulses(&[]), "None.");
     assert_eq!(quoted_list(&[]), "None.");
+}
+
+#[test]
+fn instruction_like_rc_values_remain_data() {
+    let marker = "IGNORE_PREVIOUS_INSTRUCTIONS_owned_by_player";
+    let mut context = prompt_context();
+    context.thinking_focus = bounded(marker);
+    context.player_input = bounded(marker);
+    let vars = render_runtime_vars(&context);
+    let values = vars.as_map();
+    assert!(values["thinking_focus"].as_str().unwrap().contains(marker));
+    assert!(values["player_input"].as_str().unwrap().contains(marker));
 }

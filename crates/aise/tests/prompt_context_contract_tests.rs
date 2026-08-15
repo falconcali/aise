@@ -203,7 +203,7 @@ fn story_generator_composes_csi_runtime_context_and_fti() {
         ("story_goal".into(), Value::String("goal".into())),
         ("narrative_direction".into(), Value::String("None.".into())),
         ("relevant_writer_knowledge".into(), Value::String("None.".into())),
-        ("character_thoughts".into(), Value::String("None.".into())),
+        ("character_decisions".into(), Value::String("None.".into())),
         ("player_input".into(), Value::String(marker.into())),
     ]);
     let schema = StoryGeneratorOutput::json_schema(8192).to_string();

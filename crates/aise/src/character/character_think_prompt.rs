@@ -254,7 +254,7 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
         }
         let fti_vars = TrustedPromptVars::new(HashMap::from([(
             "output_schema".into(),
-            Value::String(character_thought_output_schema(&self.config).to_string()),
+            Value::String(character_decision_output_schema(&self.config).to_string()),
         )]));
         Ok(CharacterThinkPromptProjection {
             context,
@@ -264,17 +264,15 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
     }
 }
 
-pub fn character_thought_output_schema(config: &CharacterThinkConfig) -> Value {
+pub fn character_decision_output_schema(config: &CharacterThinkConfig) -> Value {
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "additionalProperties": false,
-        "required": ["perception", "emotion", "goal", "possible_action"],
+        "required": ["decision"],
         "properties": {
-            "perception": {"type": "string", "minLength": 1, "maxLength": config.max_field_bytes},
-            "emotion": {"type": "string", "minLength": 1, "maxLength": config.max_field_bytes},
-            "goal": {"type": "string", "minLength": 1, "maxLength": config.max_field_bytes},
-            "possible_action": {"type": "string", "minLength": 1, "maxLength": config.max_field_bytes}
+            "decision": {"type": "string", "minLength": 1, "maxLength": config.max_field_bytes},
+            "suggested_utterance": {"type": ["string", "null"], "minLength": 1, "maxLength": config.max_field_bytes}
         }
     })
 }

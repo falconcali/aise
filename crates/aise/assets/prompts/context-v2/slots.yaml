@@ -17,7 +17,7 @@ slots:
       - { name: story_goal, var_type: string, required: true }
       - { name: narrative_direction, var_type: string, required: true }
       - { name: relevant_writer_knowledge, var_type: string, required: true }
-      - { name: character_thoughts, var_type: string, required: true }
+      - { name: character_decisions, var_type: string, required: true }
       - { name: player_input, var_type: string, required: true }
       - { name: previous_story_text, var_type: string, required: true }
       - { name: validation_issues, var_type: string, required: true }
@@ -91,7 +91,7 @@ slots:
       - { name: story_goal, var_type: string, required: true }
       - { name: narrative_direction, var_type: string, required: true }
       - { name: relevant_writer_knowledge, var_type: string, required: true }
-      - { name: character_thoughts, var_type: string, required: true }
+      - { name: character_decisions, var_type: string, required: true }
       - { name: player_input, var_type: string, required: true }
   - slot_id: context.story_generator.fti
     allowed_kinds: [text]

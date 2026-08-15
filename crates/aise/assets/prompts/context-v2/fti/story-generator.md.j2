@@ -7,7 +7,7 @@ Generate exactly one new story segment now and return only its prose text.
 
 - Generate exactly one coherent new segment that continues directly from the committed Story Continuity and Current Scene, then stop at a boundary where the player can meaningfully respond or decide.
 - Realize Player Input faithfully; natural elaboration is allowed, but preserve its essential intent, leave unprovided consequential choices to the player, and resolve attempted outcomes through story causality.
-- Make the best causally valid progress toward the Immediate Story Goal while preserving character agency and every provided AI Character Thought as starting private-state guidance.
+- Make the best causally valid progress toward the Immediate Story Goal while reconciling every provided AI Character Decision under the CSI rules; treat `suggested_utterance` as editable voice guidance, not mandatory final wording.
 - Obey Active Story Constraints, model-relevant Instance Settings, and Story Profile, while preserving established character knowledge and Fact, Rumor, and Memory scope.
 - Return exactly one value matching the schema: the segment's prose as `story_text`, and nothing else.
 

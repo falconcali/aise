@@ -43,7 +43,7 @@ impl TurnExecutionPipeline for StoryGenerator {
         let projection_started = Instant::now();
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;
         let projection_ms = projection_started.elapsed().as_millis() as u64;
-        let thought_count = projection.context.character_thoughts.len();
+        let decision_count = projection.context.character_decisions.len();
         let writer_knowledge_count = projection.context.relevant_writer_knowledge.len();
         let constraint_count = projection.context.active_story_constraints.len();
         let active_goal_count = projection.context.narrative_direction.active_goals.len();
@@ -102,7 +102,7 @@ impl TurnExecutionPipeline for StoryGenerator {
         let max_output_tokens = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
         tracing::info!(
             prompt_profile = "story_generator",
-            thought_count,
+            decision_count,
             writer_knowledge_count,
             constraint_count,
             active_goal_count,
@@ -124,7 +124,7 @@ impl TurnExecutionPipeline for StoryGenerator {
         let span = tracing::info_span!(
             "story_generator.generate",
             prompt_profile = "story_generator",
-            thought_count,
+            decision_count,
             writer_knowledge_count,
             constraint_count,
         );
@@ -169,13 +169,13 @@ fn map_projection_error(error: StoryGeneratorProjectionError) -> TurnExecutionEr
         StoryGeneratorProjectionError::MissingBaseline => "missing_baseline",
         StoryGeneratorProjectionError::MissingWriterPlan => "missing_writer_plan",
         StoryGeneratorProjectionError::InvalidPlayerInput => "invalid_player_input",
-        StoryGeneratorProjectionError::UnknownThoughtCharacter { .. } => "unknown_thought_character",
-        StoryGeneratorProjectionError::PlayerCharacterThought { .. } => "player_character_thought",
-        StoryGeneratorProjectionError::DuplicateCharacterThought { .. } => "duplicate_character_thought",
+        StoryGeneratorProjectionError::UnknownDecisionCharacter { .. } => "unknown_decision_character",
+        StoryGeneratorProjectionError::PlayerCharacterDecision { .. } => "player_character_decision",
+        StoryGeneratorProjectionError::DuplicateCharacterDecision { .. } => "duplicate_character_decision",
         StoryGeneratorProjectionError::RequiredPromptDataExceedsBudget { .. } => {
             "story_generator_prompt_budget_exceeded"
         }
-        StoryGeneratorProjectionError::Invariant { .. } => "story_generator_prompt_invariant",
+        StoryGeneratorProjectionError::Invariant { code } => code,
     };
     TurnExecutionError::new(
         TurnFailureKind::InvariantViolation,

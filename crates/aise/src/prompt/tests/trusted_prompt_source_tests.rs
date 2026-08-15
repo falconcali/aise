@@ -213,7 +213,7 @@ fn packaged_story_repairer_composes_exact_three_layers() {
         "story_goal",
         "narrative_direction",
         "relevant_writer_knowledge",
-        "character_thoughts",
+        "character_decisions",
         "player_input",
         "previous_story_text",
         "validation_issues",

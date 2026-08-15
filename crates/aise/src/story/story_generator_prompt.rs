@@ -29,7 +29,7 @@ pub struct StoryGeneratorPromptContext {
     pub story_goal: BoundedText,
     pub narrative_direction: StoryGeneratorNarrativeDirectionPromptView,
     pub active_story_constraints: Vec<ActiveStoryConstraintPromptView>,
-    pub character_thoughts: Vec<StoryGeneratorCharacterThoughtPromptView>,
+    pub character_decisions: Vec<StoryGeneratorCharacterDecisionPromptView>,
     pub player_input: BoundedText,
 }
 
@@ -153,13 +153,11 @@ pub enum ConstraintKindPromptView {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct StoryGeneratorCharacterThoughtPromptView {
+pub struct StoryGeneratorCharacterDecisionPromptView {
     pub character_id: CharacterId,
     pub name: BoundedText,
-    pub perception: BoundedText,
-    pub emotion: BoundedText,
-    pub goal: BoundedText,
-    pub possible_action: BoundedText,
+    pub decision: BoundedText,
+    pub suggested_utterance: Option<BoundedText>,
 }
 
 pub struct StoryGeneratorPromptProjection {
@@ -176,12 +174,12 @@ pub enum StoryGeneratorProjectionError {
     MissingWriterPlan,
     #[error("story generator player input is invalid")]
     InvalidPlayerInput,
-    #[error("story generator character thought target is unknown: {character_id}")]
-    UnknownThoughtCharacter { character_id: CharacterId },
-    #[error("story generator character thought targets player character: {character_id}")]
-    PlayerCharacterThought { character_id: CharacterId },
-    #[error("story generator character thought is duplicated: {character_id}")]
-    DuplicateCharacterThought { character_id: CharacterId },
+    #[error("story generator character decision target is unknown: {character_id}")]
+    UnknownDecisionCharacter { character_id: CharacterId },
+    #[error("story generator character decision targets player character: {character_id}")]
+    PlayerCharacterDecision { character_id: CharacterId },
+    #[error("story generator character decision is duplicated: {character_id}")]
+    DuplicateCharacterDecision { character_id: CharacterId },
     #[error("story generator required prompt data exceeds budget: {section}")]
     RequiredPromptDataExceedsBudget { section: &'static str },
     #[error("story generator prompt invariant violated: {code}")]
@@ -213,7 +211,7 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
             ctx.budget().max_item_bytes(),
         )?;
         let ai_characters = project_ai_characters(baseline, ctx.budget().max_item_bytes())?;
-        let character_thoughts = project_thoughts(ctx, baseline, &ai_characters)?;
+        let character_decisions = project_decisions(ctx, baseline, &ai_characters)?;
         let story_profile = StoryProfilePromptView {
             premise: baseline.story_profile.premise.clone(),
             language: baseline.story_profile.language.clone(),
@@ -277,7 +275,7 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
             story_goal: plan.story_goal.summary.clone(),
             narrative_direction,
             active_story_constraints,
-            character_thoughts,
+            character_decisions,
             player_input,
         };
         let rc_vars = render_runtime_vars(&context);
@@ -445,15 +443,15 @@ fn project_constraints(baseline: &BaselineContext) -> Vec<ActiveStoryConstraintP
         .collect()
 }
 
-fn project_thoughts(
+fn project_decisions(
     ctx: &TurnExecutionContext,
     baseline: &BaselineContext,
     ai_characters: &[StoryGeneratorCharacterPromptView],
-) -> Result<Vec<StoryGeneratorCharacterThoughtPromptView>, StoryGeneratorProjectionError> {
+) -> Result<Vec<StoryGeneratorCharacterDecisionPromptView>, StoryGeneratorProjectionError> {
     let plan = ctx.plan().ok_or(StoryGeneratorProjectionError::MissingWriterPlan)?;
-    if ctx.thoughts().len() != plan.character_think_requests.len() {
+    if ctx.character_decisions().len() != plan.character_think_requests.len() {
         return Err(StoryGeneratorProjectionError::Invariant {
-            code: "character_thought_count_mismatch",
+            code: "character_decision_count_mismatch",
         });
     }
     let names = ai_characters
@@ -461,37 +459,35 @@ fn project_thoughts(
         .map(|character| (character.character_id.clone(), character.name.clone()))
         .collect::<HashMap<_, _>>();
     let mut seen = HashSet::new();
-    ctx.thoughts()
+    ctx.character_decisions()
         .iter()
         .zip(&plan.character_think_requests)
-        .map(|(thought, request)| {
-            if thought.character_id != request.character_id {
+        .map(|(decision, request)| {
+            if decision.character_id != request.character_id {
                 return Err(StoryGeneratorProjectionError::Invariant {
-                    code: "character_thought_order_mismatch",
+                    code: "character_decision_order_mismatch",
                 });
             }
-            if thought.character_id == baseline.player_character.character_id {
-                return Err(StoryGeneratorProjectionError::PlayerCharacterThought {
-                    character_id: thought.character_id.clone(),
+            if decision.character_id == baseline.player_character.character_id {
+                return Err(StoryGeneratorProjectionError::PlayerCharacterDecision {
+                    character_id: decision.character_id.clone(),
                 });
             }
-            if !seen.insert(thought.character_id.clone()) {
-                return Err(StoryGeneratorProjectionError::DuplicateCharacterThought {
-                    character_id: thought.character_id.clone(),
+            if !seen.insert(decision.character_id.clone()) {
+                return Err(StoryGeneratorProjectionError::DuplicateCharacterDecision {
+                    character_id: decision.character_id.clone(),
                 });
             }
-            let name = names.get(&thought.character_id).cloned().ok_or_else(|| {
-                StoryGeneratorProjectionError::UnknownThoughtCharacter {
-                    character_id: thought.character_id.clone(),
+            let name = names.get(&decision.character_id).cloned().ok_or_else(|| {
+                StoryGeneratorProjectionError::UnknownDecisionCharacter {
+                    character_id: decision.character_id.clone(),
                 }
             })?;
-            Ok(StoryGeneratorCharacterThoughtPromptView {
-                character_id: thought.character_id.clone(),
+            Ok(StoryGeneratorCharacterDecisionPromptView {
+                character_id: decision.character_id.clone(),
                 name,
-                perception: thought.perception.clone(),
-                emotion: thought.emotion.clone(),
-                goal: thought.goal.clone(),
-                possible_action: thought.possible_action.clone(),
+                decision: decision.decision.clone(),
+                suggested_utterance: decision.suggested_utterance.clone(),
             })
         })
         .collect()
@@ -535,8 +531,8 @@ fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> RuntimePromptVa
             Value::String(render_knowledge(&context.relevant_writer_knowledge)),
         ),
         (
-            "character_thoughts".into(),
-            Value::String(render_thoughts(&context.character_thoughts)),
+            "character_decisions".into(),
+            Value::String(render_decisions(&context.character_decisions)),
         ),
         ("player_input".into(), Value::String(quoted(context.player_input.as_str()))),
     ]))
@@ -733,21 +729,23 @@ fn render_knowledge(values: &[StoryGeneratorKnowledgePromptView]) -> String {
         .join("\n")
 }
 
-fn render_thoughts(values: &[StoryGeneratorCharacterThoughtPromptView]) -> String {
+fn render_decisions(values: &[StoryGeneratorCharacterDecisionPromptView]) -> String {
     if values.is_empty() {
         return "None.".into();
     }
     values
         .iter()
         .map(|value| {
+            let suggested_utterance = value
+                .suggested_utterance
+                .as_ref()
+                .map(|value| quoted(value.as_str()))
+                .unwrap_or_else(|| "None.".into());
             format!(
-                "- character_id: {}\n  name: {}\n  perception: {}\n  emotion: {}\n  goal: {}\n  possible_action: {}",
+                "- character_id: {}\n  name: {}\n  decision: {}\n  suggested_utterance: {suggested_utterance}",
                 quoted(value.character_id.as_str()),
                 quoted(value.name.as_str()),
-                quoted(value.perception.as_str()),
-                quoted(value.emotion.as_str()),
-                quoted(value.goal.as_str()),
-                quoted(value.possible_action.as_str())
+                quoted(value.decision.as_str()),
             )
         })
         .collect::<Vec<_>>()

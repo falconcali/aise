@@ -36,7 +36,7 @@ fn story_repairer_runtime_context_has_exact_section_order() {
         "### Immediate Story Goal",
         "### Narrative Direction",
         "### Relevant Writer Knowledge",
-        "### AI Character Thoughts",
+        "### AI Character Decisions",
         "### Player Input",
         "## Previous Story Text",
         "## Validation Issues",

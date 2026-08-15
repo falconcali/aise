@@ -36,7 +36,7 @@ assets:
   - asset_id: context-v2/character-think-fti
     kind: text
     source_path: fti/character-think.md.j2
-    output_contract_ref: CharacterThoughtOutput
+    output_contract_ref: CharacterDecisionOutput
     status: active
   - asset_id: context-v2/story-generator-csi
     kind: text
