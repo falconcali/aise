@@ -2,6 +2,7 @@ use aise::config::{AssetLimitsConfig, NarrativeConfig};
 use aise::domain::asset::validation::AssetValidationCode;
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
+use aise::persistence::sqlite_store::SqliteStore;
 use aise::story::pack_service::{AssetImportError, AssetInput, NativeAssetImporter, PackService};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -20,6 +21,7 @@ fn temp_db_path(label: &str) -> String {
 
 async fn pack_service(label: &str) -> (PackService, String) {
     let db = temp_db_path(label);
+    let _ = SqliteStore::connect(&db).await.unwrap();
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&db).await.unwrap();
     let service = PackService::new(importer(), asset_store);
     (service, db)
@@ -583,7 +585,9 @@ async fn full_import_of_zero_character_card_pack_succeeds_and_round_trips() {
         .expect("export should succeed");
     match exported {
         aise::story::pack_service::PackExport::Json(bytes) => {
-            let original: serde_json::Value = serde_json::from_str(&json).unwrap();
+            let mut original: serde_json::Value = serde_json::from_str(&json).unwrap();
+            original["roles"]["protagonist"]["initial_state"]["attributes"] = serde_json::json!({});
+            original["world_book"]["topics"] = serde_json::json!({});
             let round_tripped: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(original, round_tripped);
         }

@@ -1,7 +1,7 @@
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::domain::turn::RetrievalAudience;
@@ -12,7 +12,7 @@ use async_trait::async_trait;
 pub struct KnowledgeFilter {
     pub audience: RetrievalAudience,
     pub knowledge_kinds: Vec<KnowledgeKind>,
-    pub authorized_memory_owners: Vec<CharacterId>,
+    pub authorized_memory_owners: Vec<RoleId>,
     pub max_item_bytes: usize,
 }
 
@@ -23,7 +23,7 @@ pub struct KnowledgeRecord {
     pub content: BoundedText,
     pub salience: u8,
     pub source: KnowledgeSource,
-    pub memory_owner: Option<CharacterId>,
+    pub memory_owner: Option<RoleId>,
 }
 
 #[derive(Debug, Clone)]

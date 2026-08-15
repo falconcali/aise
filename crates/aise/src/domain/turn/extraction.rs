@@ -1,7 +1,7 @@
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{AttributeKey, LocationKey, MemoryKind, NarrativeConditionKey, Sha256Digest, TopicKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
-use crate::domain::ids::{CharacterId, MemoryId, RumorId};
+use crate::domain::ids::{MemoryId, RoleId, RumorId};
 use crate::domain::knowledge::fact::Proposition;
 use crate::domain::knowledge::query::KnowledgeSourceId;
 use crate::domain::knowledge::rumor::{Claim, TruthValue};
@@ -12,11 +12,11 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy)]
 pub struct StoryStateExtractionLimits {
-    pub max_character_states: usize,
+    pub max_role_states: usize,
     pub max_relationship_states: usize,
     pub max_knowledge_changes: usize,
-    pub max_goals_per_character: usize,
-    pub max_attributes_per_character: usize,
+    pub max_goals_per_role: usize,
+    pub max_attributes_per_role: usize,
     pub max_entities_per_knowledge: usize,
     pub max_topics_per_knowledge: usize,
     pub max_item_bytes: usize,
@@ -29,7 +29,7 @@ pub struct StoryStateExtractionLimits {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StoryStateExtractorOutput {
-    pub character_states: Vec<ExtractedCharacterState>,
+    pub role_states: Vec<ExtractedRoleState>,
     pub relationship_states: Vec<RelationshipState>,
     pub knowledge_changes: Vec<ProposedKnowledgeMutation>,
     pub current_scene: CurrentScene,
@@ -37,8 +37,8 @@ pub struct StoryStateExtractorOutput {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ExtractedCharacterState {
-    pub character_id: CharacterId,
+pub struct ExtractedRoleState {
+    pub role_id: RoleId,
     pub location: LocationKey,
     pub goals: Vec<BoundedText>,
     #[serde(default)]
@@ -76,11 +76,11 @@ pub enum ProposedKnowledgeValue {
         entities: Vec<KnowledgeEntity>,
         topics: Vec<TopicKey>,
         salience: u8,
-        source_character_id: Option<CharacterId>,
+        source_role_id: Option<RoleId>,
         truth_value: TruthValue,
     },
     Memory {
-        owner: CharacterId,
+        owner: RoleId,
         memory_kind: MemoryKind,
         content: BoundedText,
         entities: Vec<KnowledgeEntity>,
@@ -189,7 +189,7 @@ impl StoryStateExtractorOutput {
             "required": ["kind", "key"],
             "properties": {
                 "kind": {
-                    "enum": ["world", "role", "character", "location", "scene", "narrative_node", "event"]
+                    "enum": ["world", "role", "location", "scene", "narrative_node", "event"]
                 },
                 "key": {"type": "string", "minLength": 1}
             }
@@ -234,7 +234,7 @@ impl StoryStateExtractorOutput {
             "additionalProperties": false,
             "required": [
                 "kind", "content", "claim", "entities", "topics", "salience",
-                "source_character_id", "truth_value"
+                "source_role_id", "truth_value"
             ],
             "properties": {
                 "kind": {"const": "rumor"},
@@ -243,7 +243,7 @@ impl StoryStateExtractorOutput {
                 "entities": entities_array,
                 "topics": topics_array,
                 "salience": salience,
-                "source_character_id": {"type": ["string", "null"]},
+                "source_role_id": {"type": ["string", "null"]},
                 "truth_value": {"enum": ["true", "false", "unverified"]}
             }
         });
@@ -334,21 +334,21 @@ impl StoryStateExtractorOutput {
                 }
             ]
         });
-        let character_state = json!({
+        let role_state = json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["character_id", "location", "goals", "attributes"],
+            "required": ["role_id", "location", "goals", "attributes"],
             "properties": {
-                "character_id": {"type": "string", "minLength": 1},
+                "role_id": {"type": "string", "minLength": 1},
                 "location": {"type": "string", "minLength": 1},
                 "goals": {
                     "type": "array",
-                    "maxItems": limits.max_goals_per_character,
+                    "maxItems": limits.max_goals_per_role,
                     "items": bounded_string()
                 },
                 "attributes": {
                     "type": "object",
-                    "maxProperties": limits.max_attributes_per_character,
+                    "maxProperties": limits.max_attributes_per_role,
                     "additionalProperties": scalar
                 }
             }
@@ -356,10 +356,10 @@ impl StoryStateExtractorOutput {
         let relationship_state = json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["source_character_id", "target_character_id", "kind", "trust"],
+            "required": ["source_role_id", "target_role_id", "kind", "trust"],
             "properties": {
-                "source_character_id": {"type": "string", "minLength": 1},
-                "target_character_id": {"type": "string", "minLength": 1},
+                "source_role_id": {"type": "string", "minLength": 1},
+                "target_role_id": {"type": "string", "minLength": 1},
                 "kind": semantic_key(),
                 "trust": {"type": "integer", "minimum": -32768, "maximum": 32767}
             }
@@ -367,15 +367,15 @@ impl StoryStateExtractorOutput {
         let current_scene = json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["scene_key", "location_key", "time", "description", "present_character_ids"],
+            "required": ["scene_key", "location_key", "time", "description", "present_role_ids"],
             "properties": {
                 "scene_key": {"type": "string", "minLength": 1},
                 "location_key": {"type": "string", "minLength": 1},
                 "time": bounded_string(),
                 "description": {"type": "string", "maxLength": limits.max_item_bytes},
-                "present_character_ids": {
+                "present_role_ids": {
                     "type": "array",
-                    "maxItems": limits.max_character_states,
+                    "maxItems": limits.max_role_states,
                     "items": {"type": "string", "minLength": 1}
                 }
             }
@@ -384,12 +384,12 @@ impl StoryStateExtractorOutput {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
             "additionalProperties": false,
-            "required": ["character_states", "relationship_states", "knowledge_changes", "current_scene"],
+            "required": ["role_states", "relationship_states", "knowledge_changes", "current_scene"],
             "properties": {
-                "character_states": {
+                "role_states": {
                     "type": "array",
-                    "maxItems": limits.max_character_states,
-                    "items": character_state
+                    "maxItems": limits.max_role_states,
+                    "items": role_state
                 },
                 "relationship_states": {
                     "type": "array",

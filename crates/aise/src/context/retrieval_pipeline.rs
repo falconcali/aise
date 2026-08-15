@@ -1,7 +1,7 @@
 use crate::config::RetrievalConfig;
 use crate::context::candidate_retriever::{CandidateRetrievalRequest, CandidateRetriever, ContextCandidate};
 use crate::context::error::ContextError;
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::RoleId;
 use crate::domain::knowledge::KnowledgeSourceId;
 use crate::domain::turn::{
     CandidateMatch, CandidateRetrieverKind, ContextItem, ContextProvenance, MatchLevel, RelevanceRank,
@@ -101,7 +101,7 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
         let merged_count = merged.len();
         let partitions = partition_and_rank(merged, &self.config)?;
         let limits = RetrievedContextLimits {
-            max_character_audiences: ctx.budget().max_character_decisions(),
+            max_role_audiences: ctx.budget().max_character_decisions(),
             max_items_per_audience: self.config.max_items_per_audience,
             max_tokens_per_audience: self.config.max_tokens_per_audience,
             max_total_items: self.config.max_total_items,
@@ -109,7 +109,7 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
             max_item_bytes: self.config.max_item_bytes,
         };
         let trimmed = trim_round_robin(partitions, limits)?;
-        let context = RetrievedContext::try_new(trimmed.writer, trimmed.characters, limits).map_err(|error| {
+        let context = RetrievedContext::try_new(trimmed.writer, trimmed.roles, limits).map_err(|error| {
             TurnExecutionError::new(
                 TurnFailureKind::InvariantViolation,
                 "retrieval_context_limit",
@@ -126,7 +126,7 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
             "topic_candidate_count": topic_candidate_count,
             "merged_count": merged_count,
             "writer_item_count": context.writer().len(),
-            "character_partition_count": context.characters().len(),
+            "character_partition_count": context.roles().len(),
             "total_tokens": context.total_tokens(),
             "status": "ok",
             "error_code": null,
@@ -138,7 +138,7 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
 
 struct PartitionedItems {
     writer: Vec<ContextItem>,
-    characters: BTreeMap<CharacterId, Vec<ContextItem>>,
+    roles: BTreeMap<RoleId, Vec<ContextItem>>,
 }
 
 fn merge_candidates(candidates: Vec<ContextCandidate>) -> Result<Vec<ContextCandidate>, TurnExecutionError> {
@@ -191,27 +191,27 @@ fn partition_and_rank(
     config: &RetrievalConfig,
 ) -> Result<PartitionedItems, TurnExecutionError> {
     let mut writer = Vec::new();
-    let mut characters: BTreeMap<CharacterId, Vec<ContextItem>> = BTreeMap::new();
+    let mut roles: BTreeMap<RoleId, Vec<ContextItem>> = BTreeMap::new();
     for candidate in candidates {
         let item = candidate_to_item(candidate)?;
         match &item.provenance.audience {
             RetrievalAudience::GlobalWriter => writer.push(item),
-            RetrievalAudience::Character { character_id } => {
-                characters.entry(character_id.clone()).or_default().push(item);
+            RetrievalAudience::Character { role_id } => {
+                roles.entry(role_id.clone()).or_default().push(item);
             }
         }
     }
     sort_partition(&mut writer);
-    for items in characters.values_mut() {
+    for items in roles.values_mut() {
         sort_partition(items);
     }
     writer.truncate(config.max_items_per_audience);
     trim_tokens(&mut writer, config.max_tokens_per_audience);
-    for items in characters.values_mut() {
+    for items in roles.values_mut() {
         items.truncate(config.max_items_per_audience);
         trim_tokens(items, config.max_tokens_per_audience);
     }
-    Ok(PartitionedItems { writer, characters })
+    Ok(PartitionedItems { writer, roles })
 }
 
 fn candidate_to_item(candidate: ContextCandidate) -> Result<ContextItem, TurnExecutionError> {
@@ -287,12 +287,12 @@ fn trim_round_robin(
     mut partitions: PartitionedItems,
     limits: RetrievedContextLimits,
 ) -> Result<PartitionedItems, TurnExecutionError> {
-    let mut character_ids: Vec<CharacterId> = partitions.characters.keys().cloned().collect();
-    character_ids.sort();
+    let mut role_ids: Vec<RoleId> = partitions.roles.keys().cloned().collect();
+    role_ids.sort();
     let mut writer_idx = 0usize;
-    let mut char_idxs: BTreeMap<CharacterId, usize> = character_ids.iter().cloned().map(|id| (id, 0)).collect();
+    let mut role_idxs: BTreeMap<RoleId, usize> = role_ids.iter().cloned().map(|id| (id, 0)).collect();
     let mut out_writer = Vec::new();
-    let mut out_characters: BTreeMap<CharacterId, Vec<ContextItem>> = BTreeMap::new();
+    let mut out_roles: BTreeMap<RoleId, Vec<ContextItem>> = BTreeMap::new();
     let mut total_items = 0usize;
     let mut total_tokens = 0u64;
     loop {
@@ -316,15 +316,15 @@ fn trim_round_robin(
                 writer_idx = partitions.writer.len();
             }
         }
-        for character_id in &character_ids {
-            let idx = char_idxs.get(character_id).copied().unwrap_or(0);
-            let Some(source) = partitions.characters.get_mut(character_id) else {
+        for role_id in &role_ids {
+            let idx = role_idxs.get(role_id).copied().unwrap_or(0);
+            let Some(source) = partitions.roles.get_mut(role_id) else {
                 continue;
             };
             if idx >= source.len() || total_items >= limits.max_total_items {
                 continue;
             }
-            let out = out_characters.entry(character_id.clone()).or_default();
+            let out = out_roles.entry(role_id.clone()).or_default();
             if out.len() >= limits.max_items_per_audience {
                 continue;
             }
@@ -335,12 +335,12 @@ fn trim_round_robin(
                 && audience_tokens.saturating_add(item.token_cost) <= limits.max_tokens_per_audience
             {
                 out.push(source[idx].clone());
-                char_idxs.insert(character_id.clone(), idx + 1);
+                role_idxs.insert(role_id.clone(), idx + 1);
                 total_items += 1;
                 total_tokens = next_tokens;
                 progressed = true;
             } else {
-                char_idxs.insert(character_id.clone(), source.len());
+                role_idxs.insert(role_id.clone(), source.len());
             }
         }
         if !progressed {
@@ -349,7 +349,7 @@ fn trim_round_robin(
     }
     Ok(PartitionedItems {
         writer: out_writer,
-        characters: out_characters,
+        roles: out_roles,
     })
 }
 

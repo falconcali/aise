@@ -87,7 +87,7 @@ async fn assert_final_migration(start_version: i64, label: &str) {
     if start_version == 10 {
         migrator_through(10).run(&pool).await.unwrap();
     }
-    sqlx::migrate!("./assets/persistence/mig").run(&pool).await.unwrap();
+    migrator_through(15).run(&pool).await.unwrap();
     let payloads: Vec<String> = sqlx::query_scalar(
         "SELECT payload_json FROM knowledge_entries WHERE story_id = 'story-1' ORDER BY knowledge_kind",
     )
@@ -106,7 +106,7 @@ async fn assert_final_migration(start_version: i64, label: &str) {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(entity_count, 4);
+    assert_eq!(entity_count, 3);
     assert_eq!(topic_count, 3);
     let legacy_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('worlds','characters','memory')",
@@ -222,7 +222,7 @@ async fn migration_converts_identical_role_openings_to_story_opening() {
     )
     .await;
 
-    sqlx::migrate!("./assets/persistence/mig").run(&pool).await.unwrap();
+    migrator_through(15).run(&pool).await.unwrap();
     let pack_json: String = sqlx::query_scalar("SELECT pack_json FROM story_packs WHERE pack_id = 'pack-opening'")
         .fetch_one(&pool)
         .await

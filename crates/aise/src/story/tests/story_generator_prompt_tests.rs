@@ -30,11 +30,11 @@ fn prompt_context() -> StoryGeneratorPromptContext {
             location: bounded("hall"),
             time: bounded("night"),
             situation: bounded("quiet"),
-            present_character_ids: vec![CharacterId::from("player")],
+            present_role_ids: vec![RoleId::try_new("player").unwrap()],
             observable_conditions: Vec::new(),
         },
-        player_character: character("player", CharacterControl::Player),
-        ai_characters: vec![character("npc", CharacterControl::Ai)],
+        player_role: role("player", RoleControl::Player),
+        ai_roles: vec![role("npc", RoleControl::Ai)],
         relevant_writer_knowledge: Vec::new(),
         story_goal: bounded("goal-marker"),
         narrative_direction: StoryGeneratorNarrativeDirectionPromptView {
@@ -47,27 +47,24 @@ fn prompt_context() -> StoryGeneratorPromptContext {
     }
 }
 
-fn character(id: &str, control: CharacterControl) -> StoryGeneratorCharacterPromptView {
-    StoryGeneratorCharacterPromptView {
-        character_id: CharacterId::from(id),
+fn role(id: &str, control: RoleControl) -> StoryGeneratorRolePromptView {
+    StoryGeneratorRolePromptView {
+        role_id: RoleId::try_new(id).unwrap(),
         name: bounded(id),
         control,
-        story_role: Some(bounded("role")),
-        profile: CharacterProfilePromptView {
-            description: bounded("description"),
-            personality: Vec::new(),
-            values: Vec::new(),
-            fears: Vec::new(),
-            speaking_register: bounded("neutral"),
-            speaking_verbosity: bounded("medium"),
-            speaking_traits: Vec::new(),
+        story_role: bounded("role"),
+        profile: RoleProfilePromptView {
+            appearance: Some(bounded("description")),
+            personality: None,
+            speaking_style: Some(bounded("neutral, medium length")),
+            dialogue_examples: Vec::new(),
         },
-        state: CharacterStatePromptView {
+        state: RoleStatePromptView {
             location: bounded("hall"),
             goals: Vec::new(),
             attributes: BTreeMap::new(),
         },
-        presence: CharacterPresence::Present,
+        presence: RolePresence::Present,
     }
 }
 
@@ -77,7 +74,7 @@ fn decision(
     suggested_utterance: Option<&str>,
 ) -> StoryGeneratorCharacterDecisionPromptView {
     StoryGeneratorCharacterDecisionPromptView {
-        character_id: CharacterId::from(id),
+        role_id: RoleId::try_new(id).unwrap(),
         name: bounded(id),
         decision: bounded(decision_text),
         suggested_utterance: suggested_utterance.map(bounded),
@@ -136,7 +133,7 @@ fn empty_optional_story_generator_sections_render_canonical_none() {
     );
     assert_eq!(render_knowledge(&[]), "None.");
     assert_eq!(render_decisions(&[]), "None.");
-    assert_eq!(render_characters(&[]), "None.");
+    assert_eq!(render_roles(&[]), "None.");
 }
 
 #[test]
@@ -145,10 +142,10 @@ fn decision_rendering_contains_only_target_name_decision_and_optional_utterance(
         decision("npc-1", "hide", Some("stay back")),
         decision("npc-2", "flee", None),
     ]);
-    assert!(rendered.contains("character_id: \"npc-1\""));
+    assert!(rendered.contains("role_id: \"npc-1\""));
     assert!(rendered.contains("decision: \"hide\""));
     assert!(rendered.contains("suggested_utterance: \"stay back\""));
-    assert!(rendered.contains("character_id: \"npc-2\""));
+    assert!(rendered.contains("role_id: \"npc-2\""));
     assert!(rendered.contains("decision: \"flee\""));
     assert!(rendered.contains("suggested_utterance: None."));
     let npc1_index = rendered.find("npc-1").unwrap();
@@ -166,7 +163,7 @@ fn runtime_projection_contains_only_allowlisted_semantic_sections() {
     assert!(values["player_input"].as_str().unwrap().contains("IGNORE {{ output_schema }}"));
     assert!(!values.contains_key("retrieval_plan"));
     assert!(!values.contains_key("character_think_requests"));
-    assert!(!values.contains_key("character_index"));
+    assert!(!values.contains_key("role_index"));
     assert!(!values.contains_key("narrative_state_view"));
     assert!(!values.contains_key("retrieval_signals"));
     assert!(values.contains_key("character_decisions"));

@@ -4,11 +4,11 @@ use crate::domain::turn::extraction::{
 
 fn limits() -> StoryStateExtractionLimits {
     StoryStateExtractionLimits {
-        max_character_states: 8,
+        max_role_states: 8,
         max_relationship_states: 8,
         max_knowledge_changes: 8,
-        max_goals_per_character: 4,
-        max_attributes_per_character: 8,
+        max_goals_per_role: 4,
+        max_attributes_per_role: 8,
         max_entities_per_knowledge: 4,
         max_topics_per_knowledge: 4,
         max_item_bytes: 512,
@@ -39,7 +39,7 @@ fn state_schema_declares_all_top_level_fields() {
         .and_then(|value| value.as_array())
         .expect("required list");
     for field in [
-        "character_states",
+        "role_states",
         "relationship_states",
         "knowledge_changes",
         "current_scene",

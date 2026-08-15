@@ -1,6 +1,6 @@
 use aise::config::{NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
 use aise::domain::asset::validation::BoundedText;
-use aise::domain::ids::{CharacterId, FactId};
+use aise::domain::ids::{FactId, RoleId};
 use aise::domain::knowledge::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use aise::domain::text::estimate_text_tokens;
 use aise::domain::turn::{
@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 fn limits() -> RetrievedContextLimits {
     RetrievedContextLimits {
-        max_character_audiences: 4,
+        max_role_audiences: 4,
         max_items_per_audience: 8,
         max_tokens_per_audience: 1_000,
         max_total_items: 16,
@@ -58,14 +58,14 @@ fn context_and_llm_accounting_share_one_token_estimator() {
 
 #[test]
 fn retrieved_context_rejects_audience_overflow() {
-    let mut characters = BTreeMap::new();
-    characters.insert(CharacterId::from("c-1"), vec![item("a", "f1")]);
-    characters.insert(CharacterId::from("c-2"), vec![item("b", "f2")]);
+    let mut roles = BTreeMap::new();
+    roles.insert(RoleId::try_new("c-1").unwrap(), vec![item("a", "f1")]);
+    roles.insert(RoleId::try_new("c-2").unwrap(), vec![item("b", "f2")]);
     let tight = RetrievedContextLimits {
-        max_character_audiences: 1,
+        max_role_audiences: 1,
         ..limits()
     };
-    let err = RetrievedContext::try_new(vec![item("w", "f0")], characters, tight);
+    let err = RetrievedContext::try_new(vec![item("w", "f0")], roles, tight);
     assert!(err.is_err());
 }
 
@@ -73,8 +73,8 @@ fn retrieved_context_rejects_audience_overflow() {
 fn fact_retrieval_never_creates_character_context() {
     let ctx = RetrievedContext::try_new(vec![item("shared fact", "f1")], BTreeMap::new(), limits()).unwrap();
     assert_eq!(ctx.writer().len(), 1);
-    assert!(ctx.characters().is_empty());
-    assert!(ctx.for_character(&CharacterId::from("c-1")).is_empty());
+    assert!(ctx.roles().is_empty());
+    assert!(ctx.for_role(&RoleId::try_new("c-1").unwrap()).is_empty());
 }
 
 #[test]

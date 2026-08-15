@@ -1,7 +1,7 @@
 use aise::config::{AssetLimitsConfig, ContextPreparationConfig, NarrativeConfig, TurnContentLimitsConfig};
 use aise::domain::StorySequence;
-use aise::domain::asset::ids::{PlayerId, StoryRoleKey};
-use aise::domain::ids::{StoryId, StoryRevision, TurnId};
+use aise::domain::asset::ids::PlayerId;
+use aise::domain::ids::{RoleId, StoryId, StoryRevision, TurnId};
 use aise::domain::narrative::StoryTurn;
 use aise::domain::turn::{SnapshotLimits, StoryCandidateVersion, ValidatedNarrativeResolution};
 use aise::persistence::asset_store::AssetStore;
@@ -25,14 +25,16 @@ fn temp_db_path(label: &str) -> String {
 
 fn valid_pack_json() -> String {
     serde_json::json!({
-        "spec": "aise_story_v3",
-        "spec_version": "3.0",
+        "spec": "aise_story_v4",
+        "spec_version": "4.0",
         "meta": {
             "pack_key": "demo",
             "title": "Demo",
             "author": "aise",
             "version": "0.1.0",
-            "description": "demo pack"
+            "description": "demo pack",
+            "tags": [],
+            "cover_asset": null
         },
         "story": {
             "premise": "A quiet village.",
@@ -41,28 +43,23 @@ fn valid_pack_json() -> String {
             "themes": ["hope"],
             "style": {"tone": ["light"], "point_of_view": "third", "tense": "past"}
         },
-        "character_assets": {
-            "protagonist_card": {
-                "spec": "aise_char_v3", "spec_version": "3.0", "character_key": "protagonist_card",
-                "meta": {"name": "Hero", "version": "0.1.0"},
-                "profile": {"description": "Hero", "personality": [], "values": [], "speaking_style": {"register": "neutral", "verbosity": "medium"}}
-            }
-        },
         "roles": {
             "protagonist": {
                 "role_label": "Protagonist",
                 "narrative_function": "hero",
+                "default_profile": {
+                    "name": "Hero",
+                    "dialogue_examples": []
+                },
+                "background": null,
                 "initial_state": {"location": "village", "goals": []},
                 "initial_relationships": [],
                 "seed_memories": []
             }
         },
-        "default_cast": {
-            "protagonist": {"character_ref": "protagonist_card"}
-        },
         "play": {
             "player_count": 1,
-            "playable_role_keys": ["protagonist"]
+            "playable_role_ids": ["protagonist"]
         },
         "world_book": {
             "spec": "aise_world_v3",
@@ -94,6 +91,7 @@ fn valid_pack_json() -> String {
             },
             "edges": []
         },
+        "constraints": {},
         "assets": {}
     })
     .to_string()
@@ -125,6 +123,7 @@ async fn create_instance(label: &str) -> (Arc<dyn Store>, StoryId, String) {
         store.clone(),
         StoryInstantiationLimits {
             max_roles: 16,
+            max_role_bytes: 131_072,
             max_facts: 128,
             max_rumors: 128,
             max_memories: 128,
@@ -137,8 +136,8 @@ async fn create_instance(label: &str) -> (Arc<dyn Store>, StoryId, String) {
         .create(CreateStoryInstanceSpec {
             pack_id: info.pack_id,
             player_id: PlayerId::from("player-1"),
-            player_role_key: StoryRoleKey::from("protagonist"),
-            player_character: None,
+            player_role_id: RoleId::try_new("protagonist").unwrap(),
+            role_profile_selections: BTreeMap::new(),
             created_at_ms: 1000,
         })
         .await
@@ -168,7 +167,7 @@ fn commit_spec(
         expected_graph_revision,
         changes: ValidatedChangeSet::new(ValidatedChangeSetParts {
             story_text: aise::domain::asset::validation::BoundedText::try_new(story_text, "story_text", 1024).unwrap(),
-            character_changes: Vec::new(),
+            role_changes: Vec::new(),
             relationship_changes: Vec::new(),
             knowledge_mutations: Vec::new(),
             current_scene: aise::domain::story_instance::state::CurrentScene {
@@ -177,7 +176,7 @@ fn commit_spec(
                 time: aise::domain::asset::validation::BoundedText::try_new("morning", "time", 256).unwrap(),
                 description: aise::domain::asset::validation::BoundedText::try_new("scene", "description", 1024)
                     .unwrap(),
-                present_character_ids: Vec::new(),
+                present_role_ids: Vec::new(),
             },
             narrative_events: Vec::new(),
             narrative_resolution: ValidatedNarrativeResolution {

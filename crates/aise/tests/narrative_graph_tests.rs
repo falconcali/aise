@@ -18,31 +18,25 @@ impl NarrativeStateView for EmptyStateView {
     ) -> Result<Option<&aise::domain::asset::validation::ScalarValue>, NarrativeStateViewError> {
         Ok(None)
     }
-    fn character_attribute(
+    fn role_attribute(
         &self,
-        _role_key: &aise::domain::asset::ids::StoryRoleKey,
-        _attribute: &aise::domain::asset::ids::AttributeKey,
+        _role_id: &aise::domain::ids::RoleId,
+        _attribute: &aise::domain::asset::validation::BoundedText,
     ) -> Result<Option<&aise::domain::asset::validation::ScalarValue>, NarrativeStateViewError> {
         Ok(None)
     }
     fn relationship_trust(
         &self,
-        _source_role_key: &aise::domain::asset::ids::StoryRoleKey,
-        _target_role_key: &aise::domain::asset::ids::StoryRoleKey,
+        _source_role_id: &aise::domain::ids::RoleId,
+        _target_role_id: &aise::domain::ids::RoleId,
     ) -> Result<Option<i16>, NarrativeStateViewError> {
         Ok(None)
     }
     fn role_controller(
         &self,
-        _role_key: &aise::domain::asset::ids::StoryRoleKey,
+        _role_id: &aise::domain::ids::RoleId,
     ) -> Result<aise::domain::narrative_graph::condition::RoleControllerKind, NarrativeStateViewError> {
         Ok(aise::domain::narrative_graph::condition::RoleControllerKind::Ai)
-    }
-    fn character_id_for_role(
-        &self,
-        _role_key: &aise::domain::asset::ids::StoryRoleKey,
-    ) -> Result<aise::domain::ids::CharacterId, NarrativeStateViewError> {
-        Ok(aise::domain::ids::CharacterId::from("char.stub"))
     }
 }
 

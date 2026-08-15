@@ -18,8 +18,8 @@ impl DeterministicValidator for ExtractionSchemaValidator {
         let limits = ctx.budget().state_extraction_limits();
         let mut issues = Vec::new();
 
-        if extraction.character_states.len() > limits.max_character_states {
-            issues.push(count_issue("character_states", "character state count exceeds its bound"));
+        if extraction.role_states.len() > limits.max_role_states {
+            issues.push(count_issue("role_states", "role state count exceeds its bound"));
         }
         if extraction.relationship_states.len() > limits.max_relationship_states {
             issues.push(count_issue("relationship_states", "relationship state count exceeds its bound"));
@@ -28,32 +28,20 @@ impl DeterministicValidator for ExtractionSchemaValidator {
             issues.push(count_issue("knowledge_changes", "knowledge change count exceeds its bound"));
         }
 
-        let mut seen_characters = BTreeSet::new();
-        for (index, state) in extraction.character_states.iter().enumerate() {
-            if !seen_characters.insert(state.character_id.clone()) {
-                issues.push(duplicate_issue(
-                    "character_states",
-                    index,
-                    "duplicate character_id in character_states",
-                ));
+        let mut seen_roles = BTreeSet::new();
+        for (index, state) in extraction.role_states.iter().enumerate() {
+            if !seen_roles.insert(state.role_id.clone()) {
+                issues.push(duplicate_issue("role_states", index, "duplicate role_id in role_states"));
             }
-            if state.goals.len() > limits.max_goals_per_character {
-                issues.push(count_issue_at("character_states", index, "character goals exceed their bound"));
+            if state.goals.len() > limits.max_goals_per_role {
+                issues.push(count_issue_at("role_states", index, "role goals exceed their bound"));
             }
-            if state.attributes.len() > limits.max_attributes_per_character {
-                issues.push(count_issue_at(
-                    "character_states",
-                    index,
-                    "character attributes exceed their bound",
-                ));
+            if state.attributes.len() > limits.max_attributes_per_role {
+                issues.push(count_issue_at("role_states", index, "role attributes exceed their bound"));
             }
             for goal in &state.goals {
                 if goal.as_str().trim().is_empty() || goal.as_str().len() > limits.max_item_bytes {
-                    issues.push(count_issue_at(
-                        "character_states",
-                        index,
-                        "character goal is empty or oversized",
-                    ));
+                    issues.push(count_issue_at("role_states", index, "role goal is empty or oversized"));
                 }
             }
         }
@@ -61,8 +49,8 @@ impl DeterministicValidator for ExtractionSchemaValidator {
         let mut seen_relationships = BTreeSet::new();
         for (index, relationship) in extraction.relationship_states.iter().enumerate() {
             let key = (
-                relationship.source_character_id.clone(),
-                relationship.target_character_id.clone(),
+                relationship.source_role_id.clone(),
+                relationship.target_role_id.clone(),
                 relationship.kind.clone(),
             );
             if !seen_relationships.insert(key) {
@@ -110,8 +98,8 @@ impl DeterministicValidator for ExtractionSchemaValidator {
         if scene.description.as_str().len() > limits.max_item_bytes {
             issues.push(count_issue("current_scene", "scene description exceeds its bound"));
         }
-        if scene.present_character_ids.len() > limits.max_character_states {
-            issues.push(count_issue("current_scene", "present character count exceeds its bound"));
+        if scene.present_role_ids.len() > limits.max_role_states {
+            issues.push(count_issue("current_scene", "present role count exceeds its bound"));
         }
 
         Ok(issues)

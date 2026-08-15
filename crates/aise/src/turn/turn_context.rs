@@ -1,4 +1,4 @@
-use crate::domain::ids::{CharacterId, StoryId, TurnId};
+use crate::domain::ids::{RoleId, StoryId, TurnId};
 use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::narrative_graph::projector::NarrativeProjection;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
@@ -251,7 +251,7 @@ impl TurnExecutionContext {
     pub fn set_retrieved_context(&mut self, context: RetrievedContext) -> Result<(), TurnExecutionError> {
         self.expect_phase(TurnPhase::Planned)?;
         let limits = RetrievedContextLimits {
-            max_character_audiences: self.budget.max_character_decisions(),
+            max_role_audiences: self.budget.max_character_decisions(),
             max_items_per_audience: self.budget.max_items_per_audience(),
             max_tokens_per_audience: self.budget.max_tokens_per_audience(),
             max_total_items: self.budget.max_total_items(),
@@ -271,12 +271,12 @@ impl TurnExecutionContext {
             &authorized_writer_memory_owners,
             limits,
         )?;
-        for (character_id, items) in context.characters() {
-            if !self.plan.as_ref().is_some_and(|plan| {
-                plan.character_think_requests
-                    .iter()
-                    .any(|request| &request.character_id == character_id)
-            }) {
+        for (role_id, items) in context.roles() {
+            if !self
+                .plan
+                .as_ref()
+                .is_some_and(|plan| plan.character_think_requests.iter().any(|request| &request.role_id == role_id))
+            {
                 return Err(TurnExecutionError::new(
                     TurnFailureKind::InvariantViolation,
                     "retrieved_character_audience_unauthorized",
@@ -287,21 +287,21 @@ impl TurnExecutionContext {
             self.validate_retrieved_partition(
                 items,
                 &RetrievalAudience::Character {
-                    character_id: character_id.clone(),
+                    role_id: role_id.clone(),
                 },
                 &authorized_writer_memory_owners,
                 limits,
             )?;
         }
-        if context.characters().len() > limits.max_character_audiences {
+        if context.roles().len() > limits.max_role_audiences {
             return Err(TurnExecutionError::new(
                 TurnFailureKind::InvariantViolation,
                 "retrieved_character_audience_limit",
                 Some(TurnStage::Context),
                 format!(
                     "retrieved character audiences {} exceeds budget {}",
-                    context.characters().len(),
-                    limits.max_character_audiences
+                    context.roles().len(),
+                    limits.max_role_audiences
                 ),
             ));
         }
@@ -368,7 +368,7 @@ impl TurnExecutionContext {
             ));
         }
         for (decision, request) in decisions.iter().zip(plan.character_think_requests.iter()) {
-            if decision.character_id != request.character_id {
+            if decision.role_id != request.role_id {
                 return Err(TurnExecutionError::new(
                     TurnFailureKind::InvariantViolation,
                     "character_decision_order_mismatch",
@@ -379,7 +379,7 @@ impl TurnExecutionContext {
         }
         let mut seen = std::collections::BTreeSet::new();
         for decision in &decisions {
-            if !seen.insert(decision.character_id.clone()) {
+            if !seen.insert(decision.role_id.clone()) {
                 return Err(TurnExecutionError::new(
                     TurnFailureKind::InvariantViolation,
                     "duplicate_character_decision",
@@ -391,7 +391,7 @@ impl TurnExecutionContext {
         if let Some(baseline) = &self.baseline {
             if decisions
                 .iter()
-                .any(|decision| decision.character_id == baseline.player_character.character_id)
+                .any(|decision| decision.role_id == baseline.player_role.role_id)
             {
                 return Err(TurnExecutionError::new(
                     TurnFailureKind::InvariantViolation,
@@ -760,7 +760,7 @@ impl TurnExecutionContext {
         &self,
         items: &[ContextItem],
         expected_audience: &RetrievalAudience,
-        authorized_writer_memory_owners: &std::collections::BTreeSet<CharacterId>,
+        authorized_writer_memory_owners: &std::collections::BTreeSet<RoleId>,
         limits: RetrievedContextLimits,
     ) -> Result<(), TurnExecutionError> {
         if items.len() > limits.max_items_per_audience {
@@ -810,8 +810,7 @@ impl TurnExecutionContext {
                 &item.provenance.memory_owner,
                 expected_audience,
             ) {
-                (KnowledgeKind::Memory, Some(owner), RetrievalAudience::Character { character_id })
-                    if owner == character_id => {}
+                (KnowledgeKind::Memory, Some(owner), RetrievalAudience::Character { role_id }) if owner == role_id => {}
                 (KnowledgeKind::Memory, Some(owner), RetrievalAudience::GlobalWriter)
                     if authorized_writer_memory_owners.contains(owner) => {}
                 (KnowledgeKind::Memory, _, _) => {

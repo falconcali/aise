@@ -1,7 +1,7 @@
 use crate::domain::asset::entity::KnowledgeEntity;
-use crate::domain::asset::ids::{RumorKey, StoryRoleKey, TopicKey};
+use crate::domain::asset::ids::{RumorKey, TopicKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
-use crate::domain::ids::{CharacterId, RumorId};
+use crate::domain::ids::{RoleId, RumorId};
 use crate::domain::knowledge::query::KnowledgeSource;
 use serde::{Deserialize, Serialize};
 
@@ -17,8 +17,7 @@ pub struct SharedRumor {
     #[serde(default)]
     pub topics: Vec<TopicKey>,
     pub salience: u8,
-    pub source_role_key: Option<StoryRoleKey>,
-    pub source_character_id: Option<CharacterId>,
+    pub source_role_id: Option<RoleId>,
     pub truth_value: TruthValue,
     pub source: KnowledgeSource,
 }

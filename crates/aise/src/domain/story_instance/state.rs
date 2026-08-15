@@ -1,8 +1,6 @@
-use crate::domain::asset::ids::{
-    AttributeKey, InstanceSettingKey, LocationKey, RelationshipKind, SceneKey, StoryRoleKey,
-};
+use crate::domain::asset::ids::{InstanceSettingKey, LocationKey, RelationshipKind, SceneKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::RoleId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -31,32 +29,21 @@ pub struct CurrentScene {
     pub location_key: LocationKey,
     pub time: BoundedText,
     pub description: BoundedText,
-    pub present_character_ids: Vec<CharacterId>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CharacterInstanceState {
-    pub character_id: CharacterId,
-    pub role_key: StoryRoleKey,
-    pub location: LocationKey,
-    pub goals: Vec<BoundedText>,
-    #[serde(default)]
-    pub attributes: BTreeMap<AttributeKey, ScalarValue>,
+    pub present_role_ids: Vec<RoleId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RelationshipKey {
-    pub source_character_id: CharacterId,
-    pub target_character_id: CharacterId,
+    pub source_role_id: RoleId,
+    pub target_role_id: RoleId,
     pub kind: RelationshipKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RelationshipState {
-    pub source_character_id: CharacterId,
-    pub target_character_id: CharacterId,
+    pub source_role_id: RoleId,
+    pub target_role_id: RoleId,
     pub kind: RelationshipKind,
     pub trust: i16,
 }
@@ -64,8 +51,8 @@ pub struct RelationshipState {
 impl RelationshipState {
     pub fn key(&self) -> RelationshipKey {
         RelationshipKey {
-            source_character_id: self.source_character_id.clone(),
-            target_character_id: self.target_character_id.clone(),
+            source_role_id: self.source_role_id.clone(),
+            target_role_id: self.target_role_id.clone(),
             kind: self.kind.clone(),
         }
     }

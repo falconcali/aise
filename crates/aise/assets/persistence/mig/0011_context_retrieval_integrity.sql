@@ -124,8 +124,7 @@ SELECT i.story_id,
                'entities', json(json_extract(rumor.value, '$.entities')),
                'topics', json(json_extract(rumor.value, '$.topics')),
                'salience', json_extract(rumor.value, '$.salience'),
-               'source_role_key', NULL,
-               'source_character_id', NULL,
+               'source_role_id', NULL,
                'truth_value', 'unverified',
                'source', json(json_object('seed', json_object('pack_id', p.pack_id, 'pack_digest', p.digest))),
                'story_revision', 0
@@ -155,8 +154,7 @@ SELECT i.story_id,
                'kind', json_extract(memory.value, '$.kind'),
                'content', json_extract(memory.value, '$.content'),
                'entities', json_array(
-                   json_object('kind', 'role', 'key', role.key),
-                   json_object('kind', 'character', 'key', json_extract(binding.value, '$.character_id'))
+                   json_object('kind', 'role', 'key', role.key)
                ),
                'topics', json(json_extract(memory.value, '$.topics')),
                'salience', json_extract(memory.value, '$.salience'),
@@ -195,16 +193,7 @@ SELECT i.story_id, 'memory',
 FROM story_instances i
 JOIN story_packs p ON p.pack_id = i.pack_id
 JOIN json_each(p.pack_json, '$.roles') role
-JOIN json_each(role.value, '$.seed_memories') memory
-UNION ALL
-SELECT i.story_id, 'memory',
-       i.story_id || ':seed:memory:' || role.key || ':' || json_extract(memory.value, '$.memory_key'),
-       'character', json_extract(binding.value, '$.character_id')
-FROM story_instances i
-JOIN story_packs p ON p.pack_id = i.pack_id
-JOIN json_each(p.pack_json, '$.roles') role
-JOIN json_each(role.value, '$.seed_memories') memory
-JOIN json_each(i.bindings_json) binding ON binding.key = role.key;
+JOIN json_each(role.value, '$.seed_memories') memory;
 
 INSERT INTO knowledge_entry_topics_new
 SELECT i.story_id, 'fact', i.story_id || ':seed:fact:' || fact.key, topic.value
@@ -267,7 +256,7 @@ WHERE (SELECT COUNT(*) FROM knowledge_entry_entities_new) != (
     JOIN story_packs p ON p.pack_id = i.pack_id
     JOIN json_each(p.world_book_json, '$.rumors') rumor
     JOIN json_each(rumor.value, '$.entities') entity
-) + 2 * (
+) + (
     SELECT COUNT(*) FROM story_instances i
     JOIN story_packs p ON p.pack_id = i.pack_id
     JOIN json_each(p.pack_json, '$.roles') role

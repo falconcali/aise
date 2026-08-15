@@ -1,30 +1,28 @@
-use crate::domain::asset::ids::{AttributeKey, FactKey, StoryRoleKey};
-use crate::domain::asset::validation::ScalarValue;
-use crate::domain::ids::CharacterId;
+use crate::domain::asset::ids::FactKey;
+use crate::domain::asset::validation::{BoundedText, ScalarValue};
+use crate::domain::ids::RoleId;
 use crate::domain::narrative_graph::condition::RoleControllerKind;
 use crate::domain::narrative_graph::state_view::{
     CommittedNarrativeStateView, NarrativeStateView, NarrativeStateViewError,
 };
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
-use crate::turn::turn_validation::{CharacterInstanceStateChange, RelationshipStateChange};
+use crate::turn::turn_validation::{RelationshipStateChange, RoleStateChange};
 
 pub struct CandidateNarrativeStateView<'a> {
     committed: CommittedNarrativeStateView<'a>,
-    snapshot: &'a StoryReadSnapshot,
-    character_changes: &'a [CharacterInstanceStateChange],
+    role_changes: &'a [RoleStateChange],
     relationship_changes: &'a [RelationshipStateChange],
 }
 
 impl<'a> CandidateNarrativeStateView<'a> {
     pub fn new(
         snapshot: &'a StoryReadSnapshot,
-        character_changes: &'a [CharacterInstanceStateChange],
+        role_changes: &'a [RoleStateChange],
         relationship_changes: &'a [RelationshipStateChange],
     ) -> Self {
         Self {
             committed: CommittedNarrativeStateView::new(snapshot),
-            snapshot,
-            character_changes,
+            role_changes,
             relationship_changes,
         }
     }
@@ -35,58 +33,38 @@ impl NarrativeStateView for CandidateNarrativeStateView<'_> {
         self.committed.fact_value(fact_key)
     }
 
-    fn character_attribute(
+    fn role_attribute(
         &self,
-        role_key: &StoryRoleKey,
-        attribute: &AttributeKey,
+        role_id: &RoleId,
+        attribute: &BoundedText,
     ) -> Result<Option<&ScalarValue>, NarrativeStateViewError> {
-        let binding = self
-            .snapshot
-            .role_binding(role_key)
-            .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                role_key: role_key.as_str().to_owned(),
-            })?;
-        if let Some(change) = self
-            .character_changes
-            .iter()
-            .find(|change| change.character_id == binding.character_id)
-        {
-            return Ok(change.new_state.attributes.get(attribute));
+        if let Some(change) = self.role_changes.iter().find(|change| &change.role_id == role_id) {
+            return Ok(change
+                .new_state
+                .attributes
+                .iter()
+                .find(|(key, _)| key.as_str() == attribute.as_str())
+                .map(|(_, value)| value));
         }
-        self.committed.character_attribute(role_key, attribute)
+        self.committed.role_attribute(role_id, attribute)
     }
 
     fn relationship_trust(
         &self,
-        source_role_key: &StoryRoleKey,
-        target_role_key: &StoryRoleKey,
+        source_role_id: &RoleId,
+        target_role_id: &RoleId,
     ) -> Result<Option<i16>, NarrativeStateViewError> {
-        let source =
-            self.snapshot
-                .role_binding(source_role_key)
-                .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                    role_key: source_role_key.as_str().to_owned(),
-                })?;
-        let target =
-            self.snapshot
-                .role_binding(target_role_key)
-                .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                    role_key: target_role_key.as_str().to_owned(),
-                })?;
-        if let Some(change) = self.relationship_changes.iter().find(|change| {
-            change.key.source_character_id == source.character_id
-                && change.key.target_character_id == target.character_id
-        }) {
+        if let Some(change) = self
+            .relationship_changes
+            .iter()
+            .find(|change| &change.key.source_role_id == source_role_id && &change.key.target_role_id == target_role_id)
+        {
             return Ok(Some(change.new_state.trust));
         }
-        self.committed.relationship_trust(source_role_key, target_role_key)
+        self.committed.relationship_trust(source_role_id, target_role_id)
     }
 
-    fn role_controller(&self, role_key: &StoryRoleKey) -> Result<RoleControllerKind, NarrativeStateViewError> {
-        self.committed.role_controller(role_key)
-    }
-
-    fn character_id_for_role(&self, role_key: &StoryRoleKey) -> Result<CharacterId, NarrativeStateViewError> {
-        self.committed.character_id_for_role(role_key)
+    fn role_controller(&self, role_id: &RoleId) -> Result<RoleControllerKind, NarrativeStateViewError> {
+        self.committed.role_controller(role_id)
     }
 }

@@ -1,6 +1,5 @@
 use crate::domain::asset::ids::{NarrativeConditionKey, NarrativeNodeKey};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::CharacterId;
 use crate::domain::narrative_graph::condition::{NarrativeCondition, NarrativeNodeState, RoleControllerKind};
 use crate::domain::narrative_graph::definition::{NarrativeError, NarrativeGraphDefinition, NarrativeLimits};
 use crate::domain::narrative_graph::effect::{
@@ -244,7 +243,7 @@ impl NarrativeProjector {
                 }
                 NarrativeEffectDefinition::CharacterImpulse(definition) => {
                     let controller =
-                        input.committed_view.role_controller(&definition.target_role_key).map_err(|_| {
+                        input.committed_view.role_controller(&definition.target_role_id).map_err(|_| {
                             NarrativeError::Invariant {
                                 code: "unknown_character_impulse_role_reference",
                             }
@@ -256,17 +255,9 @@ impl NarrativeProjector {
                         });
                         continue;
                     }
-                    let target_character_id: CharacterId = input
-                        .committed_view
-                        .character_id_for_role(&definition.target_role_key)
-                        .map_err(|_| NarrativeError::Invariant {
-                            code: "unknown_character_impulse_role_reference",
-                        })?;
                     character_impulses.push(CharacterImpulse {
-                        effect_id: effect_id.clone(),
                         source_node: pending.source_node.clone(),
-                        target_role_key: definition.target_role_key.clone(),
-                        target_character_id,
+                        target_role_id: definition.target_role_id.clone(),
                         goal: definition.goal.clone(),
                         reason: definition.reason.clone(),
                         emotion: definition.emotion.clone(),
@@ -311,7 +302,7 @@ fn collect_semantic_leaves(
         NarrativeCondition::StoryStarted
         | NarrativeCondition::NodeState { .. }
         | NarrativeCondition::FactStateEquals { .. }
-        | NarrativeCondition::CharacterStateEquals { .. }
+        | NarrativeCondition::RoleStateEquals { .. }
         | NarrativeCondition::RelationshipReaches { .. }
         | NarrativeCondition::TurnReaches { .. }
         | NarrativeCondition::RoleControllerIs { .. } => Ok(()),

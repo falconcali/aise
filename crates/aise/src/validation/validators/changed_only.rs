@@ -15,17 +15,17 @@ impl DeterministicValidator for ChangedOnlyValidator {
         };
         let mut issues = Vec::new();
 
-        for (index, state) in extraction.character_states.iter().enumerate() {
-            if let Some(current) = snapshot.character_states().get(&state.character_id) {
-                let unchanged = current.location == state.location
-                    && current.goals == state.goals
-                    && current.attributes == state.attributes;
+        for (index, state) in extraction.role_states.iter().enumerate() {
+            if let Some(current) = snapshot.role(&state.role_id) {
+                let unchanged = current.state.location == state.location
+                    && current.state.goals == state.goals
+                    && current.state.attributes == state.attributes;
                 if unchanged {
                     issues.push(issue(
-                        ValidationIssueCode::UnchangedCharacterEmitted,
-                        "character_states",
+                        ValidationIssueCode::UnchangedRoleEmitted,
+                        "role_states",
                         index,
-                        "character state is identical to the pre-turn snapshot",
+                        "role state is identical to the pre-turn snapshot",
                     ));
                 }
             }
@@ -33,8 +33,8 @@ impl DeterministicValidator for ChangedOnlyValidator {
 
         for (index, relationship) in extraction.relationship_states.iter().enumerate() {
             let key = crate::domain::story_instance::state::RelationshipKey {
-                source_character_id: relationship.source_character_id.clone(),
-                target_character_id: relationship.target_character_id.clone(),
+                source_role_id: relationship.source_role_id.clone(),
+                target_role_id: relationship.target_role_id.clone(),
                 kind: relationship.kind.clone(),
             };
             if let Some(current) = snapshot.relationships().iter().find(|existing| existing.key() == key) {

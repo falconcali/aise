@@ -1,6 +1,6 @@
 use crate::domain::asset::ids::SceneKey;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use crate::domain::text::estimate_text_tokens;
 use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
@@ -19,7 +19,7 @@ pub const STORY_STATE_EXTRACTOR_FTI_SLOT: &str = "context.story_state_extractor.
 pub struct StoryStateExtractorPromptContext {
     pub story_text: BoundedText,
     pub current_scene: StoryStateExtractorScenePromptView,
-    pub characters: Vec<StoryStateExtractorCharacterPromptView>,
+    pub roles: Vec<StoryStateExtractorRolePromptView>,
     pub relationships: Vec<StoryStateExtractorRelationshipPromptView>,
     pub modifiable_knowledge: Vec<StoryStateExtractorKnowledgePromptView>,
     pub condition_queries: Vec<StoryStateExtractorConditionQueryPromptView>,
@@ -39,12 +39,12 @@ pub struct StoryStateExtractorScenePromptView {
     pub location: BoundedText,
     pub time: BoundedText,
     pub description: BoundedText,
-    pub present_character_ids: Vec<CharacterId>,
+    pub present_role_ids: Vec<RoleId>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct StoryStateExtractorCharacterPromptView {
-    pub character_id: CharacterId,
+pub struct StoryStateExtractorRolePromptView {
+    pub role_id: RoleId,
     pub location: BoundedText,
     pub goals: Vec<BoundedText>,
     pub attributes: BTreeMap<String, ScalarValue>,
@@ -52,8 +52,8 @@ pub struct StoryStateExtractorCharacterPromptView {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct StoryStateExtractorRelationshipPromptView {
-    pub source_character_id: CharacterId,
-    pub target_character_id: CharacterId,
+    pub source_role_id: RoleId,
+    pub target_role_id: RoleId,
     pub kind: BoundedText,
     pub trust: i16,
 }
@@ -63,7 +63,7 @@ pub struct StoryStateExtractorKnowledgePromptView {
     pub source_id: KnowledgeSourceId,
     pub kind: KnowledgeKind,
     pub content: BoundedText,
-    pub memory_owner: Option<CharacterId>,
+    pub memory_owner: Option<RoleId>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -129,22 +129,23 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
             )?,
             time: snapshot.current_scene().time.clone(),
             description: snapshot.current_scene().description.clone(),
-            present_character_ids: snapshot.current_scene().present_character_ids.clone(),
+            present_role_ids: snapshot.current_scene().present_role_ids.clone(),
         };
 
-        let characters = snapshot
-            .character_states()
+        let roles = snapshot
+            .roles()
             .values()
-            .map(|state| {
-                Ok(StoryStateExtractorCharacterPromptView {
-                    character_id: state.character_id.clone(),
+            .map(|role| {
+                Ok(StoryStateExtractorRolePromptView {
+                    role_id: role.role_id.clone(),
                     location: bounded_key(
-                        state.location.as_str(),
-                        "character_location",
+                        role.state.location.as_str(),
+                        "role_location",
                         ctx.budget().max_item_bytes(),
                     )?,
-                    goals: state.goals.clone(),
-                    attributes: state
+                    goals: role.state.goals.clone(),
+                    attributes: role
+                        .state
                         .attributes
                         .iter()
                         .map(|(key, value)| (key.as_str().to_owned(), value.clone()))
@@ -158,8 +159,8 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
             .iter()
             .map(|relationship| {
                 Ok(StoryStateExtractorRelationshipPromptView {
-                    source_character_id: relationship.source_character_id.clone(),
-                    target_character_id: relationship.target_character_id.clone(),
+                    source_role_id: relationship.source_role_id.clone(),
+                    target_role_id: relationship.target_role_id.clone(),
                     kind: bounded_key(relationship.kind.as_str(), "relationship_kind", ctx.budget().max_item_bytes())?,
                     trust: relationship.trust,
                 })
@@ -233,7 +234,7 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
         let context = StoryStateExtractorPromptContext {
             story_text,
             current_scene,
-            characters,
+            roles,
             relationships,
             modifiable_knowledge,
             condition_queries,
@@ -296,7 +297,7 @@ fn modifiable_knowledge_view(ctx: &TurnExecutionContext) -> Vec<StoryStateExtrac
             },
         );
     }
-    for items in ctx.retrieved().characters().values() {
+    for items in ctx.retrieved().roles().values() {
         for item in items {
             index.insert(
                 item.provenance.source_id.clone(),
@@ -346,7 +347,7 @@ fn render_runtime_vars(context: &StoryStateExtractorPromptContext) -> RuntimePro
     RuntimePromptVars::new(HashMap::from([
         ("story_text".into(), Value::String(quoted(context.story_text.as_str()))),
         ("current_scene".into(), Value::String(render_scene(&context.current_scene))),
-        ("characters".into(), Value::String(render_characters(&context.characters))),
+        ("roles".into(), Value::String(render_roles(&context.roles))),
         (
             "relationships".into(),
             Value::String(render_relationships(&context.relationships)),
@@ -378,16 +379,16 @@ fn render_runtime_vars(context: &StoryStateExtractorPromptContext) -> RuntimePro
 
 fn render_scene(value: &StoryStateExtractorScenePromptView) -> String {
     format!(
-        "scene_key: {}\nlocation: {}\ntime: {}\ndescription: {}\npresent_character_ids: {}",
+        "scene_key: {}\nlocation: {}\ntime: {}\ndescription: {}\npresent_role_ids: {}",
         quoted(value.scene_key.as_str()),
         quoted(value.location.as_str()),
         quoted(value.time.as_str()),
         quoted(value.description.as_str()),
-        id_list(&value.present_character_ids)
+        id_list(&value.present_role_ids)
     )
 }
 
-fn render_characters(values: &[StoryStateExtractorCharacterPromptView]) -> String {
+fn render_roles(values: &[StoryStateExtractorRolePromptView]) -> String {
     if values.is_empty() {
         return "None.".into();
     }
@@ -408,8 +409,8 @@ fn render_characters(values: &[StoryStateExtractorCharacterPromptView]) -> Strin
                 )
             };
             format!(
-                "- character_id: {}\n  location: {}\n  goals: {}\n  attributes: {attributes}",
-                quoted(value.character_id.as_str()),
+                "- role_id: {}\n  location: {}\n  goals: {}\n  attributes: {attributes}",
+                quoted(value.role_id.as_str()),
                 quoted(value.location.as_str()),
                 quoted_list(&value.goals)
             )
@@ -426,9 +427,9 @@ fn render_relationships(values: &[StoryStateExtractorRelationshipPromptView]) ->
         .iter()
         .map(|value| {
             format!(
-                "- source_character_id: {}\n  target_character_id: {}\n  kind: {}\n  trust: {}",
-                quoted(value.source_character_id.as_str()),
-                quoted(value.target_character_id.as_str()),
+                "- source_role_id: {}\n  target_role_id: {}\n  kind: {}\n  trust: {}",
+                quoted(value.source_role_id.as_str()),
+                quoted(value.target_role_id.as_str()),
                 quoted(value.kind.as_str()),
                 value.trust
             )
@@ -522,7 +523,7 @@ fn quoted_list(values: &[BoundedText]) -> String {
     )
 }
 
-fn id_list(values: &[CharacterId]) -> String {
+fn id_list(values: &[RoleId]) -> String {
     if values.is_empty() {
         return "None.".into();
     }

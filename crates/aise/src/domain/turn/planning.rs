@@ -1,7 +1,7 @@
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::RoleId;
 use crate::domain::knowledge::KnowledgeKind;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -18,8 +18,8 @@ impl RetrievalTargetId {
         Ok(Self(Arc::from(value)))
     }
 
-    pub fn for_character(character_id: &CharacterId) -> Self {
-        Self(Arc::from(format!("character:{}", character_id.as_str())))
+    pub fn for_role(role_id: &RoleId) -> Self {
+        Self(Arc::from(format!("role:{}", role_id.as_str())))
     }
 
     pub fn for_knowledge(source_id: &crate::domain::knowledge::KnowledgeSourceId) -> Self {
@@ -65,7 +65,7 @@ impl<'de> Deserialize<'de> for RetrievalTargetId {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RetrievalAudience {
     GlobalWriter,
-    Character { character_id: CharacterId },
+    Character { role_id: RoleId },
 }
 
 impl Serialize for RetrievalAudience {
@@ -79,9 +79,9 @@ impl Serialize for RetrievalAudience {
             Self::GlobalWriter => {
                 map.serialize_entry("kind", "global_writer")?;
             }
-            Self::Character { character_id } => {
+            Self::Character { role_id } => {
                 map.serialize_entry("kind", "character")?;
-                map.serialize_entry("character_id", character_id)?;
+                map.serialize_entry("role_id", role_id)?;
             }
         }
         map.end()
@@ -98,11 +98,12 @@ impl<'de> Deserialize<'de> for RetrievalAudience {
         match kind.as_str() {
             "global_writer" if object.is_empty() => Ok(Self::GlobalWriter),
             "character" if object.len() == 1 => {
-                let character_id = object
-                    .remove("character_id")
-                    .and_then(|value| value.as_str().map(CharacterId::from))
-                    .ok_or_else(|| serde::de::Error::custom("character_id is required"))?;
-                Ok(Self::Character { character_id })
+                let role_id = object
+                    .remove("role_id")
+                    .and_then(|value| value.as_str().map(str::to_owned))
+                    .ok_or_else(|| serde::de::Error::custom("role_id is required"))?;
+                let role_id = RoleId::try_new(role_id).map_err(|_| serde::de::Error::custom("role_id is invalid"))?;
+                Ok(Self::Character { role_id })
             }
             _ => Err(serde::de::Error::custom("invalid retrieval audience shape")),
         }
@@ -126,7 +127,7 @@ pub struct RetrievalRequest {
     pub entities: Vec<KnowledgeEntity>,
     pub topics: Vec<TopicKey>,
     pub query_text: Option<BoundedText>,
-    pub authorized_memory_owners: Vec<CharacterId>,
+    pub authorized_memory_owners: Vec<RoleId>,
     pub reason: BoundedText,
     pub origin: RetrievalRequestOrigin,
     pub signal_priority: u8,
@@ -141,7 +142,7 @@ pub struct RetrievalPlan {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CharacterThinkRequest {
-    pub character_id: CharacterId,
+    pub role_id: RoleId,
     pub reason: BoundedText,
 }
 

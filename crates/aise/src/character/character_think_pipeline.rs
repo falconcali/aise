@@ -51,7 +51,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
             tracing::info!(
                 story_id = %ctx.story_id(),
                 turn_id = %ctx.turn_id(),
-                target_character_id = %request.character_id,
+                target_role_id = %request.role_id,
                 recent_story_segments = projection.context.story_continuity.recent_story.len(),
                 character_knowledge_count = projection.context.relevant_character_knowledge.len(),
                 character_impulse_count = projection.context.narrative_character_impulses.len(),
@@ -102,7 +102,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
             tracing::info!(
                 story_id = %ctx.story_id(),
                 turn_id = %ctx.turn_id(),
-                target_character_id = %request.character_id,
+                target_role_id = %request.role_id,
                 decision_bytes = decision_text.as_str().len(),
                 suggested_utterance_present = suggested_utterance.is_some(),
                 suggested_utterance_bytes = suggested_utterance.as_ref().map(|value| value.as_str().len()).unwrap_or(0),
@@ -110,7 +110,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                 "character decision normalized"
             );
             let decision = CharacterDecision {
-                character_id: request.character_id.clone(),
+                role_id: request.role_id.clone(),
                 decision: decision_text,
                 suggested_utterance,
             };

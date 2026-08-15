@@ -1,7 +1,7 @@
-use crate::domain::asset::frozen_ref::FrozenCharacterAssetRef;
-use crate::domain::asset::ids::{AttributeKey, FactKey, PackId, PlayerId, StoryRoleKey};
-use crate::domain::asset::validation::ScalarValue;
-use crate::domain::ids::{CharacterId, ConstraintId, FactId, MemoryId, StoryId};
+use crate::domain::asset::frozen_ref::FrozenCharacterCardRef;
+use crate::domain::asset::ids::{FactKey, PackId, PlayerId};
+use crate::domain::asset::validation::{BoundedText, ScalarValue};
+use crate::domain::ids::{ConstraintId, FactId, MemoryId, RoleId, StoryId};
 use crate::domain::knowledge::KnowledgeEntry;
 use crate::domain::knowledge::fact::{Proposition, WorldFact};
 use crate::domain::knowledge::memory::MemoryEntry;
@@ -14,13 +14,12 @@ use crate::domain::narrative_graph::definition::{NarrativeError, NarrativeGraphD
 use crate::domain::narrative_graph::effect::{NarrativeEffectId, NarrativeTransitionKind};
 use crate::domain::narrative_graph::state::{NarrativeRuntimeState, PendingNarrativeEffect};
 use crate::domain::narrative_graph::state_view::{NarrativeStateView, NarrativeStateViewError};
-use crate::domain::story_instance::binding::{RoleBinding, RoleController};
 use crate::domain::story_instance::constraint::{ActiveStoryConstraint, StoryConstraintSource};
 use crate::domain::story_instance::info::StoryInfo;
-use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings, RelationshipState};
+use crate::domain::story_instance::role::{RoleController, StoryRole, StoryRoleState};
+use crate::domain::story_instance::state::{CurrentScene, InstanceSettings, RelationshipState};
 use crate::persistence::asset_store::{AssetStore, FrozenStoryPack};
 use crate::persistence::store::{MaterializedStoryInstanceSpec, Store, StoreError};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -28,14 +27,15 @@ use std::sync::Arc;
 pub struct CreateStoryInstanceSpec {
     pub pack_id: PackId,
     pub player_id: PlayerId,
-    pub player_role_key: StoryRoleKey,
-    pub player_character: Option<FrozenCharacterAssetRef>,
+    pub player_role_id: RoleId,
+    pub role_profile_selections: BTreeMap<RoleId, FrozenCharacterCardRef>,
     pub created_at_ms: i64,
 }
 
 #[derive(Debug, Clone)]
 pub struct StoryInstantiationLimits {
     pub max_roles: usize,
+    pub max_role_bytes: usize,
     pub max_facts: usize,
     pub max_rumors: usize,
     pub max_memories: usize,
@@ -47,12 +47,16 @@ pub struct StoryInstantiationLimits {
 pub enum StoryInstantiationError {
     #[error("story pack was not found")]
     PackNotFound,
-    #[error("story role was not found")]
-    RoleNotFound,
-    #[error("story role is not playable")]
-    RoleNotPlayable,
-    #[error("character asset was not found")]
-    CharacterNotFound,
+    #[error("story role was not found: {role_id}")]
+    RoleNotFound { role_id: RoleId },
+    #[error("story role is not playable: {role_id}")]
+    RoleNotPlayable { role_id: RoleId },
+    #[error("character card was not found")]
+    CharacterCardNotFound,
+    #[error("character card reference does not match stored content")]
+    CharacterCardReferenceMismatch,
+    #[error("story role profile selection is duplicated: {role_id}")]
+    DuplicateRoleProfileSelection { role_id: RoleId },
     #[error("story materialization reference is invalid: {code}")]
     InvalidReference { code: &'static str },
     #[error("story instantiation limit exceeded: {limit}")]
@@ -88,26 +92,40 @@ impl StoryInstanceFactory {
             StoreError::NotFound => StoryInstantiationError::PackNotFound,
             other => StoryInstantiationError::Store(other),
         })?;
-        let materialized = self.materialize(&frozen, &spec)?;
+        let materialized = self.materialize(&frozen, &spec).await?;
         self.store
             .create_story_instance(&materialized)
             .await
             .map_err(StoryInstantiationError::Store)
     }
 
-    fn materialize(
+    async fn materialize(
         &self,
         frozen: &FrozenStoryPack,
         spec: &CreateStoryInstanceSpec,
     ) -> Result<MaterializedStoryInstanceSpec, StoryInstantiationError> {
         let pack = &frozen.pack;
-        if !pack.play.playable_role_keys.contains(&spec.player_role_key) {
-            return Err(StoryInstantiationError::RoleNotPlayable);
+        if !pack.roles.contains_key(&spec.player_role_id) {
+            return Err(StoryInstantiationError::RoleNotFound {
+                role_id: spec.player_role_id.clone(),
+            });
         }
-        if !pack.roles.contains_key(&spec.player_role_key) {
-            return Err(StoryInstantiationError::RoleNotFound);
+        if !pack.play.playable_role_ids.contains(&spec.player_role_id) {
+            return Err(StoryInstantiationError::RoleNotPlayable {
+                role_id: spec.player_role_id.clone(),
+            });
         }
         enforce_limit(pack.roles.len(), self.limits.max_roles, "max_roles")?;
+        if spec.role_profile_selections.len() > pack.roles.len() {
+            return Err(StoryInstantiationError::LimitExceeded { limit: "max_roles" });
+        }
+        for role_id in spec.role_profile_selections.keys() {
+            if !pack.roles.contains_key(role_id) {
+                return Err(StoryInstantiationError::RoleNotFound {
+                    role_id: role_id.clone(),
+                });
+            }
+        }
         enforce_limit(frozen.resolved_world_book.facts.len(), self.limits.max_facts, "max_facts")?;
         enforce_limit(frozen.resolved_world_book.rumors.len(), self.limits.max_rumors, "max_rumors")?;
         let memory_count = pack.roles.values().try_fold(0usize, |count, role| {
@@ -129,67 +147,61 @@ impl StoryInstanceFactory {
                 constraint: "story_id".into(),
             })
         })?;
-        let selected_player_asset = spec
-            .player_character
-            .as_ref()
-            .map(|asset| resolve_custom_character(frozen, asset))
-            .transpose()?;
-        let mut bindings = BTreeMap::new();
-        let mut characters = BTreeMap::new();
-        for (role_key, role) in &pack.roles {
-            let asset_key = if role_key == &spec.player_role_key {
-                selected_player_asset
-                    .as_ref()
-                    .map(|asset| asset.character_key.clone())
-                    .or_else(|| pack.default_cast.get(role_key).map(|cast| cast.character_ref.clone()))
-            } else {
-                pack.default_cast.get(role_key).map(|cast| cast.character_ref.clone())
+        let mut resolved_cards = BTreeMap::new();
+        for (role_id, reference) in &spec.role_profile_selections {
+            let frozen_card = self.asset_store.load_character(reference).await.map_err(|error| match error {
+                StoreError::NotFound => StoryInstantiationError::CharacterCardNotFound,
+                other => StoryInstantiationError::Store(other),
+            })?;
+            if &frozen_card.frozen_ref() != reference {
+                return Err(StoryInstantiationError::CharacterCardReferenceMismatch);
             }
-            .ok_or(StoryInstantiationError::CharacterNotFound)?;
-            let card = frozen
-                .resolved_characters
-                .get(&asset_key)
-                .ok_or(StoryInstantiationError::CharacterNotFound)?;
-            let character_asset = freeze_character(card)?;
-            if let Some(selected) = selected_player_asset.as_ref() {
-                if role_key == &spec.player_role_key && &character_asset != selected {
-                    return Err(StoryInstantiationError::CharacterNotFound);
-                }
+            if resolved_cards
+                .insert(role_id.clone(), (reference.clone(), frozen_card))
+                .is_some()
+            {
+                return Err(StoryInstantiationError::DuplicateRoleProfileSelection {
+                    role_id: role_id.clone(),
+                });
             }
-            let character_id = CharacterId::from(format!("{}:character:{}", story_id.as_str(), role_key.as_str()));
-            let controller = if role_key == &spec.player_role_key {
+        }
+        let mut roles = BTreeMap::new();
+        for (role_id, definition) in &pack.roles {
+            let controller = if role_id == &spec.player_role_id {
                 RoleController::Player(spec.player_id.clone())
             } else {
                 RoleController::Ai
             };
-            let binding = RoleBinding {
-                role_key: role_key.clone(),
-                character_id: character_id.clone(),
-                character_asset,
-                controller,
-                bound_at_ms: spec.created_at_ms,
+            let (effective_profile, source_character) = match resolved_cards.get(role_id) {
+                Some((reference, frozen_card)) => (frozen_card.card.profile.clone(), Some(reference.clone())),
+                None => (definition.default_profile.clone(), None),
             };
-            if bindings.insert(role_key.clone(), binding).is_some()
-                || characters
-                    .insert(
-                        character_id.clone(),
-                        CharacterInstanceState {
-                            character_id,
-                            role_key: role_key.clone(),
-                            location: role.initial_state.location.clone(),
-                            goals: role.initial_state.goals.clone(),
-                            attributes: role.initial_state.attributes.clone(),
-                        },
-                    )
-                    .is_some()
-            {
-                return Err(StoryInstantiationError::InvalidReference {
-                    code: "duplicate_materialized_character",
+            let role = StoryRole {
+                role_id: role_id.clone(),
+                controller,
+                role_label: definition.role_label.clone(),
+                narrative_function: definition.narrative_function.clone(),
+                background: definition.background.clone(),
+                effective_profile,
+                source_character,
+                state: StoryRoleState {
+                    location: definition.initial_state.location.clone(),
+                    goals: definition.initial_state.goals.clone(),
+                    attributes: definition.initial_state.attributes.clone(),
+                },
+            };
+            let role_bytes = role.compact_byte_len().map_err(|_| StoryInstantiationError::InvalidReference {
+                code: "role_serialization_failed",
+            })?;
+            if role_bytes > self.limits.max_role_bytes {
+                return Err(StoryInstantiationError::LimitExceeded {
+                    limit: "max_role_bytes",
                 });
             }
+            roles.insert(role_id.clone(), role);
         }
-        let relationships = materialize_relationships(pack, &bindings)?;
-        let knowledge = materialize_knowledge(frozen, &story_id, &bindings, spec.created_at_ms)?;
+        let relationships = materialize_relationships(pack, &roles)?;
+        let knowledge = materialize_knowledge(frozen, &story_id, spec.created_at_ms)?;
         let active_constraints = pack
             .constraints
             .iter()
@@ -209,26 +221,24 @@ impl StoryInstanceFactory {
                 })
             })
             .collect::<Result<Vec<_>, StoryInstantiationError>>()?;
-        let mut present_character_ids = bindings
+        let mut present_role_ids = roles
             .values()
-            .filter(|binding| characters[&binding.character_id].location == pack.start.location_key)
-            .map(|binding| binding.character_id.clone())
+            .filter(|role| role.state.location == pack.start.location_key)
+            .map(|role| role.role_id.clone())
             .collect::<Vec<_>>();
-        present_character_ids.sort();
-        present_character_ids.dedup();
+        present_role_ids.sort();
+        present_role_ids.dedup();
         let opening = pack.start.opening.clone();
         enforce_limit(opening.as_str().len(), self.limits.max_opening_bytes, "max_opening_bytes")?;
-        let narrative_state =
-            bootstrap_narrative_state(&pack.narrative, &bindings, &characters, &relationships, self.narrative_limits)
-                .map_err(|_| StoryInstantiationError::InvalidReference {
+        let narrative_state = bootstrap_narrative_state(&pack.narrative, &roles, &relationships, self.narrative_limits)
+            .map_err(|_| StoryInstantiationError::InvalidReference {
                 code: "narrative_bootstrap_failed",
             })?;
         Ok(MaterializedStoryInstanceSpec {
             story_id,
             pack: frozen.frozen_ref(),
             settings: InstanceSettings::default(),
-            bindings,
-            characters,
+            roles,
             relationships,
             knowledge,
             scene: CurrentScene {
@@ -236,7 +246,7 @@ impl StoryInstanceFactory {
                 location_key: pack.start.location_key.clone(),
                 time: pack.start.time.clone(),
                 description: pack.start.description.clone(),
-                present_character_ids,
+                present_role_ids,
             },
             narrative_state,
             fact_values: BTreeMap::new(),
@@ -248,8 +258,7 @@ impl StoryInstanceFactory {
 }
 
 struct BootstrapNarrativeStateView<'a> {
-    bindings: &'a BTreeMap<StoryRoleKey, RoleBinding>,
-    characters: &'a BTreeMap<CharacterId, CharacterInstanceState>,
+    roles: &'a BTreeMap<RoleId, StoryRole>,
     relationships: &'a [RelationshipState],
 }
 
@@ -258,90 +267,65 @@ impl NarrativeStateView for BootstrapNarrativeStateView<'_> {
         Ok(None)
     }
 
-    fn character_attribute(
+    fn role_attribute(
         &self,
-        role_key: &StoryRoleKey,
-        attribute: &AttributeKey,
+        role_id: &RoleId,
+        attribute: &BoundedText,
     ) -> Result<Option<&ScalarValue>, NarrativeStateViewError> {
-        let binding = self
-            .bindings
-            .get(role_key)
-            .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                role_key: role_key.as_str().to_owned(),
-            })?;
-        let character =
-            self.characters
-                .get(&binding.character_id)
-                .ok_or_else(|| NarrativeStateViewError::UnknownCharacter {
-                    role_key: role_key.as_str().to_owned(),
-                })?;
-        Ok(character.attributes.get(attribute))
+        let role = self.roles.get(role_id).ok_or_else(|| NarrativeStateViewError::UnknownRole {
+            role_id: role_id.as_str().to_owned(),
+        })?;
+        Ok(role
+            .state
+            .attributes
+            .iter()
+            .find(|(key, _)| key.as_str() == attribute.as_str())
+            .map(|(_, value)| value))
     }
 
     fn relationship_trust(
         &self,
-        source_role_key: &StoryRoleKey,
-        target_role_key: &StoryRoleKey,
+        source_role_id: &RoleId,
+        target_role_id: &RoleId,
     ) -> Result<Option<i16>, NarrativeStateViewError> {
-        let source = self
-            .bindings
-            .get(source_role_key)
-            .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                role_key: source_role_key.as_str().to_owned(),
-            })?;
-        let target = self
-            .bindings
-            .get(target_role_key)
-            .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                role_key: target_role_key.as_str().to_owned(),
-            })?;
+        if !self.roles.contains_key(source_role_id) {
+            return Err(NarrativeStateViewError::UnknownRole {
+                role_id: source_role_id.as_str().to_owned(),
+            });
+        }
+        if !self.roles.contains_key(target_role_id) {
+            return Err(NarrativeStateViewError::UnknownRole {
+                role_id: target_role_id.as_str().to_owned(),
+            });
+        }
         Ok(self
             .relationships
             .iter()
             .find(|relationship| {
-                relationship.source_character_id == source.character_id
-                    && relationship.target_character_id == target.character_id
+                &relationship.source_role_id == source_role_id && &relationship.target_role_id == target_role_id
             })
             .map(|relationship| relationship.trust))
     }
 
-    fn role_controller(&self, role_key: &StoryRoleKey) -> Result<RoleControllerKind, NarrativeStateViewError> {
-        let binding = self
-            .bindings
-            .get(role_key)
-            .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                role_key: role_key.as_str().to_owned(),
-            })?;
-        Ok(if binding.is_player_controlled() {
+    fn role_controller(&self, role_id: &RoleId) -> Result<RoleControllerKind, NarrativeStateViewError> {
+        let role = self.roles.get(role_id).ok_or_else(|| NarrativeStateViewError::UnknownRole {
+            role_id: role_id.as_str().to_owned(),
+        })?;
+        Ok(if role.is_player_controlled() {
             RoleControllerKind::Player
         } else {
             RoleControllerKind::Ai
         })
     }
-
-    fn character_id_for_role(&self, role_key: &StoryRoleKey) -> Result<CharacterId, NarrativeStateViewError> {
-        let binding = self
-            .bindings
-            .get(role_key)
-            .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                role_key: role_key.as_str().to_owned(),
-            })?;
-        Ok(binding.character_id.clone())
-    }
 }
 
 fn bootstrap_narrative_state(
     definition: &NarrativeGraphDefinition,
-    bindings: &BTreeMap<StoryRoleKey, RoleBinding>,
-    characters: &BTreeMap<CharacterId, CharacterInstanceState>,
+    roles: &BTreeMap<RoleId, StoryRole>,
     relationships: &[RelationshipState],
     limits: NarrativeLimits,
 ) -> Result<NarrativeRuntimeState, NarrativeError> {
-    let view = BootstrapNarrativeStateView {
-        bindings,
-        characters,
-        relationships,
-    };
+    let view = BootstrapNarrativeStateView { roles, relationships };
     let mut state = NarrativeRuntimeState::initial();
     let semantic_results = BTreeMap::new();
     let mut activated = Vec::new();
@@ -398,23 +382,25 @@ fn bootstrap_narrative_state(
 
 fn materialize_relationships(
     pack: &crate::domain::asset::story_pack::StoryPack,
-    bindings: &BTreeMap<StoryRoleKey, RoleBinding>,
+    roles: &BTreeMap<RoleId, StoryRole>,
 ) -> Result<Vec<RelationshipState>, StoryInstantiationError> {
     let mut relationships = Vec::new();
     let mut keys = BTreeSet::new();
-    for (source_role, role) in &pack.roles {
-        let source = bindings.get(source_role).ok_or(StoryInstantiationError::InvalidReference {
-            code: "relationship_source_missing",
-        })?;
+    for (source_role_id, role) in &pack.roles {
+        if !roles.contains_key(source_role_id) {
+            return Err(StoryInstantiationError::InvalidReference {
+                code: "relationship_source_missing",
+            });
+        }
         for seed in &role.initial_relationships {
-            let target = bindings
-                .get(&seed.target_role_key)
-                .ok_or(StoryInstantiationError::InvalidReference {
+            if !roles.contains_key(&seed.target_role_id) {
+                return Err(StoryInstantiationError::InvalidReference {
                     code: "relationship_target_missing",
-                })?;
+                });
+            }
             let relationship = RelationshipState {
-                source_character_id: source.character_id.clone(),
-                target_character_id: target.character_id.clone(),
+                source_role_id: source_role_id.clone(),
+                target_role_id: seed.target_role_id.clone(),
                 kind: seed.kind.clone(),
                 trust: seed.trust,
             };
@@ -433,7 +419,6 @@ fn materialize_relationships(
 fn materialize_knowledge(
     frozen: &FrozenStoryPack,
     story_id: &StoryId,
-    bindings: &BTreeMap<StoryRoleKey, RoleBinding>,
     created_at_ms: i64,
 ) -> Result<Vec<KnowledgeEntry>, StoryInstantiationError> {
     let source = KnowledgeSource::Seed {
@@ -476,31 +461,24 @@ fn materialize_knowledge(
             entities: canonical(seed.entities.clone()),
             topics: canonical(seed.topics.clone()),
             salience: seed.salience,
-            source_role_key: None,
-            source_character_id: None,
+            source_role_id: None,
             truth_value: TruthValue::Unverified,
             source: source.clone(),
         });
         insert_entry(&mut entries, &mut ids, entry)?;
     }
-    for (role_key, role) in &frozen.pack.roles {
-        let binding = bindings.get(role_key).ok_or(StoryInstantiationError::InvalidReference {
-            code: "memory_owner_binding_missing",
-        })?;
+    for (role_id, role) in &frozen.pack.roles {
         for seed in &role.seed_memories {
             let id = MemoryId::from(format!(
                 "{}:seed:memory:{}:{}",
                 story_id.as_str(),
-                role_key.as_str(),
+                role_id.as_str(),
                 seed.memory_key.as_str()
             ));
-            let entities = canonical(vec![
-                crate::domain::asset::entity::KnowledgeEntity::Role(role_key.clone()),
-                crate::domain::asset::entity::KnowledgeEntity::Character(binding.character_id.clone()),
-            ]);
+            let entities = canonical(vec![crate::domain::asset::entity::KnowledgeEntity::Role(role_id.clone())]);
             let entry = KnowledgeEntry::Memory(MemoryEntry {
                 id,
-                owner: binding.character_id.clone(),
+                owner: role_id.clone(),
                 kind: seed.kind.clone(),
                 content: seed.content.clone(),
                 entities,
@@ -527,38 +505,6 @@ fn insert_entry(
     }
     entries.push(entry);
     Ok(())
-}
-
-fn resolve_custom_character(
-    frozen: &FrozenStoryPack,
-    requested: &FrozenCharacterAssetRef,
-) -> Result<FrozenCharacterAssetRef, StoryInstantiationError> {
-    let card = frozen
-        .resolved_characters
-        .get(&requested.character_key)
-        .ok_or(StoryInstantiationError::CharacterNotFound)?;
-    let resolved = freeze_character(card)?;
-    if &resolved != requested {
-        return Err(StoryInstantiationError::CharacterNotFound);
-    }
-    Ok(resolved)
-}
-
-fn freeze_character(
-    card: &crate::domain::asset::character_card::CharacterCard,
-) -> Result<FrozenCharacterAssetRef, StoryInstantiationError> {
-    let bytes = serde_json::to_vec(card).map_err(|_| StoryInstantiationError::InvalidReference {
-        code: "character_asset_serialization",
-    })?;
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let mut digest = [0u8; 32];
-    digest.copy_from_slice(&hasher.finalize());
-    Ok(FrozenCharacterAssetRef {
-        character_key: card.character_key.clone(),
-        version: card.meta.version.clone(),
-        digest: crate::domain::asset::ids::Sha256Digest::from_bytes(digest),
-    })
 }
 
 fn canonical<T: Ord>(mut values: Vec<T>) -> Vec<T> {

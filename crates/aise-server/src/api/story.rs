@@ -1,8 +1,8 @@
 use crate::api::state::AppState;
 use crate::error::ApiError;
-use aise::domain::asset::frozen_ref::FrozenCharacterAssetRef;
-use aise::domain::asset::ids::{PackId, PlayerId, StoryRoleKey};
-use aise::domain::ids::StoryId;
+use aise::domain::asset::frozen_ref::FrozenCharacterCardRef;
+use aise::domain::asset::ids::{PackId, PlayerId};
+use aise::domain::ids::{RoleId, StoryId};
 use aise::domain::story_sequence::StorySequence;
 use aise::domain::turn::SnapshotLimits;
 use aise::persistence::{StoryHistoryQuery, StoryOpeningView, StoryTurnView};
@@ -11,22 +11,36 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateStoryInstanceRequest {
     pub pack_id: String,
     pub player_id: String,
-    pub player_role_key: String,
+    pub player_role_id: String,
     #[serde(default)]
-    pub player_character: Option<PlayerCharacterRef>,
+    pub role_profiles: Vec<RoleProfileSelectionRequest>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct PlayerCharacterRef {
-    pub character_key: String,
+#[serde(deny_unknown_fields)]
+pub struct RoleProfileSelectionRequest {
+    pub role_id: String,
+    pub character_id: String,
     pub version: String,
     pub digest: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StoryInstanceView {
+    pub story_id: String,
+    pub base_revision: u64,
+    pub pack_id: String,
+    pub player_role_id: String,
+    pub current_scene: String,
+    pub opening: StoryOpeningView,
 }
 
 #[derive(Debug, Serialize)]
@@ -35,12 +49,11 @@ pub struct StoryView {
     pub base_revision: u64,
     pub premise: String,
     pub current_scene: String,
-    pub player_character_id: Option<String>,
-    pub opening: Option<aise::persistence::StoryOpeningView>,
+    pub player_role_id: String,
+    pub opening: Option<StoryOpeningView>,
     pub turns: Vec<StoryTurnView>,
     pub next_turn_after: Option<u64>,
-    pub player_role_key: Option<String>,
-    pub characters: Vec<CharacterStateView>,
+    pub roles: Vec<RoleStateView>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,9 +64,10 @@ pub struct GetStoryQuery {
 }
 
 #[derive(Debug, Serialize)]
-pub struct CharacterStateView {
-    pub character_id: String,
-    pub role_key: String,
+pub struct RoleStateView {
+    pub role_id: String,
+    pub name: String,
+    pub source_character_id: Option<String>,
     pub location: String,
     pub goals: Vec<String>,
     pub attributes: Vec<AttributeView>,
@@ -65,37 +79,29 @@ pub struct AttributeView {
     pub value: String,
 }
 
-#[derive(Debug, Serialize)]
-pub struct StoryInstanceView {
-    pub story_id: String,
-    pub base_revision: u64,
-    pub pack_id: String,
-    pub player_role_key: String,
-    pub current_scene: String,
-    pub opening: StoryOpeningView,
-}
-
 pub async fn create_story_instance(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateStoryInstanceRequest>,
 ) -> Result<(StatusCode, Json<StoryInstanceView>), ApiError> {
     let pack_id = PackId::try_new(req.pack_id.clone()).map_err(|error| ApiError::BadRequest(error.to_string()))?;
     let player_id = PlayerId::try_new(req.player_id).map_err(|error| ApiError::BadRequest(error.to_string()))?;
-    let player_role_key =
-        StoryRoleKey::try_new(req.player_role_key.clone()).map_err(|error| ApiError::BadRequest(error.to_string()))?;
-    let player_character = req
-        .player_character
-        .map(|reference| {
-            Ok::<_, ApiError>(FrozenCharacterAssetRef {
-                character_key: aise::domain::asset::ids::CharacterAssetKey::try_new(reference.character_key)
-                    .map_err(|error| ApiError::BadRequest(error.to_string()))?,
-                version: aise::domain::asset::ids::SemanticVersion::try_new(reference.version)
-                    .map_err(|error| ApiError::BadRequest(error.to_string()))?,
-                digest: aise::domain::asset::ids::Sha256Digest::try_new(&reference.digest)
-                    .map_err(|error| ApiError::BadRequest(error.to_string()))?,
-            })
-        })
-        .transpose()?;
+    let player_role_id =
+        RoleId::try_new(req.player_role_id.clone()).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    let mut role_profile_selections = BTreeMap::new();
+    for selection in req.role_profiles {
+        let role_id = RoleId::try_new(selection.role_id).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+        let reference = FrozenCharacterCardRef {
+            character_id: aise::domain::ids::CharacterId::try_new(selection.character_id)
+                .map_err(|error| ApiError::BadRequest(error.to_string()))?,
+            version: aise::domain::asset::ids::SemanticVersion::try_new(selection.version)
+                .map_err(|error| ApiError::BadRequest(error.to_string()))?,
+            digest: aise::domain::asset::ids::Sha256Digest::try_new(&selection.digest)
+                .map_err(|error| ApiError::BadRequest(error.to_string()))?,
+        };
+        if role_profile_selections.insert(role_id.clone(), reference).is_some() {
+            return Err(ApiError::BadRequest(format!("duplicate role_profiles.role_id: {role_id}")));
+        }
+    }
     let instance_factory = state
         .instance_factory
         .as_ref()
@@ -103,8 +109,8 @@ pub async fn create_story_instance(
     let spec = CreateStoryInstanceSpec {
         pack_id,
         player_id,
-        player_role_key: player_role_key.clone(),
-        player_character,
+        player_role_id: player_role_id.clone(),
+        role_profile_selections,
         created_at_ms: now_millis(),
     };
     let info = instance_factory.create(spec).await.map_err(map_instantiation_error)?;
@@ -125,7 +131,7 @@ pub async fn create_story_instance(
             story_id: info.story_id.to_string(),
             base_revision: info.base_revision.get(),
             pack_id: snapshot.pack().pack_id.to_string(),
-            player_role_key: player_role_key.to_string(),
+            player_role_id: player_role_id.to_string(),
             current_scene: snapshot.current_scene().description.to_string(),
             opening: snapshot
                 .story_continuity()
@@ -162,21 +168,12 @@ pub async fn get_story(
             aise::persistence::StoreError::NotFound => ApiError::NotFound("story not found".into()),
             other => ApiError::Internal(anyhow::anyhow!(other.to_string())),
         })?;
-    let player_role_key = snapshot
-        .role_bindings()
+    let roles = snapshot
+        .roles()
         .values()
-        .find(|binding| binding.is_player_controlled())
-        .map(|binding| binding.role_key.to_string());
-    let player_character_id = snapshot
-        .role_bindings()
-        .values()
-        .find(|binding| binding.is_player_controlled())
-        .map(|binding| binding.character_id.to_string());
-    let characters = snapshot
-        .character_states()
-        .values()
-        .map(|character| {
-            let attributes = character
+        .map(|role| {
+            let attributes = role
+                .state
                 .attributes
                 .iter()
                 .map(|(key, value)| {
@@ -188,11 +185,12 @@ pub async fn get_story(
                         .map_err(|error| ApiError::Internal(error.into()))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(CharacterStateView {
-                character_id: character.character_id.to_string(),
-                role_key: character.role_key.to_string(),
-                location: character.location.to_string(),
-                goals: character.goals.iter().map(ToString::to_string).collect(),
+            Ok(RoleStateView {
+                role_id: role.role_id.to_string(),
+                name: role.effective_profile.name.to_string(),
+                source_character_id: role.source_character_id.as_ref().map(ToString::to_string),
+                location: role.state.location.to_string(),
+                goals: role.state.goals.iter().map(ToString::to_string).collect(),
                 attributes,
             })
         })
@@ -222,20 +220,25 @@ pub async fn get_story(
         base_revision: snapshot.base_revision().get(),
         premise: snapshot.story_profile().premise.to_string(),
         current_scene: snapshot.current_scene().description.to_string(),
-        player_character_id,
+        player_role_id: snapshot.player_role_id().to_string(),
         opening: history.opening,
         turns: history.turns,
         next_turn_after: history.next_after_sequence.map(|sequence| sequence.get()),
-        player_role_key,
-        characters,
+        roles,
     }))
 }
 
 fn map_instantiation_error(error: StoryInstantiationError) -> ApiError {
     match error {
         StoryInstantiationError::PackNotFound => ApiError::NotFound("pack not found".into()),
-        StoryInstantiationError::RoleNotFound | StoryInstantiationError::RoleNotPlayable => {
+        StoryInstantiationError::RoleNotFound { .. } | StoryInstantiationError::RoleNotPlayable { .. } => {
             ApiError::BadRequest("invalid player role".into())
+        }
+        StoryInstantiationError::CharacterCardNotFound => {
+            ApiError::Unprocessable("character card was not found".into())
+        }
+        StoryInstantiationError::CharacterCardReferenceMismatch => {
+            ApiError::Unprocessable("character card reference does not match stored content".into())
         }
         StoryInstantiationError::LimitExceeded { limit } => {
             ApiError::Unprocessable(format!("story instantiation limit exceeded: {limit}"))

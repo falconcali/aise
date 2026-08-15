@@ -8,14 +8,15 @@ use crate::domain::knowledge::rumor::SharedRumor;
 use crate::domain::knowledge::{KnowledgeEntry, KnowledgeSourceId};
 use crate::domain::narrative::{EventKind, StoryEvent};
 use crate::domain::narrative_graph::resolver::{NarrativeResolutionInput, NarrativeResolver};
-use crate::domain::story_instance::state::{CharacterInstanceState, RelationshipKey, RelationshipState};
+use crate::domain::story_instance::role::StoryRoleState;
+use crate::domain::story_instance::state::{RelationshipKey, RelationshipState};
 use crate::domain::turn::{ProposedKnowledgeMutation, ProposedKnowledgeValue, ValidatedNarrativeResolution};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::TurnExecutionError;
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::turn::turn_trace::{SpanPayload, ValidationData};
 use crate::turn::turn_validation::{
-    CharacterInstanceStateChange, RelationshipStateChange, StateChange, ValidatedChangeSet, ValidatedChangeSetParts,
+    RelationshipStateChange, RoleStateChange, StateChange, ValidatedChangeSet, ValidatedChangeSetParts,
     ValidatedKnowledgeMutation, ValidatedKnowledgeOperation, ValidationIssue, ValidationResult,
 };
 use crate::validation::narrative_candidate_state::CandidateNarrativeStateView;
@@ -107,28 +108,34 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
 
     let story_text = bounded(story.story_text.as_str(), "story_text", ctx.budget().max_story_text_bytes())?;
 
-    let character_changes = extraction
-        .character_states
+    let role_changes = extraction
+        .role_states
         .iter()
         .map(|state| {
             let current = snapshot
-                .character_states()
-                .get(&state.character_id)
-                .ok_or_else(|| invariant("character_change_reference", "character_id is not a known character"))?;
+                .role(&state.role_id)
+                .ok_or_else(|| invariant("role_change_reference", "role_id is not a known role"))?;
             let goals = state
                 .goals
                 .iter()
-                .map(|goal| bounded(goal.as_str(), "character_goal", ctx.budget().max_item_bytes()))
+                .map(|goal| bounded(goal.as_str(), "role_goal", ctx.budget().max_item_bytes()))
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(CharacterInstanceStateChange {
-                character_id: state.character_id.clone(),
-                new_state: CharacterInstanceState {
-                    character_id: state.character_id.clone(),
-                    role_key: current.role_key.clone(),
-                    location: state.location.clone(),
-                    goals,
-                    attributes: state.attributes.clone(),
-                },
+            let new_state = StoryRoleState {
+                location: state.location.clone(),
+                goals,
+                attributes: state.attributes.clone(),
+            };
+            let mut updated = current.clone();
+            updated.state = new_state.clone();
+            let role_bytes = serde_json::to_vec(&updated)
+                .map_err(|_| invariant("role_serialization_failed", "role state could not be serialized"))?
+                .len();
+            if role_bytes > ctx.budget().max_role_bytes() {
+                return Err(invariant("role_bytes_exceeded", "role state exceeds max_role_bytes"));
+            }
+            Ok(RoleStateChange {
+                role_id: state.role_id.clone(),
+                new_state,
             })
         })
         .collect::<Result<Vec<_>, TurnExecutionError>>()?;
@@ -138,15 +145,15 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
         .iter()
         .map(|relationship| {
             let key = RelationshipKey {
-                source_character_id: relationship.source_character_id.clone(),
-                target_character_id: relationship.target_character_id.clone(),
+                source_role_id: relationship.source_role_id.clone(),
+                target_role_id: relationship.target_role_id.clone(),
                 kind: relationship.kind.clone(),
             };
             RelationshipStateChange {
                 key,
                 new_state: RelationshipState {
-                    source_character_id: relationship.source_character_id.clone(),
-                    target_character_id: relationship.target_character_id.clone(),
+                    source_role_id: relationship.source_role_id.clone(),
+                    target_role_id: relationship.target_role_id.clone(),
                     kind: relationship.kind.clone(),
                     trust: relationship.trust,
                 },
@@ -191,7 +198,7 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
         )?);
     }
 
-    let candidate_view = CandidateNarrativeStateView::new(snapshot, &character_changes, &relationship_changes);
+    let candidate_view = CandidateNarrativeStateView::new(snapshot, &role_changes, &relationship_changes);
     let resolver = NarrativeResolver::new(ctx.budget().narrative_limits());
     let resolution = resolver
         .resolve(NarrativeResolutionInput {
@@ -279,7 +286,7 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
 
     ValidatedChangeSet::new(ValidatedChangeSetParts {
         story_text,
-        character_changes,
+        role_changes,
         relationship_changes,
         knowledge_mutations,
         current_scene,
@@ -392,7 +399,7 @@ fn make_knowledge_entry(
                 entities,
                 topics,
                 salience,
-                source_character_id,
+                source_role_id,
                 truth_value,
             },
             KnowledgeSourceId::Rumor(id),
@@ -404,8 +411,7 @@ fn make_knowledge_entry(
             entities: canonical(entities.clone()),
             topics: canonical(topics.clone()),
             salience: *salience,
-            source_role_key: None,
-            source_character_id: source_character_id.clone(),
+            source_role_id: source_role_id.clone(),
             truth_value: truth_value.clone(),
             source,
         })),
@@ -421,7 +427,7 @@ fn make_knowledge_entry(
             KnowledgeSourceId::Memory(id),
         ) => {
             let mut entities = entities.clone();
-            entities.push(KnowledgeEntity::Character(owner.clone()));
+            entities.push(KnowledgeEntity::Role(owner.clone()));
             Ok(KnowledgeEntry::Memory(MemoryEntry {
                 id,
                 owner: owner.clone(),

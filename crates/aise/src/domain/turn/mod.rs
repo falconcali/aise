@@ -7,12 +7,12 @@ pub mod retrieval;
 pub mod story_generation;
 
 pub use baseline::{
-    BaselineContext, CharacterIndexEntry, CharacterView, KnowledgeEntryIndexEntry, NarrativeGraphStateIndex,
-    RelevantKnowledge, SnapshotLimits,
+    BaselineContext, KnowledgeEntryIndexEntry, NarrativeGraphStateIndex, RelevantKnowledge, RoleContextView,
+    RoleIndexEntry, SnapshotLimits,
 };
 pub use character::CharacterDecision;
 pub use extraction::{
-    DeletableKnowledgeId, ExtractedCharacterState, NarrativeConditionJudgmentOutput, NarrativeConditionResult,
+    DeletableKnowledgeId, ExtractedRoleState, NarrativeConditionJudgmentOutput, NarrativeConditionResult,
     NarrativeConditionStatus, ProposedKnowledgeMutation, ProposedKnowledgeValue, StoryCandidateVersion,
     StoryStateExtractionEnvelope, StoryStateExtractionEnvelopeOutput, StoryStateExtractionLimits,
     StoryStateExtractorOutput,

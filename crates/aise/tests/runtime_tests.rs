@@ -1,6 +1,6 @@
 use aise::config::{NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
 use aise::domain::asset::validation::BoundedText;
-use aise::domain::ids::CharacterId;
+use aise::domain::ids::RoleId;
 use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::turn::{
     CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest, RetrievalRequestOrigin, WriterPlan,
@@ -30,7 +30,7 @@ fn sample_plan(with_requests: bool) -> WriterPlan {
             signal_priority: 0,
         });
         plan.character_think_requests.push(CharacterThinkRequest {
-            character_id: CharacterId::from("c-1"),
+            role_id: RoleId::try_new("c-1").unwrap(),
             reason: BoundedText::try_new("present", "reason", 64).unwrap(),
         });
     }

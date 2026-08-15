@@ -1,5 +1,6 @@
-use crate::domain::asset::ids::{AttributeKey, FactKey, NarrativeConditionKey, NarrativeNodeKey, StoryRoleKey};
+use crate::domain::asset::ids::{FactKey, NarrativeConditionKey, NarrativeNodeKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
+use crate::domain::ids::RoleId;
 use crate::domain::narrative_graph::definition::{NarrativeError, NarrativeLimits};
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::narrative_graph::state_view::NarrativeStateView;
@@ -92,21 +93,21 @@ pub enum NarrativeCondition {
         fact_key: FactKey,
         value: ScalarValue,
     },
-    CharacterStateEquals {
-        role_key: StoryRoleKey,
-        attribute: AttributeKey,
+    RoleStateEquals {
+        role_id: RoleId,
+        attribute: BoundedText,
         value: ScalarValue,
     },
     RelationshipReaches {
-        source_role_key: StoryRoleKey,
-        target_role_key: StoryRoleKey,
+        source_role_id: RoleId,
+        target_role_id: RoleId,
         minimum_trust: i16,
     },
     TurnReaches {
         turn: u64,
     },
     RoleControllerIs {
-        role_key: StoryRoleKey,
+        role_id: RoleId,
         controller: RoleControllerKind,
     },
 }
@@ -174,16 +175,16 @@ pub fn evaluate_condition(
                 _ => NarrativeTruthValue::Unsatisfied,
             })
         }
-        NarrativeCondition::CharacterStateEquals {
-            role_key,
+        NarrativeCondition::RoleStateEquals {
+            role_id,
             attribute,
             value,
         } => {
             let current = ctx
                 .view
-                .character_attribute(role_key, attribute)
+                .role_attribute(role_id, attribute)
                 .map_err(|_| NarrativeError::Invariant {
-                    code: "unknown_character_state_role_reference",
+                    code: "unknown_role_state_reference",
                 })?;
             Ok(match current {
                 Some(current) if current == value => NarrativeTruthValue::Satisfied,
@@ -191,22 +192,23 @@ pub fn evaluate_condition(
             })
         }
         NarrativeCondition::RelationshipReaches {
-            source_role_key,
-            target_role_key,
+            source_role_id,
+            target_role_id,
             minimum_trust,
         } => {
-            let trust = ctx.view.relationship_trust(source_role_key, target_role_key).map_err(|_| {
-                NarrativeError::Invariant {
-                    code: "unknown_relationship_role_reference",
-                }
-            })?;
+            let trust =
+                ctx.view
+                    .relationship_trust(source_role_id, target_role_id)
+                    .map_err(|_| NarrativeError::Invariant {
+                        code: "unknown_relationship_role_reference",
+                    })?;
             Ok(match trust {
                 Some(trust) if trust >= *minimum_trust => NarrativeTruthValue::Satisfied,
                 _ => NarrativeTruthValue::Unsatisfied,
             })
         }
-        NarrativeCondition::RoleControllerIs { role_key, controller } => {
-            let current = ctx.view.role_controller(role_key).map_err(|_| NarrativeError::Invariant {
+        NarrativeCondition::RoleControllerIs { role_id, controller } => {
+            let current = ctx.view.role_controller(role_id).map_err(|_| NarrativeError::Invariant {
                 code: "unknown_role_controller_reference",
             })?;
             Ok(if current == *controller {

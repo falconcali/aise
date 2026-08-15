@@ -3,11 +3,13 @@ use crate::context::error::ContextError;
 use crate::context::retrieval_signal_builder::RetrievalSignalBuilder;
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::validation::BoundedText;
+use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeIndexMatch, KnowledgeKind};
 use crate::domain::narrative::StoryContinuityLimits;
+use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{
-    BaselineContext, CharacterIndexEntry, CharacterView, KnowledgeEntryIndexEntry, NarrativeGraphStateIndex,
-    RelevantKnowledge, RetrievalAudience, RetrievalIndexScope, RetrievalTargetId, SnapshotLimits,
+    BaselineContext, KnowledgeEntryIndexEntry, NarrativeGraphStateIndex, RelevantKnowledge, RetrievalAudience,
+    RetrievalIndexScope, RetrievalTargetId, RoleContextView, RoleIndexEntry, SnapshotLimits,
 };
 use crate::persistence::knowledge_read_port::{
     EntityKnowledgeQuery, KnowledgeFilter, KnowledgeIndexQuery, KnowledgeLookupHit, KnowledgeReadPort,
@@ -115,7 +117,7 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
                 "story_id": story_id,
                 "turn_id": ctx.turn_id(),
                 "base_revision": snapshot.base_revision().get(),
-                "character_count": baseline.character_index.len() + baseline.scene_characters.len() + 1,
+                "role_count": baseline.role_index.len() + baseline.scene_roles.len() + 1,
                 "constraint_count": baseline.active_story_constraints.len(),
                 "entity_signal_count": baseline.retrieval_signals.entities.len(),
                 "topic_signal_count": baseline.retrieval_signals.topics.len(),
@@ -126,7 +128,7 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
                 "story_id": story_id,
                 "turn_id": ctx.turn_id(),
                 "base_revision": snapshot.base_revision().get(),
-                "character_count": 0,
+                "role_count": 0,
                 "constraint_count": 0,
                 "entity_signal_count": 0,
                 "topic_signal_count": 0,
@@ -141,87 +143,65 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
 }
 
 async fn build_baseline(
-    snapshot: &crate::domain::story_instance::snapshot::StoryReadSnapshot,
+    snapshot: &StoryReadSnapshot,
     player_input: &str,
     signal_builder: &RetrievalSignalBuilder,
     context_config: &ContextPreparationConfig,
     retrieval_config: &RetrievalConfig,
     knowledge: &Arc<dyn KnowledgeReadPort>,
 ) -> Result<BaselineContext, ContextError> {
-    let player_bindings: Vec<_> = snapshot
-        .role_bindings()
-        .values()
-        .filter(|binding| binding.is_player_controlled())
-        .collect();
-    if player_bindings.len() != 1 {
-        return Err(ContextError::SnapshotInconsistent {
-            code: "player_binding_count",
-        });
-    }
-    let player_binding = player_bindings[0];
-    let player_character = resolve_character_view(snapshot, &player_binding.character_id)?;
-    let mut seen_scene = BTreeSet::from([player_character.character_id.clone()]);
-    let mut scene_characters = Vec::new();
-    for character_id in &snapshot.current_scene().present_character_ids {
-        if character_id == &player_character.character_id {
+    let player_role_view = snapshot
+        .role(snapshot.player_role_id())
+        .ok_or(ContextError::SnapshotInconsistent {
+            code: "missing_player_role",
+        })?;
+    let player_role = RoleContextView::from(player_role_view);
+    let mut seen_scene = BTreeSet::from([player_role.role_id.clone()]);
+    let mut scene_roles = Vec::new();
+    for role_id in &snapshot.current_scene().present_role_ids {
+        if role_id == &player_role.role_id {
             continue;
         }
-        if !seen_scene.insert(character_id.clone()) {
+        if !seen_scene.insert(role_id.clone()) {
             return Err(ContextError::SnapshotInconsistent {
-                code: "duplicate_scene_character",
+                code: "duplicate_scene_role",
             });
         }
-        scene_characters.push(resolve_character_view(snapshot, character_id)?);
-        if scene_characters.len() > context_config.max_scene_characters {
+        let role = snapshot.role(role_id).ok_or(ContextError::SnapshotInconsistent {
+            code: "missing_scene_role",
+        })?;
+        scene_roles.push(RoleContextView::from(role));
+        if scene_roles.len() > context_config.max_scene_roles {
             return Err(ContextError::SignalLimitExceeded {
-                limit: "max_scene_characters",
+                limit: "max_scene_roles",
             });
         }
     }
     let retrieval_signals = signal_builder.build(snapshot, player_input)?;
-    let referenced_ids = referenced_character_ids(snapshot, &retrieval_signals, &seen_scene);
-    let mut referenced_characters = Vec::new();
-    let mut character_index = Vec::new();
-    for (character_id, state) in snapshot.character_states() {
-        if seen_scene.contains(character_id) {
+    let referenced_ids = referenced_role_ids(&retrieval_signals, &seen_scene);
+    let mut referenced_roles = Vec::new();
+    let mut role_index = Vec::new();
+    for (role_id, role) in snapshot.roles() {
+        if seen_scene.contains(role_id) {
             continue;
         }
-        let role = snapshot
-            .role_definitions()
-            .get(&state.role_key)
-            .ok_or(ContextError::SnapshotInconsistent {
-                code: "missing_role_definition",
-            })?;
-        let card = snapshot
-            .character_cards()
-            .get(character_id)
-            .ok_or(ContextError::SnapshotInconsistent {
-                code: "missing_character_card",
-            })?;
-        let binding = snapshot
-            .role_bindings()
-            .values()
-            .find(|binding| &binding.character_id == character_id)
-            .ok_or(ContextError::SnapshotInconsistent {
-                code: "missing_role_binding",
-            })?;
-        if referenced_ids.contains(character_id) {
-            referenced_characters.push(resolve_character_view(snapshot, character_id)?);
+        if referenced_ids.contains(role_id) {
+            referenced_roles.push(RoleContextView::from(role));
         } else {
-            character_index.push(CharacterIndexEntry {
-                character_id: character_id.clone(),
-                role_key: state.role_key.clone(),
-                name: card.meta.name.clone(),
+            role_index.push(RoleIndexEntry {
+                role_id: role_id.clone(),
+                name: role.effective_profile.name.clone(),
+                role_label: role.role_label.clone(),
                 narrative_function: role.narrative_function.clone(),
-                location_key: state.location.clone(),
-                player_controlled: binding.is_player_controlled(),
+                location_key: role.state.location.clone(),
+                player_controlled: role.is_player_controlled(),
             });
         }
     }
-    referenced_characters.sort_by(|left, right| left.character_id.cmp(&right.character_id));
-    character_index.sort_by(|left, right| left.character_id.cmp(&right.character_id));
-    let character_index_scope = if character_index.len() > context_config.max_character_index {
-        character_index.truncate(context_config.max_character_index);
+    referenced_roles.sort_by(|left: &RoleContextView, right: &RoleContextView| left.role_id.cmp(&right.role_id));
+    role_index.sort_by(|left, right| left.role_id.cmp(&right.role_id));
+    let role_index_scope = if role_index.len() > context_config.max_role_index {
+        role_index.truncate(context_config.max_role_index);
         RetrievalIndexScope::Prefiltered
     } else {
         RetrievalIndexScope::Complete
@@ -232,15 +212,15 @@ async fn build_baseline(
     Ok(BaselineContext {
         story_profile: snapshot.story_profile().clone(),
         instance_settings: snapshot.instance_settings().clone(),
-        player_character,
+        player_role,
         current_scene: snapshot.current_scene().clone(),
-        scene_characters,
-        referenced_characters,
+        scene_roles,
+        referenced_roles,
         relevant_knowledge,
-        character_index_scope,
+        role_index_scope,
         knowledge_entry_index_scope,
         knowledge_entry_index,
-        character_index,
+        role_index,
         story_continuity: snapshot.story_continuity().clone(),
         active_story_constraints: snapshot.active_constraints().to_vec(),
         narrative_graph_state_index: NarrativeGraphStateIndex {
@@ -252,27 +232,23 @@ async fn build_baseline(
     })
 }
 
-fn referenced_character_ids(
-    snapshot: &crate::domain::story_instance::snapshot::StoryReadSnapshot,
+fn referenced_role_ids(
     signals: &crate::domain::turn::RetrievalSignals,
-    provided: &BTreeSet<crate::domain::ids::CharacterId>,
-) -> BTreeSet<crate::domain::ids::CharacterId> {
+    provided: &BTreeSet<RoleId>,
+) -> BTreeSet<RoleId> {
     signals
         .entities
         .iter()
         .filter_map(|signal| match &signal.entity {
-            KnowledgeEntity::Character(character_id) => Some(character_id.clone()),
-            KnowledgeEntity::Role(role_key) => {
-                snapshot.role_binding(role_key).map(|binding| binding.character_id.clone())
-            }
+            KnowledgeEntity::Role(role_id) => Some(role_id.clone()),
             _ => None,
         })
-        .filter(|character_id| !provided.contains(character_id))
+        .filter(|role_id| !provided.contains(role_id))
         .collect()
 }
 
 async fn load_relevant_knowledge(
-    snapshot: &crate::domain::story_instance::snapshot::StoryReadSnapshot,
+    snapshot: &StoryReadSnapshot,
     signals: &crate::domain::turn::RetrievalSignals,
     config: &RetrievalConfig,
     knowledge: &Arc<dyn KnowledgeReadPort>,
@@ -314,7 +290,7 @@ async fn load_relevant_knowledge(
 }
 
 async fn load_knowledge_index(
-    snapshot: &crate::domain::story_instance::snapshot::StoryReadSnapshot,
+    snapshot: &StoryReadSnapshot,
     relevant: &[RelevantKnowledge],
     config: &RetrievalConfig,
     knowledge: &Arc<dyn KnowledgeReadPort>,
@@ -416,46 +392,6 @@ fn normalize_relevant_knowledge(
         }
     });
     Ok(entries)
-}
-
-fn resolve_character_view(
-    snapshot: &crate::domain::story_instance::snapshot::StoryReadSnapshot,
-    character_id: &crate::domain::ids::CharacterId,
-) -> Result<CharacterView, ContextError> {
-    let state = snapshot
-        .character_states()
-        .get(character_id)
-        .ok_or(ContextError::SnapshotInconsistent {
-            code: "missing_character_state",
-        })?;
-    let role = snapshot
-        .role_definitions()
-        .get(&state.role_key)
-        .ok_or(ContextError::SnapshotInconsistent {
-            code: "missing_role_definition",
-        })?;
-    let binding = snapshot
-        .role_bindings()
-        .values()
-        .find(|binding| &binding.character_id == character_id)
-        .ok_or(ContextError::SnapshotInconsistent {
-            code: "missing_role_binding",
-        })?
-        .clone();
-    let card = snapshot
-        .character_cards()
-        .get(character_id)
-        .ok_or(ContextError::SnapshotInconsistent {
-            code: "missing_character_card",
-        })?;
-    Ok(CharacterView {
-        character_id: character_id.clone(),
-        role_key: state.role_key.clone(),
-        role: role.clone(),
-        binding,
-        card: card.clone(),
-        state: state.clone(),
-    })
 }
 
 fn map_baseline_error(error: ContextError) -> TurnExecutionError {

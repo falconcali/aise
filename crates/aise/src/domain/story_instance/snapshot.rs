@@ -1,17 +1,16 @@
-use crate::domain::asset::character_card::CharacterCard;
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
-use crate::domain::asset::ids::{FactKey, Sha256Digest, StoryRoleKey, TopicKey};
-use crate::domain::asset::story_pack::{StoryProfile, StoryRole};
+use crate::domain::asset::ids::{FactKey, Sha256Digest, TopicKey};
+use crate::domain::asset::story_pack::StoryProfile;
 use crate::domain::asset::validation::ScalarValue;
 use crate::domain::asset::world_book::TopicDefinition;
-use crate::domain::ids::{CharacterId, StoryId, StoryRevision};
+use crate::domain::ids::{RoleId, StoryId, StoryRevision};
 use crate::domain::narrative::StoryContinuity;
 use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
-use crate::domain::story_instance::binding::RoleBinding;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
-use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings, RelationshipState};
+use crate::domain::story_instance::role::StoryRoleView;
+use crate::domain::story_instance::state::{CurrentScene, InstanceSettings, RelationshipState};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,10 +33,8 @@ pub struct StoryReadSnapshot {
     pack: FrozenStoryPackRef,
     story_profile: StoryProfile,
     instance_settings: InstanceSettings,
-    role_definitions: BTreeMap<StoryRoleKey, StoryRole>,
-    role_bindings: BTreeMap<StoryRoleKey, RoleBinding>,
-    character_cards: BTreeMap<CharacterId, CharacterCard>,
-    character_states: BTreeMap<CharacterId, CharacterInstanceState>,
+    roles: BTreeMap<RoleId, StoryRoleView>,
+    player_role_id: RoleId,
     current_scene: CurrentScene,
     relationships: Vec<RelationshipState>,
     narrative_definition: NarrativeGraphDefinition,
@@ -57,10 +54,7 @@ pub struct StoryReadSnapshotParts {
     pub pack: FrozenStoryPackRef,
     pub story_profile: StoryProfile,
     pub instance_settings: InstanceSettings,
-    pub role_definitions: BTreeMap<StoryRoleKey, StoryRole>,
-    pub role_bindings: BTreeMap<StoryRoleKey, RoleBinding>,
-    pub character_cards: BTreeMap<CharacterId, CharacterCard>,
-    pub character_states: BTreeMap<CharacterId, CharacterInstanceState>,
+    pub roles: BTreeMap<RoleId, StoryRoleView>,
     pub current_scene: CurrentScene,
     pub relationships: Vec<RelationshipState>,
     pub narrative_definition: NarrativeGraphDefinition,
@@ -81,10 +75,7 @@ impl StoryReadSnapshot {
             pack,
             story_profile,
             instance_settings,
-            role_definitions,
-            role_bindings,
-            character_cards,
-            character_states,
+            roles,
             current_scene,
             relationships,
             narrative_definition,
@@ -111,51 +102,33 @@ impl StoryReadSnapshot {
                 code: "knowledge_base_revision_mismatch",
             });
         }
-        if role_bindings.values().filter(|binding| binding.is_player_controlled()).count() != 1 {
-            return inconsistent("player_binding_count");
-        }
-        if role_definitions.keys().ne(role_bindings.keys()) {
-            return inconsistent("role_binding_set_mismatch");
-        }
-        let binding_characters = role_bindings
-            .values()
-            .map(|binding| binding.character_id.clone())
-            .collect::<BTreeSet<_>>();
-        if binding_characters.len() != role_bindings.len()
-            || binding_characters.iter().ne(character_states.keys())
-            || binding_characters.iter().ne(character_cards.keys())
-        {
-            return inconsistent("character_set_mismatch");
-        }
-        for (role_key, binding) in &role_bindings {
-            let state = character_states
-                .get(&binding.character_id)
-                .ok_or(StorySnapshotError::Inconsistent {
-                    code: "character_state_missing",
-                })?;
-            if &binding.role_key != role_key
-                || &state.role_key != role_key
-                || state.character_id != binding.character_id
-                || binding.character_asset.character_key != character_cards[&binding.character_id].character_key
-            {
-                return inconsistent("binding_character_mismatch");
+        for (role_id, view) in &roles {
+            if role_id != &view.role_id {
+                return inconsistent("role_map_key_mismatch");
             }
         }
-        validate_sorted_unique(&current_scene.present_character_ids, "scene_character_order")?;
-        if current_scene
-            .present_character_ids
-            .iter()
-            .any(|id| !character_states.contains_key(id))
-        {
-            return inconsistent("scene_character_missing");
+        let player_role_id = {
+            let mut player_role_ids = roles
+                .values()
+                .filter(|role| role.is_player_controlled())
+                .map(|role| role.role_id.clone());
+            let first = player_role_ids.next();
+            if first.is_none() || player_role_ids.next().is_some() {
+                return inconsistent("player_role_count");
+            }
+            first.expect("checked above")
+        };
+        validate_sorted_unique(&current_scene.present_role_ids, "scene_role_order")?;
+        if current_scene.present_role_ids.iter().any(|id| !roles.contains_key(id)) {
+            return inconsistent("scene_role_missing");
         }
         let mut relationship_keys = BTreeSet::new();
         for relationship in &relationships {
-            if !character_states.contains_key(&relationship.source_character_id)
-                || !character_states.contains_key(&relationship.target_character_id)
-                || !relationship_keys.insert(relationship.key())
-            {
-                return inconsistent("relationship_invalid");
+            if !roles.contains_key(&relationship.source_role_id) || !roles.contains_key(&relationship.target_role_id) {
+                return inconsistent("relationship_role_missing");
+            }
+            if !relationship_keys.insert(relationship.key()) {
+                return inconsistent("relationship_duplicate");
             }
         }
         if narrative_state
@@ -175,17 +148,15 @@ impl StoryReadSnapshot {
         }
         validate_sorted_unique(&entity_catalog, "entity_catalog_order")?;
         for entity in &entity_catalog {
-            match entity {
-                KnowledgeEntity::Role(key) if !role_definitions.contains_key(key) => {
+            if let KnowledgeEntity::Role(role_id) = entity {
+                if !roles.contains_key(role_id) {
                     return inconsistent("entity_role_missing");
                 }
-                KnowledgeEntity::Character(id) if !character_states.contains_key(id) => {
-                    return inconsistent("entity_character_missing");
-                }
-                KnowledgeEntity::NarrativeNode(key) if !narrative_definition.nodes.contains_key(key) => {
+            }
+            if let KnowledgeEntity::NarrativeNode(key) = entity {
+                if !narrative_definition.nodes.contains_key(key) {
                     return inconsistent("entity_narrative_node_missing");
                 }
-                _ => {}
             }
         }
         Ok(Self {
@@ -194,10 +165,8 @@ impl StoryReadSnapshot {
             pack,
             story_profile,
             instance_settings,
-            role_definitions,
-            role_bindings,
-            character_cards,
-            character_states,
+            roles,
+            player_role_id,
             current_scene,
             relationships,
             narrative_definition,
@@ -231,24 +200,22 @@ impl StoryReadSnapshot {
         &self.instance_settings
     }
 
-    pub fn role_definitions(&self) -> &BTreeMap<StoryRoleKey, StoryRole> {
-        &self.role_definitions
+    pub fn roles(&self) -> &BTreeMap<RoleId, StoryRoleView> {
+        &self.roles
     }
 
-    pub fn role_binding(&self, key: &StoryRoleKey) -> Option<&RoleBinding> {
-        self.role_bindings.get(key)
+    pub fn role(&self, role_id: &RoleId) -> Option<&StoryRoleView> {
+        self.roles.get(role_id)
     }
 
-    pub fn role_bindings(&self) -> &BTreeMap<StoryRoleKey, RoleBinding> {
-        &self.role_bindings
+    pub fn player_role_id(&self) -> &RoleId {
+        &self.player_role_id
     }
 
-    pub fn character_cards(&self) -> &BTreeMap<CharacterId, CharacterCard> {
-        &self.character_cards
-    }
-
-    pub fn character_states(&self) -> &BTreeMap<CharacterId, CharacterInstanceState> {
-        &self.character_states
+    pub fn player_role(&self) -> &StoryRoleView {
+        self.roles
+            .get(&self.player_role_id)
+            .expect("player role id is validated at construction")
     }
 
     pub fn current_scene(&self) -> &CurrentScene {

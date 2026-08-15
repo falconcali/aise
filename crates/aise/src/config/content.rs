@@ -10,8 +10,8 @@ pub struct TurnContentLimitsConfig {
     pub max_summary_bytes: usize,
     pub max_constraints: usize,
     pub max_constraint_bytes: usize,
-    pub max_characters: usize,
-    pub max_character_bytes: usize,
+    pub max_roles: usize,
+    pub max_role_bytes: usize,
     pub max_recent_segments: usize,
     pub max_recent_segment_bytes: usize,
     pub max_recent_segment_tokens: u64,
@@ -34,8 +34,8 @@ impl Default for TurnContentLimitsConfig {
             max_summary_bytes: 4096,
             max_constraints: 16,
             max_constraint_bytes: 512,
-            max_characters: 16,
-            max_character_bytes: 2048,
+            max_roles: 16,
+            max_role_bytes: 131_072,
             max_recent_segments: 20,
             max_recent_segment_bytes: 8192,
             max_recent_segment_tokens: 2048,
@@ -75,11 +75,11 @@ impl TurnContentLimitsConfig {
         if self.max_constraint_bytes == 0 {
             return Err(ConfigError::Invalid("content.max_constraint_bytes must be positive".into()));
         }
-        if self.max_characters == 0 {
-            return Err(ConfigError::Invalid("content.max_characters must be positive".into()));
+        if self.max_roles == 0 {
+            return Err(ConfigError::Invalid("content.max_roles must be positive".into()));
         }
-        if self.max_character_bytes == 0 {
-            return Err(ConfigError::Invalid("content.max_character_bytes must be positive".into()));
+        if self.max_role_bytes == 0 {
+            return Err(ConfigError::Invalid("content.max_role_bytes must be positive".into()));
         }
         if self.max_recent_segments == 0 {
             return Err(ConfigError::Invalid("content.max_recent_segments must be positive".into()));

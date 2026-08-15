@@ -2,7 +2,7 @@ pub use crate::domain::asset::entity::KnowledgeEntity;
 
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::RoleId;
 use crate::domain::knowledge::fact::WorldFact;
 use crate::domain::knowledge::memory::MemoryEntry;
 use crate::domain::knowledge::query::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
@@ -74,7 +74,7 @@ impl KnowledgeEntry {
         }
     }
 
-    pub fn memory_owner(&self) -> Option<&CharacterId> {
+    pub fn memory_owner(&self) -> Option<&RoleId> {
         match self {
             Self::Memory(value) => Some(&value.owner),
             _ => None,

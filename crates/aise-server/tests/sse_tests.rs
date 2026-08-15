@@ -1,10 +1,12 @@
 use aise::config::{AssetLimitsConfig, NarrativeConfig};
-use aise::domain::asset::ids::{PlayerId, StoryRoleKey};
+use aise::domain::asset::ids::PlayerId;
+use aise::domain::ids::RoleId;
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
 use aise::persistence::{SqliteStore, Store};
 use aise::story::instance_factory::{CreateStoryInstanceSpec, StoryInstanceFactory, StoryInstantiationLimits};
 use aise::story::pack_service::{AssetInput, NativeAssetImporter, PackService};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18,14 +20,16 @@ fn temp_db_path(label: &str) -> String {
 
 fn valid_pack_json() -> String {
     serde_json::json!({
-        "spec": "aise_story_v3",
-        "spec_version": "3.0",
+        "spec": "aise_story_v4",
+        "spec_version": "4.0",
         "meta": {
             "pack_key": "demo",
             "title": "Demo",
             "author": "aise",
             "version": "0.1.0",
-            "description": "demo pack"
+            "description": "demo pack",
+            "tags": [],
+            "cover_asset": null
         },
         "story": {
             "premise": "A quiet village.",
@@ -34,28 +38,23 @@ fn valid_pack_json() -> String {
             "themes": ["hope"],
             "style": {"tone": ["light"], "point_of_view": "third", "tense": "past"}
         },
-        "character_assets": {
-            "protagonist_card": {
-                "spec": "aise_char_v3", "spec_version": "3.0", "character_key": "protagonist_card",
-                "meta": {"name": "Hero", "version": "0.1.0"},
-                "profile": {"description": "Hero", "personality": [], "values": [], "speaking_style": {"register": "neutral", "verbosity": "medium"}}
-            }
-        },
         "roles": {
             "protagonist": {
                 "role_label": "Protagonist",
                 "narrative_function": "hero",
+                "default_profile": {
+                    "name": "The Traveler",
+                    "dialogue_examples": []
+                },
+                "background": null,
                 "initial_state": {"location": "village", "goals": []},
                 "initial_relationships": [],
                 "seed_memories": []
             }
         },
-        "default_cast": {
-            "protagonist": {"character_ref": "protagonist_card"}
-        },
         "play": {
             "player_count": 1,
-            "playable_role_keys": ["protagonist"]
+            "playable_role_ids": ["protagonist"]
         },
         "world_book": {
             "spec": "aise_world_v3",
@@ -77,7 +76,7 @@ fn valid_pack_json() -> String {
             "nodes": {
                 "node_a": {
                     "title": "A",
-                    "objective": "Wake up",
+                    "dramatic_focus": "Wake up",
                     "activate_when": {"type": "story_started"},
                     "complete_when": {"type": "turn_reaches", "turn": 1},
                     "skip_when": null,
@@ -87,6 +86,7 @@ fn valid_pack_json() -> String {
             },
             "edges": []
         },
+        "constraints": {},
         "assets": {}
     })
     .to_string()
@@ -110,6 +110,7 @@ async fn story_instance_snapshot_is_available_for_sse_recovery_path() {
         store.clone(),
         StoryInstantiationLimits {
             max_roles: 16,
+            max_role_bytes: 131_072,
             max_facts: 128,
             max_rumors: 128,
             max_memories: 128,
@@ -121,9 +122,9 @@ async fn story_instance_snapshot_is_available_for_sse_recovery_path() {
     let story = factory
         .create(CreateStoryInstanceSpec {
             pack_id: pack.pack_id,
-            player_id: PlayerId::from("player-1"),
-            player_role_key: StoryRoleKey::from("protagonist"),
-            player_character: None,
+            player_id: PlayerId::try_new("player-1").unwrap(),
+            player_role_id: RoleId::try_new("protagonist").unwrap(),
+            role_profile_selections: BTreeMap::new(),
             created_at_ms: 1,
         })
         .await

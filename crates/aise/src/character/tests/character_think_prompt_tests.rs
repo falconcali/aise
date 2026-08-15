@@ -6,15 +6,14 @@ fn bounded(value: &str) -> BoundedText {
 
 fn prompt_context() -> CharacterThinkPromptContext {
     CharacterThinkPromptContext {
-        target_character: CharacterThinkCharacterPromptView {
-            character_id: CharacterId::from("character-a"),
+        target_role: CharacterThinkRolePromptView {
+            role_id: RoleId::try_new("character-a").unwrap(),
             name: bounded("A"),
-            description: Some(bounded("description")),
-            personality: vec![bounded("careful")],
-            values: vec![bounded("loyalty")],
-            fears: vec![bounded("betrayal")],
+            appearance: Some(bounded("description")),
+            personality: Some(bounded("careful")),
+            speaking_style: Some(bounded("direct")),
         },
-        current_character_state: CharacterThinkStatePromptView {
+        current_role_state: CharacterThinkStatePromptView {
             location: Some(bounded("hall")),
             goals: vec![bounded("stay safe")],
             relevant_attributes: Vec::new(),
@@ -57,7 +56,7 @@ fn character_decision_schema_has_exact_properties_required_and_nullability() {
     assert_eq!(properties.len(), 2);
     assert!(properties.contains_key("decision"));
     assert!(properties.contains_key("suggested_utterance"));
-    for removed in ["character_id", "perception", "emotion", "goal", "possible_action"] {
+    for removed in ["role_id", "perception", "emotion", "goal", "possible_action"] {
         assert!(!properties.contains_key(removed));
     }
     assert_eq!(schema["additionalProperties"], Value::Bool(false));
@@ -142,7 +141,7 @@ fn character_think_runtime_vars_keep_semantic_sections_distinct() {
     assert!(!values.contains_key("narrative_plan"));
     assert!(!values.contains_key("current_perception"));
     assert!(!values.contains_key("character_decisions"));
-    assert!(!values.contains_key("output_character_id"));
+    assert!(!values.contains_key("output_role_id"));
 }
 
 #[test]

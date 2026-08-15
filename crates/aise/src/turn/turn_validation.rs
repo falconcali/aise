@@ -1,9 +1,10 @@
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeEntry, KnowledgeSourceId};
 use crate::domain::narrative::StoryEvent;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
-use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, RelationshipKey, RelationshipState};
+use crate::domain::story_instance::role::StoryRoleState;
+use crate::domain::story_instance::state::{CurrentScene, RelationshipKey, RelationshipState};
 use crate::domain::turn::{DeletableKnowledgeId, ValidatedNarrativeResolution};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::TurnStage;
@@ -19,7 +20,7 @@ pub enum ValidationIssueCode {
     ExtractionDuplicateTarget,
     ReferenceMissing,
     ModificationForbidden,
-    UnchangedCharacterEmitted,
+    UnchangedRoleEmitted,
     UnchangedRelationshipEmitted,
     DomainInvariantViolated,
     KnowledgeOperationIllegal,
@@ -40,7 +41,7 @@ impl ValidationIssueCode {
             ValidationIssueCode::ExtractionDuplicateTarget => "extraction_duplicate_target",
             ValidationIssueCode::ReferenceMissing => "reference_missing",
             ValidationIssueCode::ModificationForbidden => "modification_forbidden",
-            ValidationIssueCode::UnchangedCharacterEmitted => "unchanged_character_emitted",
+            ValidationIssueCode::UnchangedRoleEmitted => "unchanged_role_emitted",
             ValidationIssueCode::UnchangedRelationshipEmitted => "unchanged_relationship_emitted",
             ValidationIssueCode::DomainInvariantViolated => "domain_invariant_violated",
             ValidationIssueCode::KnowledgeOperationIllegal => "knowledge_operation_illegal",
@@ -291,9 +292,9 @@ impl<T> StateChange<T> {
 }
 
 #[derive(Debug, Clone)]
-pub struct CharacterInstanceStateChange {
-    pub character_id: CharacterId,
-    pub new_state: CharacterInstanceState,
+pub struct RoleStateChange {
+    pub role_id: RoleId,
+    pub new_state: StoryRoleState,
 }
 
 #[derive(Debug, Clone)]
@@ -323,7 +324,7 @@ pub struct ValidatedKnowledgeMutation {
 #[derive(Debug, Clone)]
 pub struct ValidatedChangeSet {
     story_text: BoundedText,
-    character_changes: Vec<CharacterInstanceStateChange>,
+    role_changes: Vec<RoleStateChange>,
     relationship_changes: Vec<RelationshipStateChange>,
     knowledge_mutations: Vec<ValidatedKnowledgeMutation>,
     current_scene: CurrentScene,
@@ -344,7 +345,7 @@ impl ValidatedChangeSet {
         }
         Ok(Self {
             story_text: parts.story_text,
-            character_changes: parts.character_changes,
+            role_changes: parts.role_changes,
             relationship_changes: parts.relationship_changes,
             knowledge_mutations: parts.knowledge_mutations,
             current_scene: parts.current_scene,
@@ -358,8 +359,8 @@ impl ValidatedChangeSet {
         self.story_text.as_str()
     }
 
-    pub fn character_changes(&self) -> &[CharacterInstanceStateChange] {
-        &self.character_changes
+    pub fn role_changes(&self) -> &[RoleStateChange] {
+        &self.role_changes
     }
 
     pub fn relationship_changes(&self) -> &[RelationshipStateChange] {
@@ -393,7 +394,7 @@ impl ValidatedChangeSet {
 
 pub struct ValidatedChangeSetParts {
     pub story_text: BoundedText,
-    pub character_changes: Vec<CharacterInstanceStateChange>,
+    pub role_changes: Vec<RoleStateChange>,
     pub relationship_changes: Vec<RelationshipStateChange>,
     pub knowledge_mutations: Vec<ValidatedKnowledgeMutation>,
     pub current_scene: CurrentScene,

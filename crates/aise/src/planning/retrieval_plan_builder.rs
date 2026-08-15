@@ -3,6 +3,7 @@ use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::text_matcher::{TextMatcher, normalize_match_text, term_matches};
 use crate::domain::asset::validation::BoundedText;
+use crate::domain::ids::RoleId;
 use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::narrative_graph::projector::NarrativePlan;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
@@ -12,7 +13,7 @@ use crate::domain::turn::{
 };
 use crate::planning::error::PlanningError;
 use crate::planning::planner_output::PlannerOutput;
-use crate::planning::writer_planner_prompt::{WriterPlannerPromptContext, is_ai_character};
+use crate::planning::writer_planner_prompt::{WriterPlannerPromptContext, is_ai_role};
 use std::collections::BTreeSet;
 
 pub struct RetrievalPlanBuilder {
@@ -95,13 +96,13 @@ impl RetrievalPlanBuilder {
                     code: "character_think_reason_empty",
                 });
             }
-            if request.character_id == baseline.player_character.character_id {
+            if request.role_id == baseline.player_role.role_id {
                 return Err(PlanningError::PlayerCharacterRequested);
             }
-            if !is_ai_character(baseline, &request.character_id) {
+            if !is_ai_role(baseline, &request.role_id) {
                 return Err(PlanningError::UnknownCharacter);
             }
-            if !seen.insert(request.character_id.clone()) {
+            if !seen.insert(request.role_id.clone()) {
                 continue;
             }
             out.push(request);
@@ -158,11 +159,11 @@ impl RetrievalPlanBuilder {
         let mut topics = Vec::new();
         let mut target_source_id = None;
         if let Some(target_id) = &gap.target_id {
-            if let Some(character_id) = prompt_context.character_targets.get(target_id) {
+            if let Some(role_id) = prompt_context.role_targets.get(target_id) {
                 if !matches!(&gap.audience, RetrievalAudience::GlobalWriter) {
                     return Err(PlanningError::KnowledgeAudienceViolation);
                 }
-                entities.push(KnowledgeEntity::Character(character_id.clone()));
+                entities.push(KnowledgeEntity::Role(role_id.clone()));
             } else if let Some(source_id) = prompt_context.knowledge_targets.get(target_id) {
                 if matches!(&gap.audience, RetrievalAudience::Character { .. })
                     && matches!(source_id, crate::domain::knowledge::KnowledgeSourceId::Fact(_))
@@ -190,8 +191,7 @@ impl RetrievalPlanBuilder {
             for entity in snapshot.entity_catalog() {
                 let key = match entity {
                     KnowledgeEntity::World(key) => key.as_str(),
-                    KnowledgeEntity::Role(key) => key.as_str(),
-                    KnowledgeEntity::Character(id) => id.as_str(),
+                    KnowledgeEntity::Role(id) => id.as_str(),
                     KnowledgeEntity::Location(key) => key.as_str(),
                     KnowledgeEntity::Scene(key) => key.as_str(),
                     KnowledgeEntity::NarrativeNode(key) => key.as_str(),
@@ -282,7 +282,7 @@ fn authorized_memory_owners(
     audience: &RetrievalAudience,
     knowledge_kinds: &[KnowledgeKind],
     entities: &[KnowledgeEntity],
-) -> Result<Vec<crate::domain::ids::CharacterId>, PlanningError> {
+) -> Result<Vec<RoleId>, PlanningError> {
     if !knowledge_kinds.contains(&KnowledgeKind::Memory) {
         return Ok(Vec::new());
     }
@@ -291,7 +291,7 @@ fn authorized_memory_owners(
             let mut owners = entities
                 .iter()
                 .filter_map(|entity| match entity {
-                    KnowledgeEntity::Character(id) => Some(id.clone()),
+                    KnowledgeEntity::Role(id) => Some(id.clone()),
                     _ => None,
                 })
                 .collect::<Vec<_>>();
@@ -302,7 +302,7 @@ fn authorized_memory_owners(
             }
             Ok(owners)
         }
-        RetrievalAudience::Character { character_id } => Ok(vec![character_id.clone()]),
+        RetrievalAudience::Character { role_id } => Ok(vec![role_id.clone()]),
     }
 }
 
@@ -323,8 +323,8 @@ fn authorize_gap(
     think_requests: &[CharacterThinkRequest],
 ) -> Result<(), PlanningError> {
     match &gap.audience {
-        RetrievalAudience::Character { character_id } => {
-            if !think_requests.iter().any(|request| &request.character_id == character_id) {
+        RetrievalAudience::Character { role_id } => {
+            if !think_requests.iter().any(|request| &request.role_id == role_id) {
                 return Err(PlanningError::KnowledgeAudienceViolation);
             }
         }
@@ -370,7 +370,7 @@ struct RetrievalRequestKey {
     entities: Vec<KnowledgeEntity>,
     topics: Vec<TopicKey>,
     query_text: Option<String>,
-    authorized_memory_owners: Vec<crate::domain::ids::CharacterId>,
+    authorized_memory_owners: Vec<RoleId>,
 }
 
 fn canonical_key(request: &RetrievalRequest) -> RetrievalRequestKey {
@@ -396,7 +396,7 @@ fn origin_rank(origin: RetrievalRequestOrigin) -> u8 {
 fn entity_is_known(entity: &KnowledgeEntity, catalog: &[KnowledgeEntity], signals: &[EntitySignal]) -> bool {
     catalog.contains(entity)
         || signals.iter().any(|signal| &signal.entity == entity)
-        || matches!(entity, KnowledgeEntity::Character(_) | KnowledgeEntity::Role(_))
+        || matches!(entity, KnowledgeEntity::Role(_))
 }
 
 #[cfg(test)]

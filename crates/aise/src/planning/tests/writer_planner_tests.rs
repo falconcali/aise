@@ -1,6 +1,6 @@
 use super::*;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::RoleId;
 use crate::domain::turn::{CharacterThinkRequest, RetrievalAudience, WriterStoryGoal};
 use crate::planning::writer_planner_prompt::writer_planner_output_schema;
 
@@ -15,14 +15,14 @@ fn planner_output_reads_goal_gaps_and_character_requests() {
                 "query_text":"the gate",
                 "reason":"need location lore"
             }],
-            "character_think_requests":[{"character_id":"c-1","reason":"present"}]
+            "character_think_requests":[{"role_id":"c-1","reason":"present"}]
         }"#,
     )
     .expect("valid planner output");
     assert_eq!(output.story_goal.as_str(), "reach the gate");
     assert_eq!(output.context_gaps.len(), 1);
     assert_eq!(output.character_think_requests.len(), 1);
-    assert_eq!(output.character_think_requests[0].character_id.as_str(), "c-1");
+    assert_eq!(output.character_think_requests[0].role_id.as_str(), "c-1");
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn planner_output_requires_tagged_audience_shape() {
     for audience in [
         r#""global_writer""#,
         r#"{"kind":"unknown"}"#,
-        r#"{"kind":"global_writer","character_id":"c-1"}"#,
+        r#"{"kind":"global_writer","role_id":"c-1"}"#,
         r#"{"kind":"character"}"#,
     ] {
         let payload = format!(
@@ -102,12 +102,12 @@ fn writer_story_goal_roundtrips() {
     let parsed: WriterStoryGoal = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed.summary.as_str(), "keep moving");
     let request = CharacterThinkRequest {
-        character_id: CharacterId::from("c-1"),
+        role_id: RoleId::try_new("c-1").unwrap(),
         reason: BoundedText::try_new("present", "reason", 256).unwrap(),
     };
     assert!(matches!(
         RetrievalAudience::Character {
-            character_id: request.character_id.clone()
+            role_id: request.role_id.clone()
         },
         RetrievalAudience::Character { .. }
     ));

@@ -19,43 +19,35 @@ impl DeterministicValidator for ReferenceValidator {
         let (Some(extraction), Some(snapshot)) = (ctx.extraction(), ctx.snapshot()) else {
             return Ok(Vec::new());
         };
-        let known_characters = snapshot.character_states().keys().cloned().collect::<BTreeSet<_>>();
+        let known_roles = snapshot.roles().keys().cloned().collect::<BTreeSet<_>>();
         let modifiable = modifiable_knowledge_index(ctx);
         let mut issues = Vec::new();
 
-        for (index, state) in extraction.character_states.iter().enumerate() {
-            if !known_characters.contains(&state.character_id) {
-                issues.push(issue("character_states", index, "character_id is not a known character"));
+        for (index, state) in extraction.role_states.iter().enumerate() {
+            if !known_roles.contains(&state.role_id) {
+                issues.push(issue("role_states", index, "role_id is not a known role"));
             }
             if !location_key_resolves(
                 &state.location,
                 &snapshot.current_scene().location_key,
                 snapshot.entity_catalog(),
             ) {
-                issues.push(issue(
-                    "character_states",
-                    index,
-                    "location does not resolve to a known location",
-                ));
+                issues.push(issue("role_states", index, "location does not resolve to a known location"));
             }
         }
 
         for (index, relationship) in extraction.relationship_states.iter().enumerate() {
-            if !known_characters.contains(&relationship.source_character_id)
-                || !known_characters.contains(&relationship.target_character_id)
+            if !known_roles.contains(&relationship.source_role_id)
+                || !known_roles.contains(&relationship.target_role_id)
             {
-                issues.push(issue(
-                    "relationship_states",
-                    index,
-                    "relationship references an unknown character",
-                ));
+                issues.push(issue("relationship_states", index, "relationship references an unknown role"));
             }
         }
 
         for (index, mutation) in extraction.knowledge_changes.iter().enumerate() {
             match mutation {
                 ProposedKnowledgeMutation::Add { value } => {
-                    if let Some(message) = invalid_value_reference(value, &known_characters, snapshot) {
+                    if let Some(message) = invalid_value_reference(value, &known_roles, snapshot) {
                         issues.push(issue("knowledge_changes", index, message));
                     }
                 }
@@ -65,7 +57,7 @@ impl DeterministicValidator for ReferenceValidator {
                         Some(_) => issues.push(issue("knowledge_changes", index, "update target kind mismatch")),
                         None => issues.push(issue("knowledge_changes", index, "update target is not modifiable")),
                     }
-                    if let Some(message) = invalid_value_reference(value, &known_characters, snapshot) {
+                    if let Some(message) = invalid_value_reference(value, &known_roles, snapshot) {
                         issues.push(issue("knowledge_changes", index, message));
                     }
                 }
@@ -90,12 +82,12 @@ impl DeterministicValidator for ReferenceValidator {
             issues.push(issue("current_scene", 0, "location_key does not resolve to a known location"));
         }
         let mut seen = BTreeSet::new();
-        for character_id in &scene.present_character_ids {
-            if !known_characters.contains(character_id) || !seen.insert(character_id.clone()) {
+        for role_id in &scene.present_role_ids {
+            if !known_roles.contains(role_id) || !seen.insert(role_id.clone()) {
                 issues.push(issue(
                     "current_scene",
                     0,
-                    "present_character_ids contains an unknown or duplicate id",
+                    "present_role_ids contains an unknown or duplicate id",
                 ));
                 break;
             }
@@ -107,7 +99,7 @@ impl DeterministicValidator for ReferenceValidator {
 
 fn invalid_value_reference(
     value: &ProposedKnowledgeValue,
-    known_characters: &BTreeSet<crate::domain::ids::CharacterId>,
+    known_roles: &BTreeSet<crate::domain::ids::RoleId>,
     snapshot: &StoryReadSnapshot,
 ) -> Option<&'static str> {
     let (entities, topics, memory_owner, rumor_source) = match value {
@@ -115,9 +107,9 @@ fn invalid_value_reference(
         ProposedKnowledgeValue::Rumor {
             entities,
             topics,
-            source_character_id,
+            source_role_id,
             ..
-        } => (entities, topics, None, source_character_id.as_ref()),
+        } => (entities, topics, None, source_role_id.as_ref()),
         ProposedKnowledgeValue::Memory {
             entities,
             topics,
@@ -125,11 +117,11 @@ fn invalid_value_reference(
             ..
         } => (entities, topics, Some(owner), None),
     };
-    if memory_owner.is_some_and(|owner| !known_characters.contains(owner)) {
-        return Some("memory owner is not a known character");
+    if memory_owner.is_some_and(|owner| !known_roles.contains(owner)) {
+        return Some("memory owner is not a known role");
     }
-    if rumor_source.is_some_and(|character| !known_characters.contains(character)) {
-        return Some("rumor source_character_id is not a known character");
+    if rumor_source.is_some_and(|role| !known_roles.contains(role)) {
+        return Some("rumor source_role_id is not a known role");
     }
     if entities.iter().any(|entity| !entity_resolves(entity, snapshot)) {
         return Some("knowledge entity does not resolve");
@@ -168,7 +160,7 @@ pub fn modifiable_knowledge_index(ctx: &TurnExecutionContext) -> BTreeMap<Knowle
     for item in ctx.retrieved().writer() {
         index.insert(item.provenance.source_id.clone(), item.provenance.knowledge_kind);
     }
-    for items in ctx.retrieved().characters().values() {
+    for items in ctx.retrieved().roles().values() {
         for item in items {
             index.insert(item.provenance.source_id.clone(), item.provenance.knowledge_kind);
         }
@@ -183,8 +175,7 @@ fn has_duplicates<T: Ord + Clone>(values: &[T]) -> bool {
 
 fn entity_resolves(entity: &KnowledgeEntity, snapshot: &StoryReadSnapshot) -> bool {
     match entity {
-        KnowledgeEntity::Role(key) => snapshot.role_bindings().contains_key(key),
-        KnowledgeEntity::Character(id) => snapshot.character_states().contains_key(id),
+        KnowledgeEntity::Role(id) => snapshot.roles().contains_key(id),
         KnowledgeEntity::Scene(key) => {
             scene_key_resolves(key, &snapshot.current_scene().scene_key, snapshot.entity_catalog())
         }

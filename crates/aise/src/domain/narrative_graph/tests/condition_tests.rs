@@ -1,6 +1,6 @@
-use crate::domain::asset::ids::{AttributeKey, FactKey, NarrativeConditionKey, NarrativeNodeKey, StoryRoleKey};
-use crate::domain::asset::validation::ScalarValue;
-use crate::domain::ids::CharacterId;
+use crate::domain::asset::ids::{FactKey, NarrativeConditionKey, NarrativeNodeKey};
+use crate::domain::asset::validation::{BoundedText, ScalarValue};
+use crate::domain::ids::RoleId;
 use crate::domain::narrative_graph::condition::{
     ConditionEvalContext, NarrativeCondition, NarrativeNodeState, NarrativeTruthValue, RoleControllerKind,
     SemanticNarrativeCondition, evaluate_condition,
@@ -12,9 +12,9 @@ use std::collections::BTreeMap;
 
 struct StubStateView {
     facts: BTreeMap<FactKey, ScalarValue>,
-    attributes: BTreeMap<(StoryRoleKey, AttributeKey), ScalarValue>,
-    trust: BTreeMap<(StoryRoleKey, StoryRoleKey), i16>,
-    controllers: BTreeMap<StoryRoleKey, RoleControllerKind>,
+    attributes: BTreeMap<(RoleId, String), ScalarValue>,
+    trust: BTreeMap<(RoleId, RoleId), i16>,
+    controllers: BTreeMap<RoleId, RoleControllerKind>,
 }
 
 impl StubStateView {
@@ -33,35 +33,29 @@ impl NarrativeStateView for StubStateView {
         Ok(self.facts.get(fact_key))
     }
 
-    fn character_attribute(
+    fn role_attribute(
         &self,
-        role_key: &StoryRoleKey,
-        attribute: &AttributeKey,
+        role_id: &RoleId,
+        attribute: &BoundedText,
     ) -> Result<Option<&ScalarValue>, NarrativeStateViewError> {
-        Ok(self.attributes.get(&(role_key.clone(), attribute.clone())))
+        Ok(self.attributes.get(&(role_id.clone(), attribute.as_str().to_owned())))
     }
 
     fn relationship_trust(
         &self,
-        source_role_key: &StoryRoleKey,
-        target_role_key: &StoryRoleKey,
+        source_role_id: &RoleId,
+        target_role_id: &RoleId,
     ) -> Result<Option<i16>, NarrativeStateViewError> {
-        Ok(self.trust.get(&(source_role_key.clone(), target_role_key.clone())).copied())
+        Ok(self.trust.get(&(source_role_id.clone(), target_role_id.clone())).copied())
     }
 
-    fn role_controller(&self, role_key: &StoryRoleKey) -> Result<RoleControllerKind, NarrativeStateViewError> {
+    fn role_controller(&self, role_id: &RoleId) -> Result<RoleControllerKind, NarrativeStateViewError> {
         self.controllers
-            .get(role_key)
+            .get(role_id)
             .copied()
             .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                role_key: role_key.as_str().to_owned(),
+                role_id: role_id.as_str().to_owned(),
             })
-    }
-
-    fn character_id_for_role(&self, role_key: &StoryRoleKey) -> Result<CharacterId, NarrativeStateViewError> {
-        Err(NarrativeStateViewError::UnknownRole {
-            role_key: role_key.as_str().to_owned(),
-        })
     }
 }
 

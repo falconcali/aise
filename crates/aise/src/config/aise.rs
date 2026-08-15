@@ -73,14 +73,14 @@ impl AiseConfig {
         if self.context.recent_segments_for_signals > 2 {
             return Err(ConfigError::Invalid("context.recent_segments_for_signals must be <= 2".into()));
         }
-        if self.context.max_scene_characters > self.content.max_characters {
+        if self.context.max_scene_roles > self.content.max_roles {
             return Err(ConfigError::Invalid(
-                "context.max_scene_characters must be <= content.max_characters".into(),
+                "context.max_scene_roles must be <= content.max_roles".into(),
             ));
         }
-        if self.context.max_character_index > self.content.max_characters {
+        if self.context.max_role_index > self.content.max_roles {
             return Err(ConfigError::Invalid(
-                "context.max_character_index must be <= content.max_characters".into(),
+                "context.max_role_index must be <= content.max_roles".into(),
             ));
         }
         if self.planner.max_character_think_requests > self.turn.max_character_decisions {
@@ -98,9 +98,9 @@ impl AiseConfig {
                 "planner.max_reason_bytes must be <= character_think.max_thinking_focus_bytes".into(),
             ));
         }
-        if self.state_extractor.max_character_states < self.content.max_characters {
+        if self.state_extractor.max_role_states < self.content.max_roles {
             return Err(ConfigError::Invalid(
-                "state_extractor.max_character_states must be >= content.max_characters".into(),
+                "state_extractor.max_role_states must be >= content.max_roles".into(),
             ));
         }
         if self.state_extractor.max_relationship_states < self.context.max_relationships {
@@ -136,6 +136,16 @@ impl AiseConfig {
         if self.state_extractor.max_topics_per_knowledge > self.assets.max_topics_per_entry {
             return Err(ConfigError::Invalid(
                 "state_extractor.max_topics_per_knowledge must be <= assets.max_topics_per_entry".into(),
+            ));
+        }
+        let role_aggregate_bound = self
+            .assets
+            .max_profile_total_bytes
+            .saturating_add(self.assets.max_role_background_bytes)
+            .saturating_add(self.assets.max_text_bytes);
+        if self.content.max_role_bytes < role_aggregate_bound {
+            return Err(ConfigError::Invalid(
+                "content.max_role_bytes is smaller than the configured role aggregate bounds".into(),
             ));
         }
         Ok(())

@@ -90,7 +90,7 @@ impl TurnExecutionPipeline for StoryStateExtractor {
                     prompt_profile = "story_state_extractor",
                     is_reextraction,
                     output_bytes = completion.text.len(),
-                    character_state_count = output.state.character_states.len(),
+                    role_state_count = output.state.role_states.len(),
                     relationship_state_count = output.state.relationship_states.len(),
                     knowledge_change_count = output.state.knowledge_changes.len(),
                     "story state extractor output decoded"

@@ -39,6 +39,7 @@ pub struct TurnBudgetLimits {
     pub max_total_items: usize,
     pub max_retrieved_tokens: u64,
     pub max_item_bytes: usize,
+    pub max_role_bytes: usize,
     pub max_context_tokens: u64,
     pub max_character_decisions: usize,
     pub max_character_decision_bytes: usize,
@@ -81,6 +82,7 @@ impl TurnBudgetLimits {
             max_total_items: retrieval.max_total_items,
             max_retrieved_tokens: retrieval.max_total_tokens,
             max_item_bytes: retrieval.max_item_bytes,
+            max_role_bytes: content.max_role_bytes,
             max_context_tokens: turn.max_context_tokens,
             max_character_decisions: turn.max_character_decisions,
             max_character_decision_bytes: content.max_character_decision_bytes,
@@ -92,14 +94,14 @@ impl TurnBudgetLimits {
             max_validation_issue_bytes: content.max_validation_issue_bytes,
             max_trace_spans: turn.max_trace_spans,
             state_extraction: StoryStateExtractionLimits {
-                max_character_states: state_extractor.max_character_states,
+                max_role_states: state_extractor.max_role_states,
                 max_relationship_states: state_extractor.max_relationship_states,
                 max_knowledge_changes: state_extractor.max_knowledge_changes,
-                max_goals_per_character: state_extractor.max_goals_per_character,
-                max_attributes_per_character: state_extractor.max_attributes_per_character,
+                max_goals_per_role: state_extractor.max_goals_per_role,
+                max_attributes_per_role: state_extractor.max_attributes_per_role,
                 max_entities_per_knowledge: state_extractor.max_entities_per_knowledge,
                 max_topics_per_knowledge: state_extractor.max_topics_per_knowledge,
-                max_item_bytes: content.max_character_bytes,
+                max_item_bytes: content.max_role_bytes,
                 max_knowledge_change_bytes: content.max_knowledge_change_bytes,
                 max_condition_queries: narrative.max_semantic_queries_per_turn,
                 max_condition_evidence_bytes: narrative.max_evidence_bytes,
@@ -183,6 +185,10 @@ impl TurnBudget {
 
     pub fn max_item_bytes(&self) -> usize {
         self.limits.max_item_bytes
+    }
+
+    pub fn max_role_bytes(&self) -> usize {
+        self.limits.max_role_bytes
     }
 
     pub fn max_retrieved_tokens(&self) -> u64 {

@@ -81,8 +81,8 @@ max_scene_bytes = 8192
 max_summary_bytes = 4096
 max_constraints = 16
 max_constraint_bytes = 512
-max_characters = 16
-max_character_bytes = 2048
+max_roles = 16
+max_role_bytes = 131072
 max_recent_segments = 20
 max_recent_segment_bytes = 8192
 max_recent_segment_tokens = 2048
@@ -102,8 +102,8 @@ max_field_bytes = 512
 max_total_output_bytes = 1024
 
 [aise.context]
-max_scene_characters = 8
-max_character_index = 16
+max_scene_roles = 8
+max_role_index = 16
 max_relationships = 64
 max_condition_event_keys = 256
 max_condition_fact_values = 256
@@ -136,11 +136,11 @@ max_item_bytes = 4096
 [aise.state_extractor]
 max_context_tokens = 4096
 max_output_tokens = 2048
-max_character_states = 16
+max_role_states = 16
 max_relationship_states = 64
 max_knowledge_changes = 64
-max_goals_per_character = 16
-max_attributes_per_character = 64
+max_goals_per_role = 16
+max_attributes_per_role = 64
 max_entities_per_knowledge = 16
 max_topics_per_knowledge = 16
 max_knowledge_context_items = 128

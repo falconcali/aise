@@ -1,10 +1,11 @@
-pub mod binding;
 pub mod constraint;
 pub mod info;
+pub mod role;
 pub mod snapshot;
 pub mod state;
 
 pub use constraint::{ActiveStoryConstraint, StoryConstraintDefinition, StoryConstraintSource};
 pub use info::StoryInfo;
+pub use role::{RoleController, StoryRole, StoryRoleState, StoryRoleView};
 pub use snapshot::{KnowledgeSnapshotRef, StoryReadSnapshot, StorySnapshotError};
-pub use state::{CharacterInstanceState, CurrentScene, InstanceSettings, RelationshipState};
+pub use state::{CurrentScene, InstanceSettings, RelationshipState};

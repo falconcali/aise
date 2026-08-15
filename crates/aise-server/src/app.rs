@@ -115,6 +115,7 @@ pub async fn build_services(
         store,
         StoryInstantiationLimits {
             max_roles: config.aise.assets.max_roles,
+            max_role_bytes: config.aise.content.max_role_bytes,
             max_facts: config.aise.assets.max_world_facts,
             max_rumors: config.aise.assets.max_world_rumors,
             max_memories: config.aise.assets.max_seed_memories_per_role,

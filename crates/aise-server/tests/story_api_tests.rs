@@ -13,7 +13,7 @@ fn story_instance_response_exposes_opening_as_first_story_segment() {
         story_id: "story-1".into(),
         base_revision: 0,
         pack_id: "pack-1".into(),
-        player_role_key: "protagonist".into(),
+        player_role_id: "protagonist".into(),
         current_scene: "A quiet room.".into(),
         opening: StoryOpeningView {
             sequence: StorySequence::try_new(1).unwrap(),

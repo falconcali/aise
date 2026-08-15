@@ -1,14 +1,14 @@
-use crate::domain::asset::character_card::CharacterCard;
-use crate::domain::asset::ids::{LocationKey, NarrativeNodeKey, Sha256Digest, StoryRoleKey};
-use crate::domain::asset::story_pack::{StoryProfile, StoryRole};
+use crate::domain::asset::character_card::CharacterProfile;
+use crate::domain::asset::ids::{LocationKey, NarrativeNodeKey, Sha256Digest};
+use crate::domain::asset::story_pack::StoryProfile;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use crate::domain::narrative::{StoryContinuity, StoryContinuityLimits};
 use crate::domain::narrative_graph::condition::NarrativeNodeState;
-use crate::domain::story_instance::binding::RoleBinding;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
-use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings};
+use crate::domain::story_instance::role::{RoleController, StoryRoleState, StoryRoleView};
+use crate::domain::story_instance::state::{CurrentScene, InstanceSettings};
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::retrieval::RetrievalSignals;
 use crate::domain::turn::{RetrievalIndexScope, RetrievalTargetId};
@@ -21,10 +21,9 @@ pub struct SnapshotLimits {
     pub max_instance_settings: usize,
     pub max_instance_setting_bytes: usize,
     pub max_roles: usize,
-    pub max_characters: usize,
-    pub max_character_bytes: usize,
+    pub max_role_bytes: usize,
     pub max_scene_bytes: usize,
-    pub max_scene_characters: usize,
+    pub max_scene_roles: usize,
     pub max_relationships: usize,
     pub max_narrative_nodes: usize,
     pub max_condition_fact_values: usize,
@@ -37,20 +36,41 @@ pub struct SnapshotLimits {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CharacterView {
-    pub character_id: CharacterId,
-    pub role_key: StoryRoleKey,
-    pub role: StoryRole,
-    pub binding: RoleBinding,
-    pub card: CharacterCard,
-    pub state: CharacterInstanceState,
+pub struct RoleContextView {
+    pub role_id: RoleId,
+    pub role_label: BoundedText,
+    pub narrative_function: BoundedText,
+    pub background: Option<BoundedText>,
+    pub profile: CharacterProfile,
+    pub state: StoryRoleState,
+    pub controller: RoleController,
+}
+
+impl From<&StoryRoleView> for RoleContextView {
+    fn from(role: &StoryRoleView) -> Self {
+        Self {
+            role_id: role.role_id.clone(),
+            role_label: role.role_label.clone(),
+            narrative_function: role.narrative_function.clone(),
+            background: role.background.clone(),
+            profile: role.effective_profile.clone(),
+            state: role.state.clone(),
+            controller: role.controller.clone(),
+        }
+    }
+}
+
+impl RoleContextView {
+    pub fn is_player_controlled(&self) -> bool {
+        matches!(self.controller, RoleController::Player(_))
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CharacterIndexEntry {
-    pub character_id: CharacterId,
-    pub role_key: StoryRoleKey,
+pub struct RoleIndexEntry {
+    pub role_id: RoleId,
     pub name: BoundedText,
+    pub role_label: BoundedText,
     pub narrative_function: BoundedText,
     pub location_key: LocationKey,
     pub player_controlled: bool,
@@ -84,15 +104,15 @@ pub struct NarrativeGraphStateIndex {
 pub struct BaselineContext {
     pub story_profile: StoryProfile,
     pub instance_settings: InstanceSettings,
-    pub player_character: CharacterView,
+    pub player_role: RoleContextView,
     pub current_scene: CurrentScene,
-    pub scene_characters: Vec<CharacterView>,
-    pub referenced_characters: Vec<CharacterView>,
+    pub scene_roles: Vec<RoleContextView>,
+    pub referenced_roles: Vec<RoleContextView>,
     pub relevant_knowledge: Vec<RelevantKnowledge>,
-    pub character_index_scope: RetrievalIndexScope,
+    pub role_index_scope: RetrievalIndexScope,
     pub knowledge_entry_index_scope: RetrievalIndexScope,
     pub knowledge_entry_index: Vec<KnowledgeEntryIndexEntry>,
-    pub character_index: Vec<CharacterIndexEntry>,
+    pub role_index: Vec<RoleIndexEntry>,
     pub story_continuity: StoryContinuity,
     pub active_story_constraints: Vec<ActiveStoryConstraint>,
     pub narrative_graph_state_index: NarrativeGraphStateIndex,
@@ -104,17 +124,17 @@ impl BaselineContext {
         let mut total = self.story_continuity.estimate_tokens();
         total = total.saturating_add(estimate_text_tokens(self.story_profile.premise.as_str()));
         total = total.saturating_add(estimate_text_tokens(self.current_scene.description.as_str()));
-        total = total.saturating_add(estimate_text_tokens(self.player_character.card.meta.name.as_str()));
-        for character in &self.scene_characters {
-            total = total.saturating_add(estimate_text_tokens(character.card.meta.name.as_str()));
+        total = total.saturating_add(estimate_text_tokens(self.player_role.profile.name.as_str()));
+        for role in &self.scene_roles {
+            total = total.saturating_add(estimate_text_tokens(role.profile.name.as_str()));
         }
-        for character in &self.referenced_characters {
-            total = total.saturating_add(estimate_text_tokens(character.card.meta.name.as_str()));
+        for role in &self.referenced_roles {
+            total = total.saturating_add(estimate_text_tokens(role.profile.name.as_str()));
         }
         for entry in &self.relevant_knowledge {
             total = total.saturating_add(estimate_text_tokens(entry.content.as_str()));
         }
-        for entry in &self.character_index {
+        for entry in &self.role_index {
             total = total.saturating_add(estimate_text_tokens(entry.name.as_str()));
         }
         for constraint in &self.active_story_constraints {

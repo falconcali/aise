@@ -246,7 +246,7 @@ impl AssetStore for SqliteAssetStore {
             }
         }
         let card_json = serde_json::to_vec(&validated.card).map_err(|_| StoreError::Serialization {
-            kind: StoreSerializationErrorKind::InvalidCharacterState,
+            kind: StoreSerializationErrorKind::InvalidRoleState,
         })?;
         sqlx::query(
             "INSERT INTO character_cards (character_id, version, digest, card_json, canonical_json) \
@@ -306,10 +306,10 @@ impl AssetStore for SqliteAssetStore {
 
 fn hydrate_character(canonical_json: Vec<u8>, digest: String) -> Result<FrozenCharacterCard, StoreError> {
     let card: CharacterCard = serde_json::from_slice(&canonical_json).map_err(|_| StoreError::Serialization {
-        kind: StoreSerializationErrorKind::InvalidCharacterState,
+        kind: StoreSerializationErrorKind::InvalidRoleState,
     })?;
     let digest = Sha256Digest::try_new(&digest).map_err(|_| StoreError::Serialization {
-        kind: StoreSerializationErrorKind::InvalidCharacterState,
+        kind: StoreSerializationErrorKind::InvalidRoleState,
     })?;
     Ok(FrozenCharacterCard { card, digest })
 }

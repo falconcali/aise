@@ -18,7 +18,7 @@ pub use story_instance::snapshot::StoryReadSnapshot;
 pub use story_instance::state::CurrentScene;
 pub use story_sequence::{StoryContinuityError, StorySequence};
 pub use turn::{
-    BaselineContext, CharacterDecision, CharacterThinkRequest, CharacterView, ContextItem, NarrativeGraphStateIndex,
-    RetrievalAudience, RetrievalPlan, RetrievalRequest, RetrievalSignals, RetrievedContext, SnapshotLimits,
-    StoryGeneratorOutput, StoryStateExtractorOutput, WriterPlan, WriterStoryGoal,
+    BaselineContext, CharacterDecision, CharacterThinkRequest, ContextItem, NarrativeGraphStateIndex,
+    RetrievalAudience, RetrievalPlan, RetrievalRequest, RetrievalSignals, RetrievedContext, RoleContextView,
+    SnapshotLimits, StoryGeneratorOutput, StoryStateExtractorOutput, WriterPlan, WriterStoryGoal,
 };

@@ -4,6 +4,7 @@ use crate::domain::asset::frozen_ref::FrozenCharacterCardRef;
 use crate::domain::asset::ids::{SemanticVersion, Sha256Digest};
 use crate::persistence::asset_store::AssetStore;
 use crate::persistence::sqlite_asset_store::SqliteAssetStore;
+use crate::persistence::sqlite_store::SqliteStore;
 use crate::persistence::store::StoreError;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,6 +19,7 @@ fn temp_db_path(label: &str) -> String {
 
 async fn service_with_store(label: &str) -> (CharacterCardService, Arc<dyn AssetStore>, String) {
     let db = temp_db_path(label);
+    let _ = SqliteStore::connect(&db).await.unwrap();
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&db).await.unwrap();
     let service = CharacterCardService::new(asset_store.clone(), AssetLimitsConfig::default());
     (service, asset_store, db)

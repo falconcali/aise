@@ -1,9 +1,7 @@
 use crate::domain::asset::entity::KnowledgeEntity;
-use crate::domain::asset::ids::{
-    AttributeKey, CanonicalEventKey, FactKey, NarrativeConditionKey, NarrativeNodeKey, StoryRoleKey,
-};
+use crate::domain::asset::ids::{CanonicalEventKey, FactKey, NarrativeConditionKey, NarrativeNodeKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::RoleId;
 use crate::domain::narrative_graph::condition::{NarrativeCondition, RoleControllerKind, SemanticNarrativeCondition};
 use crate::domain::narrative_graph::definition::{
     NarrativeGraphDefinition, NarrativeLimits, NarrativeNodeDefinition, NarrativeNodeEffects,
@@ -24,25 +22,22 @@ impl NarrativeStateView for StubStateView {
     fn fact_value(&self, _fact_key: &FactKey) -> Result<Option<&ScalarValue>, NarrativeStateViewError> {
         Ok(None)
     }
-    fn character_attribute(
+    fn role_attribute(
         &self,
-        _role_key: &StoryRoleKey,
-        _attribute: &AttributeKey,
+        _role_id: &RoleId,
+        _attribute: &BoundedText,
     ) -> Result<Option<&ScalarValue>, NarrativeStateViewError> {
         Ok(None)
     }
     fn relationship_trust(
         &self,
-        _source_role_key: &StoryRoleKey,
-        _target_role_key: &StoryRoleKey,
+        _source_role_id: &RoleId,
+        _target_role_id: &RoleId,
     ) -> Result<Option<i16>, NarrativeStateViewError> {
         Ok(None)
     }
-    fn role_controller(&self, _role_key: &StoryRoleKey) -> Result<RoleControllerKind, NarrativeStateViewError> {
+    fn role_controller(&self, _role_id: &RoleId) -> Result<RoleControllerKind, NarrativeStateViewError> {
         Ok(RoleControllerKind::Ai)
-    }
-    fn character_id_for_role(&self, _role_key: &StoryRoleKey) -> Result<CharacterId, NarrativeStateViewError> {
-        Ok(CharacterId::from("char.stub"))
     }
 }
 

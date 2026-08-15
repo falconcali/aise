@@ -12,7 +12,7 @@ fn current_scene() -> CurrentScene {
         location_key: crate::domain::asset::ids::LocationKey::from("village"),
         time: BoundedText::try_new("morning", "time", 100).expect("bounded text"),
         description: BoundedText::try_new("scene", "description", 100).expect("bounded text"),
-        present_character_ids: Vec::new(),
+        present_role_ids: Vec::new(),
     }
 }
 
@@ -33,7 +33,7 @@ fn narrative_resolution() -> ValidatedNarrativeResolution {
 fn pass_cannot_contain_issues() {
     let change_set = ValidatedChangeSet::new(ValidatedChangeSetParts {
         story_text: BoundedText::try_new("story text", "story_text", 100).expect("bounded text"),
-        character_changes: Vec::new(),
+        role_changes: Vec::new(),
         relationship_changes: Vec::new(),
         knowledge_mutations: Vec::new(),
         current_scene: current_scene(),

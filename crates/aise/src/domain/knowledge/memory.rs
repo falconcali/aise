@@ -1,7 +1,7 @@
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{MemoryKind, TopicKey};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{CharacterId, MemoryId};
+use crate::domain::ids::{MemoryId, RoleId};
 use crate::domain::knowledge::query::KnowledgeSource;
 use serde::{Deserialize, Serialize};
 
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct MemoryEntry {
     pub id: MemoryId,
-    pub owner: CharacterId,
+    pub owner: RoleId,
     pub kind: MemoryKind,
     pub content: BoundedText,
     #[serde(default)]

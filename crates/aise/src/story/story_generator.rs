@@ -48,7 +48,7 @@ impl TurnExecutionPipeline for StoryGenerator {
         let constraint_count = projection.context.active_story_constraints.len();
         let active_goal_count = projection.context.narrative_direction.active_goals.len();
         let event_intent_count = projection.context.narrative_direction.event_intents.len();
-        let ai_character_count = projection.context.ai_characters.len();
+        let ai_character_count = projection.context.ai_roles.len();
         let story_summary_bytes = projection.context.story_continuity.story_summary.as_str().len();
         let story_summary_tokens = estimate_text_tokens(projection.context.story_continuity.story_summary.as_str());
         let recent_story_count = projection.context.story_continuity.recent_story.len();

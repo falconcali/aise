@@ -1,40 +1,27 @@
-use crate::domain::asset::character_card::CharacterCard;
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
-use crate::domain::asset::ids::{FactKey, PackId, Sha256Digest, StoryRoleKey, TopicKey};
-use crate::domain::asset::story_pack::{StoryProfile, StoryRole};
+use crate::domain::asset::ids::{FactKey, PackId, Sha256Digest, TopicKey};
+use crate::domain::asset::story_pack::StoryProfile;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::asset::world_book::TopicDefinition;
-use crate::domain::ids::{CharacterId, StoryId, StoryRevision, TurnId};
+use crate::domain::ids::{RoleId, StoryId, StoryRevision, TurnId};
 use crate::domain::narrative::{StoryContinuity, StorySegment, StorySegmentOrigin, StorySummary};
 use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
-use crate::domain::story_instance::binding::RoleBinding;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
+use crate::domain::story_instance::role::{StoryRole, StoryRoleView};
 use crate::domain::story_instance::snapshot::{KnowledgeSnapshotRef, StoryReadSnapshot, StoryReadSnapshotParts};
-use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings, RelationshipState};
+use crate::domain::story_instance::state::{CurrentScene, InstanceSettings, RelationshipState};
 use crate::domain::turn::SnapshotLimits;
 use crate::persistence::sqlite_error::SqliteStoreError;
 use crate::persistence::store::StoreError;
 use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 
-type StoryInstanceRow = (
-    i64,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-);
-type StoryPackRow = (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>);
-type InstanceProjectionLengths = (String, i64, i64, i64, i64, i64, i64, i64, i64, i64);
-type PackProjectionLengths = (i64, i64, i64, i64, i64);
+type StoryInstanceRow = (i64, String, String, String, String, String, String, String, String, String);
+type StoryPackRow = (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>);
+type InstanceProjectionLengths = (String, i64, i64, i64, i64, i64, i64, i64, i64);
+type PackProjectionLengths = (i64, i64, i64);
 
 pub(crate) async fn load_story_snapshot(
     pool: &SqlitePool,
@@ -43,7 +30,7 @@ pub(crate) async fn load_story_snapshot(
 ) -> Result<StoryReadSnapshot, StoreError> {
     let mut tx = pool.begin().await.map_err(SqliteStoreError::from)?;
     let instance_lengths: Option<InstanceProjectionLengths> = sqlx::query_as(
-        "SELECT i.pack_id, length(i.settings_json), length(i.bindings_json), length(i.characters_json), \
+        "SELECT i.pack_id, length(i.settings_json), length(i.roles_json), \
                 length(i.relationships_json), length(i.narrative_state_json), \
                 length(i.fact_values_json), length(s.current_scene), length(s.story_summary), \
                 length(s.active_constraints) \
@@ -56,8 +43,7 @@ pub(crate) async fn load_story_snapshot(
     let Some((
         projection_pack_id,
         settings_len,
-        bindings_len,
-        characters_len,
+        roles_len,
         relationships_len,
         narrative_state_len,
         fact_values_len,
@@ -74,23 +60,18 @@ pub(crate) async fn load_story_snapshot(
         "settings_json",
     )?;
     ensure_projection_length(
-        bindings_len,
-        projection_limit(limits.max_roles, limits.max_character_bytes, 1024)?,
-        "bindings_json",
-    )?;
-    ensure_projection_length(
-        characters_len,
-        projection_limit(limits.max_characters, limits.max_character_bytes, 1024)?,
-        "characters_json",
+        roles_len,
+        projection_limit(limits.max_roles, limits.max_role_bytes, 1024)?,
+        "roles_json",
     )?;
     ensure_projection_length(
         relationships_len,
-        projection_limit(limits.max_relationships, limits.max_character_bytes, 1024)?,
+        projection_limit(limits.max_relationships, limits.max_role_bytes, 1024)?,
         "relationships_json",
     )?;
     ensure_projection_length(
         narrative_state_len,
-        projection_limit(limits.max_narrative_nodes, limits.max_character_bytes, 1024)?,
+        projection_limit(limits.max_narrative_nodes, limits.max_role_bytes, 1024)?,
         "narrative_state_json",
     )?;
     ensure_projection_length(
@@ -100,7 +81,7 @@ pub(crate) async fn load_story_snapshot(
     )?;
     ensure_projection_length(
         scene_len,
-        projection_limit(limits.max_scene_characters, 256, limits.max_scene_bytes)?,
+        projection_limit(limits.max_scene_roles, 256, limits.max_scene_bytes)?,
         "current_scene",
     )?;
     ensure_projection_length(
@@ -118,26 +99,20 @@ pub(crate) async fn load_story_snapshot(
         "active_constraints",
     )?;
     let pack_lengths: Option<PackProjectionLengths> = sqlx::query_as(
-        "SELECT length(story_profile_json), length(role_definitions_json), length(narrative_definition_json), \
-                length(topic_dictionary_json), length(resolved_characters_json) \
+        "SELECT length(story_profile_json), length(narrative_definition_json), length(topic_dictionary_json) \
          FROM story_packs WHERE pack_id = ?",
     )
     .bind(&projection_pack_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(SqliteStoreError::from)?;
-    let Some((profile_len, roles_len, narrative_len, topics_len, cards_len)) = pack_lengths else {
+    let Some((profile_len, narrative_len, topics_len)) = pack_lengths else {
         return Err(StoreError::NotFound);
     };
     ensure_projection_length(profile_len, limits.max_story_profile_bytes, "story_profile_json")?;
     ensure_projection_length(
-        roles_len,
-        projection_limit(limits.max_roles, limits.max_character_bytes, 1024)?,
-        "role_definitions_json",
-    )?;
-    ensure_projection_length(
         narrative_len,
-        projection_limit(limits.max_narrative_nodes, limits.max_character_bytes, 1024)?,
+        projection_limit(limits.max_narrative_nodes, limits.max_role_bytes, 1024)?,
         "narrative_definition_json",
     )?;
     let topic_items = limits
@@ -155,16 +130,11 @@ pub(crate) async fn load_story_snapshot(
         })?;
     ensure_projection_length(
         topics_len,
-        projection_limit(topic_items, limits.max_character_bytes, 1024)?,
+        projection_limit(topic_items, limits.max_role_bytes, 1024)?,
         "topic_dictionary_json",
     )?;
-    ensure_projection_length(
-        cards_len,
-        projection_limit(limits.max_characters, limits.max_character_bytes, 1024)?,
-        "resolved_characters_json",
-    )?;
     let row: Option<StoryInstanceRow> = sqlx::query_as(
-        "SELECT s.revision, i.pack_id, i.settings_json, i.bindings_json, i.characters_json, \
+        "SELECT s.revision, i.pack_id, i.settings_json, i.roles_json, \
                 i.relationships_json, i.narrative_state_json, \
                 i.fact_values_json, s.current_scene, s.story_summary, s.active_constraints \
          FROM stories s \
@@ -179,8 +149,7 @@ pub(crate) async fn load_story_snapshot(
         revision,
         pack_id,
         settings_json,
-        bindings_json,
-        characters_json,
+        roles_json,
         relationships_json,
         narrative_state_json,
         fact_values_json,
@@ -193,8 +162,7 @@ pub(crate) async fn load_story_snapshot(
         return Err(StoreError::NotFound);
     };
     let pack_row: Option<StoryPackRow> = sqlx::query_as(
-        "SELECT pack_key, version, digest, story_profile_json, role_definitions_json, narrative_definition_json, \
-                topic_dictionary_json, resolved_characters_json \
+        "SELECT pack_key, version, digest, story_profile_json, narrative_definition_json, topic_dictionary_json \
          FROM story_packs WHERE pack_id = ?",
     )
     .bind(&pack_id)
@@ -206,10 +174,8 @@ pub(crate) async fn load_story_snapshot(
         pack_version,
         digest_raw,
         story_profile_json,
-        role_definitions_json,
         narrative_definition_json,
         topic_dictionary_json,
-        pack_characters_json,
     )) = pack_row
     else {
         tx.rollback().await.map_err(SqliteStoreError::from)?;
@@ -222,14 +188,6 @@ pub(crate) async fn load_story_snapshot(
     let digest = Sha256Digest::try_new(&digest_raw).map_err(|_| StoreError::Serialization {
         kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
     })?;
-    let resolved_characters: BTreeMap<crate::domain::asset::ids::CharacterAssetKey, CharacterCard> =
-        serde_json::from_slice(&pack_characters_json).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidCharacterState,
-        })?;
-    let role_definitions: BTreeMap<StoryRoleKey, StoryRole> =
-        serde_json::from_slice(&role_definitions_json).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-        })?;
     let narrative_definition: NarrativeGraphDefinition =
         serde_json::from_slice(&narrative_definition_json).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
@@ -242,19 +200,27 @@ pub(crate) async fn load_story_snapshot(
         serde_json::from_str(&settings_json).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
         })?;
-    let bindings: BTreeMap<StoryRoleKey, RoleBinding> =
-        serde_json::from_str(&bindings_json).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+    let roles: BTreeMap<RoleId, StoryRole> =
+        serde_json::from_str(&roles_json).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidRoleState,
         })?;
-    let character_states: BTreeMap<CharacterId, CharacterInstanceState> = serde_json::from_str(&characters_json)
-        .map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidCharacterState,
-        })?;
-    if character_states.len() > limits.max_characters {
+    if roles.len() > limits.max_roles {
         return Err(StoreError::ConstraintViolation {
-            constraint: "max_characters".into(),
+            constraint: "max_roles".into(),
         });
     }
+    for role in roles.values() {
+        let role_bytes = role.compact_byte_len().map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidRoleState,
+        })?;
+        if role_bytes > limits.max_role_bytes {
+            return Err(StoreError::ConstraintViolation {
+                constraint: "max_role_bytes".into(),
+            });
+        }
+    }
+    let roles: BTreeMap<RoleId, StoryRoleView> =
+        roles.into_iter().map(|(id, role)| (id, StoryRoleView::from(&role))).collect();
     let relationships: Vec<RelationshipState> =
         serde_json::from_str(&relationships_json).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
@@ -281,9 +247,9 @@ pub(crate) async fn load_story_snapshot(
             constraint: "max_scene_bytes".into(),
         });
     }
-    if current_scene.present_character_ids.len() > limits.max_scene_characters {
+    if current_scene.present_role_ids.len() > limits.max_scene_roles {
         return Err(StoreError::ConstraintViolation {
-            constraint: "max_scene_characters".into(),
+            constraint: "max_scene_roles".into(),
         });
     }
     let summary: StorySummary = serde_json::from_str(&story_summary_json).map_err(|_| StoreError::Serialization {
@@ -393,17 +359,6 @@ pub(crate) async fn load_story_snapshot(
             });
         }
     }
-    let mut character_cards = BTreeMap::new();
-    for binding in bindings.values() {
-        if let Some(card) = resolved_characters.get(&binding.character_asset.character_key) {
-            character_cards.insert(binding.character_id.clone(), card.clone());
-        }
-    }
-    if role_definitions.len() > limits.max_roles {
-        return Err(StoreError::ConstraintViolation {
-            constraint: "max_roles".into(),
-        });
-    }
     if story_profile.premise.as_str().len() > limits.max_story_profile_bytes {
         return Err(StoreError::ConstraintViolation {
             constraint: "max_story_profile_bytes".into(),
@@ -432,10 +387,7 @@ pub(crate) async fn load_story_snapshot(
         pack: pack_ref,
         story_profile,
         instance_settings,
-        role_definitions,
-        role_bindings: bindings,
-        character_cards,
-        character_states,
+        roles,
         current_scene,
         relationships,
         narrative_definition,
@@ -476,8 +428,9 @@ fn ensure_projection_length(actual: i64, maximum: usize, limit: &'static str) ->
 fn parse_entity(kind: &str, key: &str) -> Result<KnowledgeEntity, StoreError> {
     Ok(match kind {
         "world" => KnowledgeEntity::World(key.into()),
-        "role" => KnowledgeEntity::Role(key.into()),
-        "character" => KnowledgeEntity::Character(CharacterId::from(key.to_owned())),
+        "role" => KnowledgeEntity::Role(RoleId::try_new(key.to_owned()).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        })?),
         "location" => KnowledgeEntity::Location(key.into()),
         "scene" => KnowledgeEntity::Scene(key.into()),
         "narrative_node" => KnowledgeEntity::NarrativeNode(key.into()),

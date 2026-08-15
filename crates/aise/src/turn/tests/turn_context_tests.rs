@@ -1,25 +1,19 @@
 use super::*;
 use crate::config::{NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
-use crate::domain::asset::character_card::{
-    AssetSpecVersion, CharacterCard, CharacterMeta, CharacterProfile, CharacterSpec, SpeakingStyle,
-};
-use crate::domain::asset::frozen_ref::FrozenCharacterAssetRef;
-use crate::domain::asset::ids::{
-    CharacterAssetKey, LocationKey, PackId, PlayerId, SceneKey, SemanticVersion, Sha256Digest, StoryPackKey,
-    StoryRoleKey,
-};
-use crate::domain::asset::story_pack::{InitialRoleState, StoryProfile, StoryRole, StoryStyle};
+use crate::domain::asset::character_card::CharacterProfile;
+use crate::domain::asset::ids::{LocationKey, PackId, PlayerId, SceneKey, SemanticVersion, Sha256Digest, StoryPackKey};
+use crate::domain::asset::story_pack::{StoryProfile, StoryStyle};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::StoryRevision;
+use crate::domain::ids::{RoleId, StoryRevision};
 use crate::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySummary};
 use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
-use crate::domain::story_instance::binding::{RoleBinding, RoleController};
+use crate::domain::story_instance::role::{RoleController, StoryRole, StoryRoleState};
 use crate::domain::story_instance::snapshot::{KnowledgeSnapshotRef, StoryReadSnapshotParts};
-use crate::domain::story_instance::state::{CharacterInstanceState, CurrentScene, InstanceSettings};
+use crate::domain::story_instance::state::{CurrentScene, InstanceSettings};
 use crate::domain::turn::{
-    CharacterThinkRequest, CharacterView, NarrativeGraphStateIndex, RetrievalIndexScope, RetrievalPlan,
-    RetrievalSignals, WriterStoryGoal,
+    CharacterThinkRequest, NarrativeGraphStateIndex, RetrievalIndexScope, RetrievalPlan, RetrievalSignals,
+    RoleContextView, WriterStoryGoal,
 };
 use crate::turn::turn_contract::{IdempotencyKey, TurnCancellation};
 use std::collections::BTreeMap;
@@ -53,7 +47,7 @@ fn scene() -> CurrentScene {
         location_key: LocationKey::from("village"),
         time: bounded("morning"),
         description: bounded("scene"),
-        present_character_ids: Vec::new(),
+        present_role_ids: Vec::new(),
     }
 }
 
@@ -74,84 +68,42 @@ fn story_continuity() -> StoryContinuity {
     .unwrap()
 }
 
-fn player_view() -> CharacterView {
-    let character_id = CharacterId::from("player-1");
-    let role_key = StoryRoleKey::from("protagonist");
-    let card = CharacterCard {
-        spec: CharacterSpec::V3,
-        spec_version: AssetSpecVersion::V3_0,
-        character_key: CharacterAssetKey::from("player"),
-        meta: CharacterMeta {
-            name: bounded("Player"),
-            creator: None,
-            version: SemanticVersion::try_new("0.1.0").unwrap(),
-            tags: Vec::new(),
-        },
-        profile: CharacterProfile {
-            description: bounded("player"),
-            personality: Vec::new(),
-            values: Vec::new(),
-            fears: Vec::new(),
-            speaking_style: SpeakingStyle {
-                register: bounded("neutral"),
-                verbosity: bounded("medium"),
-                traits: Vec::new(),
-            },
-            dialogue_examples: Vec::new(),
-        },
-    };
-    let role = StoryRole {
+fn player_role() -> StoryRole {
+    StoryRole {
+        role_id: RoleId::try_new("protagonist").unwrap(),
+        controller: RoleController::Player(PlayerId::try_new("player-account-1").unwrap()),
         role_label: bounded("Protagonist"),
         narrative_function: bounded("hero"),
-        initial_state: InitialRoleState {
+        background: None,
+        effective_profile: CharacterProfile {
+            name: bounded("Player"),
+            appearance: None,
+            personality: None,
+            speaking_style: None,
+            dialogue_examples: Vec::new(),
+        },
+        source_character: None,
+        state: StoryRoleState {
             location: LocationKey::from("village"),
             goals: Vec::new(),
             attributes: BTreeMap::new(),
         },
-        initial_relationships: Vec::new(),
-        seed_memories: Vec::new(),
-    };
-    let binding = RoleBinding {
-        role_key: role_key.clone(),
-        character_id: character_id.clone(),
-        character_asset: FrozenCharacterAssetRef {
-            character_key: card.character_key.clone(),
-            version: card.meta.version.clone(),
-            digest: digest(),
-        },
-        controller: RoleController::Player(PlayerId::from("player-account-1")),
-        bound_at_ms: 0,
-    };
-    let state = CharacterInstanceState {
-        character_id: character_id.clone(),
-        role_key: role_key.clone(),
-        location: LocationKey::from("village"),
-        goals: Vec::new(),
-        attributes: BTreeMap::new(),
-    };
-    CharacterView {
-        character_id,
-        role_key,
-        role,
-        binding,
-        card,
-        state,
     }
 }
 
-fn sample_baseline(player: &CharacterView) -> BaselineContext {
+fn sample_baseline(player: &StoryRole) -> BaselineContext {
     BaselineContext {
         story_profile: story_profile(),
         instance_settings: InstanceSettings::default(),
-        player_character: player.clone(),
+        player_role: RoleContextView::from(&crate::domain::story_instance::role::StoryRoleView::from(player)),
         current_scene: scene(),
-        scene_characters: Vec::new(),
-        referenced_characters: Vec::new(),
+        scene_roles: Vec::new(),
+        referenced_roles: Vec::new(),
         relevant_knowledge: Vec::new(),
-        character_index_scope: RetrievalIndexScope::Complete,
+        role_index_scope: RetrievalIndexScope::Complete,
         knowledge_entry_index_scope: RetrievalIndexScope::Complete,
         knowledge_entry_index: Vec::new(),
-        character_index: Vec::new(),
+        role_index: Vec::new(),
         story_continuity: story_continuity(),
         active_story_constraints: Vec::new(),
         narrative_graph_state_index: NarrativeGraphStateIndex {
@@ -163,15 +115,12 @@ fn sample_baseline(player: &CharacterView) -> BaselineContext {
     }
 }
 
-fn sample_snapshot(player: &CharacterView) -> StoryReadSnapshot {
-    let mut role_definitions = BTreeMap::new();
-    role_definitions.insert(player.role_key.clone(), player.role.clone());
-    let mut role_bindings = BTreeMap::new();
-    role_bindings.insert(player.role_key.clone(), player.binding.clone());
-    let mut character_cards = BTreeMap::new();
-    character_cards.insert(player.character_id.clone(), player.card.clone());
-    let mut character_states = BTreeMap::new();
-    character_states.insert(player.character_id.clone(), player.state.clone());
+fn sample_snapshot(player: &StoryRole) -> StoryReadSnapshot {
+    let mut roles = BTreeMap::new();
+    roles.insert(
+        player.role_id.clone(),
+        crate::domain::story_instance::role::StoryRoleView::from(player),
+    );
     StoryReadSnapshot::try_from_parts(StoryReadSnapshotParts {
         story_id: StoryId::try_new("story-1").unwrap(),
         base_revision: StoryRevision::new(0),
@@ -183,10 +132,7 @@ fn sample_snapshot(player: &CharacterView) -> StoryReadSnapshot {
         },
         story_profile: story_profile(),
         instance_settings: InstanceSettings::default(),
-        role_definitions,
-        role_bindings,
-        character_cards,
-        character_states,
+        roles,
         current_scene: scene(),
         relationships: Vec::new(),
         narrative_definition: NarrativeGraphDefinition {
@@ -211,14 +157,14 @@ fn sample_snapshot(player: &CharacterView) -> StoryReadSnapshot {
 
 fn think_request(id: &str) -> CharacterThinkRequest {
     CharacterThinkRequest {
-        character_id: CharacterId::from(id),
+        role_id: RoleId::try_new(id).unwrap(),
         reason: bounded("present"),
     }
 }
 
 fn decision(id: &str, text: &str) -> CharacterDecision {
     CharacterDecision {
-        character_id: CharacterId::from(id),
+        role_id: RoleId::try_new(id).unwrap(),
         decision: bounded(text),
         suggested_utterance: None,
     }
@@ -248,7 +194,7 @@ fn build_ready_context(
     let trace = TraceRecorder::with_limits(budget.max_trace_spans());
     let mut ctx = TurnExecutionContext::new(identity, request, budget, control, trace).unwrap();
     ctx.complete_initialization().unwrap();
-    let player = player_view();
+    let player = player_role();
     ctx.set_prepared_context(sample_snapshot(&player), sample_baseline(&player))
         .unwrap();
     let plan = WriterPlan {
@@ -315,9 +261,9 @@ fn player_character_target_fails_before_assignment() {
     let mut ctx = build_ready_context(
         TurnConfig::default(),
         TurnContentLimitsConfig::default(),
-        vec![think_request("player-1")],
+        vec![think_request("protagonist")],
     );
-    let err = ctx.set_character_decisions(vec![decision("player-1", "act")]).unwrap_err();
+    let err = ctx.set_character_decisions(vec![decision("protagonist", "act")]).unwrap_err();
     assert_eq!(err.code(), "character_think_player_target");
     assert!(ctx.character_decisions().is_empty());
 }
@@ -360,10 +306,10 @@ fn failed_assignment_leaves_previous_collection_unchanged() {
         vec![think_request("npc-1")],
     );
     ctx.set_character_decisions(vec![decision("npc-1", "act")]).unwrap();
-    let before: Vec<CharacterId> = ctx.character_decisions().iter().map(|item| item.character_id.clone()).collect();
+    let before: Vec<RoleId> = ctx.character_decisions().iter().map(|item| item.role_id.clone()).collect();
     let err = ctx.set_character_decisions(Vec::new()).unwrap_err();
     assert_eq!(err.code(), "character_decision_count_mismatch");
-    let after: Vec<CharacterId> = ctx.character_decisions().iter().map(|item| item.character_id.clone()).collect();
+    let after: Vec<RoleId> = ctx.character_decisions().iter().map(|item| item.role_id.clone()).collect();
     assert_eq!(before, after);
     assert_eq!(ctx.character_decisions().len(), 1);
 }

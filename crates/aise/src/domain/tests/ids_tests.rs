@@ -132,7 +132,7 @@ fn character_id_and_role_id_with_duplicate_display_names_remain_distinct() {
 
 #[test]
 fn character_id_and_role_id_ordering_is_deterministic() {
-    let mut roles = vec![RoleId::try_new("zeta").unwrap(), RoleId::try_new("alpha").unwrap()];
+    let mut roles = [RoleId::try_new("zeta").unwrap(), RoleId::try_new("alpha").unwrap()];
     roles.sort();
     assert_eq!(roles[0].as_str(), "alpha");
     assert_eq!(roles[1].as_str(), "zeta");

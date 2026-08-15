@@ -1,10 +1,11 @@
 use crate::config::PlannerConfig;
 use crate::domain::asset::constraint::StoryConstraintRequirement;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
+use crate::domain::ids::RoleId;
 use crate::domain::narrative_graph::projector::NarrativePlan;
-use crate::domain::story_instance::binding::RoleController;
+use crate::domain::story_instance::role::RoleController;
 use crate::domain::story_instance::state::CastPolicy;
-use crate::domain::turn::{BaselineContext, CharacterView, RetrievalTargetId};
+use crate::domain::turn::{BaselineContext, RetrievalTargetId, RoleContextView};
 use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
@@ -15,9 +16,9 @@ pub const WRITER_PLANNER_FTI_SLOT: &str = "context.writer_planner.fti";
 
 #[derive(Debug, Clone)]
 pub struct WriterPlannerPromptContext {
-    pub character_targets: BTreeMap<RetrievalTargetId, crate::domain::ids::CharacterId>,
+    pub role_targets: BTreeMap<RetrievalTargetId, RoleId>,
     pub knowledge_targets: BTreeMap<RetrievalTargetId, crate::domain::knowledge::KnowledgeSourceId>,
-    pub provided_character_ids: Vec<crate::domain::ids::CharacterId>,
+    pub provided_role_ids: Vec<RoleId>,
     pub provided_knowledge_ids: Vec<crate::domain::knowledge::KnowledgeSourceId>,
 }
 
@@ -37,18 +38,13 @@ impl WriterPlannerPromptContextProjector {
         player_input: &BoundedText,
         config: &PlannerConfig,
     ) -> WriterPlannerPromptProjection {
-        let mut character_targets = BTreeMap::new();
-        let character_index = render_character_index(baseline, &mut character_targets);
+        let mut role_targets = BTreeMap::new();
+        let role_index = render_role_index(baseline, &mut role_targets);
         let mut knowledge_targets = BTreeMap::new();
         let knowledge_entry_index = render_knowledge_index(baseline, &mut knowledge_targets);
-        let provided_character_ids = std::iter::once(baseline.player_character.character_id.clone())
-            .chain(baseline.scene_characters.iter().map(|character| character.character_id.clone()))
-            .chain(
-                baseline
-                    .referenced_characters
-                    .iter()
-                    .map(|character| character.character_id.clone()),
-            )
+        let provided_role_ids = std::iter::once(baseline.player_role.role_id.clone())
+            .chain(baseline.scene_roles.iter().map(|role| role.role_id.clone()))
+            .chain(baseline.referenced_roles.iter().map(|role| role.role_id.clone()))
             .collect();
         let provided_knowledge_ids = baseline.relevant_knowledge.iter().map(|entry| entry.entry_id.clone()).collect();
         let continuity = &baseline.story_continuity;
@@ -66,18 +62,15 @@ impl WriterPlannerPromptContextProjector {
             ("current_scene".into(), Value::String(render_current_scene(baseline))),
             (
                 "player_character".into(),
-                Value::String(render_character(&baseline.player_character, "player", None)),
+                Value::String(render_role(&baseline.player_role, "player", None)),
             ),
             (
                 "scene_characters".into(),
-                Value::String(render_characters(&baseline.scene_characters, "ai")),
+                Value::String(render_roles(&baseline.scene_roles, "ai")),
             ),
-            (
-                "referenced_characters".into(),
-                Value::String(render_referenced_characters(baseline)),
-            ),
+            ("referenced_characters".into(), Value::String(render_referenced_roles(baseline))),
             ("relevant_knowledge".into(), Value::String(render_relevant_knowledge(baseline))),
-            ("character_index".into(), Value::String(character_index)),
+            ("character_index".into(), Value::String(role_index)),
             ("knowledge_entry_index".into(), Value::String(knowledge_entry_index)),
             ("narrative_plan".into(), Value::String(render_narrative_plan(narrative_plan))),
             ("active_story_constraints".into(), Value::String(render_constraints(baseline))),
@@ -89,9 +82,9 @@ impl WriterPlannerPromptContextProjector {
         )]);
         WriterPlannerPromptProjection {
             context: WriterPlannerPromptContext {
-                character_targets,
+                role_targets,
                 knowledge_targets,
-                provided_character_ids,
+                provided_role_ids,
                 provided_knowledge_ids,
             },
             rc_vars: RuntimePromptVars::new(rc_vars),
@@ -127,10 +120,10 @@ pub fn writer_planner_output_schema(config: &PlannerConfig) -> Value {
                                 {
                                     "type": "object",
                                     "additionalProperties": false,
-                                    "required": ["kind", "character_id"],
+                                    "required": ["kind", "role_id"],
                                     "properties": {
                                         "kind": {"const": "character"},
-                                        "character_id": {"type": "string", "minLength": 1}
+                                        "role_id": {"type": "string", "minLength": 1}
                                     }
                                 }
                             ]
@@ -161,9 +154,9 @@ pub fn writer_planner_output_schema(config: &PlannerConfig) -> Value {
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["character_id", "reason"],
+                    "required": ["role_id", "reason"],
                     "properties": {
-                        "character_id": {"type": "string", "minLength": 1},
+                        "role_id": {"type": "string", "minLength": 1},
                         "reason": {"type": "string", "minLength": 1, "maxLength": config.max_reason_bytes}
                     }
                 }
@@ -223,30 +216,25 @@ fn render_current_scene(baseline: &BaselineContext) -> String {
     .join("\n")
 }
 
-fn render_characters(characters: &[CharacterView], control: &str) -> String {
-    if characters.is_empty() {
+fn render_roles(roles: &[RoleContextView], control: &str) -> String {
+    if roles.is_empty() {
         return "None.".into();
     }
-    characters
+    roles
         .iter()
-        .map(|character| render_character(character, control, Some("- ")))
+        .map(|role| render_role(role, control, Some("- ")))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn render_referenced_characters(baseline: &BaselineContext) -> String {
-    if baseline.referenced_characters.is_empty() {
+fn render_referenced_roles(baseline: &BaselineContext) -> String {
+    if baseline.referenced_roles.is_empty() {
         return "None.".into();
     }
     baseline
-        .referenced_characters
+        .referenced_roles
         .iter()
-        .map(|character| {
-            format!(
-                "{}\n  presence: referenced_off_scene",
-                render_character(character, "ai", Some("- "))
-            )
-        })
+        .map(|role| format!("{}\n  presence: referenced_off_scene", render_role(role, "ai", Some("- "))))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -275,50 +263,47 @@ fn render_relevant_knowledge(baseline: &BaselineContext) -> String {
         .join("\n")
 }
 
-fn render_character(character: &CharacterView, control: &str, prefix: Option<&str>) -> String {
+fn render_role(role: &RoleContextView, control: &str, prefix: Option<&str>) -> String {
     let first = prefix.unwrap_or_default();
-    let profile = &character.card.profile;
+    let profile = &role.profile;
     [
-        format!("{first}character_id: {}", quoted(character.character_id.as_str())),
-        format!("  name: {}", quoted(character.card.meta.name.as_str())),
-        format!("  story_role: {}", quoted(character.role.role_label.as_str())),
+        format!("{first}role_id: {}", quoted(role.role_id.as_str())),
+        format!("  name: {}", quoted(profile.name.as_str())),
+        format!("  story_role: {}", quoted(role.role_label.as_str())),
         format!("  control: {control}"),
-        format!("  description: {}", quoted(profile.description.as_str())),
-        format!("  personality: {}", quoted_list(&profile.personality)),
-        format!("  values: {}", quoted_list(&profile.values)),
-        format!("  location: {}", quoted(character.state.location.as_str())),
-        format!("  goals: {}", quoted_list(&character.state.goals)),
-        format!("  attributes: {}", render_attributes(&character.state.attributes)),
+        format!("  appearance: {}", render_optional(profile.appearance.as_ref())),
+        format!("  personality: {}", render_optional(profile.personality.as_ref())),
+        format!("  speaking_style: {}", render_optional(profile.speaking_style.as_ref())),
+        format!("  location: {}", quoted(role.state.location.as_str())),
+        format!("  goals: {}", quoted_list(&role.state.goals)),
+        format!("  attributes: {}", render_attributes(&role.state.attributes)),
     ]
     .join("\n")
     .trim_start()
     .to_owned()
 }
 
-fn render_character_index(
-    baseline: &BaselineContext,
-    targets: &mut BTreeMap<RetrievalTargetId, crate::domain::ids::CharacterId>,
-) -> String {
-    let scope = match baseline.character_index_scope {
+fn render_role_index(baseline: &BaselineContext, targets: &mut BTreeMap<RetrievalTargetId, RoleId>) -> String {
+    let scope = match baseline.role_index_scope {
         crate::domain::turn::RetrievalIndexScope::Complete => "complete",
         crate::domain::turn::RetrievalIndexScope::Prefiltered => "prefiltered",
     };
-    if baseline.character_index.is_empty() {
+    if baseline.role_index.is_empty() {
         return format!("scope: {scope}\nentries: None.");
     }
     let entries = baseline
-        .character_index
+        .role_index
         .iter()
         .filter(|entry| !entry.player_controlled)
         .map(|entry| {
-            let target_id = RetrievalTargetId::for_character(&entry.character_id);
-            targets.insert(target_id.clone(), entry.character_id.clone());
+            let target_id = RetrievalTargetId::for_role(&entry.role_id);
+            targets.insert(target_id.clone(), entry.role_id.clone());
             format!(
-                "- target_id: {}\n  character_id: {}\n  name: {}\n  role: {}\n  control: ai\n  retrieval_hint: {}",
+                "- target_id: {}\n  role_id: {}\n  name: {}\n  role: {}\n  control: ai\n  retrieval_hint: {}",
                 quoted(target_id.as_str()),
-                quoted(entry.character_id.as_str()),
+                quoted(entry.role_id.as_str()),
                 quoted(entry.name.as_str()),
-                quoted(entry.role_key.as_str()),
+                quoted(entry.role_label.as_str()),
                 quoted(entry.narrative_function.as_str())
             )
         })
@@ -375,13 +360,7 @@ fn render_narrative_plan(plan: &NarrativePlan) -> String {
     let impulses = plan
         .character_impulses
         .iter()
-        .map(|impulse| {
-            format!(
-                "{}: {}",
-                quoted(impulse.target_character_id.as_str()),
-                quoted(impulse.goal.as_str())
-            )
-        })
+        .map(|impulse| format!("{}: {}", quoted(impulse.target_role_id.as_str()), quoted(impulse.goal.as_str())))
         .collect::<Vec<_>>()
         .join(", ");
     format!(
@@ -442,6 +421,10 @@ fn quoted_list(values: &[BoundedText]) -> String {
     )
 }
 
+fn render_optional(value: Option<&BoundedText>) -> String {
+    value.map(|value| quoted(value.as_str())).unwrap_or_else(|| "None.".into())
+}
+
 fn quoted(value: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "\"\"".into())
 }
@@ -462,13 +445,12 @@ fn scalar(value: &ScalarValue) -> String {
     }
 }
 
-pub fn is_ai_character(baseline: &BaselineContext, character_id: &crate::domain::ids::CharacterId) -> bool {
+pub fn is_ai_role(baseline: &BaselineContext, role_id: &RoleId) -> bool {
     baseline
-        .scene_characters
+        .scene_roles
         .iter()
-        .find(|character| &character.character_id == character_id)
-        .is_some_and(|character| {
-            matches!(character.binding.controller, RoleController::Ai)
-                && baseline.current_scene.present_character_ids.contains(character_id)
+        .find(|role| &role.role_id == role_id)
+        .is_some_and(|role| {
+            matches!(role.controller, RoleController::Ai) && baseline.current_scene.present_role_ids.contains(role_id)
         })
 }

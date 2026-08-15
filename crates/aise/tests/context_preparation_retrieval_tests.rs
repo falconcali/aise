@@ -3,7 +3,7 @@ use aise::context::TextMatcher;
 use aise::domain::asset::ids::TopicKey;
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::asset::world_book::{TopicDefinition, TopicDictionaryError, validate_topic_dictionary};
-use aise::domain::ids::CharacterId;
+use aise::domain::ids::RoleId;
 use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::text::estimate_text_tokens;
 use aise::domain::turn::{
@@ -184,7 +184,7 @@ fn retrieval_and_character_think_are_enabled_from_plan_collections() {
             }],
         },
         character_think_requests: vec![CharacterThinkRequest {
-            character_id: CharacterId::from("c-1"),
+            role_id: RoleId::try_new("c-1").unwrap(),
             reason: BoundedText::try_new("present", "reason", 64).unwrap(),
         }],
     };

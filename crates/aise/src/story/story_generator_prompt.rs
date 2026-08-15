@@ -1,12 +1,12 @@
 use crate::domain::asset::constraint::StoryConstraintRequirement;
 use crate::domain::asset::ids::SceneKey;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
-use crate::domain::ids::CharacterId;
+use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
-use crate::domain::story_instance::binding::RoleController;
+use crate::domain::story_instance::role::RoleController;
 use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::{BaselineContext, CharacterView, RetrievalAudience, StoryGeneratorOutput};
+use crate::domain::turn::{BaselineContext, RetrievalAudience, RoleContextView, StoryGeneratorOutput};
 use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
 use crate::turn::turn_context::TurnExecutionContext;
 use serde::Serialize;
@@ -23,8 +23,8 @@ pub struct StoryGeneratorPromptContext {
     pub instance_settings: Option<StoryGeneratorInstanceSettingsPromptView>,
     pub story_continuity: StoryContinuityPromptView,
     pub current_scene: StoryGeneratorScenePromptView,
-    pub player_character: StoryGeneratorCharacterPromptView,
-    pub ai_characters: Vec<StoryGeneratorCharacterPromptView>,
+    pub player_role: StoryGeneratorRolePromptView,
+    pub ai_roles: Vec<StoryGeneratorRolePromptView>,
     pub relevant_writer_knowledge: Vec<StoryGeneratorKnowledgePromptView>,
     pub story_goal: BoundedText,
     pub narrative_direction: StoryGeneratorNarrativeDirectionPromptView,
@@ -67,49 +67,52 @@ pub struct StoryGeneratorScenePromptView {
     pub location: BoundedText,
     pub time: BoundedText,
     pub situation: BoundedText,
-    pub present_character_ids: Vec<CharacterId>,
+    pub present_role_ids: Vec<RoleId>,
     pub observable_conditions: Vec<BoundedText>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CharacterControl {
+pub enum RoleControl {
     Player,
     Ai,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CharacterPresence {
+pub enum RolePresence {
     Present,
     DirectParticipant,
     Referenced,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct StoryGeneratorCharacterPromptView {
-    pub character_id: CharacterId,
+pub struct StoryGeneratorRolePromptView {
+    pub role_id: RoleId,
     pub name: BoundedText,
-    pub control: CharacterControl,
-    pub story_role: Option<BoundedText>,
-    pub profile: CharacterProfilePromptView,
-    pub state: CharacterStatePromptView,
-    pub presence: CharacterPresence,
+    pub control: RoleControl,
+    pub story_role: BoundedText,
+    pub profile: RoleProfilePromptView,
+    pub state: RoleStatePromptView,
+    pub presence: RolePresence,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CharacterProfilePromptView {
-    pub description: BoundedText,
-    pub personality: Vec<BoundedText>,
-    pub values: Vec<BoundedText>,
-    pub fears: Vec<BoundedText>,
-    pub speaking_register: BoundedText,
-    pub speaking_verbosity: BoundedText,
-    pub speaking_traits: Vec<BoundedText>,
+pub struct RoleProfilePromptView {
+    pub appearance: Option<BoundedText>,
+    pub personality: Option<BoundedText>,
+    pub speaking_style: Option<BoundedText>,
+    pub dialogue_examples: Vec<DialogueExamplePromptView>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CharacterStatePromptView {
+pub struct DialogueExamplePromptView {
+    pub situation: BoundedText,
+    pub response: BoundedText,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RoleStatePromptView {
     pub location: BoundedText,
     pub goals: Vec<BoundedText>,
     pub attributes: BTreeMap<String, ScalarValue>,
@@ -129,7 +132,7 @@ pub struct StoryGeneratorKnowledgePromptView {
 pub enum KnowledgeScopePromptView {
     ObjectiveWorld,
     PublicClaim,
-    CharacterMemory { owner: CharacterId },
+    CharacterMemory { owner: RoleId },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -154,7 +157,7 @@ pub enum ConstraintKindPromptView {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct StoryGeneratorCharacterDecisionPromptView {
-    pub character_id: CharacterId,
+    pub role_id: RoleId,
     pub name: BoundedText,
     pub decision: BoundedText,
     pub suggested_utterance: Option<BoundedText>,
@@ -174,12 +177,12 @@ pub enum StoryGeneratorProjectionError {
     MissingWriterPlan,
     #[error("story generator player input is invalid")]
     InvalidPlayerInput,
-    #[error("story generator character decision target is unknown: {character_id}")]
-    UnknownDecisionCharacter { character_id: CharacterId },
-    #[error("story generator character decision targets player character: {character_id}")]
-    PlayerCharacterDecision { character_id: CharacterId },
-    #[error("story generator character decision is duplicated: {character_id}")]
-    DuplicateCharacterDecision { character_id: CharacterId },
+    #[error("story generator character decision target is unknown: {role_id}")]
+    UnknownDecisionCharacter { role_id: RoleId },
+    #[error("story generator character decision targets player role: {role_id}")]
+    PlayerCharacterDecision { role_id: RoleId },
+    #[error("story generator character decision is duplicated: {role_id}")]
+    DuplicateCharacterDecision { role_id: RoleId },
     #[error("story generator required prompt data exceeds budget: {section}")]
     RequiredPromptDataExceedsBudget { section: &'static str },
     #[error("story generator prompt invariant violated: {code}")]
@@ -204,14 +207,14 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
         let plan = ctx.plan().ok_or(StoryGeneratorProjectionError::MissingWriterPlan)?;
         let player_input = BoundedText::try_new(ctx.player_input().to_owned(), "player_input", 4096)
             .map_err(|_| StoryGeneratorProjectionError::InvalidPlayerInput)?;
-        let player_character = project_character(
-            &baseline.player_character,
-            CharacterControl::Player,
-            CharacterPresence::Present,
+        let player_role = project_role(
+            &baseline.player_role,
+            RoleControl::Player,
+            RolePresence::Present,
             ctx.budget().max_item_bytes(),
         )?;
-        let ai_characters = project_ai_characters(baseline, ctx.budget().max_item_bytes())?;
-        let character_decisions = project_decisions(ctx, baseline, &ai_characters)?;
+        let ai_roles = project_ai_roles(baseline, ctx.budget().max_item_bytes())?;
+        let character_decisions = project_decisions(ctx, baseline, &ai_roles)?;
         let story_profile = StoryProfilePromptView {
             premise: baseline.story_profile.premise.clone(),
             language: baseline.story_profile.language.clone(),
@@ -242,7 +245,7 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
             )?,
             time: baseline.current_scene.time.clone(),
             situation: baseline.current_scene.description.clone(),
-            present_character_ids: baseline.current_scene.present_character_ids.clone(),
+            present_role_ids: baseline.current_scene.present_role_ids.clone(),
             observable_conditions: Vec::new(),
         };
         let relevant_writer_knowledge = project_writer_knowledge(ctx)?;
@@ -269,8 +272,8 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
             }),
             story_continuity,
             current_scene,
-            player_character,
-            ai_characters,
+            player_role,
+            ai_roles,
             relevant_writer_knowledge,
             story_goal: plan.story_goal.summary.clone(),
             narrative_direction,
@@ -313,61 +316,61 @@ fn bounded_key(
     })
 }
 
-fn project_ai_characters(
+fn project_ai_roles(
     baseline: &BaselineContext,
     max_item_bytes: usize,
-) -> Result<Vec<StoryGeneratorCharacterPromptView>, StoryGeneratorProjectionError> {
+) -> Result<Vec<StoryGeneratorRolePromptView>, StoryGeneratorProjectionError> {
     let mut seen = HashSet::new();
     baseline
-        .scene_characters
+        .scene_roles
         .iter()
-        .map(|character| {
-            let presence = if baseline.current_scene.present_character_ids.contains(&character.character_id) {
-                CharacterPresence::Present
+        .map(|role| {
+            let presence = if baseline.current_scene.present_role_ids.contains(&role.role_id) {
+                RolePresence::Present
             } else {
-                CharacterPresence::DirectParticipant
+                RolePresence::DirectParticipant
             };
-            (character, presence)
+            (role, presence)
         })
-        .chain(
-            baseline
-                .referenced_characters
-                .iter()
-                .map(|character| (character, CharacterPresence::Referenced)),
-        )
-        .filter(|(character, _)| {
-            character.character_id != baseline.player_character.character_id
-                && matches!(character.binding.controller, RoleController::Ai)
-                && seen.insert(character.character_id.clone())
+        .chain(baseline.referenced_roles.iter().map(|role| (role, RolePresence::Referenced)))
+        .filter(|(role, _)| {
+            role.role_id != baseline.player_role.role_id
+                && matches!(role.controller, RoleController::Ai)
+                && seen.insert(role.role_id.clone())
         })
-        .map(|(character, presence)| project_character(character, CharacterControl::Ai, presence, max_item_bytes))
+        .map(|(role, presence)| project_role(role, RoleControl::Ai, presence, max_item_bytes))
         .collect()
 }
 
-fn project_character(
-    character: &CharacterView,
-    control: CharacterControl,
-    presence: CharacterPresence,
+fn project_role(
+    role: &RoleContextView,
+    control: RoleControl,
+    presence: RolePresence,
     max_item_bytes: usize,
-) -> Result<StoryGeneratorCharacterPromptView, StoryGeneratorProjectionError> {
-    Ok(StoryGeneratorCharacterPromptView {
-        character_id: character.character_id.clone(),
-        name: character.card.meta.name.clone(),
+) -> Result<StoryGeneratorRolePromptView, StoryGeneratorProjectionError> {
+    Ok(StoryGeneratorRolePromptView {
+        role_id: role.role_id.clone(),
+        name: role.profile.name.clone(),
         control,
-        story_role: Some(character.role.role_label.clone()),
-        profile: CharacterProfilePromptView {
-            description: character.card.profile.description.clone(),
-            personality: character.card.profile.personality.clone(),
-            values: character.card.profile.values.clone(),
-            fears: character.card.profile.fears.clone(),
-            speaking_register: character.card.profile.speaking_style.register.clone(),
-            speaking_verbosity: character.card.profile.speaking_style.verbosity.clone(),
-            speaking_traits: character.card.profile.speaking_style.traits.clone(),
+        story_role: role.role_label.clone(),
+        profile: RoleProfilePromptView {
+            appearance: role.profile.appearance.clone(),
+            personality: role.profile.personality.clone(),
+            speaking_style: role.profile.speaking_style.clone(),
+            dialogue_examples: role
+                .profile
+                .dialogue_examples
+                .iter()
+                .map(|example| DialogueExamplePromptView {
+                    situation: example.situation.clone(),
+                    response: example.response.clone(),
+                })
+                .collect(),
         },
-        state: CharacterStatePromptView {
-            location: bounded_key(character.state.location.as_str(), "character_location", max_item_bytes)?,
-            goals: character.state.goals.clone(),
-            attributes: character
+        state: RoleStatePromptView {
+            location: bounded_key(role.state.location.as_str(), "role_location", max_item_bytes)?,
+            goals: role.state.goals.clone(),
+            attributes: role
                 .state
                 .attributes
                 .iter()
@@ -446,7 +449,7 @@ fn project_constraints(baseline: &BaselineContext) -> Vec<ActiveStoryConstraintP
 fn project_decisions(
     ctx: &TurnExecutionContext,
     baseline: &BaselineContext,
-    ai_characters: &[StoryGeneratorCharacterPromptView],
+    ai_roles: &[StoryGeneratorRolePromptView],
 ) -> Result<Vec<StoryGeneratorCharacterDecisionPromptView>, StoryGeneratorProjectionError> {
     let plan = ctx.plan().ok_or(StoryGeneratorProjectionError::MissingWriterPlan)?;
     if ctx.character_decisions().len() != plan.character_think_requests.len() {
@@ -454,37 +457,37 @@ fn project_decisions(
             code: "character_decision_count_mismatch",
         });
     }
-    let names = ai_characters
+    let names = ai_roles
         .iter()
-        .map(|character| (character.character_id.clone(), character.name.clone()))
+        .map(|role| (role.role_id.clone(), role.name.clone()))
         .collect::<HashMap<_, _>>();
     let mut seen = HashSet::new();
     ctx.character_decisions()
         .iter()
         .zip(&plan.character_think_requests)
         .map(|(decision, request)| {
-            if decision.character_id != request.character_id {
+            if decision.role_id != request.role_id {
                 return Err(StoryGeneratorProjectionError::Invariant {
                     code: "character_decision_order_mismatch",
                 });
             }
-            if decision.character_id == baseline.player_character.character_id {
+            if decision.role_id == baseline.player_role.role_id {
                 return Err(StoryGeneratorProjectionError::PlayerCharacterDecision {
-                    character_id: decision.character_id.clone(),
+                    role_id: decision.role_id.clone(),
                 });
             }
-            if !seen.insert(decision.character_id.clone()) {
+            if !seen.insert(decision.role_id.clone()) {
                 return Err(StoryGeneratorProjectionError::DuplicateCharacterDecision {
-                    character_id: decision.character_id.clone(),
+                    role_id: decision.role_id.clone(),
                 });
             }
-            let name = names.get(&decision.character_id).cloned().ok_or_else(|| {
+            let name = names.get(&decision.role_id).cloned().ok_or_else(|| {
                 StoryGeneratorProjectionError::UnknownDecisionCharacter {
-                    character_id: decision.character_id.clone(),
+                    role_id: decision.role_id.clone(),
                 }
             })?;
             Ok(StoryGeneratorCharacterDecisionPromptView {
-                character_id: decision.character_id.clone(),
+                role_id: decision.role_id.clone(),
                 name,
                 decision: decision.decision.clone(),
                 suggested_utterance: decision.suggested_utterance.clone(),
@@ -514,9 +517,9 @@ fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> RuntimePromptVa
         ("current_scene".into(), Value::String(render_scene(&context.current_scene))),
         (
             "player_character".into(),
-            Value::String(render_character(&context.player_character, None)),
+            Value::String(render_role(&context.player_role, None)),
         ),
-        ("ai_characters".into(), Value::String(render_characters(&context.ai_characters))),
+        ("ai_characters".into(), Value::String(render_roles(&context.ai_roles))),
         (
             "active_story_constraints".into(),
             Value::String(render_constraints(&context.active_story_constraints)),
@@ -587,38 +590,33 @@ fn render_scene(value: &StoryGeneratorScenePromptView) -> String {
         format!("location: {}", quoted(value.location.as_str())),
         format!("time: {}", quoted(value.time.as_str())),
         format!("situation: {}", quoted(value.situation.as_str())),
-        format!("present_character_ids: {}", id_list(&value.present_character_ids)),
+        format!("present_role_ids: {}", id_list(&value.present_role_ids)),
         format!("observable_conditions: {}", quoted_list(&value.observable_conditions)),
     ]
     .join("\n")
 }
 
-fn render_characters(values: &[StoryGeneratorCharacterPromptView]) -> String {
+fn render_roles(values: &[StoryGeneratorRolePromptView]) -> String {
     if values.is_empty() {
         return "None.".into();
     }
     values
         .iter()
-        .map(|value| render_character(value, Some("- ")))
+        .map(|value| render_role(value, Some("- ")))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn render_character(value: &StoryGeneratorCharacterPromptView, prefix: Option<&str>) -> String {
+fn render_role(value: &StoryGeneratorRolePromptView, prefix: Option<&str>) -> String {
     let control = match value.control {
-        CharacterControl::Player => "player",
-        CharacterControl::Ai => "ai",
+        RoleControl::Player => "player",
+        RoleControl::Ai => "ai",
     };
     let presence = match value.presence {
-        CharacterPresence::Present => "present",
-        CharacterPresence::DirectParticipant => "direct_participant",
-        CharacterPresence::Referenced => "referenced",
+        RolePresence::Present => "present",
+        RolePresence::DirectParticipant => "direct_participant",
+        RolePresence::Referenced => "referenced",
     };
-    let role = value
-        .story_role
-        .as_ref()
-        .map(|role| quoted(role.as_str()))
-        .unwrap_or_else(|| "None.".into());
     let attributes = if value.state.attributes.is_empty() {
         "None.".into()
     } else {
@@ -633,23 +631,33 @@ fn render_character(value: &StoryGeneratorCharacterPromptView, prefix: Option<&s
                 .join(", ")
         )
     };
+    let dialogue_examples = if value.profile.dialogue_examples.is_empty() {
+        "None.".into()
+    } else {
+        value
+            .profile
+            .dialogue_examples
+            .iter()
+            .map(|example| {
+                format!(
+                    "- situation: {}\n    response: {}",
+                    quoted(example.situation.as_str()),
+                    quoted(example.response.as_str())
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
     [
-        format!(
-            "{}character_id: {}",
-            prefix.unwrap_or_default(),
-            quoted(value.character_id.as_str())
-        ),
+        format!("{}role_id: {}", prefix.unwrap_or_default(), quoted(value.role_id.as_str())),
         format!("  name: {}", quoted(value.name.as_str())),
         format!("  control: {control}"),
         format!("  presence: {presence}"),
-        format!("  story_role: {role}"),
-        format!("  description: {}", quoted(value.profile.description.as_str())),
-        format!("  personality: {}", quoted_list(&value.profile.personality)),
-        format!("  values: {}", quoted_list(&value.profile.values)),
-        format!("  fears: {}", quoted_list(&value.profile.fears)),
-        format!("  speaking_register: {}", quoted(value.profile.speaking_register.as_str())),
-        format!("  speaking_verbosity: {}", quoted(value.profile.speaking_verbosity.as_str())),
-        format!("  speaking_traits: {}", quoted_list(&value.profile.speaking_traits)),
+        format!("  story_role: {}", quoted(value.story_role.as_str())),
+        format!("  appearance: {}", render_optional(value.profile.appearance.as_ref())),
+        format!("  personality: {}", render_optional(value.profile.personality.as_ref())),
+        format!("  speaking_style: {}", render_optional(value.profile.speaking_style.as_ref())),
+        format!("  dialogue_examples:\n{dialogue_examples}"),
         format!("  location: {}", quoted(value.state.location.as_str())),
         format!("  goals: {}", quoted_list(&value.state.goals)),
         format!("  attributes: {attributes}"),
@@ -742,8 +750,8 @@ fn render_decisions(values: &[StoryGeneratorCharacterDecisionPromptView]) -> Str
                 .map(|value| quoted(value.as_str()))
                 .unwrap_or_else(|| "None.".into());
             format!(
-                "- character_id: {}\n  name: {}\n  decision: {}\n  suggested_utterance: {suggested_utterance}",
-                quoted(value.character_id.as_str()),
+                "- role_id: {}\n  name: {}\n  decision: {}\n  suggested_utterance: {suggested_utterance}",
+                quoted(value.role_id.as_str()),
                 quoted(value.name.as_str()),
                 quoted(value.decision.as_str()),
             )
@@ -760,6 +768,10 @@ fn render_optional_text(value: &str) -> String {
     }
 }
 
+fn render_optional(value: Option<&BoundedText>) -> String {
+    value.map(|value| quoted(value.as_str())).unwrap_or_else(|| "None.".into())
+}
+
 fn quoted_list(values: &[BoundedText]) -> String {
     if values.is_empty() {
         return "None.".into();
@@ -770,7 +782,7 @@ fn quoted_list(values: &[BoundedText]) -> String {
     )
 }
 
-fn id_list(values: &[CharacterId]) -> String {
+fn id_list(values: &[RoleId]) -> String {
     if values.is_empty() {
         return "None.".into();
     }

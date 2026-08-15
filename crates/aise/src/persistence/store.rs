@@ -2,6 +2,7 @@ use crate::domain::ids::StoryRevision;
 use crate::domain::narrative::StoryTurn;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::info::StoryInfo;
+use crate::domain::story_instance::role::StoryRole;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::story_instance::state::CurrentScene;
 use crate::domain::turn::SnapshotLimits;
@@ -15,7 +16,7 @@ pub enum StoreSerializationErrorKind {
     InvalidTurnResult,
     InvalidEventPayload,
     InvalidWorldState,
-    InvalidCharacterState,
+    InvalidRoleState,
     InvalidMemory,
 }
 
@@ -63,14 +64,7 @@ pub struct MaterializedStoryInstanceSpec {
     pub story_id: crate::domain::ids::StoryId,
     pub pack: crate::domain::asset::frozen_ref::FrozenStoryPackRef,
     pub settings: crate::domain::story_instance::state::InstanceSettings,
-    pub bindings: std::collections::BTreeMap<
-        crate::domain::asset::ids::StoryRoleKey,
-        crate::domain::story_instance::binding::RoleBinding,
-    >,
-    pub characters: std::collections::BTreeMap<
-        crate::domain::ids::CharacterId,
-        crate::domain::story_instance::state::CharacterInstanceState,
-    >,
+    pub roles: std::collections::BTreeMap<crate::domain::ids::RoleId, StoryRole>,
     pub relationships: Vec<crate::domain::story_instance::state::RelationshipState>,
     pub knowledge: Vec<crate::domain::knowledge::KnowledgeEntry>,
     pub scene: CurrentScene,
@@ -85,14 +79,7 @@ pub struct MaterializedStoryInstanceSpec {
 #[derive(Debug, Clone)]
 pub struct StoryInstanceMeta {
     pub pack_id: crate::domain::asset::ids::PackId,
-    pub bindings: std::collections::BTreeMap<
-        crate::domain::asset::ids::StoryRoleKey,
-        crate::domain::story_instance::binding::RoleBinding,
-    >,
-    pub characters: std::collections::BTreeMap<
-        crate::domain::ids::CharacterId,
-        crate::domain::story_instance::state::CharacterInstanceState,
-    >,
+    pub roles: std::collections::BTreeMap<crate::domain::ids::RoleId, StoryRole>,
 }
 
 #[derive(Debug, Clone)]

@@ -1,35 +1,31 @@
-use crate::domain::asset::ids::{AttributeKey, FactKey, StoryRoleKey};
-use crate::domain::asset::validation::ScalarValue;
-use crate::domain::ids::CharacterId;
+use crate::domain::asset::ids::FactKey;
+use crate::domain::asset::validation::{BoundedText, ScalarValue};
+use crate::domain::ids::RoleId;
 use crate::domain::narrative_graph::condition::RoleControllerKind;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NarrativeStateViewError {
-    #[error("unknown role reference: {role_key}")]
-    UnknownRole { role_key: String },
-    #[error("unknown character reference for role: {role_key}")]
-    UnknownCharacter { role_key: String },
+    #[error("unknown role reference: {role_id}")]
+    UnknownRole { role_id: String },
 }
 
 pub trait NarrativeStateView {
     fn fact_value(&self, fact_key: &FactKey) -> Result<Option<&ScalarValue>, NarrativeStateViewError>;
 
-    fn character_attribute(
+    fn role_attribute(
         &self,
-        role_key: &StoryRoleKey,
-        attribute: &AttributeKey,
+        role_id: &RoleId,
+        attribute: &BoundedText,
     ) -> Result<Option<&ScalarValue>, NarrativeStateViewError>;
 
     fn relationship_trust(
         &self,
-        source_role_key: &StoryRoleKey,
-        target_role_key: &StoryRoleKey,
+        source_role_id: &RoleId,
+        target_role_id: &RoleId,
     ) -> Result<Option<i16>, NarrativeStateViewError>;
 
-    fn role_controller(&self, role_key: &StoryRoleKey) -> Result<RoleControllerKind, NarrativeStateViewError>;
-
-    fn character_id_for_role(&self, role_key: &StoryRoleKey) -> Result<CharacterId, NarrativeStateViewError>;
+    fn role_controller(&self, role_id: &RoleId) -> Result<RoleControllerKind, NarrativeStateViewError>;
 }
 
 pub struct CommittedNarrativeStateView<'a> {
@@ -40,20 +36,6 @@ impl<'a> CommittedNarrativeStateView<'a> {
     pub fn new(snapshot: &'a StoryReadSnapshot) -> Self {
         Self { snapshot }
     }
-
-    fn resolve_role_controller(&self, role_key: &StoryRoleKey) -> Result<RoleControllerKind, NarrativeStateViewError> {
-        let binding = self
-            .snapshot
-            .role_binding(role_key)
-            .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                role_key: role_key.as_str().to_owned(),
-            })?;
-        Ok(if binding.is_player_controlled() {
-            RoleControllerKind::Player
-        } else {
-            RoleControllerKind::Ai
-        })
-    }
 }
 
 impl NarrativeStateView for CommittedNarrativeStateView<'_> {
@@ -61,64 +43,61 @@ impl NarrativeStateView for CommittedNarrativeStateView<'_> {
         Ok(self.snapshot.fact_values().get(fact_key))
     }
 
-    fn character_attribute(
+    fn role_attribute(
         &self,
-        role_key: &StoryRoleKey,
-        attribute: &AttributeKey,
+        role_id: &RoleId,
+        attribute: &BoundedText,
     ) -> Result<Option<&ScalarValue>, NarrativeStateViewError> {
-        let binding = self
+        let role = self
             .snapshot
-            .role_binding(role_key)
+            .role(role_id)
             .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                role_key: role_key.as_str().to_owned(),
+                role_id: role_id.as_str().to_owned(),
             })?;
-        let character = self.snapshot.character_states().get(&binding.character_id).ok_or_else(|| {
-            NarrativeStateViewError::UnknownCharacter {
-                role_key: role_key.as_str().to_owned(),
-            }
-        })?;
-        Ok(character.attributes.get(attribute))
+        Ok(role
+            .state
+            .attributes
+            .iter()
+            .find(|(key, _)| key.as_str() == attribute.as_str())
+            .map(|(_, value)| value))
     }
 
     fn relationship_trust(
         &self,
-        source_role_key: &StoryRoleKey,
-        target_role_key: &StoryRoleKey,
+        source_role_id: &RoleId,
+        target_role_id: &RoleId,
     ) -> Result<Option<i16>, NarrativeStateViewError> {
-        let source =
-            self.snapshot
-                .role_binding(source_role_key)
-                .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                    role_key: source_role_key.as_str().to_owned(),
-                })?;
-        let target =
-            self.snapshot
-                .role_binding(target_role_key)
-                .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                    role_key: target_role_key.as_str().to_owned(),
-                })?;
+        if self.snapshot.role(source_role_id).is_none() {
+            return Err(NarrativeStateViewError::UnknownRole {
+                role_id: source_role_id.as_str().to_owned(),
+            });
+        }
+        if self.snapshot.role(target_role_id).is_none() {
+            return Err(NarrativeStateViewError::UnknownRole {
+                role_id: target_role_id.as_str().to_owned(),
+            });
+        }
         Ok(self
             .snapshot
             .relationships()
             .iter()
             .find(|relationship| {
-                relationship.source_character_id == source.character_id
-                    && relationship.target_character_id == target.character_id
+                &relationship.source_role_id == source_role_id && &relationship.target_role_id == target_role_id
             })
             .map(|relationship| relationship.trust))
     }
 
-    fn role_controller(&self, role_key: &StoryRoleKey) -> Result<RoleControllerKind, NarrativeStateViewError> {
-        self.resolve_role_controller(role_key)
-    }
-
-    fn character_id_for_role(&self, role_key: &StoryRoleKey) -> Result<CharacterId, NarrativeStateViewError> {
-        let binding = self
+    fn role_controller(&self, role_id: &RoleId) -> Result<RoleControllerKind, NarrativeStateViewError> {
+        let role = self
             .snapshot
-            .role_binding(role_key)
+            .role(role_id)
             .ok_or_else(|| NarrativeStateViewError::UnknownRole {
-                role_key: role_key.as_str().to_owned(),
+                role_id: role_id.as_str().to_owned(),
             })?;
-        Ok(binding.character_id.clone())
+        Ok(if role.is_player_controlled() {
+            RoleControllerKind::Player
+        } else {
+            RoleControllerKind::Ai
+        })
     }
 }

@@ -1,8 +1,9 @@
-use crate::domain::ids::{CharacterId, StoryId, StoryRevision};
+use crate::domain::ids::{RoleId, StoryId, StoryRevision};
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::info::StoryInfo;
+use crate::domain::story_instance::role::StoryRole;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
-use crate::domain::story_instance::state::{CharacterInstanceState, RelationshipKey, RelationshipState};
+use crate::domain::story_instance::state::{RelationshipKey, RelationshipState};
 use crate::domain::turn::SnapshotLimits;
 use crate::persistence::sqlite_error::SqliteStoreError;
 use crate::persistence::sqlite_snapshot;
@@ -109,11 +110,8 @@ impl Store for SqliteStore {
         spec: &crate::persistence::store::MaterializedStoryInstanceSpec,
     ) -> Result<StoryInfo, StoreError> {
         let mut tx = self.pool.begin().await.map_err(SqliteStoreError::from)?;
-        let bindings_json = serde_json::to_string(&spec.bindings).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-        })?;
-        let characters_json = serde_json::to_string(&spec.characters).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidCharacterState,
+        let roles_json = serde_json::to_string(&spec.roles).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidRoleState,
         })?;
         let relationships_json = serde_json::to_string(&spec.relationships).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
@@ -135,18 +133,18 @@ impl Store for SqliteStore {
             serde_json::to_string(&spec.active_constraints).map_err(|_| StoreError::Serialization {
                 kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
             })?;
-        let player_character_id = spec
-            .bindings
+        let player_role_id = spec
+            .roles
             .values()
-            .find(|binding| binding.is_player_controlled())
-            .map(|binding| binding.character_id.as_str().to_owned());
+            .find(|role| role.is_player_controlled())
+            .map(|role| role.role_id.as_str());
         sqlx::query(
-            "INSERT INTO stories (id, revision, player_character_id, created_at, \
+            "INSERT INTO stories (id, revision, player_role_id, created_at, \
              current_scene, story_summary, active_constraints) \
              VALUES (?, 0, ?, ?, ?, ?, ?)",
         )
         .bind(spec.story_id.as_str())
-        .bind(player_character_id.as_deref())
+        .bind(player_role_id)
         .bind(spec.created_at_ms)
         .bind(&scene_json)
         .bind("{\"text\":\"\",\"summarized_through\":null}")
@@ -156,15 +154,14 @@ impl Store for SqliteStore {
         .map_err(SqliteStoreError::from)?;
         sqlx::query(
             "INSERT INTO story_instances \
-             (story_id, pack_id, settings_json, bindings_json, characters_json, relationships_json, \
+             (story_id, pack_id, settings_json, roles_json, relationships_json, \
               narrative_state_json, fact_values_json, created_at_ms) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(spec.story_id.as_str())
         .bind(spec.pack.pack_id.as_str())
         .bind(&settings_json)
-        .bind(&bindings_json)
-        .bind(&characters_json)
+        .bind(&roles_json)
         .bind(&relationships_json)
         .bind(&narrative_state_json)
         .bind(&fact_values_json)
@@ -183,7 +180,7 @@ impl Store for SqliteStore {
                     story_id: &spec.story_id,
                     knowledge_kind: knowledge_kind_str(entry.kind()),
                     source_id: source_id.as_str(),
-                    memory_owner: entry.memory_owner().map(CharacterId::as_str),
+                    memory_owner: entry.memory_owner().map(RoleId::as_str),
                     content: entry.content().as_str(),
                     salience: entry.salience(),
                     source: entry.source(),
@@ -238,25 +235,21 @@ impl Store for SqliteStore {
         &self,
         story_id: &StoryId,
     ) -> Result<Option<crate::persistence::store::StoryInstanceMeta>, StoreError> {
-        let row: Option<(String, String, String)> =
-            sqlx::query_as("SELECT pack_id, bindings_json, characters_json FROM story_instances WHERE story_id = ?")
+        let row: Option<(String, String)> =
+            sqlx::query_as("SELECT pack_id, roles_json FROM story_instances WHERE story_id = ?")
                 .bind(story_id.as_str())
                 .fetch_optional(&self.pool)
                 .await
                 .map_err(SqliteStoreError::from)?;
-        let Some((pack_id, bindings_json, characters_json)) = row else {
+        let Some((pack_id, roles_json)) = row else {
             return Ok(None);
         };
-        let bindings = serde_json::from_str(&bindings_json).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-        })?;
-        let characters = serde_json::from_str(&characters_json).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidCharacterState,
+        let roles = serde_json::from_str(&roles_json).map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidRoleState,
         })?;
         Ok(Some(crate::persistence::store::StoryInstanceMeta {
             pack_id: crate::domain::asset::ids::PackId::from(pack_id),
-            bindings,
-            characters,
+            roles,
         }))
     }
 
@@ -305,14 +298,14 @@ impl Store for SqliteStore {
         }
 
         let state: Option<(i64, String, String, String)> = sqlx::query_as(
-            "SELECT s.revision, i.characters_json, i.relationships_json, i.narrative_state_json \
+            "SELECT s.revision, i.roles_json, i.relationships_json, i.narrative_state_json \
              FROM stories s JOIN story_instances i ON i.story_id = s.id WHERE s.id = ?",
         )
         .bind(commit.story_id.as_str())
         .fetch_optional(&mut *tx)
         .await
         .map_err(SqliteStoreError::from)?;
-        let Some((stored_revision, characters_json, relationships_json, narrative_state_json)) = state else {
+        let Some((stored_revision, roles_json, relationships_json, narrative_state_json)) = state else {
             return Err(StoreError::NotFound);
         };
         let base = commit.base_revision.get();
@@ -331,17 +324,17 @@ impl Store for SqliteStore {
         if sequence <= 0 {
             return Err(StoreError::LimitExceeded { limit: "turn_sequence" });
         }
-        let mut characters: std::collections::BTreeMap<CharacterId, CharacterInstanceState> =
-            serde_json::from_str(&characters_json).map_err(|_| StoreError::Serialization {
-                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidCharacterState,
+        let mut roles: std::collections::BTreeMap<RoleId, StoryRole> =
+            serde_json::from_str(&roles_json).map_err(|_| StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidRoleState,
             })?;
-        for change in commit.changes.character_changes() {
-            if !characters.contains_key(&change.character_id) || change.character_id != change.new_state.character_id {
+        for change in commit.changes.role_changes() {
+            let Some(role) = roles.get_mut(&change.role_id) else {
                 return Err(StoreError::ConstraintViolation {
-                    constraint: "character_change_reference".to_owned(),
+                    constraint: "role_change_reference".to_owned(),
                 });
-            }
-            characters.insert(change.character_id.clone(), change.new_state.clone());
+            };
+            role.state = change.new_state.clone();
         }
         let relationships: Vec<RelationshipState> =
             serde_json::from_str(&relationships_json).map_err(|_| StoreError::Serialization {
@@ -419,7 +412,7 @@ impl Store for SqliteStore {
         persist_instance_state(
             &mut tx,
             commit,
-            &characters,
+            &roles,
             relationships_by_key.into_values().collect(),
             &narrative_state,
         )
@@ -571,12 +564,12 @@ fn aggregate_llm_usage(
 async fn persist_instance_state(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     commit: &TurnCommitSpec,
-    characters: &std::collections::BTreeMap<CharacterId, CharacterInstanceState>,
+    roles: &std::collections::BTreeMap<RoleId, StoryRole>,
     relationships: Vec<RelationshipState>,
     narrative_state: &NarrativeRuntimeState,
 ) -> Result<(), StoreError> {
-    let characters_json = serde_json::to_string(characters).map_err(|_| StoreError::Serialization {
-        kind: crate::persistence::store::StoreSerializationErrorKind::InvalidCharacterState,
+    let roles_json = serde_json::to_string(roles).map_err(|_| StoreError::Serialization {
+        kind: crate::persistence::store::StoreSerializationErrorKind::InvalidRoleState,
     })?;
     let relationships_json = serde_json::to_string(&relationships).map_err(|_| StoreError::Serialization {
         kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
@@ -585,10 +578,10 @@ async fn persist_instance_state(
         kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
     })?;
     sqlx::query(
-        "UPDATE story_instances SET characters_json = ?, relationships_json = ?, \
+        "UPDATE story_instances SET roles_json = ?, relationships_json = ?, \
          narrative_state_json = ? WHERE story_id = ?",
     )
-    .bind(&characters_json)
+    .bind(&roles_json)
     .bind(&relationships_json)
     .bind(&narrative_state_json)
     .bind(commit.story_id.as_str())
@@ -628,7 +621,7 @@ async fn insert_knowledge_entry(
     })?;
     sqlx::query(
         "INSERT INTO knowledge_entries \
-         (story_id, source_id, knowledge_kind, memory_owner_character_id, content, salience, source_json, payload_json) \
+         (story_id, source_id, knowledge_kind, memory_owner_role_id, content, salience, source_json, payload_json) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(entry.story_id.as_str())
@@ -664,8 +657,7 @@ async fn write_knowledge_entity_and_topic_rows(
     for entity in entities {
         let (entity_kind, entity_key) = match entity {
             crate::domain::asset::entity::KnowledgeEntity::World(key) => ("world", key.as_str().to_owned()),
-            crate::domain::asset::entity::KnowledgeEntity::Role(key) => ("role", key.as_str().to_owned()),
-            crate::domain::asset::entity::KnowledgeEntity::Character(id) => ("character", id.as_str().to_owned()),
+            crate::domain::asset::entity::KnowledgeEntity::Role(id) => ("role", id.as_str().to_owned()),
             crate::domain::asset::entity::KnowledgeEntity::Location(key) => ("location", key.as_str().to_owned()),
             crate::domain::asset::entity::KnowledgeEntity::Scene(key) => ("scene", key.as_str().to_owned()),
             crate::domain::asset::entity::KnowledgeEntity::NarrativeNode(key) => {
@@ -719,7 +711,7 @@ async fn apply_knowledge_mutation(
                     story_id,
                     knowledge_kind: knowledge_kind_str(entry.kind()),
                     source_id: source_id_value.as_str(),
-                    memory_owner: entry.memory_owner().map(CharacterId::as_str),
+                    memory_owner: entry.memory_owner().map(RoleId::as_str),
                     content: entry.content().as_str(),
                     salience: entry.salience(),
                     source: entry.source(),
@@ -858,8 +850,7 @@ fn merge_knowledge_update(
                 entities: new.entities,
                 topics: new.topics,
                 salience: new.salience,
-                source_role_key: old.source_role_key,
-                source_character_id: new.source_character_id,
+                source_role_id: new.source_role_id,
                 truth_value: new.truth_value,
                 source: new.source,
             }))

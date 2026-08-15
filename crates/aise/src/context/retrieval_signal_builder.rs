@@ -1,11 +1,9 @@
 use crate::config::ContextPreparationConfig;
 use crate::context::error::ContextError;
 use crate::domain::asset::entity::KnowledgeEntity;
-use crate::domain::asset::ids::StoryRoleKey;
 use crate::domain::asset::text_matcher::{TextMatcher, normalize_match_text, term_matches};
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{EntitySignal, RetrievalSignalOrigin, RetrievalSignals, TopicSignal};
-use std::collections::BTreeSet;
 
 pub struct RetrievalSignalBuilder {
     config: ContextPreparationConfig,
@@ -24,15 +22,9 @@ impl RetrievalSignalBuilder {
         let scene = snapshot.current_scene();
         let mut entities = Vec::new();
         let mut topics = Vec::new();
-        let mut present = scene.present_character_ids.clone();
+        let mut present = scene.present_role_ids.clone();
         present.sort();
         present.dedup();
-        let mut active_role_keys: Vec<StoryRoleKey> = present
-            .iter()
-            .filter_map(|id| snapshot.character_states().get(id).map(|state| state.role_key.clone()))
-            .collect();
-        active_role_keys.sort();
-        active_role_keys.dedup();
 
         self.push_text_matches(
             player_input,
@@ -42,7 +34,7 @@ impl RetrievalSignalBuilder {
             &mut entities,
             &mut topics,
         )?;
-        self.push_structured_scene(scene, snapshot, &mut entities)?;
+        self.push_structured_scene(scene, &mut entities)?;
         self.push_text_matches(
             scene.description.as_str(),
             snapshot,
@@ -90,8 +82,7 @@ impl RetrievalSignalBuilder {
         Ok(RetrievalSignals {
             scene_key: scene.scene_key.clone(),
             location_key: scene.location_key.clone(),
-            present_character_ids: present,
-            active_role_keys,
+            present_role_ids: present,
             entities,
             topics,
         })
@@ -100,7 +91,6 @@ impl RetrievalSignalBuilder {
     fn push_structured_scene(
         &self,
         scene: &crate::domain::story_instance::state::CurrentScene,
-        snapshot: &StoryReadSnapshot,
         entities: &mut Vec<EntitySignal>,
     ) -> Result<(), ContextError> {
         entities.push(EntitySignal {
@@ -113,19 +103,12 @@ impl RetrievalSignalBuilder {
             origin: RetrievalSignalOrigin::Scene,
             priority: 1,
         });
-        for character_id in &scene.present_character_ids {
+        for role_id in &scene.present_role_ids {
             entities.push(EntitySignal {
-                entity: KnowledgeEntity::Character(character_id.clone()),
+                entity: KnowledgeEntity::Role(role_id.clone()),
                 origin: RetrievalSignalOrigin::Scene,
                 priority: 1,
             });
-            if let Some(state) = snapshot.character_states().get(character_id) {
-                entities.push(EntitySignal {
-                    entity: KnowledgeEntity::Role(state.role_key.clone()),
-                    origin: RetrievalSignalOrigin::Scene,
-                    priority: 1,
-                });
-            }
         }
         if entities.len() > self.config.max_signal_entities {
             return Err(ContextError::SignalLimitExceeded {
@@ -148,27 +131,16 @@ impl RetrievalSignalBuilder {
         if haystack.is_empty() {
             return Ok(());
         }
-        let mut role_hits: BTreeSet<StoryRoleKey> = BTreeSet::new();
-        for (role_key, role) in snapshot.role_definitions() {
+        for (role_id, role) in snapshot.roles() {
             let label = normalize_match_text(role.role_label.as_str());
-            if term_matches(&haystack, &label) {
-                role_hits.insert(role_key.clone());
+            let name = normalize_match_text(role.effective_profile.name.as_str());
+            if term_matches(&haystack, &label) || term_matches(&haystack, &name) {
+                entities.push(EntitySignal {
+                    entity: KnowledgeEntity::Role(role_id.clone()),
+                    origin,
+                    priority,
+                });
             }
-        }
-        for (character_id, card) in snapshot.character_cards() {
-            let name = normalize_match_text(card.meta.name.as_str());
-            if term_matches(&haystack, &name) {
-                if let Some(state) = snapshot.character_states().get(character_id) {
-                    role_hits.insert(state.role_key.clone());
-                }
-            }
-        }
-        for role_key in role_hits {
-            entities.push(EntitySignal {
-                entity: KnowledgeEntity::Role(role_key),
-                origin,
-                priority,
-            });
         }
         for entity in snapshot.entity_catalog() {
             let key = entity_match_text(entity);
@@ -194,8 +166,7 @@ impl RetrievalSignalBuilder {
 fn entity_match_text(entity: &KnowledgeEntity) -> String {
     match entity {
         KnowledgeEntity::World(key) => key.as_str().to_owned(),
-        KnowledgeEntity::Role(key) => key.as_str().to_owned(),
-        KnowledgeEntity::Character(id) => id.as_str().to_owned(),
+        KnowledgeEntity::Role(id) => id.as_str().to_owned(),
         KnowledgeEntity::Location(key) => key.as_str().to_owned(),
         KnowledgeEntity::Scene(key) => key.as_str().to_owned(),
         KnowledgeEntity::NarrativeNode(key) => key.as_str().to_owned(),

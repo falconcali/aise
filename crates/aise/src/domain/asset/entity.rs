@@ -1,5 +1,5 @@
 use crate::domain::asset::ids::{CanonicalEventKey, EntityKey, LocationKey, NarrativeNodeKey, SceneKey};
-use crate::domain::ids::{CharacterId, RoleId};
+use crate::domain::ids::RoleId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 pub enum KnowledgeEntity {
     World(EntityKey),
     Role(RoleId),
-    Character(CharacterId),
     Location(LocationKey),
     Scene(SceneKey),
     NarrativeNode(NarrativeNodeKey),

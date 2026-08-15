@@ -1,7 +1,7 @@
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{CharacterId, FactId, MemoryId};
+use crate::domain::ids::{FactId, MemoryId, RoleId};
 use crate::domain::knowledge::{KnowledgeIndexMatch, KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::domain::turn::RetrievalAudience;
@@ -83,7 +83,7 @@ async fn load_by_source_ids(
     let mut tx = pool.begin().await.map_err(SqliteStoreError::from)?;
     verify_snapshot(&mut tx, query.snapshot).await?;
     let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT e.source_id, e.knowledge_kind, e.memory_owner_character_id, e.content, \
+        "SELECT e.source_id, e.knowledge_kind, e.memory_owner_role_id, e.content, \
          length(CAST(e.content AS BLOB)) AS content_bytes, e.salience, e.source_json, e.payload_json, \
          length(CAST(e.payload_json AS BLOB)) AS payload_bytes \
          FROM knowledge_entries e WHERE e.story_id = ",
@@ -176,7 +176,7 @@ async fn load_hits(
     let mut tx = pool.begin().await.map_err(SqliteStoreError::from)?;
     verify_snapshot(&mut tx, snapshot).await?;
     let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT e.source_id, e.knowledge_kind, e.memory_owner_character_id, e.content, \
+        "SELECT e.source_id, e.knowledge_kind, e.memory_owner_role_id, e.content, \
          length(CAST(e.content AS BLOB)) AS content_bytes, e.salience, e.source_json, e.payload_json, \
          length(CAST(e.payload_json AS BLOB)) AS payload_bytes \
          FROM knowledge_entries e WHERE e.story_id = ",
@@ -237,8 +237,8 @@ fn validate_query(filter: &KnowledgeFilter, selector: &Selector<'_>, limit: usiz
                 constraint: "memory_owner_authorization_empty".into(),
             });
         }
-        RetrievalAudience::Character { character_id }
-            if includes_memory && filter.authorized_memory_owners.as_slice() != [character_id.clone()] =>
+        RetrievalAudience::Character { role_id }
+            if includes_memory && filter.authorized_memory_owners.as_slice() != [role_id.clone()] =>
         {
             return Err(StoreError::ConstraintViolation {
                 constraint: "memory_owner_authorization_mismatch".into(),
@@ -258,7 +258,7 @@ fn push_authorization(builder: &mut QueryBuilder<'_, Sqlite>, filter: &Knowledge
     match &filter.audience {
         RetrievalAudience::GlobalWriter => {
             if filter.knowledge_kinds.contains(&KnowledgeKind::Memory) {
-                builder.push(" AND (e.knowledge_kind != 'memory' OR e.memory_owner_character_id IN (");
+                builder.push(" AND (e.knowledge_kind != 'memory' OR e.memory_owner_role_id IN (");
                 let mut separated = builder.separated(", ");
                 for owner in &filter.authorized_memory_owners {
                     separated.push_bind(owner.as_str().to_owned());
@@ -266,10 +266,10 @@ fn push_authorization(builder: &mut QueryBuilder<'_, Sqlite>, filter: &Knowledge
                 builder.push("))");
             }
         }
-        RetrievalAudience::Character { character_id } => {
+        RetrievalAudience::Character { role_id } => {
             builder.push(" AND e.knowledge_kind != 'fact'");
-            builder.push(" AND (e.knowledge_kind != 'memory' OR e.memory_owner_character_id = ");
-            builder.push_bind(character_id.as_str().to_owned());
+            builder.push(" AND (e.knowledge_kind != 'memory' OR e.memory_owner_role_id = ");
+            builder.push_bind(role_id.as_str().to_owned());
             builder.push(")");
         }
     }
@@ -392,7 +392,7 @@ async fn verify_snapshot(
 fn materialize_row(row: &sqlx::sqlite::SqliteRow, max_item_bytes: usize) -> Result<KnowledgeRecord, StoreError> {
     let source_id_raw: String = row.try_get("source_id").map_err(SqliteStoreError::from)?;
     let kind_raw: String = row.try_get("knowledge_kind").map_err(SqliteStoreError::from)?;
-    let owner_raw: Option<String> = row.try_get("memory_owner_character_id").map_err(SqliteStoreError::from)?;
+    let owner_raw: Option<String> = row.try_get("memory_owner_role_id").map_err(SqliteStoreError::from)?;
     let content_raw: String = row.try_get("content").map_err(SqliteStoreError::from)?;
     let content_bytes: i64 = row.try_get("content_bytes").map_err(SqliteStoreError::from)?;
     let salience: i64 = row.try_get("salience").map_err(SqliteStoreError::from)?;
@@ -418,7 +418,7 @@ fn materialize_row(row: &sqlx::sqlite::SqliteRow, max_item_bytes: usize) -> Resu
         });
     }
     let kind = parse_kind(&kind_raw)?;
-    let memory_owner = owner_raw.map(CharacterId::from);
+    let memory_owner = owner_raw.map(RoleId::try_new).transpose().map_err(|_| invalid_record())?;
     if (kind == KnowledgeKind::Memory) != memory_owner.is_some() {
         return Err(invalid_record());
     }
@@ -484,8 +484,7 @@ fn make_source_id(kind: KnowledgeKind, value: String) -> KnowledgeSourceId {
 fn entity_parts(entity: &KnowledgeEntity) -> (&'static str, &str) {
     match entity {
         KnowledgeEntity::World(key) => ("world", key.as_str()),
-        KnowledgeEntity::Role(key) => ("role", key.as_str()),
-        KnowledgeEntity::Character(id) => ("character", id.as_str()),
+        KnowledgeEntity::Role(id) => ("role", id.as_str()),
         KnowledgeEntity::Location(key) => ("location", key.as_str()),
         KnowledgeEntity::Scene(key) => ("scene", key.as_str()),
         KnowledgeEntity::NarrativeNode(key) => ("narrative_node", key.as_str()),
