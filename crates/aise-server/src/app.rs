@@ -70,6 +70,7 @@ pub async fn build_services(
             config.aise.content.clone(),
             config.aise.context.clone(),
             config.aise.assets.clone(),
+            config.aise.narrative.clone(),
             config.aise.retrieval.clone(),
             knowledge,
         )))
@@ -77,7 +78,7 @@ pub async fn build_services(
             gateway.clone(),
             config.aise.planner.clone(),
             config.aise.retrieval.clone(),
-            config.aise.assets.clone(),
+            &config.aise.narrative,
         )))
         .retrieval(Box::new(retrieval))
         .character_think(Box::new(CharacterThinkPipeline::new(
@@ -104,7 +105,7 @@ pub async fn build_services(
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&config.aise.storage.database_url)
         .await
         .map_err(|error| anyhow::anyhow!("asset store connect failed: {error}"))?;
-    let importer = NativeAssetImporter::new(config.aise.assets.clone());
+    let importer = NativeAssetImporter::new(config.aise.assets.clone(), config.aise.narrative.clone());
     let pack_service = Arc::new(PackService::new(importer, asset_store.clone()));
     let instance_factory = Arc::new(StoryInstanceFactory::new(
         asset_store,
@@ -117,6 +118,7 @@ pub async fn build_services(
             max_relationships: config.aise.assets.max_relationships_per_role,
             max_opening_bytes: config.aise.content.max_recent_segment_bytes,
         },
+        config.aise.narrative.as_limits(),
     ));
 
     Ok(EngineServices {

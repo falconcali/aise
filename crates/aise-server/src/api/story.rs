@@ -113,6 +113,7 @@ pub async fn create_story_instance(
         &state.engine.config().content,
         &state.engine.config().context,
         &state.engine.config().assets,
+        &state.engine.config().narrative,
     );
     let snapshot = store
         .load_story_snapshot(&info.story_id, limits)
@@ -150,6 +151,7 @@ pub async fn get_story(
         &state.engine.config().content,
         &state.engine.config().context,
         &state.engine.config().assets,
+        &state.engine.config().narrative,
     );
     let snapshot = state
         .engine

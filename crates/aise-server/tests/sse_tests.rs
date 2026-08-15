@@ -1,4 +1,4 @@
-use aise::config::AssetLimitsConfig;
+use aise::config::{AssetLimitsConfig, NarrativeConfig};
 use aise::domain::asset::ids::{PlayerId, StoryRoleKey};
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
@@ -97,7 +97,10 @@ async fn story_instance_snapshot_is_available_for_sse_recovery_path() {
     let db = temp_db_path("sse");
     let store: Arc<dyn Store> = SqliteStore::connect(&db).await.unwrap();
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&db).await.unwrap();
-    let pack_service = PackService::new(NativeAssetImporter::new(AssetLimitsConfig::default()), asset_store.clone());
+    let pack_service = PackService::new(
+        NativeAssetImporter::new(AssetLimitsConfig::default(), NarrativeConfig::default()),
+        asset_store.clone(),
+    );
     let pack = pack_service
         .import(AssetInput::Json(valid_pack_json().as_bytes()))
         .await
@@ -113,6 +116,7 @@ async fn story_instance_snapshot_is_available_for_sse_recovery_path() {
             max_relationships: 64,
             max_opening_bytes: 8192,
         },
+        NarrativeConfig::default().as_limits(),
     );
     let story = factory
         .create(CreateStoryInstanceSpec {
@@ -128,6 +132,7 @@ async fn story_instance_snapshot_is_available_for_sse_recovery_path() {
         &aise::config::TurnContentLimitsConfig::default(),
         &aise::config::ContextPreparationConfig::default(),
         &aise::config::AssetLimitsConfig::default(),
+        &NarrativeConfig::default(),
     );
     let snapshot = store.load_story_snapshot(&story.story_id, limits).await.expect("snapshot");
     assert_eq!(snapshot.story_id(), &story.story_id);
