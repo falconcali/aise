@@ -16,7 +16,7 @@ pub struct TurnContentLimitsConfig {
     pub max_recent_segment_bytes: usize,
     pub max_recent_segment_tokens: u64,
     pub max_plan_bytes: usize,
-    pub max_character_thought_bytes: usize,
+    pub max_character_decision_bytes: usize,
     pub max_story_text_bytes: usize,
     pub max_state_extraction_bytes: usize,
     pub max_knowledge_change_bytes: usize,
@@ -40,7 +40,7 @@ impl Default for TurnContentLimitsConfig {
             max_recent_segment_bytes: 8192,
             max_recent_segment_tokens: 2048,
             max_plan_bytes: 4096,
-            max_character_thought_bytes: 1024,
+            max_character_decision_bytes: 1024,
             max_story_text_bytes: 16 * 1024,
             max_state_extraction_bytes: 32 * 1024,
             max_knowledge_change_bytes: 4 * 1024,
@@ -95,9 +95,9 @@ impl TurnContentLimitsConfig {
         if self.max_plan_bytes == 0 {
             return Err(ConfigError::Invalid("content.max_plan_bytes must be positive".into()));
         }
-        if self.max_character_thought_bytes == 0 {
+        if self.max_character_decision_bytes == 0 {
             return Err(ConfigError::Invalid(
-                "content.max_character_thought_bytes must be positive".into(),
+                "content.max_character_decision_bytes must be positive".into(),
             ));
         }
         if self.max_story_text_bytes == 0 {

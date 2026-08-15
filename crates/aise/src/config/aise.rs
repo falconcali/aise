@@ -83,14 +83,14 @@ impl AiseConfig {
                 "context.max_character_index must be <= content.max_characters".into(),
             ));
         }
-        if self.planner.max_character_think_requests > self.turn.max_character_thoughts {
+        if self.planner.max_character_think_requests > self.turn.max_character_decisions {
             return Err(ConfigError::Invalid(
-                "planner.max_character_think_requests must be <= turn.max_character_thoughts".into(),
+                "planner.max_character_think_requests must be <= turn.max_character_decisions".into(),
             ));
         }
-        if self.character_think.max_total_output_bytes > self.content.max_character_thought_bytes {
+        if self.character_think.max_total_output_bytes > self.content.max_character_decision_bytes {
             return Err(ConfigError::Invalid(
-                "character_think.max_total_output_bytes must be <= content.max_character_thought_bytes".into(),
+                "character_think.max_total_output_bytes must be <= content.max_character_decision_bytes".into(),
             ));
         }
         if self.planner.max_reason_bytes > self.character_think.max_thinking_focus_bytes {

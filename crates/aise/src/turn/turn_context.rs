@@ -4,7 +4,7 @@ use crate::domain::narrative_graph::projector::NarrativeProjection;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::{
-    BaselineContext, CharacterThought, ContextItem, RetrievalAudience, RetrievedContext, RetrievedContextLimits,
+    BaselineContext, CharacterDecision, ContextItem, RetrievalAudience, RetrievedContext, RetrievedContextLimits,
     WriterPlan,
 };
 use crate::domain::turn::{StoryGeneratorOutput, StoryStateExtractionEnvelope, StoryStateExtractorOutput};
@@ -36,7 +36,7 @@ pub struct TurnExecutionContext {
     plan: Option<WriterPlan>,
     narrative_projection: Option<NarrativeProjection>,
     retrieved: RetrievedContext,
-    thoughts: Vec<CharacterThought>,
+    character_decisions: Vec<CharacterDecision>,
     story: Option<StoryGeneratorOutput>,
     story_version: u32,
     extraction: Option<BoundStateExtraction>,
@@ -76,7 +76,7 @@ impl TurnExecutionContext {
             plan: None,
             narrative_projection: None,
             retrieved: RetrievedContext::default(),
-            thoughts: Vec::new(),
+            character_decisions: Vec::new(),
             story: None,
             story_version: 0,
             extraction: None,
@@ -155,8 +155,8 @@ impl TurnExecutionContext {
         &self.retrieved
     }
 
-    pub fn thoughts(&self) -> &[CharacterThought] {
-        &self.thoughts
+    pub fn character_decisions(&self) -> &[CharacterDecision] {
+        &self.character_decisions
     }
 
     pub fn story(&self) -> Option<&StoryGeneratorOutput> {
@@ -251,7 +251,7 @@ impl TurnExecutionContext {
     pub fn set_retrieved_context(&mut self, context: RetrievedContext) -> Result<(), TurnExecutionError> {
         self.expect_phase(TurnPhase::Planned)?;
         let limits = RetrievedContextLimits {
-            max_character_audiences: self.budget.max_character_thoughts(),
+            max_character_audiences: self.budget.max_character_decisions(),
             max_items_per_audience: self.budget.max_items_per_audience(),
             max_tokens_per_audience: self.budget.max_tokens_per_audience(),
             max_total_items: self.budget.max_total_items(),
@@ -333,40 +333,96 @@ impl TurnExecutionContext {
         Ok(())
     }
 
-    pub fn set_character_thoughts(&mut self, thoughts: Vec<CharacterThought>) -> Result<(), TurnExecutionError> {
+    pub fn set_character_decisions(&mut self, decisions: Vec<CharacterDecision>) -> Result<(), TurnExecutionError> {
         self.expect_phase(TurnPhase::Planned)?;
-        if thoughts.len() > self.budget.max_character_thoughts() {
+        if decisions.len() > self.budget.max_character_decisions() {
             return Err(TurnExecutionError::new(
                 TurnFailureKind::InvariantViolation,
-                "character_thought_limit",
+                "character_decision_limit",
                 Some(TurnStage::CharacterThink),
                 format!(
-                    "character thoughts {} exceeds budget {}",
-                    thoughts.len(),
-                    self.budget.max_character_thoughts()
+                    "character decisions {} exceeds budget {}",
+                    decisions.len(),
+                    self.budget.max_character_decisions()
                 ),
             ));
+        }
+        let plan = self.plan.as_ref().ok_or_else(|| {
+            TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "missing_writer_plan",
+                Some(TurnStage::CharacterThink),
+                "writer plan is required before character decisions",
+            )
+        })?;
+        if decisions.len() != plan.character_think_requests.len() {
+            return Err(TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "character_decision_count_mismatch",
+                Some(TurnStage::CharacterThink),
+                format!(
+                    "character decisions {} does not match request count {}",
+                    decisions.len(),
+                    plan.character_think_requests.len()
+                ),
+            ));
+        }
+        for (decision, request) in decisions.iter().zip(plan.character_think_requests.iter()) {
+            if decision.character_id != request.character_id {
+                return Err(TurnExecutionError::new(
+                    TurnFailureKind::InvariantViolation,
+                    "character_decision_order_mismatch",
+                    Some(TurnStage::CharacterThink),
+                    "character decision id does not match the paired request",
+                ));
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for decision in &decisions {
+            if !seen.insert(decision.character_id.clone()) {
+                return Err(TurnExecutionError::new(
+                    TurnFailureKind::InvariantViolation,
+                    "duplicate_character_decision",
+                    Some(TurnStage::CharacterThink),
+                    "character decision collection contains a duplicate target",
+                ));
+            }
+        }
+        if let Some(baseline) = &self.baseline {
+            if decisions
+                .iter()
+                .any(|decision| decision.character_id == baseline.player_character.character_id)
+            {
+                return Err(TurnExecutionError::new(
+                    TurnFailureKind::InvariantViolation,
+                    "character_think_player_target",
+                    Some(TurnStage::CharacterThink),
+                    "character decision targets the player character",
+                ));
+            }
         }
         let mut total_bytes = 0usize;
-        for thought in &thoughts {
-            total_bytes = total_bytes
-                .saturating_add(thought.perception.as_str().len())
-                .saturating_add(thought.emotion.as_str().len())
-                .saturating_add(thought.goal.as_str().len())
-                .saturating_add(thought.possible_action.as_str().len());
+        for decision in &decisions {
+            total_bytes = total_bytes.saturating_add(decision.decision.as_str().len()).saturating_add(
+                decision
+                    .suggested_utterance
+                    .as_ref()
+                    .map(|value| value.as_str().len())
+                    .unwrap_or(0),
+            );
         }
-        if total_bytes > self.budget.max_character_thought_bytes() {
+        if total_bytes > self.budget.max_character_decision_bytes() {
             return Err(TurnExecutionError::new(
                 TurnFailureKind::InvariantViolation,
-                "character_thought_byte_limit",
+                "character_decision_byte_limit",
                 Some(TurnStage::CharacterThink),
                 format!(
-                    "character thoughts {total_bytes} bytes exceeds budget {}",
-                    self.budget.max_character_thought_bytes()
+                    "character decisions {total_bytes} bytes exceeds budget {}",
+                    self.budget.max_character_decision_bytes()
                 ),
             ));
         }
-        self.thoughts = thoughts;
+        self.character_decisions = decisions;
         Ok(())
     }
 
@@ -410,7 +466,23 @@ impl TurnExecutionContext {
 
     pub fn skip_character_thinking(&mut self) -> Result<(), TurnExecutionError> {
         self.expect_phase(TurnPhase::Planned)?;
-        self.thoughts = Vec::new();
+        let plan = self.plan.as_ref().ok_or_else(|| {
+            TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "missing_writer_plan",
+                Some(TurnStage::CharacterThink),
+                "writer plan is required before character thinking",
+            )
+        })?;
+        if !plan.character_think_requests.is_empty() {
+            return Err(TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "character_thinking_not_skippable",
+                Some(TurnStage::CharacterThink),
+                "writer plan requests character thinking and cannot be skipped",
+            ));
+        }
+        self.character_decisions = Vec::new();
         Ok(())
     }
 
@@ -895,3 +967,7 @@ impl TurnLlmCallScope<'_> {
         self.trace.end_span_with(span, payload);
     }
 }
+
+#[cfg(test)]
+#[path = "tests/turn_context_tests.rs"]
+mod tests;

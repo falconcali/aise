@@ -10,7 +10,7 @@ pub use baseline::{
     BaselineContext, CharacterIndexEntry, CharacterView, KnowledgeEntryIndexEntry, NarrativeGraphStateIndex,
     RelevantKnowledge, SnapshotLimits,
 };
-pub use character::CharacterThought;
+pub use character::CharacterDecision;
 pub use extraction::{
     DeletableKnowledgeId, ExtractedCharacterState, NarrativeConditionJudgmentOutput, NarrativeConditionResult,
     NarrativeConditionStatus, ProposedKnowledgeMutation, ProposedKnowledgeValue, StoryCandidateVersion,

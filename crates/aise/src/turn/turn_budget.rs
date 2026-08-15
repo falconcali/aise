@@ -40,8 +40,8 @@ pub struct TurnBudgetLimits {
     pub max_retrieved_tokens: u64,
     pub max_item_bytes: usize,
     pub max_context_tokens: u64,
-    pub max_character_thoughts: usize,
-    pub max_character_thought_bytes: usize,
+    pub max_character_decisions: usize,
+    pub max_character_decision_bytes: usize,
     pub max_plan_bytes: usize,
     pub max_story_text_bytes: usize,
     pub max_state_extraction_bytes: usize,
@@ -82,8 +82,8 @@ impl TurnBudgetLimits {
             max_retrieved_tokens: retrieval.max_total_tokens,
             max_item_bytes: retrieval.max_item_bytes,
             max_context_tokens: turn.max_context_tokens,
-            max_character_thoughts: turn.max_character_thoughts,
-            max_character_thought_bytes: content.max_character_thought_bytes,
+            max_character_decisions: turn.max_character_decisions,
+            max_character_decision_bytes: content.max_character_decision_bytes,
             max_plan_bytes: content.max_plan_bytes,
             max_story_text_bytes: content.max_story_text_bytes,
             max_state_extraction_bytes: content.max_state_extraction_bytes,
@@ -193,12 +193,12 @@ impl TurnBudget {
         self.limits.max_context_tokens
     }
 
-    pub fn max_character_thoughts(&self) -> usize {
-        self.limits.max_character_thoughts
+    pub fn max_character_decisions(&self) -> usize {
+        self.limits.max_character_decisions
     }
 
-    pub fn max_character_thought_bytes(&self) -> usize {
-        self.limits.max_character_thought_bytes
+    pub fn max_character_decision_bytes(&self) -> usize {
+        self.limits.max_character_decision_bytes
     }
 
     pub fn max_plan_bytes(&self) -> usize {

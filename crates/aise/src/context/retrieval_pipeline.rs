@@ -101,7 +101,7 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
         let merged_count = merged.len();
         let partitions = partition_and_rank(merged, &self.config)?;
         let limits = RetrievedContextLimits {
-            max_character_audiences: ctx.budget().max_character_thoughts(),
+            max_character_audiences: ctx.budget().max_character_decisions(),
             max_items_per_audience: self.config.max_items_per_audience,
             max_tokens_per_audience: self.config.max_tokens_per_audience,
             max_total_items: self.config.max_total_items,
