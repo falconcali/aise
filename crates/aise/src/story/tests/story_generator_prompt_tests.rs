@@ -33,8 +33,8 @@ fn prompt_context() -> StoryGeneratorPromptContext {
             present_role_ids: vec![RoleId::try_new("player").unwrap()],
             observable_conditions: Vec::new(),
         },
-        player_role: role("player", RoleControl::Player),
-        ai_roles: vec![role("npc", RoleControl::Ai)],
+        player_role: role("player", CharacterPresence::Scene),
+        ai_roles: vec![role("npc", CharacterPresence::Scene)],
         relevant_writer_knowledge: Vec::new(),
         story_goal: bounded("goal-marker"),
         narrative_direction: StoryGeneratorNarrativeDirectionPromptView {
@@ -47,24 +47,22 @@ fn prompt_context() -> StoryGeneratorPromptContext {
     }
 }
 
-fn role(id: &str, control: RoleControl) -> StoryGeneratorRolePromptView {
+fn role(id: &str, presence: CharacterPresence) -> StoryGeneratorRolePromptView {
     StoryGeneratorRolePromptView {
         role_id: RoleId::try_new(id).unwrap(),
         name: bounded(id),
-        control,
-        story_role: bounded("role"),
-        profile: RoleProfilePromptView {
-            appearance: Some(bounded("description")),
-            personality: None,
-            speaking_style: Some(bounded("neutral, medium length")),
-            dialogue_examples: Vec::new(),
-        },
-        state: RoleStatePromptView {
-            location: bounded("hall"),
+        role_label: bounded("role"),
+        appearance: Some(bounded("description")),
+        personality: None,
+        speaking_style: Some(bounded("neutral, medium length")),
+        dialogue_examples: Vec::new(),
+        background: Some(bounded("background")),
+        state: StoryGeneratorRoleStatePromptView {
+            location: LocationKey::from("hall"),
             goals: Vec::new(),
             attributes: BTreeMap::new(),
         },
-        presence: RolePresence::Present,
+        presence,
     }
 }
 
@@ -118,7 +116,6 @@ fn story_generator_runtime_context_has_exact_section_order() {
         previous = current;
     }
     assert_eq!(rc.matches("{{ output_schema }}").count(), 0);
-    assert!(!rc.contains("AI Character Thoughts"));
     assert!(rc.rfind("## Player Input").unwrap() > rc.rfind("## AI Character Decisions").unwrap());
 }
 
@@ -167,7 +164,6 @@ fn runtime_projection_contains_only_allowlisted_semantic_sections() {
     assert!(!values.contains_key("narrative_state_view"));
     assert!(!values.contains_key("retrieval_signals"));
     assert!(values.contains_key("character_decisions"));
-    assert!(!values.contains_key("character_thoughts"));
 }
 
 #[test]
@@ -179,6 +175,60 @@ fn story_generator_schema_is_closed_and_complete() {
     assert_eq!(required.len(), 1);
     assert_eq!(schema["properties"]["story_text"]["minLength"], 1);
     assert_eq!(schema["properties"]["story_text"]["maxLength"], 8192);
+}
+
+#[test]
+fn full_role_rendering_uses_stage_visibility_contract() {
+    let mut value = role("guard", CharacterPresence::Referenced);
+    value.dialogue_examples = vec![dialogue_example("challenged", "State your business.")];
+    let rendered = render_role(&value, Some("- "));
+    assert!(rendered.starts_with("- role_id: \"guard\"\n  name: \"guard\""));
+    assert!(rendered.contains("\n  role: \"role\""));
+    assert!(rendered.contains("\n  presence: referenced"));
+    assert!(rendered.contains("\n  appearance: \"description\""));
+    assert!(rendered.contains("\n  speaking_style: \"neutral, medium length\""));
+    assert!(rendered.contains("\n  dialogue_examples:"));
+    assert!(rendered.contains("\n  background: \"background\""));
+    assert!(!rendered.contains("control:"));
+}
+
+#[test]
+fn player_role_rendering_omits_redundant_presence_and_controller() {
+    let rendered = render_role(&role("player", CharacterPresence::Scene), None);
+    assert!(!rendered.contains("presence:"));
+    assert!(!rendered.contains("control:"));
+}
+
+#[test]
+fn global_budget_prunes_dialogue_examples_by_descending_role_id() {
+    let mut context = prompt_context();
+    context.player_role.role_id = RoleId::try_new("a-player").unwrap();
+    context.player_role.dialogue_examples = vec![dialogue_example("player", "player response")];
+    context.ai_roles[0].role_id = RoleId::try_new("z-npc").unwrap();
+    context.ai_roles[0].dialogue_examples = vec![dialogue_example("npc", "npc response")];
+    let initial_tokens = runtime_tokens(&render_runtime_vars(&context));
+    let vars = prune_dialogue_examples_to_budget(&mut context, initial_tokens - 1, 0).expect("pruned");
+    assert!(runtime_tokens(&vars) < initial_tokens);
+    assert!(context.ai_roles[0].dialogue_examples.is_empty());
+    assert_eq!(context.player_role.dialogue_examples.len(), 1);
+}
+
+#[test]
+fn required_data_overflow_removes_all_examples_before_error() {
+    let mut context = prompt_context();
+    context.player_role.dialogue_examples = vec![dialogue_example("player", "response")];
+    context.ai_roles[0].dialogue_examples = vec![dialogue_example("npc", "response")];
+    let error = prune_dialogue_examples_to_budget(&mut context, 1, 0).unwrap_err();
+    assert!(matches!(error, StoryGeneratorProjectionError::RequiredPromptDataExceedsBudget));
+    assert!(context.player_role.dialogue_examples.is_empty());
+    assert!(context.ai_roles[0].dialogue_examples.is_empty());
+}
+
+fn dialogue_example(situation: &str, response: &str) -> DialogueExample {
+    DialogueExample {
+        situation: bounded(situation),
+        response: bounded(response),
+    }
 }
 
 fn section_item_count(text: &str, start: &str, end: &str) -> usize {

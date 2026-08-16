@@ -86,10 +86,11 @@ pub async fn build_services(
         .character_think(Box::new(CharacterThinkPipeline::new(
             gateway.clone(),
             config.aise.character_think.clone(),
+            config.aise.context.clone(),
         )))
-        .story_generator(Box::new(StoryGenerator::new(gateway.clone())))
+        .story_generator(Box::new(StoryGenerator::new(gateway.clone(), config.aise.context.clone())))
         .validation(Box::new(ValidationPipeline::default()))
-        .story_repairer(Box::new(StoryRepairer::new(gateway.clone())))
+        .story_repairer(Box::new(StoryRepairer::new(gateway.clone(), config.aise.context.clone())))
         .committer(Box::new(TurnCommitter::new(store.clone())))
         .build()?;
     let runtime = TurnRuntime::new(pipeline_set);

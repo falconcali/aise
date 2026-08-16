@@ -49,6 +49,17 @@ fn planner_output_rejects_unknown_fields() {
 }
 
 #[test]
+fn planner_output_rejects_legacy_character_identity_fields() {
+    for payload in [
+        r#"{"story_goal":"x","context_gaps":[],"character_think_requests":[{"character_id":"c-1","reason":"why"}]}"#,
+        r#"{"story_goal":"x","context_gaps":[],"character_think_requests":[{"role_key":"c-1","reason":"why"}]}"#,
+        r#"{"story_goal":"x","context_gaps":[{"audience":{"kind":"character","character_id":"c-1"},"target_id":null,"query_text":"need","reason":"why"}],"character_think_requests":[]}"#,
+    ] {
+        assert!(serde_json::from_str::<PlannerOutput>(payload).is_err());
+    }
+}
+
+#[test]
 fn planner_output_requires_non_null_arrays() {
     for payload in [
         r#"{"story_goal":"x","character_think_requests":[]}"#,

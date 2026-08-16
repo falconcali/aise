@@ -1,4 +1,4 @@
-use crate::domain::asset::ids::SceneKey;
+use crate::domain::asset::ids::{AttributeKey, LocationKey, SceneKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
@@ -45,9 +45,11 @@ pub struct StoryStateExtractorScenePromptView {
 #[derive(Debug, Clone, Serialize)]
 pub struct StoryStateExtractorRolePromptView {
     pub role_id: RoleId,
-    pub location: BoundedText,
+    pub name: BoundedText,
+    pub role_label: BoundedText,
+    pub location: LocationKey,
     pub goals: Vec<BoundedText>,
-    pub attributes: BTreeMap<String, ScalarValue>,
+    pub attributes: BTreeMap<AttributeKey, ScalarValue>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -138,18 +140,11 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
             .map(|role| {
                 Ok(StoryStateExtractorRolePromptView {
                     role_id: role.role_id.clone(),
-                    location: bounded_key(
-                        role.state.location.as_str(),
-                        "role_location",
-                        ctx.budget().max_item_bytes(),
-                    )?,
+                    name: role.effective_profile.name.clone(),
+                    role_label: role.role_label.clone(),
+                    location: role.state.location.clone(),
                     goals: role.state.goals.clone(),
-                    attributes: role
-                        .state
-                        .attributes
-                        .iter()
-                        .map(|(key, value)| (key.as_str().to_owned(), value.clone()))
-                        .collect(),
+                    attributes: role.state.attributes.clone(),
                 })
             })
             .collect::<Result<Vec<_>, StoryStateExtractorProjectionError>>()?;
@@ -403,17 +398,22 @@ fn render_roles(values: &[StoryStateExtractorRolePromptView]) -> String {
                     value
                         .attributes
                         .iter()
-                        .map(|(key, value)| format!("{}: {}", quoted(key), render_scalar(value)))
+                        .map(|(key, value)| format!("{}: {}", quoted(key.as_str()), render_scalar(value)))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
             };
-            format!(
-                "- role_id: {}\n  location: {}\n  goals: {}\n  attributes: {attributes}",
-                quoted(value.role_id.as_str()),
-                quoted(value.location.as_str()),
-                quoted_list(&value.goals)
-            )
+            let mut lines = vec![
+                format!("- role_id: {}", quoted(value.role_id.as_str())),
+                format!("  name: {}", quoted(value.name.as_str())),
+            ];
+            if value.role_label != value.name {
+                lines.push(format!("  role: {}", quoted(value.role_label.as_str())));
+            }
+            lines.push(format!("  location: {}", quoted(value.location.as_str())));
+            lines.push(format!("  goals: {}", quoted_list(&value.goals)));
+            lines.push(format!("  attributes: {attributes}"));
+            lines.join("\n")
         })
         .collect::<Vec<_>>()
         .join("\n")

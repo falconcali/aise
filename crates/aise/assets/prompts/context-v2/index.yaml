@@ -62,7 +62,7 @@ assets:
   - asset_id: context-v2/story-state-extractor-fti
     kind: text
     source_path: fti/story-state-extractor.md.j2
-    output_contract_ref: StoryStateExtractorOutput
+    output_contract_ref: StoryStateExtractionEnvelopeOutput
     status: active
 packs:
   - name: context-v2

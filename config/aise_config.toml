@@ -104,6 +104,8 @@ max_total_output_bytes = 1024
 [aise.context]
 max_scene_roles = 8
 max_role_index = 16
+max_dialogue_examples_per_role = 4
+max_dialogue_example_tokens_per_role = 256
 max_relationships = 64
 max_condition_event_keys = 256
 max_condition_fact_values = 256

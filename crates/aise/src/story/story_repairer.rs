@@ -1,3 +1,4 @@
+use crate::config::ContextPreparationConfig;
 use crate::domain::turn::StoryGeneratorOutput;
 use crate::llm::gateway::LlmGateway;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
@@ -18,10 +19,10 @@ pub struct StoryRepairer {
 }
 
 impl StoryRepairer {
-    pub fn new(gateway: Arc<LlmGateway>) -> Self {
+    pub fn new(gateway: Arc<LlmGateway>, context_config: ContextPreparationConfig) -> Self {
         Self {
             gateway,
-            projector: Arc::new(DefaultStoryRepairerPromptContextProjector::default()),
+            projector: Arc::new(DefaultStoryRepairerPromptContextProjector::with_context_config(context_config)),
         }
     }
 
@@ -113,6 +114,9 @@ fn map_projection_error(error: StoryRepairerProjectionError) -> TurnExecutionErr
         StoryRepairerProjectionError::EmptyValidationIssues => "empty_validation_issues",
         StoryRepairerProjectionError::PreviousStoryExceedsBounds => "previous_story_exceeds_bounds",
         StoryRepairerProjectionError::Invariant { .. } => "story_repairer_prompt_invariant",
+        StoryRepairerProjectionError::GenerationContext(
+            crate::story::story_generator_prompt::StoryGeneratorProjectionError::RequiredPromptDataExceedsBudget,
+        ) => "required_prompt_data_exceeds_budget",
         StoryRepairerProjectionError::GenerationContext(_) => "story_generator_projection_failed",
     };
     TurnExecutionError::new(

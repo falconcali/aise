@@ -9,14 +9,16 @@ fn prompt_context() -> CharacterThinkPromptContext {
         target_role: CharacterThinkRolePromptView {
             role_id: RoleId::try_new("character-a").unwrap(),
             name: bounded("A"),
+            role_label: bounded("A role"),
             appearance: Some(bounded("description")),
             personality: Some(bounded("careful")),
             speaking_style: Some(bounded("direct")),
+            dialogue_examples: Vec::new(),
         },
         current_role_state: CharacterThinkStatePromptView {
-            location: Some(bounded("hall")),
+            location: LocationKey::from("hall"),
             goals: vec![bounded("stay safe")],
-            relevant_attributes: Vec::new(),
+            attributes: Vec::new(),
         },
         story_continuity: CharacterThinkStoryContinuityPromptView {
             story_summary: bounded("summary-marker"),
@@ -162,4 +164,60 @@ fn instruction_like_rc_values_remain_data() {
     let values = vars.as_map();
     assert!(values["thinking_focus"].as_str().unwrap().contains(marker));
     assert!(values["player_input"].as_str().unwrap().contains(marker));
+}
+
+#[test]
+fn target_role_rendering_uses_role_identity_and_omits_absent_profile_fields() {
+    let view = CharacterThinkRolePromptView {
+        role_id: RoleId::try_new("guard").unwrap(),
+        name: bounded("Guard"),
+        role_label: bounded("Guard"),
+        appearance: None,
+        personality: Some(bounded("watchful")),
+        speaking_style: None,
+        dialogue_examples: Vec::new(),
+    };
+    let rendered = render_target_role(&view);
+    assert_eq!(rendered, "role_id: \"guard\"\nname: \"Guard\"\npersonality: \"watchful\"");
+    assert!(!rendered.contains("background"));
+    assert!(!rendered.contains("controller"));
+}
+
+#[test]
+fn dialogue_example_selection_preserves_order_and_count_limit() {
+    let examples = vec![
+        dialogue_example("one", "first"),
+        dialogue_example("two", "second"),
+        dialogue_example("three", "third"),
+    ];
+    let config = ContextPreparationConfig {
+        max_dialogue_examples_per_role: 2,
+        max_dialogue_example_tokens_per_role: 100,
+        ..ContextPreparationConfig::default()
+    };
+    let selected = select_dialogue_examples(&examples, &config);
+    assert_eq!(selected, examples[..2]);
+}
+
+#[test]
+fn dialogue_example_selection_omits_whole_example_over_token_limit() {
+    let examples = vec![
+        dialogue_example("1234", "5678"),
+        dialogue_example("12345678", "12345678"),
+    ];
+    let config = ContextPreparationConfig {
+        max_dialogue_examples_per_role: 4,
+        max_dialogue_example_tokens_per_role: 2,
+        ..ContextPreparationConfig::default()
+    };
+    let selected = select_dialogue_examples(&examples, &config);
+    assert_eq!(selected, examples[..1]);
+    assert_eq!(selected[0].response.as_str(), "5678");
+}
+
+fn dialogue_example(situation: &str, response: &str) -> DialogueExample {
+    DialogueExample {
+        situation: bounded(situation),
+        response: bounded(response),
+    }
 }

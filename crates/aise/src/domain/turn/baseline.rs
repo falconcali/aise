@@ -1,5 +1,5 @@
 use crate::domain::asset::character_card::CharacterProfile;
-use crate::domain::asset::ids::{LocationKey, NarrativeNodeKey, Sha256Digest};
+use crate::domain::asset::ids::{NarrativeNodeKey, Sha256Digest};
 use crate::domain::asset::story_pack::StoryProfile;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
@@ -68,12 +68,11 @@ impl RoleContextView {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RoleIndexEntry {
+    pub target_id: RetrievalTargetId,
     pub role_id: RoleId,
     pub name: BoundedText,
     pub role_label: BoundedText,
-    pub narrative_function: BoundedText,
-    pub location_key: LocationKey,
-    pub player_controlled: bool,
+    pub retrieval_hint: BoundedText,
 }
 
 #[derive(Debug, Clone, Serialize)]

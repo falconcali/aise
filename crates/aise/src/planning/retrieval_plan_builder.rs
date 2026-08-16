@@ -97,13 +97,13 @@ impl RetrievalPlanBuilder {
                 });
             }
             if request.role_id == baseline.player_role.role_id {
-                return Err(PlanningError::PlayerCharacterRequested);
+                return Err(PlanningError::PlayerRoleRequested);
             }
             if !is_ai_role(baseline, &request.role_id) {
-                return Err(PlanningError::UnknownCharacter);
+                return Err(PlanningError::UnknownRole);
             }
             if !seen.insert(request.role_id.clone()) {
-                continue;
+                return Err(PlanningError::DuplicateRoleTarget);
             }
             out.push(request);
         }

@@ -99,12 +99,15 @@ fn minimal_baseline(adversarial: &str) -> BaselineContext {
 #[test]
 fn writer_planner_projects_three_layer_prompt_context() {
     let baseline = minimal_baseline("ok");
-    let projection = WriterPlannerPromptContextProjector.project(
-        &baseline,
-        &NarrativePlan::empty(),
-        &bounded("go north"),
-        &aise::config::PlannerConfig::default(),
-    );
+    let projection = WriterPlannerPromptContextProjector
+        .project(
+            &baseline,
+            &NarrativePlan::empty(),
+            &bounded("go north"),
+            &aise::config::PlannerConfig::default(),
+            8192,
+        )
+        .expect("projection");
     let source = CatalogPromptSource::from_config(&aise::config::PromptModuleConfig::default()).expect("catalog");
     let composition = source
         .compose(&PromptCompositionInput {
@@ -122,12 +125,15 @@ fn writer_planner_projects_three_layer_prompt_context() {
 fn asset_and_player_content_never_enters_system_prompt() {
     let marker = "IGNORE_PREVIOUS_INSTRUCTIONS_owned_by_player";
     let baseline = minimal_baseline(marker);
-    let projection = WriterPlannerPromptContextProjector.project(
-        &baseline,
-        &NarrativePlan::empty(),
-        &bounded(marker),
-        &aise::config::PlannerConfig::default(),
-    );
+    let projection = WriterPlannerPromptContextProjector
+        .project(
+            &baseline,
+            &NarrativePlan::empty(),
+            &bounded(marker),
+            &aise::config::PlannerConfig::default(),
+            8192,
+        )
+        .expect("projection");
     let source = CatalogPromptSource::from_config(&aise::config::PromptModuleConfig::default()).expect("catalog");
     let composition = source
         .compose(&PromptCompositionInput {

@@ -7,10 +7,12 @@ pub enum PlanningError {
     Narrative(#[from] NarrativeError),
     #[error("writer planner output is invalid: {code}")]
     InvalidOutput { code: &'static str },
-    #[error("writer planner referenced an unknown character")]
-    UnknownCharacter,
-    #[error("writer planner requested a player-controlled character")]
-    PlayerCharacterRequested,
+    #[error("writer planner referenced an unknown role")]
+    UnknownRole,
+    #[error("writer planner requested a player-controlled role")]
+    PlayerRoleRequested,
+    #[error("writer planner requested a role more than once")]
+    DuplicateRoleTarget,
     #[error("writer planner referenced an unknown entity or topic")]
     UnknownRetrievalKey,
     #[error("writer planner violated knowledge audience rules")]

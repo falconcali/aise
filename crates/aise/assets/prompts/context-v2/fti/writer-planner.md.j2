@@ -8,7 +8,7 @@ Create the Writer Plan for the next story segment using the Runtime Context.
 - Set `story_goal` to the immediate narrative transition the next story segment should make.
 - Request only context not already provided in the Runtime Context that could materially affect that transition.
 - For every context gap, select the audience that needs the result and use exactly one retrieval form: copy an indexed `target_id` exactly when a suitable target exists; otherwise provide one bounded `query_text`.
-- Pair every character-scoped context gap with a Character Think request for the same character, and request Character Think only for existing AI-controlled characters whose private decisions could materially affect that transition.
+- Pair every character-scoped context gap with a Character Think request for the same exact Role ID (`role_id`), and request Character Think only for existing AI-controlled Roles whose private decisions could materially affect that transition.
 - Use empty arrays when no additional context or Character Think is needed.
 
 ## NEVER

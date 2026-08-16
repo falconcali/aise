@@ -117,7 +117,10 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
                 "story_id": story_id,
                 "turn_id": ctx.turn_id(),
                 "base_revision": snapshot.base_revision().get(),
-                "role_count": baseline.role_index.len() + baseline.scene_roles.len() + 1,
+                "role_count": baseline.role_index.len()
+                    + baseline.scene_roles.len()
+                    + baseline.referenced_roles.len()
+                    + 1,
                 "constraint_count": baseline.active_story_constraints.len(),
                 "entity_signal_count": baseline.retrieval_signals.entities.len(),
                 "topic_signal_count": baseline.retrieval_signals.topics.len(),
@@ -155,7 +158,7 @@ async fn build_baseline(
         .ok_or(ContextError::SnapshotInconsistent {
             code: "missing_player_role",
         })?;
-    let player_role = RoleContextView::from(player_role_view);
+    let player_role = project_role_context(player_role_view);
     let mut seen_scene = BTreeSet::from([player_role.role_id.clone()]);
     let mut scene_roles = Vec::new();
     for role_id in &snapshot.current_scene().present_role_ids {
@@ -170,13 +173,14 @@ async fn build_baseline(
         let role = snapshot.role(role_id).ok_or(ContextError::SnapshotInconsistent {
             code: "missing_scene_role",
         })?;
-        scene_roles.push(RoleContextView::from(role));
+        scene_roles.push(project_role_context(role));
         if scene_roles.len() > context_config.max_scene_roles {
             return Err(ContextError::SignalLimitExceeded {
                 limit: "max_scene_roles",
             });
         }
     }
+    scene_roles.sort_by(|left, right| left.role_id.cmp(&right.role_id));
     let retrieval_signals = signal_builder.build(snapshot, player_input)?;
     let referenced_ids = referenced_role_ids(&retrieval_signals, &seen_scene);
     let mut referenced_roles = Vec::new();
@@ -186,15 +190,14 @@ async fn build_baseline(
             continue;
         }
         if referenced_ids.contains(role_id) {
-            referenced_roles.push(RoleContextView::from(role));
+            referenced_roles.push(project_role_context(role));
         } else {
             role_index.push(RoleIndexEntry {
+                target_id: RetrievalTargetId::for_role(role_id),
                 role_id: role_id.clone(),
                 name: role.effective_profile.name.clone(),
                 role_label: role.role_label.clone(),
-                narrative_function: role.narrative_function.clone(),
-                location_key: role.state.location.clone(),
-                player_controlled: role.is_player_controlled(),
+                retrieval_hint: role.narrative_function.clone(),
             });
         }
     }
@@ -230,6 +233,10 @@ async fn build_baseline(
         },
         retrieval_signals,
     })
+}
+
+fn project_role_context(role: &crate::domain::story_instance::role::StoryRoleView) -> RoleContextView {
+    RoleContextView::from(role)
 }
 
 fn referenced_role_ids(
@@ -402,3 +409,7 @@ fn map_baseline_error(error: ContextError) -> TurnExecutionError {
         error.to_string(),
     )
 }
+
+#[cfg(test)]
+#[path = "tests/baseline_ctx_builder_tests.rs"]
+mod tests;

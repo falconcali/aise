@@ -1,8 +1,9 @@
 use crate::character::character_think_prompt::{
-    CharacterThinkPromptContextProjector, DefaultCharacterThinkPromptContextProjector,
+    CharacterThinkProjectionError, CharacterThinkPromptContextProjector, DefaultCharacterThinkPromptContextProjector,
 };
-use crate::config::CharacterThinkConfig;
+use crate::config::{CharacterThinkConfig, ContextPreparationConfig};
 use crate::domain::asset::validation::BoundedText;
+use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::CharacterDecision;
 use crate::domain::turn::character::CharacterDecisionOutput;
 use crate::llm::gateway::LlmGateway;
@@ -21,10 +22,14 @@ pub struct CharacterThinkPipeline {
 }
 
 impl CharacterThinkPipeline {
-    pub fn new(gateway: Arc<LlmGateway>, config: CharacterThinkConfig) -> Self {
+    pub fn new(
+        gateway: Arc<LlmGateway>,
+        config: CharacterThinkConfig,
+        context_config: ContextPreparationConfig,
+    ) -> Self {
         Self {
             gateway,
-            projector: DefaultCharacterThinkPromptContextProjector::new(config.clone()),
+            projector: DefaultCharacterThinkPromptContextProjector::new(config.clone(), context_config),
             config,
         }
     }
@@ -44,10 +49,30 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
         let mut decisions = Vec::with_capacity(plan.character_think_requests.len());
         for request in &plan.character_think_requests {
             let projection_started = Instant::now();
-            let projection = self
-                .projector
-                .project(ctx, request)
-                .map_err(|error| invariant(error.to_string()))?;
+            let projection = self.projector.project(ctx, request).map_err(map_projection_error)?;
+            let dialogue_example_count = projection.context.target_role.dialogue_examples.len();
+            let dialogue_example_tokens = projection
+                .context
+                .target_role
+                .dialogue_examples
+                .iter()
+                .map(|example| {
+                    estimate_text_tokens(example.situation.as_str())
+                        .saturating_add(estimate_text_tokens(example.response.as_str()))
+                })
+                .sum::<u64>();
+            let omitted_dialogue_example_count = ctx
+                .baseline()
+                .and_then(|baseline| baseline.scene_roles.iter().find(|role| role.role_id == request.role_id))
+                .map(|role| role.profile.dialogue_examples.len().saturating_sub(dialogue_example_count))
+                .unwrap_or(0);
+            let prompt_section_bytes = projection
+                .rc_vars
+                .as_map()
+                .values()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::len)
+                .sum::<usize>();
             tracing::info!(
                 story_id = %ctx.story_id(),
                 turn_id = %ctx.turn_id(),
@@ -55,6 +80,10 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                 recent_story_segments = projection.context.story_continuity.recent_story.len(),
                 character_knowledge_count = projection.context.relevant_character_knowledge.len(),
                 character_impulse_count = projection.context.narrative_character_impulses.len(),
+                dialogue_example_count,
+                dialogue_example_tokens,
+                omitted_dialogue_example_count,
+                prompt_section_bytes,
                 thinking_focus_bytes = projection.context.thinking_focus.as_str().len(),
                 projection_duration_ms = projection_started.elapsed().as_millis(),
                 "character think prompt projected"
@@ -122,6 +151,24 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
 
 fn invariant(message: impl Into<String>) -> TurnExecutionError {
     TurnExecutionError::invariant(message)
+}
+
+fn map_projection_error(error: CharacterThinkProjectionError) -> TurnExecutionError {
+    let code = match error {
+        CharacterThinkProjectionError::MissingStageState => "missing_stage_state",
+        CharacterThinkProjectionError::UnknownRole { .. } => "unknown_role",
+        CharacterThinkProjectionError::PlayerControlledRole { .. } => "player_controlled_role",
+        CharacterThinkProjectionError::RoleNotPresent { .. } => "role_not_present",
+        CharacterThinkProjectionError::UnauthorizedKnowledge { .. } => "unauthorized_knowledge",
+        CharacterThinkProjectionError::RequiredPromptDataExceedsBudget => "required_prompt_data_exceeds_budget",
+        CharacterThinkProjectionError::InvalidPromptField => "invalid_prompt_field",
+    };
+    TurnExecutionError::new(
+        TurnFailureKind::InvariantViolation,
+        code,
+        Some(TurnStage::CharacterThink),
+        error.to_string(),
+    )
 }
 
 fn model_output_invalid(message: impl Into<String>) -> TurnExecutionError {

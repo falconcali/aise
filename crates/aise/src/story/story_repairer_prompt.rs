@@ -1,9 +1,10 @@
+use crate::config::ContextPreparationConfig;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::text::estimate_text_tokens;
 use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
 use crate::story::story_generator_prompt::{
     DefaultStoryGeneratorPromptContextProjector, StoryGeneratorProjectionError, StoryGeneratorPromptContext,
-    StoryGeneratorPromptContextProjector,
+    StoryGeneratorPromptContextProjector, prune_dialogue_examples_to_budget,
 };
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_validation::{ValidationDecision, ValidationIssueCode, ValidationLocation};
@@ -74,11 +75,15 @@ impl DefaultStoryRepairerPromptContextProjector {
     pub fn new(generation_projector: Arc<dyn StoryGeneratorPromptContextProjector>) -> Self {
         Self { generation_projector }
     }
+
+    pub fn with_context_config(config: ContextPreparationConfig) -> Self {
+        Self::new(Arc::new(DefaultStoryGeneratorPromptContextProjector::new(config)))
+    }
 }
 
 impl Default for DefaultStoryRepairerPromptContextProjector {
     fn default() -> Self {
-        Self::new(Arc::new(DefaultStoryGeneratorPromptContextProjector))
+        Self::with_context_config(ContextPreparationConfig::default())
     }
 }
 
@@ -122,24 +127,19 @@ impl StoryRepairerPromptContextProjector for DefaultStoryRepairerPromptContextPr
                 })
             })
             .collect::<Result<Vec<_>, StoryRepairerProjectionError>>()?;
-        let generation = self.generation_projector.project(ctx)?;
+        let mut generation = self.generation_projector.project(ctx)?;
         let validation_issues_rendered = render_validation_issues(&validation_issues);
-        let mut rc_vars = generation.rc_vars.as_map().clone();
-        rc_vars.insert(
-            "previous_story_text".into(),
-            Value::String(quoted(previous_story.story_text.as_str())),
-        );
+        let previous_story_rendered = quoted(previous_story.story_text.as_str());
+        let extra_tokens = estimate_text_tokens(&previous_story_rendered)
+            .saturating_add(estimate_text_tokens(&validation_issues_rendered));
+        let generation_vars = prune_dialogue_examples_to_budget(
+            &mut generation.context,
+            ctx.budget().max_context_tokens(),
+            extra_tokens,
+        )?;
+        let mut rc_vars = generation_vars.as_map().clone();
+        rc_vars.insert("previous_story_text".into(), Value::String(previous_story_rendered));
         rc_vars.insert("validation_issues".into(), Value::String(validation_issues_rendered));
-        let input_tokens = rc_vars
-            .values()
-            .filter_map(Value::as_str)
-            .map(estimate_text_tokens)
-            .fold(0u64, u64::saturating_add);
-        if input_tokens > ctx.budget().max_context_tokens() {
-            return Err(StoryRepairerProjectionError::Invariant {
-                code: "required_prompt_data_exceeds_budget",
-            });
-        }
         Ok(StoryRepairerPromptProjection {
             context: StoryRepairerPromptContext {
                 generation: generation.context,

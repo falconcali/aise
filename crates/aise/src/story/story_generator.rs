@@ -1,3 +1,4 @@
+use crate::config::ContextPreparationConfig;
 use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::StoryGeneratorOutput;
@@ -21,10 +22,10 @@ pub struct StoryGenerator {
 }
 
 impl StoryGenerator {
-    pub fn new(gateway: Arc<LlmGateway>) -> Self {
+    pub fn new(gateway: Arc<LlmGateway>, context_config: ContextPreparationConfig) -> Self {
         Self {
             gateway,
-            projector: Arc::new(DefaultStoryGeneratorPromptContextProjector),
+            projector: Arc::new(DefaultStoryGeneratorPromptContextProjector::new(context_config)),
         }
     }
 
@@ -43,12 +44,42 @@ impl TurnExecutionPipeline for StoryGenerator {
         let projection_started = Instant::now();
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;
         let projection_ms = projection_started.elapsed().as_millis() as u64;
-        let decision_count = projection.context.character_decisions.len();
+        let decision_role_count = projection.context.character_decisions.len();
         let writer_knowledge_count = projection.context.relevant_writer_knowledge.len();
         let constraint_count = projection.context.active_story_constraints.len();
         let active_goal_count = projection.context.narrative_direction.active_goals.len();
         let event_intent_count = projection.context.narrative_direction.event_intents.len();
-        let ai_character_count = projection.context.ai_roles.len();
+        let ai_role_count = projection.context.ai_roles.len();
+        let dialogue_example_count = std::iter::once(&projection.context.player_role)
+            .chain(projection.context.ai_roles.iter())
+            .map(|role| role.dialogue_examples.len())
+            .sum::<usize>();
+        let dialogue_example_tokens = std::iter::once(&projection.context.player_role)
+            .chain(projection.context.ai_roles.iter())
+            .flat_map(|role| role.dialogue_examples.iter())
+            .map(|example| {
+                estimate_text_tokens(example.situation.as_str())
+                    .saturating_add(estimate_text_tokens(example.response.as_str()))
+            })
+            .sum::<u64>();
+        let source_dialogue_example_count = ctx
+            .baseline()
+            .map(|baseline| {
+                std::iter::once(&baseline.player_role)
+                    .chain(baseline.scene_roles.iter())
+                    .chain(baseline.referenced_roles.iter())
+                    .map(|role| role.profile.dialogue_examples.len())
+                    .sum::<usize>()
+            })
+            .unwrap_or(0);
+        let omitted_dialogue_example_count = source_dialogue_example_count.saturating_sub(dialogue_example_count);
+        let prompt_section_bytes = projection
+            .rc_vars
+            .as_map()
+            .values()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::len)
+            .sum::<usize>();
         let story_summary_bytes = projection.context.story_continuity.story_summary.as_str().len();
         let story_summary_tokens = estimate_text_tokens(projection.context.story_continuity.story_summary.as_str());
         let recent_story_count = projection.context.story_continuity.recent_story.len();
@@ -102,12 +133,16 @@ impl TurnExecutionPipeline for StoryGenerator {
         let max_output_tokens = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
         tracing::info!(
             prompt_profile = "story_generator",
-            decision_count,
+            decision_role_count,
             writer_knowledge_count,
             constraint_count,
             active_goal_count,
             event_intent_count,
-            ai_character_count,
+            ai_role_count,
+            dialogue_example_count,
+            dialogue_example_tokens,
+            omitted_dialogue_example_count,
+            prompt_section_bytes,
             story_summary_bytes,
             story_summary_tokens,
             recent_story_count,
@@ -124,7 +159,7 @@ impl TurnExecutionPipeline for StoryGenerator {
         let span = tracing::info_span!(
             "story_generator.generate",
             prompt_profile = "story_generator",
-            decision_count,
+            decision_role_count,
             writer_knowledge_count,
             constraint_count,
         );
@@ -169,12 +204,10 @@ fn map_projection_error(error: StoryGeneratorProjectionError) -> TurnExecutionEr
         StoryGeneratorProjectionError::MissingBaseline => "missing_baseline",
         StoryGeneratorProjectionError::MissingWriterPlan => "missing_writer_plan",
         StoryGeneratorProjectionError::InvalidPlayerInput => "invalid_player_input",
-        StoryGeneratorProjectionError::UnknownDecisionCharacter { .. } => "unknown_decision_character",
-        StoryGeneratorProjectionError::PlayerCharacterDecision { .. } => "player_character_decision",
-        StoryGeneratorProjectionError::DuplicateCharacterDecision { .. } => "duplicate_character_decision",
-        StoryGeneratorProjectionError::RequiredPromptDataExceedsBudget { .. } => {
-            "story_generator_prompt_budget_exceeded"
-        }
+        StoryGeneratorProjectionError::UnknownDecisionRole { .. } => "unknown_decision_role",
+        StoryGeneratorProjectionError::PlayerRoleDecision { .. } => "player_role_decision",
+        StoryGeneratorProjectionError::DuplicateRoleDecision { .. } => "duplicate_role_decision",
+        StoryGeneratorProjectionError::RequiredPromptDataExceedsBudget => "required_prompt_data_exceeds_budget",
         StoryGeneratorProjectionError::Invariant { code } => code,
     };
     TurnExecutionError::new(

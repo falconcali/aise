@@ -23,7 +23,7 @@ fn story_state_extractor_runtime_context_has_exact_section_order() {
     let headings = [
         "## Story Text",
         "## Pre-turn Current Scene",
-        "## Pre-turn Characters",
+        "## Pre-turn Roles",
         "## Pre-turn Relationships",
         "## Modifiable Knowledge",
         "## Narrative Condition Queries",
@@ -68,6 +68,33 @@ fn validation_issues_render_as_ordered_untrusted_diagnostics() {
 #[test]
 fn empty_validation_issues_render_canonical_none() {
     assert_eq!(render_validation_issues(&[]), "None.");
+}
+
+#[test]
+fn extractor_role_rendering_contains_state_identity_only() {
+    let rendered = render_roles(&[StoryStateExtractorRolePromptView {
+        role_id: RoleId::try_new("guard").unwrap(),
+        name: bounded("Guard"),
+        role_label: bounded("Captain"),
+        location: LocationKey::from("gate"),
+        goals: vec![bounded("hold the gate")],
+        attributes: BTreeMap::new(),
+    }]);
+    assert!(rendered.contains("- role_id: \"guard\""));
+    assert!(rendered.contains("  name: \"Guard\""));
+    assert!(rendered.contains("  role: \"Captain\""));
+    assert!(rendered.contains("  location: \"gate\""));
+    for excluded in [
+        "appearance:",
+        "personality:",
+        "speaking_style:",
+        "dialogue_examples:",
+        "background:",
+        "controller:",
+        "decision:",
+    ] {
+        assert!(!rendered.contains(excluded));
+    }
 }
 
 fn section_item_count(text: &str, start: &str, end: &str) -> usize {

@@ -1,4 +1,6 @@
-use crate::config::CharacterThinkConfig;
+use crate::config::{CharacterThinkConfig, ContextPreparationConfig};
+use crate::domain::asset::character_card::DialogueExample;
+use crate::domain::asset::ids::LocationKey;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::KnowledgeKind;
@@ -37,16 +39,18 @@ pub struct CharacterThinkStoryContinuityPromptView {
 pub struct CharacterThinkRolePromptView {
     pub role_id: RoleId,
     pub name: BoundedText,
+    pub role_label: BoundedText,
     pub appearance: Option<BoundedText>,
     pub personality: Option<BoundedText>,
     pub speaking_style: Option<BoundedText>,
+    pub dialogue_examples: Vec<DialogueExample>,
 }
 
 #[derive(Debug, Clone)]
 pub struct CharacterThinkStatePromptView {
-    pub location: Option<BoundedText>,
+    pub location: LocationKey,
     pub goals: Vec<BoundedText>,
-    pub relevant_attributes: Vec<CharacterStateAttributePromptView>,
+    pub attributes: Vec<CharacterStateAttributePromptView>,
 }
 
 #[derive(Debug, Clone)]
@@ -93,16 +97,16 @@ pub struct CharacterThinkPromptProjection {
 pub enum CharacterThinkProjectionError {
     #[error("character think stage state is missing")]
     MissingStageState,
-    #[error("character think target is the player role")]
-    PlayerCharacterTarget,
-    #[error("character think target is unknown or off-scene")]
-    InvalidTarget,
-    #[error("character think target is not AI-controlled")]
-    NonAiTarget,
-    #[error("character think private knowledge is unauthorized")]
-    UnauthorizedKnowledge,
-    #[error("character think prompt input budget exceeded")]
-    InputBudgetExceeded,
+    #[error("character think role is unknown: {role_id}")]
+    UnknownRole { role_id: RoleId },
+    #[error("character think role is player-controlled: {role_id}")]
+    PlayerControlledRole { role_id: RoleId },
+    #[error("character think role is not present: {role_id}")]
+    RoleNotPresent { role_id: RoleId },
+    #[error("character think private knowledge is unauthorized for role: {role_id}")]
+    UnauthorizedKnowledge { role_id: RoleId },
+    #[error("character think required prompt data exceeds budget")]
+    RequiredPromptDataExceedsBudget,
     #[error("character think prompt field is invalid")]
     InvalidPromptField,
 }
@@ -116,12 +120,16 @@ pub trait CharacterThinkPromptContextProjector {
 }
 
 pub struct DefaultCharacterThinkPromptContextProjector {
-    config: CharacterThinkConfig,
+    character_config: CharacterThinkConfig,
+    context_config: ContextPreparationConfig,
 }
 
 impl DefaultCharacterThinkPromptContextProjector {
-    pub fn new(config: CharacterThinkConfig) -> Self {
-        Self { config }
+    pub fn new(character_config: CharacterThinkConfig, context_config: ContextPreparationConfig) -> Self {
+        Self {
+            character_config,
+            context_config,
+        }
     }
 }
 
@@ -134,28 +142,48 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
         let baseline = ctx.baseline().ok_or(CharacterThinkProjectionError::MissingStageState)?;
         let _plan = ctx.plan().ok_or(CharacterThinkProjectionError::MissingStageState)?;
         if request.reason.as_str().trim().is_empty()
-            || request.reason.as_str().len() > self.config.max_thinking_focus_bytes
+            || request.reason.as_str().len() > self.character_config.max_thinking_focus_bytes
         {
             return Err(CharacterThinkProjectionError::InvalidPromptField);
         }
         if request.role_id == baseline.player_role.role_id {
-            return Err(CharacterThinkProjectionError::PlayerCharacterTarget);
+            return Err(CharacterThinkProjectionError::PlayerControlledRole {
+                role_id: request.role_id.clone(),
+            });
         }
         let role = baseline
             .scene_roles
             .iter()
-            .find(|candidate| candidate.role_id == request.role_id)
-            .ok_or(CharacterThinkProjectionError::InvalidTarget)?;
+            .find(|candidate| candidate.role_id == request.role_id);
+        let Some(role) = role else {
+            if baseline
+                .referenced_roles
+                .iter()
+                .any(|candidate| candidate.role_id == request.role_id)
+                || baseline.role_index.iter().any(|candidate| candidate.role_id == request.role_id)
+            {
+                return Err(CharacterThinkProjectionError::RoleNotPresent {
+                    role_id: request.role_id.clone(),
+                });
+            }
+            return Err(CharacterThinkProjectionError::UnknownRole {
+                role_id: request.role_id.clone(),
+            });
+        };
         if !baseline.current_scene.present_role_ids.contains(&request.role_id) {
-            return Err(CharacterThinkProjectionError::InvalidTarget);
+            return Err(CharacterThinkProjectionError::RoleNotPresent {
+                role_id: request.role_id.clone(),
+            });
         }
         if !matches!(role.controller, RoleController::Ai) {
-            return Err(CharacterThinkProjectionError::NonAiTarget);
+            return Err(CharacterThinkProjectionError::PlayerControlledRole {
+                role_id: request.role_id.clone(),
+            });
         }
         let player_input = BoundedText::try_new(
             ctx.player_input().to_owned(),
             "player_input",
-            self.config.max_input_tokens.saturating_mul(4) as usize,
+            self.character_config.max_input_tokens.saturating_mul(4) as usize,
         )
         .map_err(|_| CharacterThinkProjectionError::InvalidPromptField)?;
         let relevant_character_knowledge = project_knowledge(ctx, &request.role_id)?;
@@ -172,24 +200,19 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
                 reason: impulse.reason.clone(),
             })
             .collect();
-        let target_role = CharacterThinkRolePromptView {
+        let mut target_role = CharacterThinkRolePromptView {
             role_id: role.role_id.clone(),
             name: role.profile.name.clone(),
+            role_label: role.role_label.clone(),
             appearance: role.profile.appearance.clone(),
             personality: role.profile.personality.clone(),
             speaking_style: role.profile.speaking_style.clone(),
+            dialogue_examples: select_dialogue_examples(&role.profile.dialogue_examples, &self.context_config),
         };
         let current_role_state = CharacterThinkStatePromptView {
-            location: Some(
-                BoundedText::try_new(
-                    role.state.location.as_str().to_owned(),
-                    "role_location",
-                    self.config.max_input_tokens.saturating_mul(4) as usize,
-                )
-                .map_err(|_| CharacterThinkProjectionError::InvalidPromptField)?,
-            ),
+            location: role.state.location.clone(),
             goals: role.state.goals.clone(),
-            relevant_attributes: role
+            attributes: role
                 .state
                 .attributes
                 .iter()
@@ -198,7 +221,7 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
                         name: BoundedText::try_new(
                             name.as_str().to_owned(),
                             "attribute_name",
-                            self.config.max_input_tokens.saturating_mul(4) as usize,
+                            self.character_config.max_input_tokens.saturating_mul(4) as usize,
                         )
                         .map_err(|_| CharacterThinkProjectionError::InvalidPromptField)?,
                         value: value.clone(),
@@ -220,7 +243,7 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
                 BoundedText::try_new(
                     baseline.current_scene.location_key.as_str().to_owned(),
                     "scene_location",
-                    self.config.max_input_tokens.saturating_mul(4) as usize,
+                    self.character_config.max_input_tokens.saturating_mul(4) as usize,
                 )
                 .map_err(|_| CharacterThinkProjectionError::InvalidPromptField)?,
             ),
@@ -228,8 +251,8 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
             situation: Some(baseline.current_scene.description.clone()),
             observable_conditions: Vec::new(),
         };
-        let context = CharacterThinkPromptContext {
-            target_role,
+        let mut context = CharacterThinkPromptContext {
+            target_role: target_role.clone(),
             current_role_state,
             story_continuity,
             current_scene,
@@ -238,19 +261,20 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
             thinking_focus: request.reason.clone(),
             player_input,
         };
-        let rc_vars = render_runtime_vars(&context);
-        let input_tokens = rc_vars
-            .as_map()
-            .values()
-            .filter_map(Value::as_str)
-            .map(estimate_text_tokens)
-            .fold(0u64, u64::saturating_add);
-        if input_tokens > self.config.max_input_tokens {
-            return Err(CharacterThinkProjectionError::InputBudgetExceeded);
+        let mut rc_vars = render_runtime_vars(&context);
+        while runtime_tokens(&rc_vars) > self.character_config.max_input_tokens
+            && !target_role.dialogue_examples.is_empty()
+        {
+            target_role.dialogue_examples.pop();
+            context.target_role = target_role.clone();
+            rc_vars = render_runtime_vars(&context);
+        }
+        if runtime_tokens(&rc_vars) > self.character_config.max_input_tokens {
+            return Err(CharacterThinkProjectionError::RequiredPromptDataExceedsBudget);
         }
         let fti_vars = TrustedPromptVars::new(HashMap::from([(
             "output_schema".into(),
-            Value::String(character_decision_output_schema(&self.config).to_string()),
+            Value::String(character_decision_output_schema(&self.character_config).to_string()),
         )]));
         Ok(CharacterThinkPromptProjection {
             context,
@@ -286,14 +310,20 @@ fn project_knowledge(
                     role_id: role_id.clone(),
                 })
             {
-                return Err(CharacterThinkProjectionError::UnauthorizedKnowledge);
+                return Err(CharacterThinkProjectionError::UnauthorizedKnowledge {
+                    role_id: role_id.clone(),
+                });
             }
             let kind = match item.provenance.knowledge_kind {
                 KnowledgeKind::Rumor if item.provenance.memory_owner.is_none() => CharacterThinkKnowledgeKind::Rumor,
                 KnowledgeKind::Memory if item.provenance.memory_owner.as_ref() == Some(role_id) => {
                     CharacterThinkKnowledgeKind::Memory
                 }
-                _ => return Err(CharacterThinkProjectionError::UnauthorizedKnowledge),
+                _ => {
+                    return Err(CharacterThinkProjectionError::UnauthorizedKnowledge {
+                        role_id: role_id.clone(),
+                    });
+                }
             };
             Ok(CharacterThinkKnowledgePromptView {
                 kind,
@@ -339,22 +369,40 @@ fn render_runtime_vars(context: &CharacterThinkPromptContext) -> RuntimePromptVa
 }
 
 fn render_target_role(value: &CharacterThinkRolePromptView) -> String {
-    [
+    let mut lines = vec![
         format!("role_id: {}", quoted(value.role_id.as_str())),
         format!("name: {}", quoted(value.name.as_str())),
-        format!("appearance: {}", render_optional(value.appearance.as_ref())),
-        format!("personality: {}", render_optional(value.personality.as_ref())),
-        format!("speaking_style: {}", render_optional(value.speaking_style.as_ref())),
-    ]
-    .join("\n")
+    ];
+    if value.role_label != value.name {
+        lines.push(format!("role: {}", quoted(value.role_label.as_str())));
+    }
+    push_optional(&mut lines, "appearance", value.appearance.as_ref());
+    push_optional(&mut lines, "personality", value.personality.as_ref());
+    push_optional(&mut lines, "speaking_style", value.speaking_style.as_ref());
+    if !value.dialogue_examples.is_empty() {
+        lines.push(format!(
+            "dialogue_examples:\n{}",
+            value
+                .dialogue_examples
+                .iter()
+                .map(|example| format!(
+                    "- situation: {}\n  response: {}",
+                    quoted(example.situation.as_str()),
+                    quoted(example.response.as_str())
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
+    lines.join("\n")
 }
 
 fn render_role_state(value: &CharacterThinkStatePromptView) -> String {
-    let attributes = if value.relevant_attributes.is_empty() {
+    let attributes = if value.attributes.is_empty() {
         "None.".into()
     } else {
         value
-            .relevant_attributes
+            .attributes
             .iter()
             .map(|attribute| {
                 format!(
@@ -367,9 +415,9 @@ fn render_role_state(value: &CharacterThinkStatePromptView) -> String {
             .join("\n")
     };
     [
-        format!("location: {}", render_optional(value.location.as_ref())),
+        format!("location: {}", quoted(value.location.as_str())),
         format!("goals: {}", quoted_list(&value.goals)),
-        format!("relevant_attributes:\n{attributes}"),
+        format!("attributes:\n{attributes}"),
     ]
     .join("\n")
 }
@@ -437,6 +485,39 @@ fn render_impulses(values: &[CharacterThinkImpulsePromptView]) -> String {
 
 fn render_optional(value: Option<&BoundedText>) -> String {
     value.map(|value| quoted(value.as_str())).unwrap_or_else(|| "None.".into())
+}
+
+fn push_optional(lines: &mut Vec<String>, name: &str, value: Option<&BoundedText>) {
+    if let Some(value) = value {
+        lines.push(format!("{name}: {}", quoted(value.as_str())));
+    }
+}
+
+fn select_dialogue_examples(examples: &[DialogueExample], config: &ContextPreparationConfig) -> Vec<DialogueExample> {
+    let mut tokens = 0u64;
+    examples
+        .iter()
+        .take(config.max_dialogue_examples_per_role)
+        .filter_map(|example| {
+            let cost = estimate_text_tokens(example.situation.as_str())
+                .saturating_add(estimate_text_tokens(example.response.as_str()));
+            let next = tokens.saturating_add(cost);
+            if next > config.max_dialogue_example_tokens_per_role {
+                None
+            } else {
+                tokens = next;
+                Some(example.clone())
+            }
+        })
+        .collect()
+}
+
+fn runtime_tokens(vars: &RuntimePromptVars) -> u64 {
+    vars.as_map()
+        .values()
+        .filter_map(Value::as_str)
+        .map(estimate_text_tokens)
+        .fold(0u64, u64::saturating_add)
 }
 
 fn render_optional_text(value: &str) -> String {

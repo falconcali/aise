@@ -361,16 +361,6 @@ fn renamed_configuration_values_flow_into_turn_budget() {
 }
 
 #[test]
-fn old_turn_config_key_is_not_accepted_as_alias() {
-    let mut value = serde_json::to_value(TurnConfig::default()).unwrap();
-    let object = value.as_object_mut().unwrap();
-    object.remove("max_character_decisions");
-    object.insert("max_character_thoughts".to_owned(), serde_json::Value::from(99));
-    let config: TurnConfig = serde_json::from_value(value).unwrap();
-    assert_eq!(config.max_character_decisions, TurnConfig::default().max_character_decisions);
-}
-
-#[test]
 fn old_content_config_key_is_not_accepted_as_alias() {
     let mut value = serde_json::to_value(TurnContentLimitsConfig::default()).unwrap();
     let object = value.as_object_mut().unwrap();

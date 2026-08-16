@@ -1,5 +1,7 @@
+use crate::config::ContextPreparationConfig;
+use crate::domain::asset::character_card::DialogueExample;
 use crate::domain::asset::constraint::StoryConstraintRequirement;
-use crate::domain::asset::ids::SceneKey;
+use crate::domain::asset::ids::{AttributeKey, LocationKey, SceneKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
@@ -73,16 +75,8 @@ pub struct StoryGeneratorScenePromptView {
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RoleControl {
-    Player,
-    Ai,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RolePresence {
-    Present,
-    DirectParticipant,
+pub enum CharacterPresence {
+    Scene,
     Referenced,
 }
 
@@ -90,32 +84,21 @@ pub enum RolePresence {
 pub struct StoryGeneratorRolePromptView {
     pub role_id: RoleId,
     pub name: BoundedText,
-    pub control: RoleControl,
-    pub story_role: BoundedText,
-    pub profile: RoleProfilePromptView,
-    pub state: RoleStatePromptView,
-    pub presence: RolePresence,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RoleProfilePromptView {
+    pub role_label: BoundedText,
+    pub presence: CharacterPresence,
     pub appearance: Option<BoundedText>,
     pub personality: Option<BoundedText>,
     pub speaking_style: Option<BoundedText>,
-    pub dialogue_examples: Vec<DialogueExamplePromptView>,
+    pub dialogue_examples: Vec<DialogueExample>,
+    pub background: Option<BoundedText>,
+    pub state: StoryGeneratorRoleStatePromptView,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct DialogueExamplePromptView {
-    pub situation: BoundedText,
-    pub response: BoundedText,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RoleStatePromptView {
-    pub location: BoundedText,
+pub struct StoryGeneratorRoleStatePromptView {
+    pub location: LocationKey,
     pub goals: Vec<BoundedText>,
-    pub attributes: BTreeMap<String, ScalarValue>,
+    pub attributes: BTreeMap<AttributeKey, ScalarValue>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -177,14 +160,14 @@ pub enum StoryGeneratorProjectionError {
     MissingWriterPlan,
     #[error("story generator player input is invalid")]
     InvalidPlayerInput,
-    #[error("story generator character decision target is unknown: {role_id}")]
-    UnknownDecisionCharacter { role_id: RoleId },
+    #[error("story generator character decision role is unknown: {role_id}")]
+    UnknownDecisionRole { role_id: RoleId },
     #[error("story generator character decision targets player role: {role_id}")]
-    PlayerCharacterDecision { role_id: RoleId },
-    #[error("story generator character decision is duplicated: {role_id}")]
-    DuplicateCharacterDecision { role_id: RoleId },
-    #[error("story generator required prompt data exceeds budget: {section}")]
-    RequiredPromptDataExceedsBudget { section: &'static str },
+    PlayerRoleDecision { role_id: RoleId },
+    #[error("story generator character decision role is duplicated: {role_id}")]
+    DuplicateRoleDecision { role_id: RoleId },
+    #[error("story generator required prompt data exceeds budget")]
+    RequiredPromptDataExceedsBudget,
     #[error("story generator prompt invariant violated: {code}")]
     Invariant { code: &'static str },
 }
@@ -196,7 +179,15 @@ pub trait StoryGeneratorPromptContextProjector: Send + Sync {
     ) -> Result<StoryGeneratorPromptProjection, StoryGeneratorProjectionError>;
 }
 
-pub struct DefaultStoryGeneratorPromptContextProjector;
+pub struct DefaultStoryGeneratorPromptContextProjector {
+    config: ContextPreparationConfig,
+}
+
+impl DefaultStoryGeneratorPromptContextProjector {
+    pub fn new(config: ContextPreparationConfig) -> Self {
+        Self { config }
+    }
+}
 
 impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContextProjector {
     fn project(
@@ -207,13 +198,8 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
         let plan = ctx.plan().ok_or(StoryGeneratorProjectionError::MissingWriterPlan)?;
         let player_input = BoundedText::try_new(ctx.player_input().to_owned(), "player_input", 4096)
             .map_err(|_| StoryGeneratorProjectionError::InvalidPlayerInput)?;
-        let player_role = project_role(
-            &baseline.player_role,
-            RoleControl::Player,
-            RolePresence::Present,
-            ctx.budget().max_item_bytes(),
-        )?;
-        let ai_roles = project_ai_roles(baseline, ctx.budget().max_item_bytes())?;
+        let player_role = project_role(&baseline.player_role, CharacterPresence::Scene, &self.config)?;
+        let ai_roles = project_ai_roles(baseline, &self.config)?;
         let character_decisions = project_decisions(ctx, baseline, &ai_roles)?;
         let story_profile = StoryProfilePromptView {
             premise: baseline.story_profile.premise.clone(),
@@ -265,7 +251,7 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
                 .collect(),
         };
         let active_story_constraints = project_constraints(baseline);
-        let context = StoryGeneratorPromptContext {
+        let mut context = StoryGeneratorPromptContext {
             story_profile,
             instance_settings: Some(StoryGeneratorInstanceSettingsPromptView {
                 cast_policy: baseline.instance_settings.cast_policy,
@@ -281,18 +267,7 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
             character_decisions,
             player_input,
         };
-        let rc_vars = render_runtime_vars(&context);
-        let input_tokens = rc_vars
-            .as_map()
-            .values()
-            .filter_map(Value::as_str)
-            .map(estimate_text_tokens)
-            .fold(0u64, u64::saturating_add);
-        if input_tokens > ctx.budget().max_context_tokens() {
-            return Err(StoryGeneratorProjectionError::RequiredPromptDataExceedsBudget {
-                section: "runtime_context",
-            });
-        }
+        let rc_vars = prune_dialogue_examples_to_budget(&mut context, ctx.budget().max_context_tokens(), 0)?;
         let output_schema = StoryGeneratorOutput::json_schema(ctx.budget().max_story_text_bytes());
         let fti_vars = TrustedPromptVars::new(HashMap::from([(
             "output_schema".into(),
@@ -318,64 +293,46 @@ fn bounded_key(
 
 fn project_ai_roles(
     baseline: &BaselineContext,
-    max_item_bytes: usize,
+    config: &ContextPreparationConfig,
 ) -> Result<Vec<StoryGeneratorRolePromptView>, StoryGeneratorProjectionError> {
     let mut seen = HashSet::new();
     baseline
         .scene_roles
         .iter()
-        .map(|role| {
-            let presence = if baseline.current_scene.present_role_ids.contains(&role.role_id) {
-                RolePresence::Present
-            } else {
-                RolePresence::DirectParticipant
-            };
-            (role, presence)
-        })
-        .chain(baseline.referenced_roles.iter().map(|role| (role, RolePresence::Referenced)))
+        .map(|role| (role, CharacterPresence::Scene))
+        .chain(
+            baseline
+                .referenced_roles
+                .iter()
+                .map(|role| (role, CharacterPresence::Referenced)),
+        )
         .filter(|(role, _)| {
             role.role_id != baseline.player_role.role_id
                 && matches!(role.controller, RoleController::Ai)
                 && seen.insert(role.role_id.clone())
         })
-        .map(|(role, presence)| project_role(role, RoleControl::Ai, presence, max_item_bytes))
+        .map(|(role, presence)| project_role(role, presence, config))
         .collect()
 }
 
 fn project_role(
     role: &RoleContextView,
-    control: RoleControl,
-    presence: RolePresence,
-    max_item_bytes: usize,
+    presence: CharacterPresence,
+    config: &ContextPreparationConfig,
 ) -> Result<StoryGeneratorRolePromptView, StoryGeneratorProjectionError> {
     Ok(StoryGeneratorRolePromptView {
         role_id: role.role_id.clone(),
         name: role.profile.name.clone(),
-        control,
-        story_role: role.role_label.clone(),
-        profile: RoleProfilePromptView {
-            appearance: role.profile.appearance.clone(),
-            personality: role.profile.personality.clone(),
-            speaking_style: role.profile.speaking_style.clone(),
-            dialogue_examples: role
-                .profile
-                .dialogue_examples
-                .iter()
-                .map(|example| DialogueExamplePromptView {
-                    situation: example.situation.clone(),
-                    response: example.response.clone(),
-                })
-                .collect(),
-        },
-        state: RoleStatePromptView {
-            location: bounded_key(role.state.location.as_str(), "role_location", max_item_bytes)?,
+        role_label: role.role_label.clone(),
+        appearance: role.profile.appearance.clone(),
+        personality: role.profile.personality.clone(),
+        speaking_style: role.profile.speaking_style.clone(),
+        dialogue_examples: select_dialogue_examples(&role.profile.dialogue_examples, config),
+        background: role.background.clone(),
+        state: StoryGeneratorRoleStatePromptView {
+            location: role.state.location.clone(),
             goals: role.state.goals.clone(),
-            attributes: role
-                .state
-                .attributes
-                .iter()
-                .map(|(key, value)| (key.as_str().to_owned(), value.clone()))
-                .collect(),
+            attributes: role.state.attributes.clone(),
         },
         presence,
     })
@@ -472,17 +429,17 @@ fn project_decisions(
                 });
             }
             if decision.role_id == baseline.player_role.role_id {
-                return Err(StoryGeneratorProjectionError::PlayerCharacterDecision {
+                return Err(StoryGeneratorProjectionError::PlayerRoleDecision {
                     role_id: decision.role_id.clone(),
                 });
             }
             if !seen.insert(decision.role_id.clone()) {
-                return Err(StoryGeneratorProjectionError::DuplicateCharacterDecision {
+                return Err(StoryGeneratorProjectionError::DuplicateRoleDecision {
                     role_id: decision.role_id.clone(),
                 });
             }
             let name = names.get(&decision.role_id).cloned().ok_or_else(|| {
-                StoryGeneratorProjectionError::UnknownDecisionCharacter {
+                StoryGeneratorProjectionError::UnknownDecisionRole {
                     role_id: decision.role_id.clone(),
                 }
             })?;
@@ -496,7 +453,7 @@ fn project_decisions(
         .collect()
 }
 
-fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> RuntimePromptVars {
+pub(crate) fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> RuntimePromptVars {
     RuntimePromptVars::new(HashMap::from([
         (
             "story_profile".into(),
@@ -539,6 +496,64 @@ fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> RuntimePromptVa
         ),
         ("player_input".into(), Value::String(quoted(context.player_input.as_str()))),
     ]))
+}
+
+pub(crate) fn prune_dialogue_examples_to_budget(
+    context: &mut StoryGeneratorPromptContext,
+    max_tokens: u64,
+    extra_tokens: u64,
+) -> Result<RuntimePromptVars, StoryGeneratorProjectionError> {
+    let mut vars = render_runtime_vars(context);
+    let mut role_ids = std::iter::once(context.player_role.role_id.clone())
+        .chain(context.ai_roles.iter().map(|role| role.role_id.clone()))
+        .collect::<Vec<_>>();
+    role_ids.sort_by(|left, right| right.cmp(left));
+    for role_id in role_ids {
+        while runtime_tokens(&vars).saturating_add(extra_tokens) > max_tokens {
+            let examples = if context.player_role.role_id == role_id {
+                &mut context.player_role.dialogue_examples
+            } else if let Some(role) = context.ai_roles.iter_mut().find(|role| role.role_id == role_id) {
+                &mut role.dialogue_examples
+            } else {
+                break;
+            };
+            if examples.pop().is_none() {
+                break;
+            }
+            vars = render_runtime_vars(context);
+        }
+    }
+    if runtime_tokens(&vars).saturating_add(extra_tokens) > max_tokens {
+        return Err(StoryGeneratorProjectionError::RequiredPromptDataExceedsBudget);
+    }
+    Ok(vars)
+}
+
+fn select_dialogue_examples(examples: &[DialogueExample], config: &ContextPreparationConfig) -> Vec<DialogueExample> {
+    let mut tokens = 0u64;
+    examples
+        .iter()
+        .take(config.max_dialogue_examples_per_role)
+        .filter_map(|example| {
+            let cost = estimate_text_tokens(example.situation.as_str())
+                .saturating_add(estimate_text_tokens(example.response.as_str()));
+            let next = tokens.saturating_add(cost);
+            if next > config.max_dialogue_example_tokens_per_role {
+                None
+            } else {
+                tokens = next;
+                Some(example.clone())
+            }
+        })
+        .collect()
+}
+
+fn runtime_tokens(vars: &RuntimePromptVars) -> u64 {
+    vars.as_map()
+        .values()
+        .filter_map(Value::as_str)
+        .map(estimate_text_tokens)
+        .fold(0u64, u64::saturating_add)
 }
 
 fn render_story_profile(value: &StoryProfilePromptView) -> String {
@@ -608,15 +623,13 @@ fn render_roles(values: &[StoryGeneratorRolePromptView]) -> String {
 }
 
 fn render_role(value: &StoryGeneratorRolePromptView, prefix: Option<&str>) -> String {
-    let control = match value.control {
-        RoleControl::Player => "player",
-        RoleControl::Ai => "ai",
-    };
     let presence = match value.presence {
-        RolePresence::Present => "present",
-        RolePresence::DirectParticipant => "direct_participant",
-        RolePresence::Referenced => "referenced",
+        CharacterPresence::Scene => "scene",
+        CharacterPresence::Referenced => "referenced",
     };
+    let collection = prefix.is_some();
+    let first = prefix.unwrap_or_default();
+    let rest = if collection { "  " } else { "" };
     let attributes = if value.state.attributes.is_empty() {
         "None.".into()
     } else {
@@ -626,45 +639,44 @@ fn render_role(value: &StoryGeneratorRolePromptView, prefix: Option<&str>) -> St
                 .state
                 .attributes
                 .iter()
-                .map(|(key, value)| format!("{}: {}", quoted(key), render_scalar(value)))
+                .map(|(key, value)| format!("{}: {}", quoted(key.as_str()), render_scalar(value)))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
     };
-    let dialogue_examples = if value.profile.dialogue_examples.is_empty() {
-        "None.".into()
-    } else {
-        value
-            .profile
-            .dialogue_examples
-            .iter()
-            .map(|example| {
-                format!(
-                    "- situation: {}\n    response: {}",
-                    quoted(example.situation.as_str()),
-                    quoted(example.response.as_str())
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    [
-        format!("{}role_id: {}", prefix.unwrap_or_default(), quoted(value.role_id.as_str())),
-        format!("  name: {}", quoted(value.name.as_str())),
-        format!("  control: {control}"),
-        format!("  presence: {presence}"),
-        format!("  story_role: {}", quoted(value.story_role.as_str())),
-        format!("  appearance: {}", render_optional(value.profile.appearance.as_ref())),
-        format!("  personality: {}", render_optional(value.profile.personality.as_ref())),
-        format!("  speaking_style: {}", render_optional(value.profile.speaking_style.as_ref())),
-        format!("  dialogue_examples:\n{dialogue_examples}"),
-        format!("  location: {}", quoted(value.state.location.as_str())),
-        format!("  goals: {}", quoted_list(&value.state.goals)),
-        format!("  attributes: {attributes}"),
-    ]
-    .join("\n")
-    .trim_start()
-    .to_owned()
+    let dialogue_examples = value
+        .dialogue_examples
+        .iter()
+        .map(|example| {
+            format!(
+                "{rest}- situation: {}\n{rest}  response: {}",
+                quoted(example.situation.as_str()),
+                quoted(example.response.as_str())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut lines = vec![
+        format!("{first}role_id: {}", quoted(value.role_id.as_str())),
+        format!("{rest}name: {}", quoted(value.name.as_str())),
+    ];
+    if value.role_label != value.name {
+        lines.push(format!("{rest}role: {}", quoted(value.role_label.as_str())));
+    }
+    if collection {
+        lines.push(format!("{rest}presence: {presence}"));
+    }
+    push_optional(&mut lines, rest, "appearance", value.appearance.as_ref());
+    push_optional(&mut lines, rest, "personality", value.personality.as_ref());
+    push_optional(&mut lines, rest, "speaking_style", value.speaking_style.as_ref());
+    if !dialogue_examples.is_empty() {
+        lines.push(format!("{rest}dialogue_examples:\n{dialogue_examples}"));
+    }
+    push_optional(&mut lines, rest, "background", value.background.as_ref());
+    lines.push(format!("{rest}location: {}", quoted(value.state.location.as_str())));
+    lines.push(format!("{rest}goals: {}", quoted_list(&value.state.goals)));
+    lines.push(format!("{rest}attributes: {attributes}"));
+    lines.join("\n")
 }
 
 fn render_constraints(values: &[ActiveStoryConstraintPromptView]) -> String {
@@ -768,8 +780,10 @@ fn render_optional_text(value: &str) -> String {
     }
 }
 
-fn render_optional(value: Option<&BoundedText>) -> String {
-    value.map(|value| quoted(value.as_str())).unwrap_or_else(|| "None.".into())
+fn push_optional(lines: &mut Vec<String>, indent: &str, name: &str, value: Option<&BoundedText>) {
+    if let Some(value) = value {
+        lines.push(format!("{indent}{name}: {}", quoted(value.as_str())));
+    }
 }
 
 fn quoted_list(values: &[BoundedText]) -> String {

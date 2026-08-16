@@ -46,4 +46,8 @@ fn state_schema_declares_all_top_level_fields() {
     ] {
         assert!(required.iter().any(|value| value == field), "missing field {field}");
     }
+    let schema_text = schema.to_string();
+    assert!(!schema_text.contains("character_states"));
+    assert!(!schema_text.contains("character_id"));
+    assert!(!schema_text.contains("role_key"));
 }

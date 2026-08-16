@@ -101,8 +101,22 @@ impl TurnExecutionPipeline for WriterPlanner {
             self.config.max_query_bytes.max(4096),
         )
         .map_err(|_| map_planning_error(PlanningError::LimitExceeded { limit: "player_input" }))?;
-        let projection =
-            WriterPlannerPromptContextProjector.project(&baseline, &narrative_plan, &player_input, &self.config);
+        let projection = WriterPlannerPromptContextProjector
+            .project(
+                &baseline,
+                &narrative_plan,
+                &player_input,
+                &self.config,
+                ctx.budget().max_context_tokens(),
+            )
+            .map_err(|error| {
+                TurnExecutionError::new(
+                    TurnFailureKind::InvariantViolation,
+                    "required_prompt_data_exceeds_budget",
+                    Some(TurnStage::WriterPlanner),
+                    error.to_string(),
+                )
+            })?;
         let request = PromptCompositionInput {
             profile: PromptProfile::WriterPlanner,
             rc_vars: projection.rc_vars,
