@@ -17,7 +17,7 @@ use aise::runtime::{StoryTurnCoordinator, TurnInitializer, TurnPipelineSet, Turn
 use aise::story::character_card_service::CharacterCardService;
 use aise::story::instance_factory::{StoryInstanceFactory, StoryInstantiationLimits};
 use aise::story::pack_service::{NativeAssetImporter, PackService};
-use aise::story::{StoryGenerator, StoryRepairer};
+use aise::story::{StoryGenerator, StoryRepairer, StoryStateExtractor};
 use aise::turn::turn_trace::TraceSpanSink;
 use aise::validation::ValidationPipeline;
 use std::sync::Arc;
@@ -89,6 +89,7 @@ pub async fn build_services(
             config.aise.context.clone(),
         )))
         .story_generator(Box::new(StoryGenerator::new(gateway.clone(), config.aise.context.clone())))
+        .story_state_extractor(Box::new(StoryStateExtractor::new(gateway.clone())))
         .validation(Box::new(ValidationPipeline::default()))
         .story_repairer(Box::new(StoryRepairer::new(gateway.clone(), config.aise.context.clone())))
         .committer(Box::new(TurnCommitter::new(store.clone())))

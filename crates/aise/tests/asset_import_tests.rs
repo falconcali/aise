@@ -112,6 +112,14 @@ fn valid_pack_passes_validation() {
 }
 
 #[test]
+fn demo_pack_passes_validation() {
+    let importer = importer();
+    let json = include_str!("../../../examples/demo_pack.json");
+    let report = importer.parse(AssetInput::Json(json.as_bytes()));
+    assert!(report.valid, "expected valid pack, got issues: {:?}", report.issues);
+}
+
+#[test]
 fn rejects_unknown_spec() {
     let importer = importer();
     let json = valid_pack_json().replace("\"aise_story_v4\"", "\"aise_story_v2\"");

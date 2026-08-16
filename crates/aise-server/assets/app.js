@@ -264,23 +264,10 @@ function renderPackDetail(pack) {
   const play = pack.play || {};
   const start = pack.start || {};
   const worldBook = pack.world_book || {};
-  const playableKeys = play.playable_role_keys || [];
+  const playableRoleIds = play.playable_role_ids || [];
   const tags = (meta.tags || []).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
   const genre = (story.genre || []).map((g) => `<span class="tag">${escapeHtml(g)}</span>`).join("");
   const themes = (story.themes || []).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
-
-  const characterSection = pack.character_assets && Object.keys(pack.character_assets).length
-    ? `<div class="detail-section"><h3>角色卡</h3>` +
-      Object.entries(pack.character_assets)
-        .map(([key, source]) => {
-          if (source && source.character_key) {
-            return `<div class="kv"><span class="k">${escapeHtml(key)}</span><span>${escapeHtml(source.character_key)}</span></div>`;
-          }
-          return "";
-        })
-        .join("") +
-      `</div>`
-    : "";
 
   const worldBookSection = worldBook && worldBook.world_book_key
     ? `<div class="detail-section"><h3>世界书</h3>` +
@@ -308,29 +295,28 @@ function renderPackDetail(pack) {
     `</div>` +
     `<div class="detail-section"><h3>初始场景</h3><p>${escapeHtml(start.description || "")}</p></div>` +
     `<div class="detail-section"><h3>故事开篇</h3><p>${escapeHtml(start.opening || "")}</p></div>` +
-    characterSection +
     worldBookSection;
 
   rolePickEl.style.display = "block";
   roleListEl.innerHTML = "";
-  if (playableKeys.length === 0) {
+  if (playableRoleIds.length === 0) {
     roleListEl.innerHTML = `<p class="muted">该故事包没有可玩角色。</p>`;
     return;
   }
-  for (const key of playableKeys) {
-    const role = roles[key];
+  for (const roleId of playableRoleIds) {
+    const role = roles[roleId];
     if (!role) continue;
     const card = document.createElement("div");
     card.className = "role-card";
     card.innerHTML =
-      `<div class="role-label">${escapeHtml(role.role_label || key)}</div>` +
+      `<div class="role-label">${escapeHtml(role.role_label || roleId)}</div>` +
       `<div class="role-fn">${escapeHtml(role.narrative_function || "")}</div>`;
-    card.onclick = () => startGame(currentPack, key);
+    card.onclick = () => startGame(currentPack, roleId);
     roleListEl.appendChild(card);
   }
 }
 
-async function startGame(pack, roleKey) {
+async function startGame(pack, roleId) {
   sendBtn.disabled = true;
   try {
     if (!pack || !pack.pack_id) {
@@ -342,11 +328,11 @@ async function startGame(pack, roleKey) {
       body: JSON.stringify({
         pack_id: pack.pack_id,
         player_id: playerId(),
-        player_role_key: roleKey,
+        player_role_id: roleId,
       }),
     });
     const instance = await res.json();
-    const roleLabel = (currentPackJson?.roles?.[roleKey]?.role_label) || roleKey;
+    const roleLabel = (currentPackJson?.roles?.[roleId]?.role_label) || roleId;
     const sessionRes = await api(`/api/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -413,8 +399,8 @@ function renderStory() {
   } else {
     sceneBox.innerHTML = "";
   }
-  if (story.player_role_key) {
-    const label = currentPackJson?.roles?.[story.player_role_key]?.role_label || story.player_role_key;
+  if (story.player_role_id) {
+    const label = currentPackJson?.roles?.[story.player_role_id]?.role_label || story.player_role_id;
     gameRoleEl.textContent = `扮演：${label}`;
   }
   storyEl.textContent = "";
@@ -434,23 +420,23 @@ function renderStory() {
 
 function renderRoleState(story) {
   roleStateEl.innerHTML = "";
-  const characters = story.characters || [];
-  if (characters.length === 0) {
+  const roles = story.roles || [];
+  if (roles.length === 0) {
     roleStateEl.innerHTML = `<p class="muted">暂无角色状态</p>`;
     return;
   }
-  for (const character of characters) {
+  for (const role of roles) {
     const card = document.createElement("div");
     card.className = "state-card";
-    const isPlayer = story.player_role_key && character.role_key === story.player_role_key;
-    const attrs = (character.attributes || [])
+    const isPlayer = story.player_role_id && role.role_id === story.player_role_id;
+    const attrs = (role.attributes || [])
       .map((a) => `<div class="state-attr"><span>${escapeHtml(a.key)}</span><span>${escapeHtml(a.value)}</span></div>`)
       .join("");
     card.innerHTML =
-      `<div class="state-name">${escapeHtml(character.role_key)}${isPlayer ? "（你）" : ""}</div>` +
-      `<div class="state-row">位置：${escapeHtml(character.location)}</div>` +
-      (character.goals && character.goals.length
-        ? `<div class="state-row">目标：${character.goals.map(escapeHtml).join("；")}</div>`
+      `<div class="state-name">${escapeHtml(role.name || role.role_id)}${isPlayer ? "（你）" : ""}</div>` +
+      `<div class="state-row">位置：${escapeHtml(role.location)}</div>` +
+      (role.goals && role.goals.length
+        ? `<div class="state-row">目标：${role.goals.map(escapeHtml).join("；")}</div>`
         : "") +
       attrs;
     roleStateEl.appendChild(card);

@@ -1,13 +1,14 @@
 {
-  "spec": "aise_story_v3",
-  "spec_version": "3.0",
+  "spec": "aise_story_v4",
+  "spec_version": "4.0",
   "meta": {
     "pack_key": "forest_lodge",
     "title": "林间木屋",
     "author": "aise",
     "version": "0.1.0",
     "description": "一个关于林间木屋的短篇探索故事包，用于演示前端故事包功能。",
-    "tags": ["demo", "mystery"]
+    "tags": ["demo", "mystery"],
+    "cover_asset": null
   },
   "story": {
     "premise": "你在林中醒来，发现自己身处一座陌生的木屋。门外有脚步声。",
@@ -20,33 +21,18 @@
       "tense": "present"
     }
   },
-  "character_assets": {
-    "traveler_card": {
-      "spec": "aise_char_v3",
-      "spec_version": "3.0",
-      "character_key": "traveler_card",
-      "meta": {
-        "name": "旅人",
-        "version": "0.1.0"
-      },
-      "profile": {
-        "description": "一个在林间木屋醒来的旅人，对昨晚的记忆模糊不清。",
-        "personality": ["谨慎而好奇"],
-        "values": ["真相", "安全"],
-        "fears": ["被困", "失去记忆"],
-        "speaking_style": {
-          "register": "casual",
-          "verbosity": "medium",
-          "traits": []
-        },
-        "dialogue_examples": []
-      }
-    }
-  },
   "roles": {
     "protagonist": {
       "role_label": "旅人",
       "narrative_function": "player",
+      "default_profile": {
+        "name": "旅人",
+        "appearance": null,
+        "personality": "谨慎而好奇，重视真相与安全，害怕被困和失去记忆。",
+        "speaking_style": "口语化，表达详略适中。",
+        "dialogue_examples": []
+      },
+      "background": "一个在林间木屋醒来的旅人，对昨晚的记忆模糊不清。",
       "initial_state": {
         "location": "lodge_hall",
         "goals": ["查明自己为何在此"],
@@ -59,12 +45,9 @@
       "seed_memories": []
     }
   },
-  "default_cast": {
-    "protagonist": { "character_ref": "traveler_card" }
-  },
   "play": {
     "player_count": 1,
-    "playable_role_keys": ["protagonist"]
+    "playable_role_ids": ["protagonist"]
   },
   "world_book": {
     "spec": "aise_world_v3",
@@ -94,7 +77,7 @@
     "nodes": {
       "node_wake": {
         "title": "苏醒",
-        "objective": "探查木屋，弄清楚处境。",
+        "dramatic_focus": "探查木屋，弄清楚处境。",
         "activate_when": { "type": "story_started" },
         "complete_when": { "type": "turn_reaches", "turn": 2 },
         "skip_when": null,
@@ -104,5 +87,6 @@
     },
     "edges": []
   },
+  "constraints": {},
   "assets": {}
 }
