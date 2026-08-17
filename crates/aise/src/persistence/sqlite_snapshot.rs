@@ -18,7 +18,7 @@ use crate::persistence::store::StoreError;
 use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 
-type StoryInstanceRow = (i64, String, String, String, String, String, String, String, String);
+type StoryInstanceRow = (i64, String, String, String, String, String, String, String, String, i64);
 type StoryPackRow = (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>);
 type InstanceProjectionLengths = (String, i64, i64, i64, i64, i64, i64, i64);
 type PackProjectionLengths = (i64, i64, i64);
@@ -130,7 +130,8 @@ pub(crate) async fn load_story_snapshot(
     let row: Option<StoryInstanceRow> = sqlx::query_as(
         "SELECT s.revision, i.pack_id, i.settings_json, i.roles_json, \
                 i.relationships_json, i.narrative_state_json, \
-                i.fact_values_json, s.story_summary, s.active_constraints \
+                i.fact_values_json, s.story_summary, s.active_constraints, \
+                i.knowledge_id_high_water \
          FROM stories s \
          INNER JOIN story_instances i ON i.story_id = s.id \
          WHERE s.id = ?",
@@ -149,6 +150,7 @@ pub(crate) async fn load_story_snapshot(
         fact_values_json,
         story_summary_json,
         active_constraints_json,
+        knowledge_id_high_water,
     )) = row
     else {
         tx.rollback().await.map_err(SqliteStoreError::from)?;
@@ -353,6 +355,9 @@ pub(crate) async fn load_story_snapshot(
         story_id: story_id.clone(),
         pack_digest: digest,
         base_revision,
+        knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater::new(
+            knowledge_id_high_water.max(0) as u64
+        ),
     };
     tx.commit().await.map_err(SqliteStoreError::from)?;
     StoryReadSnapshot::try_from_parts(StoryReadSnapshotParts {

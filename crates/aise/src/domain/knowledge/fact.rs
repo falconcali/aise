@@ -2,6 +2,7 @@ use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{FactKey, TopicKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::FactId;
+use crate::domain::knowledge::hint::RetrievalHint;
 use crate::domain::knowledge::query::KnowledgeSource;
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +13,7 @@ pub struct WorldFact {
     pub key: Option<FactKey>,
     pub text: BoundedText,
     pub proposition: Option<Proposition>,
+    pub retrieval_hint: RetrievalHint,
     #[serde(default)]
     pub entities: Vec<KnowledgeEntity>,
     #[serde(default)]

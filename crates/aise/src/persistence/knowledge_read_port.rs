@@ -2,7 +2,7 @@ use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
-use crate::domain::knowledge::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
+use crate::domain::knowledge::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId, RetrievalHint};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::domain::turn::RetrievalAudience;
 use crate::persistence::store::StoreError;
@@ -67,6 +67,7 @@ pub struct KnowledgeIndexQuery<'a> {
 pub struct KnowledgeIndexRecord {
     pub source_id: KnowledgeSourceId,
     pub kind: KnowledgeKind,
+    pub retrieval_hint: Option<RetrievalHint>,
 }
 
 #[async_trait]

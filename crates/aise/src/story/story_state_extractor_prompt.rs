@@ -126,6 +126,9 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
                 })
             })
             .collect::<Result<Vec<_>, StoryStateExtractorProjectionError>>()?;
+        if roles.is_empty() {
+            return Err(StoryStateExtractorProjectionError::Invariant { code: "roles_empty" });
+        }
 
         let relationships = snapshot
             .relationships()
@@ -140,7 +143,7 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
             })
             .collect::<Result<Vec<_>, StoryStateExtractorProjectionError>>()?;
 
-        let modifiable_knowledge = modifiable_knowledge_view(ctx);
+        let modifiable_knowledge = modifiable_knowledge_view(ctx)?;
 
         let condition_queries = ctx
             .narrative_projection()
@@ -243,46 +246,65 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
     }
 }
 
-fn modifiable_knowledge_view(ctx: &TurnExecutionContext) -> Vec<StoryStateExtractorKnowledgePromptView> {
+fn modifiable_knowledge_view(
+    ctx: &TurnExecutionContext,
+) -> Result<Vec<StoryStateExtractorKnowledgePromptView>, StoryStateExtractorProjectionError> {
     let mut index = BTreeMap::new();
     if let Some(baseline) = ctx.baseline() {
         for entry in &baseline.relevant_knowledge {
-            index.insert(
-                entry.entry_id.clone(),
-                StoryStateExtractorKnowledgePromptView {
-                    source_id: entry.entry_id.clone(),
-                    kind: entry.kind,
-                    content: entry.content.clone(),
-                    memory_owner: None,
-                },
-            );
+            let view = build_modifiable_item(entry.entry_id.clone(), entry.kind, entry.content.clone(), None)?;
+            index.insert(entry.entry_id.clone(), view);
         }
     }
     for item in ctx.retrieved().writer() {
-        index.insert(
+        let view = build_modifiable_item(
             item.provenance.source_id.clone(),
-            StoryStateExtractorKnowledgePromptView {
-                source_id: item.provenance.source_id.clone(),
-                kind: item.provenance.knowledge_kind,
-                content: item.content.clone(),
-                memory_owner: item.provenance.memory_owner.clone(),
-            },
-        );
+            item.provenance.knowledge_kind,
+            item.content.clone(),
+            item.provenance.memory_owner.clone(),
+        )?;
+        index.insert(item.provenance.source_id.clone(), view);
     }
     for items in ctx.retrieved().roles().values() {
         for item in items {
-            index.insert(
+            let view = build_modifiable_item(
                 item.provenance.source_id.clone(),
-                StoryStateExtractorKnowledgePromptView {
-                    source_id: item.provenance.source_id.clone(),
-                    kind: item.provenance.knowledge_kind,
-                    content: item.content.clone(),
-                    memory_owner: item.provenance.memory_owner.clone(),
-                },
-            );
+                item.provenance.knowledge_kind,
+                item.content.clone(),
+                item.provenance.memory_owner.clone(),
+            )?;
+            index.insert(item.provenance.source_id.clone(), view);
         }
     }
-    index.into_values().collect()
+    Ok(index.into_values().collect())
+}
+
+fn build_modifiable_item(
+    source_id: KnowledgeSourceId,
+    kind: KnowledgeKind,
+    content: BoundedText,
+    memory_owner: Option<RoleId>,
+) -> Result<StoryStateExtractorKnowledgePromptView, StoryStateExtractorProjectionError> {
+    match (kind, memory_owner) {
+        (KnowledgeKind::Memory, None) => Err(StoryStateExtractorProjectionError::Invariant {
+            code: "modifiable_memory_owner_missing",
+        }),
+        (KnowledgeKind::Memory, Some(owner)) => Ok(StoryStateExtractorKnowledgePromptView {
+            source_id,
+            kind,
+            content,
+            memory_owner: Some(owner),
+        }),
+        (_, None) => Ok(StoryStateExtractorKnowledgePromptView {
+            source_id,
+            kind,
+            content,
+            memory_owner: None,
+        }),
+        (_, Some(_)) => Err(StoryStateExtractorProjectionError::Invariant {
+            code: "modifiable_knowledge_owner_invalid",
+        }),
+    }
 }
 
 fn bounded_key(
@@ -338,7 +360,7 @@ fn render_runtime_vars(context: &StoryStateExtractorPromptContext) -> RuntimePro
                     .previous_extraction
                     .as_ref()
                     .map(|value| value.as_str().to_owned())
-                    .unwrap_or_else(|| "None.".into()),
+                    .unwrap_or_default(),
             ),
         ),
         (
@@ -349,25 +371,9 @@ fn render_runtime_vars(context: &StoryStateExtractorPromptContext) -> RuntimePro
 }
 
 fn render_roles(values: &[StoryStateExtractorRolePromptView]) -> String {
-    if values.is_empty() {
-        return "None.".into();
-    }
     values
         .iter()
         .map(|value| {
-            let attributes = if value.attributes.is_empty() {
-                "None.".into()
-            } else {
-                format!(
-                    "{{{}}}",
-                    value
-                        .attributes
-                        .iter()
-                        .map(|(key, value)| format!("{}: {}", quoted(key.as_str()), render_scalar(value)))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            };
             let mut lines = vec![
                 format!("- role_id: {}", quoted(value.role_id.as_str())),
                 format!("  name: {}", quoted(value.name.as_str())),
@@ -376,8 +382,18 @@ fn render_roles(values: &[StoryStateExtractorRolePromptView]) -> String {
                 lines.push(format!("  role: {}", quoted(value.role_label.as_str())));
             }
             lines.push(format!("  location: {}", quoted(value.location.as_str())));
-            lines.push(format!("  goals: {}", quoted_list(&value.goals)));
-            lines.push(format!("  attributes: {attributes}"));
+            if !value.goals.is_empty() {
+                lines.push(format!("  goals: {}", quoted_list(&value.goals)));
+            }
+            if !value.attributes.is_empty() {
+                let attributes = value
+                    .attributes
+                    .iter()
+                    .map(|(key, value)| format!("{}: {}", quoted(key.as_str()), render_scalar(value)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                lines.push(format!("  attributes: {{{attributes}}}"));
+            }
             lines.join("\n")
         })
         .collect::<Vec<_>>()
@@ -386,7 +402,7 @@ fn render_roles(values: &[StoryStateExtractorRolePromptView]) -> String {
 
 fn render_relationships(values: &[StoryStateExtractorRelationshipPromptView]) -> String {
     if values.is_empty() {
-        return "None.".into();
+        return String::new();
     }
     values
         .iter()
@@ -405,7 +421,7 @@ fn render_relationships(values: &[StoryStateExtractorRelationshipPromptView]) ->
 
 fn render_knowledge(values: &[StoryStateExtractorKnowledgePromptView]) -> String {
     if values.is_empty() {
-        return "None.".into();
+        return String::new();
     }
     values
         .iter()
@@ -415,16 +431,15 @@ fn render_knowledge(values: &[StoryStateExtractorKnowledgePromptView]) -> String
                 KnowledgeKind::Rumor => "rumor",
                 KnowledgeKind::Memory => "memory",
             };
-            let owner = value
-                .memory_owner
-                .as_ref()
-                .map(|owner| quoted(owner.as_str()))
-                .unwrap_or_else(|| "None.".into());
-            format!(
-                "- source_id: {}\n  kind: {kind}\n  memory_owner: {owner}\n  content: {}",
-                quoted(value.source_id.as_str()),
-                quoted(value.content.as_str())
-            )
+            let mut lines = vec![
+                format!("- source_id: {}", quoted(value.source_id.as_str())),
+                format!("  kind: {kind}"),
+            ];
+            if let Some(owner) = value.memory_owner.as_ref() {
+                lines.push(format!("  memory_owner: {}", quoted(owner.as_str())));
+            }
+            lines.push(format!("  content: {}", quoted(value.content.as_str())));
+            lines.join("\n")
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -432,7 +447,7 @@ fn render_knowledge(values: &[StoryStateExtractorKnowledgePromptView]) -> String
 
 fn render_condition_queries(values: &[StoryStateExtractorConditionQueryPromptView]) -> String {
     if values.is_empty() {
-        return "None.".into();
+        return String::new();
     }
     values
         .iter()
@@ -449,39 +464,28 @@ fn render_condition_queries(values: &[StoryStateExtractorConditionQueryPromptVie
 
 fn render_validation_issues(values: &[StoryStateExtractorValidationIssuePromptView]) -> String {
     if values.is_empty() {
-        return "None.".into();
+        return String::new();
     }
     values
         .iter()
         .enumerate()
         .map(|(index, value)| {
-            let location = value
-                .location
-                .as_ref()
-                .map(|location| {
-                    let path = quoted(location.path.as_str());
-                    match location.item_index {
-                        Some(item_index) => format!("{path}\n   Item Index: {item_index}"),
-                        None => path,
-                    }
-                })
-                .unwrap_or_else(|| "None.".into());
-            format!(
-                "{}. Code: {}\n   Location: {}\n   Message: {}",
-                index + 1,
-                value.code,
-                location,
-                quoted(value.message.as_str())
-            )
+            let mut lines = vec![format!("{}. Code: {}", index + 1, value.code)];
+            if let Some(location) = value.location.as_ref() {
+                let path = quoted(location.path.as_str());
+                match location.item_index {
+                    Some(item_index) => lines.push(format!("   Location: {path}\n   Item Index: {item_index}")),
+                    None => lines.push(format!("   Location: {path}")),
+                }
+            }
+            lines.push(format!("   Message: {}", quoted(value.message.as_str())));
+            lines.join("\n")
         })
         .collect::<Vec<_>>()
         .join("\n\n")
 }
 
 fn quoted_list(values: &[BoundedText]) -> String {
-    if values.is_empty() {
-        return "None.".into();
-    }
     format!(
         "[{}]",
         values.iter().map(|value| quoted(value.as_str())).collect::<Vec<_>>().join(", ")

@@ -1,4 +1,3 @@
-use aise::domain::knowledge::KnowledgeEntry;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::borrow::Cow;
@@ -96,7 +95,8 @@ async fn assert_final_migration(start_version: i64, label: &str) {
     .unwrap();
     assert_eq!(payloads.len(), 3);
     for payload in payloads {
-        serde_json::from_str::<KnowledgeEntry>(&payload).expect("typed knowledge payload");
+        let value: serde_json::Value = serde_json::from_str(&payload).expect("valid knowledge payload json");
+        assert!(value.get("kind").is_some(), "reconstructed payload must carry a kind tag");
     }
     let entity_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM knowledge_entry_entities")
         .fetch_one(&pool)

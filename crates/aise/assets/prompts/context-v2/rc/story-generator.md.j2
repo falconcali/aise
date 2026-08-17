@@ -27,30 +27,35 @@
 
 {{ player_character }}
 
+{% if ai_characters %}
 ## AI Characters
 
 {{ ai_characters }}
-
+{% endif %}
+{% if active_story_constraints %}
 ## Active Story Constraints
 
 {{ active_story_constraints }}
-
+{% endif %}
 ## Immediate Story Goal
 
 {{ story_goal }}
 
+{% if narrative_direction %}
 ## Narrative Direction
 
 {{ narrative_direction }}
-
+{% endif %}
+{% if relevant_writer_knowledge %}
 ## Relevant Writer Knowledge
 
 {{ relevant_writer_knowledge }}
-
+{% endif %}
+{% if character_decisions %}
 ## AI Character Decisions
 
 {{ character_decisions }}
-
+{% endif %}
 ## Player Input
 
 {{ player_input }}

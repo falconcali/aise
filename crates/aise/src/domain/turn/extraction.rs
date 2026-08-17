@@ -2,6 +2,7 @@ use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{AttributeKey, LocationKey, MemoryKind, NarrativeConditionKey, Sha256Digest, TopicKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::{MemoryId, RoleId, RumorId};
+use crate::domain::knowledge::RetrievalHint;
 use crate::domain::knowledge::fact::Proposition;
 use crate::domain::knowledge::query::KnowledgeSourceId;
 use crate::domain::knowledge::rumor::{Claim, TruthValue};
@@ -65,6 +66,7 @@ pub enum ProposedKnowledgeValue {
     Fact {
         content: BoundedText,
         proposition: Option<Proposition>,
+        retrieval_hint: RetrievalHint,
         entities: Vec<KnowledgeEntity>,
         topics: Vec<TopicKey>,
         salience: u8,
@@ -72,6 +74,7 @@ pub enum ProposedKnowledgeValue {
     Rumor {
         content: BoundedText,
         claim: Option<Claim>,
+        retrieval_hint: RetrievalHint,
         entities: Vec<KnowledgeEntity>,
         topics: Vec<TopicKey>,
         salience: u8,
@@ -86,6 +89,16 @@ pub enum ProposedKnowledgeValue {
         topics: Vec<TopicKey>,
         salience: u8,
     },
+}
+
+impl ProposedKnowledgeValue {
+    pub fn kind(&self) -> crate::domain::knowledge::KnowledgeKind {
+        match self {
+            Self::Fact { .. } => crate::domain::knowledge::KnowledgeKind::Fact,
+            Self::Rumor { .. } => crate::domain::knowledge::KnowledgeKind::Rumor,
+            Self::Memory { .. } => crate::domain::knowledge::KnowledgeKind::Memory,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -215,14 +228,16 @@ impl StoryStateExtractorOutput {
             "items": semantic_key()
         });
         let salience = json!({"type": "integer", "minimum": 0, "maximum": 255});
+        let retrieval_hint = json!({"type": "string", "minLength": 1, "maxLength": RetrievalHint::MAX_BYTES});
         let fact_value = json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["kind", "content", "proposition", "entities", "topics", "salience"],
+            "required": ["kind", "content", "proposition", "retrieval_hint", "entities", "topics", "salience"],
             "properties": {
                 "kind": {"const": "fact"},
                 "content": knowledge_bounded_string(),
                 "proposition": proposition,
+                "retrieval_hint": retrieval_hint,
                 "entities": entities_array,
                 "topics": topics_array,
                 "salience": salience
@@ -232,13 +247,14 @@ impl StoryStateExtractorOutput {
             "type": "object",
             "additionalProperties": false,
             "required": [
-                "kind", "content", "claim", "entities", "topics", "salience",
+                "kind", "content", "claim", "retrieval_hint", "entities", "topics", "salience",
                 "source_role_id", "truth_value"
             ],
             "properties": {
                 "kind": {"const": "rumor"},
                 "content": knowledge_bounded_string(),
                 "claim": proposition,
+                "retrieval_hint": retrieval_hint,
                 "entities": entities_array,
                 "topics": topics_array,
                 "salience": salience,

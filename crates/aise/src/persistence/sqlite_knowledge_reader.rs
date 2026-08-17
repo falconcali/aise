@@ -1,7 +1,7 @@
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{FactId, MemoryId, RoleId};
+use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeIndexMatch, KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::domain::turn::RetrievalAudience;
@@ -133,8 +133,9 @@ async fn load_index(
     }
     let mut tx = pool.begin().await.map_err(SqliteStoreError::from)?;
     verify_snapshot(&mut tx, query.snapshot).await?;
-    let mut builder =
-        QueryBuilder::<Sqlite>::new("SELECT source_id, knowledge_kind FROM knowledge_entries WHERE story_id = ");
+    let mut builder = QueryBuilder::<Sqlite>::new(
+        "SELECT source_id, knowledge_kind, retrieval_hint FROM knowledge_entries WHERE story_id = ",
+    );
     builder.push_bind(query.snapshot.story_id.as_str());
     builder.push(" AND knowledge_kind IN (");
     {
@@ -152,10 +153,16 @@ async fn load_index(
     for row in rows {
         let source_id: String = row.try_get("source_id").map_err(SqliteStoreError::from)?;
         let kind_raw: String = row.try_get("knowledge_kind").map_err(SqliteStoreError::from)?;
+        let retrieval_hint_raw: Option<String> = row.try_get("retrieval_hint").map_err(SqliteStoreError::from)?;
         let kind = parse_kind(&kind_raw)?;
+        let retrieval_hint = retrieval_hint_raw
+            .map(crate::domain::knowledge::RetrievalHint::try_new)
+            .transpose()
+            .map_err(|_| invalid_record())?;
         records.push(KnowledgeIndexRecord {
-            source_id: make_source_id(kind, source_id),
+            source_id: make_source_id(kind, source_id)?,
             kind,
+            retrieval_hint,
         });
     }
     tx.commit().await.map_err(SqliteStoreError::from)?;
@@ -422,7 +429,7 @@ fn materialize_row(row: &sqlx::sqlite::SqliteRow, max_item_bytes: usize) -> Resu
     if (kind == KnowledgeKind::Memory) != memory_owner.is_some() {
         return Err(invalid_record());
     }
-    let source_id = make_source_id(kind, source_id_raw);
+    let source_id = make_source_id(kind, source_id_raw)?;
     let source = serde_json::from_str::<KnowledgeSource>(&source_json).map_err(|_| invalid_record())?;
     let content =
         BoundedText::try_new(content_raw, "knowledge_content", max_item_bytes).map_err(|_| invalid_record())?;
@@ -473,12 +480,8 @@ fn source_id_kind(source_id: &KnowledgeSourceId) -> KnowledgeKind {
     }
 }
 
-fn make_source_id(kind: KnowledgeKind, value: String) -> KnowledgeSourceId {
-    match kind {
-        KnowledgeKind::Fact => KnowledgeSourceId::Fact(FactId::from(value)),
-        KnowledgeKind::Rumor => KnowledgeSourceId::Rumor(crate::domain::ids::RumorId::from(value)),
-        KnowledgeKind::Memory => KnowledgeSourceId::Memory(MemoryId::from(value)),
-    }
+fn make_source_id(kind: KnowledgeKind, value: String) -> Result<KnowledgeSourceId, StoreError> {
+    KnowledgeSourceId::try_from_parts(kind, &value).map_err(|_| invalid_record())
 }
 
 fn entity_parts(entity: &KnowledgeEntity) -> (&'static str, &str) {

@@ -49,8 +49,8 @@
     "playable_role_ids": ["protagonist"]
   },
   "world_book": {
-    "spec": "aise_world_v3",
-    "spec_version": "3.0",
+    "spec": "aise_world_v4",
+    "spec_version": "4.0",
     "world_book_key": "lodge_world",
     "meta": {
       "name": "木屋世界",
@@ -59,6 +59,7 @@
     "facts": {
       "lodge_is_remote": {
         "content": "木屋位于人迹罕至的密林深处。",
+        "retrieval_hint": "木屋地理位置：位于密林深处，人迹罕至",
         "salience": 5
       }
     },

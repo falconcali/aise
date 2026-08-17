@@ -114,16 +114,11 @@ impl TurnExecutionPipeline for StoryGenerator {
             .iter()
             .filter(|entry| entry.kind == KnowledgeKind::Memory)
             .count();
-        let cast_policy = projection
-            .context
-            .instance_settings
-            .as_ref()
-            .map(|settings| match settings.cast_policy {
-                crate::domain::story_instance::state::CastPolicy::Open => "open",
-                crate::domain::story_instance::state::CastPolicy::IncidentalOnly => "incidental_only",
-                crate::domain::story_instance::state::CastPolicy::Closed => "closed",
-            })
-            .unwrap_or("none");
+        let cast_policy = match projection.context.instance_settings.cast_policy {
+            crate::domain::story_instance::state::CastPolicy::Open => "open",
+            crate::domain::story_instance::state::CastPolicy::IncidentalOnly => "incidental_only",
+            crate::domain::story_instance::state::CastPolicy::Closed => "closed",
+        };
         let request = PromptCompositionInput {
             profile: PromptProfile::StoryGenerator,
             rc_vars: projection.rc_vars,

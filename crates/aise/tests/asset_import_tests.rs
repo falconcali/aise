@@ -68,8 +68,8 @@ fn valid_pack_json() -> String {
             "playable_role_ids": ["protagonist"]
         },
         "world_book": {
-            "spec": "aise_world_v3",
-            "spec_version": "3.0",
+            "spec": "aise_world_v4",
+            "spec_version": "4.0",
             "world_book_key": "demo_world",
             "meta": {"name": "Demo World", "version": "0.1.0"},
             "facts": {},

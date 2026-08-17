@@ -9,23 +9,29 @@
 
 {{ roles }}
 
+{% if relationships %}
 ## Pre-turn Relationships
 
 {{ relationships }}
-
+{% endif %}
+{% if modifiable_knowledge %}
 ## Modifiable Knowledge
 
 {{ modifiable_knowledge }}
-
+{% endif %}
+{% if condition_queries %}
 ## Narrative Condition Queries
 
 {{ condition_queries }}
-
+{% endif %}
+{% if previous_extraction %}
 ## Previous Extraction
 
 {{ previous_extraction }}
-
+{% endif %}
+{% if validation_issues %}
 ## Validation Issues
 
 {{ validation_issues }}
+{% endif %}
 {# @endasset #}

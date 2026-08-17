@@ -36,9 +36,9 @@ fn prompt_context() -> StoryGeneratorPromptContext {
             point_of_view: bounded("second"),
             tense: bounded("present"),
         },
-        instance_settings: Some(StoryGeneratorInstanceSettingsPromptView {
+        instance_settings: StoryGeneratorInstanceSettingsPromptView {
             cast_policy: CastPolicy::Closed,
-        }),
+        },
         story_continuity: StoryContinuityPromptView {
             story_summary: bounded("summary"),
             recent_story: vec![bounded("recent")],
@@ -129,17 +129,42 @@ fn story_generator_runtime_context_has_exact_section_order() {
 }
 
 #[test]
-fn empty_optional_story_generator_sections_render_canonical_none() {
+fn empty_optional_story_generator_sections_render_no_sentinel() {
     assert_eq!(
         render_narrative_direction(&StoryGeneratorNarrativeDirectionPromptView {
             active_goals: Vec::new(),
             event_intents: Vec::new(),
         }),
-        "None."
+        ""
     );
-    assert_eq!(render_knowledge(&[]), "None.");
-    assert_eq!(render_decisions(&[]), "None.");
-    assert_eq!(render_roles(&[]), "None.");
+    assert_eq!(render_knowledge(&[]), "");
+    assert_eq!(render_decisions(&[]), "");
+    assert_eq!(render_roles(&[]), "");
+}
+
+#[test]
+fn story_profile_omits_empty_optional_lists() {
+    let rendered = render_story_profile(&StoryProfilePromptView {
+        language: bounded("zh-CN"),
+        genre: Vec::new(),
+        themes: Vec::new(),
+        tone: Vec::new(),
+        point_of_view: bounded("second"),
+        tense: bounded("present"),
+    });
+    assert!(!rendered.contains("genre"));
+    assert!(!rendered.contains("themes"));
+    assert!(!rendered.contains("tone"));
+    assert!(rendered.contains("language: \"zh-CN\""));
+    assert!(rendered.contains("point_of_view: \"second\""));
+}
+
+#[test]
+fn role_rendering_elides_empty_goals_and_attributes_but_keeps_location() {
+    let rendered = render_role(&role("npc"), None);
+    assert!(rendered.contains("location: \"hall\""));
+    assert!(!rendered.contains("goals"));
+    assert!(!rendered.contains("attributes"));
 }
 
 #[test]
@@ -153,7 +178,8 @@ fn decision_rendering_contains_only_target_name_decision_and_optional_utterance(
     assert!(rendered.contains("suggested_utterance: \"stay back\""));
     assert!(rendered.contains("role_id: \"npc-2\""));
     assert!(rendered.contains("decision: \"flee\""));
-    assert!(rendered.contains("suggested_utterance: None."));
+    let npc2_block = rendered.split("- role_id: \"npc-2\"").nth(1).unwrap();
+    assert!(!npc2_block.contains("suggested_utterance"));
     let npc1_index = rendered.find("npc-1").unwrap();
     let npc2_index = rendered.find("npc-2").unwrap();
     assert!(npc1_index < npc2_index);
@@ -386,6 +412,7 @@ fn sample_snapshot(roles: &[&StoryRole]) -> StoryReadSnapshot {
             story_id: StoryId::try_new("story-1").unwrap(),
             pack_digest: digest(),
             base_revision: StoryRevision::new(0),
+            knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater::zero(),
         },
     })
     .unwrap()

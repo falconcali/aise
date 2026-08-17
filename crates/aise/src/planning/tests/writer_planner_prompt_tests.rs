@@ -41,10 +41,11 @@ fn writer_role_rendering_has_exact_profile_and_state_fields() {
     let rendered = render_role(&role(), false);
     assert_eq!(
         rendered,
-        "role_id: \"guard\"\nname: \"Guard\"\nrole: \"Guard Captain\"\nappearance: \"scarred\"\npersonality: \"watchful\"\nspeaking_style: \"formal\"\nbackground: \"secret orders\"\nlocation: \"gate\"\ngoals: [\"hold the gate\"]\nattributes: {}"
+        "role_id: \"guard\"\nname: \"Guard\"\nrole: \"Guard Captain\"\nappearance: \"scarred\"\npersonality: \"watchful\"\nspeaking_style: \"formal\"\nbackground: \"secret orders\"\nlocation: \"gate\"\ngoals: [\"hold the gate\"]"
     );
     assert!(!rendered.contains("control:"));
     assert!(!rendered.contains("presence:"));
+    assert!(!rendered.contains("attributes:"));
 }
 
 #[test]
@@ -67,8 +68,19 @@ fn writer_role_rendering_omits_absent_and_duplicate_fields() {
 fn writer_role_collection_uses_required_indentation() {
     let rendered = render_roles(&[role()]);
     assert!(rendered.starts_with("- role_id: \"guard\"\n  name: \"Guard\""));
-    assert!(rendered.contains("\n  attributes: {}"));
+    assert!(rendered.contains("\n  goals: [\"hold the gate\"]"));
     assert!(!rendered.contains("presence:"));
+    assert!(!rendered.contains("attributes:"));
+}
+
+#[test]
+fn writer_role_rendering_elides_empty_goals_and_attributes() {
+    let mut value = role();
+    value.state.goals = Vec::new();
+    let rendered = render_role(&value, false);
+    assert!(!rendered.contains("goals:"));
+    assert!(!rendered.contains("attributes:"));
+    assert!(rendered.contains("location: \"gate\""));
 }
 
 #[test]

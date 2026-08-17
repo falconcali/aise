@@ -26,7 +26,7 @@ fn item(text: &str, id: &str) -> ContextItem {
     ContextItem::from_parts(
         content,
         ContextProvenance {
-            source_id: KnowledgeSourceId::Fact(FactId::from(id)),
+            source_id: KnowledgeSourceId::Fact(FactId::try_new(id).unwrap()),
             knowledge_kind: KnowledgeKind::Fact,
             source: KnowledgeSource::Seed {
                 pack_id: aise::domain::asset::ids::PackId::from("pack-1"),
@@ -52,26 +52,26 @@ fn context_and_llm_accounting_share_one_token_estimator() {
     assert_eq!(estimate_text_tokens(""), 1);
     assert_eq!(estimate_text_tokens("abcd"), 1);
     assert_eq!(estimate_text_tokens("abcde"), 2);
-    let item = item("abcdefgh", "f1");
+    let item = item("abcdefgh", "fact_0001");
     assert_eq!(item.token_cost, estimate_text_tokens("abcdefgh"));
 }
 
 #[test]
 fn retrieved_context_rejects_audience_overflow() {
     let mut roles = BTreeMap::new();
-    roles.insert(RoleId::try_new("c-1").unwrap(), vec![item("a", "f1")]);
-    roles.insert(RoleId::try_new("c-2").unwrap(), vec![item("b", "f2")]);
+    roles.insert(RoleId::try_new("c-1").unwrap(), vec![item("a", "fact_0001")]);
+    roles.insert(RoleId::try_new("c-2").unwrap(), vec![item("b", "fact_0002")]);
     let tight = RetrievedContextLimits {
         max_role_audiences: 1,
         ..limits()
     };
-    let err = RetrievedContext::try_new(vec![item("w", "f0")], roles, tight);
+    let err = RetrievedContext::try_new(vec![item("w", "fact_0003")], roles, tight);
     assert!(err.is_err());
 }
 
 #[test]
 fn fact_retrieval_never_creates_character_context() {
-    let ctx = RetrievedContext::try_new(vec![item("shared fact", "f1")], BTreeMap::new(), limits()).unwrap();
+    let ctx = RetrievedContext::try_new(vec![item("shared fact", "fact_0001")], BTreeMap::new(), limits()).unwrap();
     assert_eq!(ctx.writer().len(), 1);
     assert!(ctx.roles().is_empty());
     assert!(ctx.for_role(&RoleId::try_new("c-1").unwrap()).is_empty());

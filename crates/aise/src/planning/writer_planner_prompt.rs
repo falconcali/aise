@@ -185,15 +185,19 @@ pub fn writer_planner_output_schema(config: &PlannerConfig) -> Value {
 
 fn render_story_profile(baseline: &BaselineContext) -> String {
     let profile = &baseline.story_profile;
-    [
-        field("language", profile.language.as_str()),
-        list_field("genre", &profile.genre),
-        list_field("themes", &profile.themes),
-        list_field("tone", &profile.style.tone),
-        field("point_of_view", profile.style.point_of_view.as_str()),
-        field("tense", profile.style.tense.as_str()),
-    ]
-    .join("\n")
+    let mut lines = vec![field("language", profile.language.as_str())];
+    if !profile.genre.is_empty() {
+        lines.push(list_field("genre", &profile.genre));
+    }
+    if !profile.themes.is_empty() {
+        lines.push(list_field("themes", &profile.themes));
+    }
+    if !profile.style.tone.is_empty() {
+        lines.push(list_field("tone", &profile.style.tone));
+    }
+    lines.push(field("point_of_view", profile.style.point_of_view.as_str()));
+    lines.push(field("tense", profile.style.tense.as_str()));
+    lines.join("\n")
 }
 
 fn render_instance_settings(policy: CastPolicy) -> String {
@@ -217,14 +221,14 @@ fn render_recent_story(baseline: &BaselineContext) -> String {
 
 fn render_roles(roles: &[RoleContextView]) -> String {
     if roles.is_empty() {
-        return "None.".into();
+        return String::new();
     }
     roles.iter().map(|role| render_role(role, true)).collect::<Vec<_>>().join("\n")
 }
 
 fn render_relevant_knowledge(baseline: &BaselineContext) -> String {
     if baseline.relevant_knowledge.is_empty() {
-        return "None.".into();
+        return String::new();
     }
     baseline
         .relevant_knowledge
@@ -262,8 +266,12 @@ fn render_role(role: &RoleContextView, collection: bool) -> String {
     push_optional(&mut lines, rest, "speaking_style", profile.speaking_style.as_ref());
     push_optional(&mut lines, rest, "background", role.background.as_ref());
     lines.push(format!("{rest}location: {}", quoted(role.state.location.as_str())));
-    lines.push(format!("{rest}goals: {}", quoted_list(&role.state.goals)));
-    lines.push(format!("{rest}attributes: {}", render_attributes(&role.state.attributes)));
+    if !role.state.goals.is_empty() {
+        lines.push(format!("{rest}goals: {}", quoted_list(&role.state.goals)));
+    }
+    if !role.state.attributes.is_empty() {
+        lines.push(format!("{rest}attributes: {}", render_attributes(&role.state.attributes)));
+    }
     lines.join("\n")
 }
 
@@ -273,7 +281,7 @@ fn render_role_index(baseline: &BaselineContext, targets: &mut BTreeMap<Retrieva
         crate::domain::turn::RetrievalIndexScope::Prefiltered => "prefiltered",
     };
     if baseline.role_index.is_empty() {
-        return format!("scope: {scope}\nentries: None.");
+        return format!("scope: {scope}");
     }
     let entries = baseline
         .role_index
@@ -292,11 +300,7 @@ fn render_role_index(baseline: &BaselineContext, targets: &mut BTreeMap<Retrieva
             lines.join("\n")
         })
         .collect::<Vec<_>>();
-    if entries.is_empty() {
-        format!("scope: {scope}\nentries: None.")
-    } else {
-        format!("scope: {scope}\nentries:\n{}", entries.join("\n"))
-    }
+    format!("scope: {scope}\nentries:\n{}", entries.join("\n"))
 }
 
 fn render_knowledge_index(
@@ -308,7 +312,7 @@ fn render_knowledge_index(
         crate::domain::turn::RetrievalIndexScope::Prefiltered => "prefiltered",
     };
     if baseline.knowledge_entry_index.is_empty() {
-        return format!("scope: {scope}\nentries: None.");
+        return format!("scope: {scope}");
     }
     let entries = baseline
         .knowledge_entry_index
@@ -332,32 +336,34 @@ fn render_knowledge_index(
 }
 
 fn render_narrative_plan(plan: &NarrativePlan) -> String {
-    if plan.active_directions.is_empty() && plan.world_event_intents.is_empty() && plan.character_impulses.is_empty() {
-        return "None.".into();
+    let mut parts = Vec::new();
+    if !plan.active_directions.is_empty() {
+        let directions = plan
+            .active_directions
+            .iter()
+            .map(|direction| quoted(direction.dramatic_focus.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        parts.push(format!("active_directions: [{directions}]"));
     }
-    let directions = plan
-        .active_directions
-        .iter()
-        .map(|direction| quoted(direction.dramatic_focus.as_str()))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let impulses = plan
-        .character_impulses
-        .iter()
-        .map(|impulse| format!("{}: {}", quoted(impulse.target_role_id.as_str()), quoted(impulse.goal.as_str())))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(
-        "active_directions: [{}]\ncharacter_impulses: [{}]\nworld_event_intent_count: {}",
-        directions,
-        impulses,
-        plan.world_event_intents.len()
-    )
+    if !plan.character_impulses.is_empty() {
+        let impulses = plan
+            .character_impulses
+            .iter()
+            .map(|impulse| format!("{}: {}", quoted(impulse.target_role_id.as_str()), quoted(impulse.goal.as_str())))
+            .collect::<Vec<_>>()
+            .join(", ");
+        parts.push(format!("character_impulses: [{impulses}]"));
+    }
+    if !plan.world_event_intents.is_empty() {
+        parts.push(format!("world_event_intent_count: {}", plan.world_event_intents.len()));
+    }
+    parts.join("\n")
 }
 
 fn render_constraints(baseline: &BaselineContext) -> String {
     if baseline.active_story_constraints.is_empty() {
-        return "None.".into();
+        return String::new();
     }
     let mut constraints = baseline.active_story_constraints.iter().collect::<Vec<_>>();
     constraints.sort_by_key(|constraint| constraint.id.to_string());

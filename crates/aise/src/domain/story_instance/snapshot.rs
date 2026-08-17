@@ -5,6 +5,7 @@ use crate::domain::asset::story_pack::StoryProfile;
 use crate::domain::asset::validation::ScalarValue;
 use crate::domain::asset::world_book::TopicDefinition;
 use crate::domain::ids::{RoleId, StoryId, StoryRevision};
+use crate::domain::knowledge::KnowledgeIdHighWater;
 use crate::domain::narrative::StoryContinuity;
 use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
@@ -18,6 +19,7 @@ pub struct KnowledgeSnapshotRef {
     pub story_id: StoryId,
     pub pack_digest: Sha256Digest,
     pub base_revision: StoryRevision,
+    pub knowledge_id_high_water: KnowledgeIdHighWater,
 }
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
@@ -244,6 +246,10 @@ impl StoryReadSnapshot {
 
     pub fn knowledge_snapshot(&self) -> &KnowledgeSnapshotRef {
         &self.knowledge_snapshot
+    }
+
+    pub fn knowledge_id_high_water(&self) -> KnowledgeIdHighWater {
+        self.knowledge_snapshot.knowledge_id_high_water
     }
 
     pub fn graph_revision(&self) -> u64 {

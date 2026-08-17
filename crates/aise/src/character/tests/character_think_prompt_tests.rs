@@ -261,6 +261,7 @@ fn sample_snapshot(roles: &[&StoryRole]) -> StoryReadSnapshot {
             story_id: StoryId::try_new("story-1").unwrap(),
             pack_digest: digest(),
             base_revision: StoryRevision::new(0),
+            knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater::zero(),
         },
     })
     .unwrap()

@@ -171,24 +171,16 @@ fn render_validation_issues(values: &[StoryRepairValidationIssuePromptView]) -> 
         .iter()
         .enumerate()
         .map(|(index, value)| {
-            let location = value
-                .location
-                .as_ref()
-                .map(|location| {
-                    let path = quoted(location.path.as_str());
-                    match location.item_index {
-                        Some(item_index) => format!("{path}\n   Item Index: {item_index}"),
-                        None => path,
-                    }
-                })
-                .unwrap_or_else(|| "None.".into());
-            format!(
-                "{}. Code: {}\n   Location: {}\n   Message: {}",
-                index + 1,
-                value.code,
-                location,
-                quoted(value.message.as_str())
-            )
+            let mut lines = vec![format!("{}. Code: {}", index + 1, value.code)];
+            if let Some(location) = value.location.as_ref() {
+                let path = quoted(location.path.as_str());
+                match location.item_index {
+                    Some(item_index) => lines.push(format!("   Location: {path}\n   Item Index: {item_index}")),
+                    None => lines.push(format!("   Location: {path}")),
+                }
+            }
+            lines.push(format!("   Message: {}", quoted(value.message.as_str())));
+            lines.join("\n")
         })
         .collect::<Vec<_>>()
         .join("\n\n")

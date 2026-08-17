@@ -1,6 +1,7 @@
-use crate::domain::error::DomainInputError;
+use crate::domain::error::{DomainInputError, KnowledgeIdError};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -54,9 +55,94 @@ macro_rules! id_type {
 }
 
 id_type!(EventId);
-id_type!(MemoryId);
-id_type!(FactId);
-id_type!(RumorId);
+
+pub(crate) fn format_knowledge_sequence(sequence: NonZeroU64) -> String {
+    let value = sequence.get();
+    if value < 10000 {
+        format!("{value:04}")
+    } else {
+        value.to_string()
+    }
+}
+
+pub(crate) fn parse_knowledge_sequence(text: &str) -> Option<NonZeroU64> {
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let value: u64 = text.parse().ok()?;
+    let sequence = NonZeroU64::new(value)?;
+    (format_knowledge_sequence(sequence) == text).then_some(sequence)
+}
+
+fn is_canonical_knowledge_id_shape(value: &str) -> bool {
+    [FactId::PREFIX, RumorId::PREFIX, MemoryId::PREFIX]
+        .into_iter()
+        .any(|prefix| value.strip_prefix(prefix).and_then(parse_knowledge_sequence).is_some())
+}
+
+macro_rules! knowledge_id_type {
+    ($name:ident, $prefix:literal) => {
+        #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub struct $name(Arc<str>);
+
+        impl $name {
+            pub const PREFIX: &'static str = $prefix;
+
+            pub fn try_new(value: impl Into<String>) -> Result<Self, KnowledgeIdError> {
+                let value = value.into();
+                let sequence = value
+                    .strip_prefix(Self::PREFIX)
+                    .and_then(parse_knowledge_sequence)
+                    .ok_or_else(|| KnowledgeIdError::InvalidGrammar { value: value.clone() })?;
+                Self::from_sequence(sequence)
+            }
+
+            pub(crate) fn from_sequence(sequence: NonZeroU64) -> Result<Self, KnowledgeIdError> {
+                if sequence.get() > i64::MAX as u64 {
+                    return Err(KnowledgeIdError::SequenceOverflow);
+                }
+                Ok(Self(Arc::from(format!(
+                    "{}{}",
+                    Self::PREFIX,
+                    format_knowledge_sequence(sequence)
+                ))))
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl Serialize for $name {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.serialize_str(&self.0)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let value = String::deserialize(deserializer)?;
+                Self::try_new(value).map_err(serde::de::Error::custom)
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+
+        impl fmt::Debug for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_tuple(stringify!($name)).field(&self.0).finish()
+            }
+        }
+    };
+}
+
+knowledge_id_type!(FactId, "fact_");
+knowledge_id_type!(RumorId, "rumor_");
+knowledge_id_type!(MemoryId, "memory_");
 
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CharacterId(Arc<str>);
@@ -115,6 +201,9 @@ impl RoleId {
         let value = value.into();
         if !is_valid_role_id(&value) {
             return Err(DomainInputError::InvalidRoleId);
+        }
+        if is_canonical_knowledge_id_shape(&value) {
+            return Err(DomainInputError::RoleIdReservedForKnowledge);
         }
         Ok(Self(Arc::from(value)))
     }

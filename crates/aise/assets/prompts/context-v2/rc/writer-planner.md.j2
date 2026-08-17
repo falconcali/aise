@@ -27,14 +27,16 @@
 
 {{ player_character }}
 
+{% if relevant_characters %}
 ## Relevant Characters
 
 {{ relevant_characters }}
-
+{% endif %}
+{% if relevant_knowledge %}
 ## Relevant Knowledge
 
 {{ relevant_knowledge }}
-
+{% endif %}
 ## Character Index
 
 {{ character_index }}
@@ -43,14 +45,16 @@
 
 {{ knowledge_entry_index }}
 
+{% if narrative_plan %}
 ## Narrative Plan
 
 {{ narrative_plan }}
-
+{% endif %}
+{% if active_story_constraints %}
 ## Active Story Constraints
 
 {{ active_story_constraints }}
-
+{% endif %}
 ## Player Input
 
 {{ player_input }}

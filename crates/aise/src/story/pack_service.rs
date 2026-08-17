@@ -948,6 +948,13 @@ impl PackService {
         };
         let resolved_world_book = match &pack.world_book {
             WorldBookSource::Embedded(book) => {
+                if book.spec_version != crate::domain::asset::character_card::AssetSpecVersion::V4_0 {
+                    return Err(invalid_import(
+                        AssetValidationCode::UnsupportedSpecVersion,
+                        "/world_book/spec_version",
+                        "world_book spec_version must be 4.0",
+                    ));
+                }
                 crate::domain::asset::world_book::validate_topic_dictionary(&book.topics).map_err(|_| {
                     invalid_import(
                         AssetValidationCode::DuplicateKey,

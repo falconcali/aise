@@ -2,6 +2,7 @@ use crate::domain::asset::character_card::AssetSpecVersion;
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{FactKey, RumorKey, SemanticVersion, TopicKey, WorldBookKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
+use crate::domain::knowledge::RetrievalHint;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -22,8 +23,8 @@ pub struct WorldBook {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WorldSpec {
-    #[serde(rename = "aise_world_v3")]
-    V3,
+    #[serde(rename = "aise_world_v4")]
+    V4,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +94,7 @@ pub fn validate_topic_dictionary(dictionary: &BTreeMap<TopicKey, TopicDefinition
 pub struct FactSeed {
     pub proposition: Option<Proposition>,
     pub content: BoundedText,
+    pub retrieval_hint: RetrievalHint,
     #[serde(default)]
     pub entities: Vec<KnowledgeEntity>,
     #[serde(default)]
@@ -105,6 +107,7 @@ pub struct FactSeed {
 pub struct RumorSeed {
     pub claim: Option<Proposition>,
     pub content: BoundedText,
+    pub retrieval_hint: RetrievalHint,
     #[serde(default)]
     pub entities: Vec<KnowledgeEntity>,
     #[serde(default)]

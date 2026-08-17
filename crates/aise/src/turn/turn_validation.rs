@@ -1,6 +1,6 @@
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
-use crate::domain::knowledge::{KnowledgeEntry, KnowledgeSourceId};
+use crate::domain::knowledge::{KnowledgeEntry, KnowledgeIdHighWater, KnowledgeSourceId};
 use crate::domain::narrative::StoryEvent;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::role::StoryRoleState;
@@ -327,6 +327,7 @@ pub struct ValidatedChangeSet {
     role_changes: Vec<RoleStateChange>,
     relationship_changes: Vec<RelationshipStateChange>,
     knowledge_mutations: Vec<ValidatedKnowledgeMutation>,
+    knowledge_id_high_water: KnowledgeIdHighWater,
     narrative_events: Vec<StoryEvent>,
     narrative_resolution: ValidatedNarrativeResolution,
     constraint_change: StateChange<Vec<ActiveStoryConstraint>>,
@@ -347,6 +348,7 @@ impl ValidatedChangeSet {
             role_changes: parts.role_changes,
             relationship_changes: parts.relationship_changes,
             knowledge_mutations: parts.knowledge_mutations,
+            knowledge_id_high_water: parts.knowledge_id_high_water,
             narrative_events: parts.narrative_events,
             narrative_resolution: parts.narrative_resolution,
             constraint_change: parts.constraint_change,
@@ -367,6 +369,10 @@ impl ValidatedChangeSet {
 
     pub fn knowledge_mutations(&self) -> &[ValidatedKnowledgeMutation] {
         &self.knowledge_mutations
+    }
+
+    pub fn knowledge_id_high_water(&self) -> KnowledgeIdHighWater {
+        self.knowledge_id_high_water
     }
 
     pub fn narrative_events(&self) -> &[StoryEvent] {
@@ -391,6 +397,7 @@ pub struct ValidatedChangeSetParts {
     pub role_changes: Vec<RoleStateChange>,
     pub relationship_changes: Vec<RelationshipStateChange>,
     pub knowledge_mutations: Vec<ValidatedKnowledgeMutation>,
+    pub knowledge_id_high_water: KnowledgeIdHighWater,
     pub narrative_events: Vec<StoryEvent>,
     pub narrative_resolution: ValidatedNarrativeResolution,
     pub constraint_change: StateChange<Vec<ActiveStoryConstraint>>,

@@ -349,10 +349,12 @@ fn render_target_role(value: &CharacterThinkRolePromptView) -> String {
 }
 
 fn render_role_state(value: &CharacterThinkStatePromptView) -> String {
-    let attributes = if value.attributes.is_empty() {
-        "None.".into()
-    } else {
-        value
+    let mut lines = vec![format!("location: {}", quoted(value.location.as_str()))];
+    if !value.goals.is_empty() {
+        lines.push(format!("goals: {}", quoted_list(&value.goals)));
+    }
+    if !value.attributes.is_empty() {
+        let attributes = value
             .attributes
             .iter()
             .map(|attribute| {
@@ -363,14 +365,10 @@ fn render_role_state(value: &CharacterThinkStatePromptView) -> String {
                 )
             })
             .collect::<Vec<_>>()
-            .join("\n")
-    };
-    [
-        format!("location: {}", quoted(value.location.as_str())),
-        format!("goals: {}", quoted_list(&value.goals)),
-        format!("attributes:\n{attributes}"),
-    ]
-    .join("\n")
+            .join("\n");
+        lines.push(format!("attributes:\n{attributes}"));
+    }
+    lines.join("\n")
 }
 
 fn render_recent_story(values: &[BoundedText]) -> String {
@@ -379,7 +377,7 @@ fn render_recent_story(values: &[BoundedText]) -> String {
 
 fn render_knowledge(values: &[CharacterThinkKnowledgePromptView]) -> String {
     if values.is_empty() {
-        return "None.".into();
+        return String::new();
     }
     values
         .iter()
@@ -396,7 +394,7 @@ fn render_knowledge(values: &[CharacterThinkKnowledgePromptView]) -> String {
 
 fn render_impulses(values: &[CharacterThinkImpulsePromptView]) -> String {
     if values.is_empty() {
-        return "None.".into();
+        return String::new();
     }
     values
         .iter()
@@ -406,19 +404,22 @@ fn render_impulses(values: &[CharacterThinkImpulsePromptView]) -> String {
                 ImpulseUrgency::Medium => "medium",
                 ImpulseUrgency::High => "high",
             };
-            format!(
-                "- goal: {}\n  emotion: {}\n  urgency: {urgency}\n  reason: {}",
-                quoted(value.goal.as_str()),
-                render_optional(value.emotion.as_ref()),
-                render_optional(value.reason.as_ref())
-            )
+            let mut lines = vec![format!("- goal: {}", quoted(value.goal.as_str()))];
+            if let Some(emotion) = non_empty(value.emotion.as_ref()) {
+                lines.push(format!("  emotion: {}", quoted(emotion)));
+            }
+            lines.push(format!("  urgency: {urgency}"));
+            if let Some(reason) = non_empty(value.reason.as_ref()) {
+                lines.push(format!("  reason: {}", quoted(reason)));
+            }
+            lines.join("\n")
         })
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn render_optional(value: Option<&BoundedText>) -> String {
-    value.map(|value| quoted(value.as_str())).unwrap_or_else(|| "None.".into())
+fn non_empty(value: Option<&BoundedText>) -> Option<&str> {
+    value.map(BoundedText::as_str).filter(|value| !value.trim().is_empty())
 }
 
 fn push_optional(lines: &mut Vec<String>, name: &str, value: Option<&BoundedText>) {
@@ -463,9 +464,6 @@ fn render_story_summary(value: &str) -> String {
 }
 
 fn quoted_list(values: &[BoundedText]) -> String {
-    if values.is_empty() {
-        return "None.".into();
-    }
     format!(
         "[{}]",
         values.iter().map(|value| quoted(value.as_str())).collect::<Vec<_>>().join(", ")

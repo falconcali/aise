@@ -1,12 +1,12 @@
 use crate::domain::asset::frozen_ref::FrozenCharacterCardRef;
 use crate::domain::asset::ids::{FactKey, PackId, PlayerId};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
-use crate::domain::ids::{ConstraintId, FactId, MemoryId, RoleId, StoryId};
-use crate::domain::knowledge::KnowledgeEntry;
+use crate::domain::ids::{ConstraintId, RoleId, StoryId};
 use crate::domain::knowledge::fact::{Proposition, WorldFact};
 use crate::domain::knowledge::memory::MemoryEntry;
-use crate::domain::knowledge::query::KnowledgeSource;
+use crate::domain::knowledge::query::{KnowledgeSource, allocate_knowledge_ids};
 use crate::domain::knowledge::rumor::{Claim, SharedRumor, TruthValue};
+use crate::domain::knowledge::{KnowledgeEntry, KnowledgeIdHighWater, KnowledgeKind, KnowledgeSourceId};
 use crate::domain::narrative_graph::condition::{
     ConditionEvalContext, NarrativeNodeState, RoleControllerKind, evaluate_condition,
 };
@@ -201,7 +201,7 @@ impl StoryInstanceFactory {
             roles.insert(role_id.clone(), role);
         }
         let relationships = materialize_relationships(pack, &roles)?;
-        let knowledge = materialize_knowledge(frozen, &story_id, spec.created_at_ms)?;
+        let (knowledge, knowledge_id_high_water) = materialize_knowledge(frozen, spec.created_at_ms)?;
         let active_constraints = pack
             .constraints
             .iter()
@@ -234,6 +234,7 @@ impl StoryInstanceFactory {
             roles,
             relationships,
             knowledge,
+            knowledge_id_high_water,
             narrative_state,
             fact_values: BTreeMap::new(),
             active_constraints,
@@ -404,93 +405,111 @@ fn materialize_relationships(
 
 fn materialize_knowledge(
     frozen: &FrozenStoryPack,
-    story_id: &StoryId,
     created_at_ms: i64,
-) -> Result<Vec<KnowledgeEntry>, StoryInstantiationError> {
+) -> Result<(Vec<KnowledgeEntry>, KnowledgeIdHighWater), StoryInstantiationError> {
     let source = KnowledgeSource::Seed {
         pack_id: frozen.pack_id.clone(),
         pack_digest: frozen.digest.clone(),
     };
+    let fact_count = frozen.resolved_world_book.facts.len();
+    let rumor_count = frozen.resolved_world_book.rumors.len();
+    let mut memory_seeds = frozen
+        .pack
+        .roles
+        .iter()
+        .flat_map(|(role_id, role)| role.seed_memories.iter().map(move |seed| (role_id.clone(), seed)))
+        .collect::<Vec<_>>();
+    memory_seeds.sort_by(|(left_role, left_seed), (right_role, right_seed)| {
+        (left_role, &left_seed.memory_key).cmp(&(right_role, &right_seed.memory_key))
+    });
+    let addition_kinds = std::iter::repeat_n(KnowledgeKind::Fact, fact_count)
+        .chain(std::iter::repeat_n(KnowledgeKind::Rumor, rumor_count))
+        .chain(std::iter::repeat_n(KnowledgeKind::Memory, memory_seeds.len()))
+        .collect::<Vec<_>>();
+    let allocation = allocate_knowledge_ids(KnowledgeIdHighWater::zero(), &addition_kinds).map_err(|_| {
+        StoryInstantiationError::LimitExceeded {
+            limit: "knowledge_id_allocation",
+        }
+    })?;
+    let mut ids = allocation.assigned.into_iter();
     let mut entries = Vec::new();
-    let mut ids = BTreeSet::new();
     for (key, seed) in &frozen.resolved_world_book.facts {
-        let id = FactId::from(format!("{}:seed:fact:{}", story_id.as_str(), key.as_str()));
+        let KnowledgeSourceId::Fact(id) = ids.next().ok_or(StoryInstantiationError::LimitExceeded {
+            limit: "knowledge_id_allocation",
+        })?
+        else {
+            return Err(StoryInstantiationError::InvalidReference {
+                code: "knowledge_id_allocation_kind_mismatch",
+            });
+        };
         let proposition = seed.proposition.as_ref().map(|value| Proposition {
             subject: value.subject.clone(),
             predicate: value.predicate.clone(),
             value: value.value.clone(),
         });
-        let entry = KnowledgeEntry::Fact(WorldFact {
+        entries.push(KnowledgeEntry::Fact(WorldFact {
             id,
             key: Some(key.clone()),
             text: seed.content.clone(),
             proposition,
+            retrieval_hint: seed.retrieval_hint.clone(),
             entities: canonical(seed.entities.clone()),
             topics: canonical(seed.topics.clone()),
             salience: seed.salience,
             source: source.clone(),
-        });
-        insert_entry(&mut entries, &mut ids, entry)?;
+        }));
     }
     for (key, seed) in &frozen.resolved_world_book.rumors {
-        let id = crate::domain::ids::RumorId::from(format!("{}:seed:rumor:{}", story_id.as_str(), key.as_str()));
+        let KnowledgeSourceId::Rumor(id) = ids.next().ok_or(StoryInstantiationError::LimitExceeded {
+            limit: "knowledge_id_allocation",
+        })?
+        else {
+            return Err(StoryInstantiationError::InvalidReference {
+                code: "knowledge_id_allocation_kind_mismatch",
+            });
+        };
         let claim = seed.claim.as_ref().map(|value| Claim {
             subject: value.subject.clone(),
             predicate: value.predicate.clone(),
             value: value.value.clone(),
         });
-        let entry = KnowledgeEntry::Rumor(SharedRumor {
+        entries.push(KnowledgeEntry::Rumor(SharedRumor {
             id,
             key: Some(key.clone()),
             content: seed.content.clone(),
             claim,
+            retrieval_hint: seed.retrieval_hint.clone(),
             entities: canonical(seed.entities.clone()),
             topics: canonical(seed.topics.clone()),
             salience: seed.salience,
             source_role_id: None,
             truth_value: TruthValue::Unverified,
             source: source.clone(),
-        });
-        insert_entry(&mut entries, &mut ids, entry)?;
+        }));
     }
-    for (role_id, role) in &frozen.pack.roles {
-        for seed in &role.seed_memories {
-            let id = MemoryId::from(format!(
-                "{}:seed:memory:{}:{}",
-                story_id.as_str(),
-                role_id.as_str(),
-                seed.memory_key.as_str()
-            ));
-            let entities = canonical(vec![crate::domain::asset::entity::KnowledgeEntity::Role(role_id.clone())]);
-            let entry = KnowledgeEntry::Memory(MemoryEntry {
-                id,
-                owner: role_id.clone(),
-                kind: seed.kind.clone(),
-                content: seed.content.clone(),
-                entities,
-                topics: canonical(seed.topics.clone()),
-                salience: seed.salience,
-                source: source.clone(),
-                created_at_ms,
+    for (role_id, seed) in memory_seeds {
+        let KnowledgeSourceId::Memory(id) = ids.next().ok_or(StoryInstantiationError::LimitExceeded {
+            limit: "knowledge_id_allocation",
+        })?
+        else {
+            return Err(StoryInstantiationError::InvalidReference {
+                code: "knowledge_id_allocation_kind_mismatch",
             });
-            insert_entry(&mut entries, &mut ids, entry)?;
-        }
+        };
+        let entities = canonical(vec![crate::domain::asset::entity::KnowledgeEntity::Role(role_id.clone())]);
+        entries.push(KnowledgeEntry::Memory(MemoryEntry {
+            id,
+            owner: role_id,
+            kind: seed.kind.clone(),
+            content: seed.content.clone(),
+            entities,
+            topics: canonical(seed.topics.clone()),
+            salience: seed.salience,
+            source: source.clone(),
+            created_at_ms,
+        }));
     }
-    Ok(entries)
-}
-
-fn insert_entry(
-    entries: &mut Vec<KnowledgeEntry>,
-    ids: &mut BTreeSet<crate::domain::knowledge::KnowledgeSourceId>,
-    entry: KnowledgeEntry,
-) -> Result<(), StoryInstantiationError> {
-    if !ids.insert(entry.source_id()) {
-        return Err(StoryInstantiationError::InvalidReference {
-            code: "duplicate_knowledge_id",
-        });
-    }
-    entries.push(entry);
-    Ok(())
+    Ok((entries, allocation.new_high_water))
 }
 
 fn canonical<T: Ord>(mut values: Vec<T>) -> Vec<T> {

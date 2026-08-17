@@ -1,5 +1,5 @@
-use super::{CharacterId, RoleId};
-use crate::domain::error::DomainInputError;
+use super::{CharacterId, FactId, MemoryId, RoleId, RumorId};
+use crate::domain::error::{DomainInputError, KnowledgeIdError};
 
 #[test]
 fn character_id_accepts_canonical_lowercase_hyphenated_uuid() {
@@ -136,4 +136,62 @@ fn character_id_and_role_id_ordering_is_deterministic() {
     roles.sort();
     assert_eq!(roles[0].as_str(), "alpha");
     assert_eq!(roles[1].as_str(), "zeta");
+}
+
+#[test]
+fn role_id_cannot_collide_with_knowledge_id() {
+    for value in ["fact_0001", "rumor_0002", "memory_0003", "fact_10000"] {
+        let error = RoleId::try_new(value).expect_err("role id must not collide with a knowledge id shape");
+        assert_eq!(error, DomainInputError::RoleIdReservedForKnowledge);
+    }
+    RoleId::try_new("fact_0001x").expect("non-canonical suffix must remain a valid role id");
+    RoleId::try_new("fact_1").expect("unpadded sequence must remain a valid role id");
+}
+
+#[test]
+fn knowledge_ids_use_canonical_zero_padded_grammar() {
+    assert_eq!(FactId::try_new("fact_0001").unwrap().as_str(), "fact_0001");
+    assert_eq!(RumorId::try_new("rumor_9999").unwrap().as_str(), "rumor_9999");
+    assert_eq!(MemoryId::try_new("memory_10000").unwrap().as_str(), "memory_10000");
+}
+
+#[test]
+fn knowledge_ids_reject_alternate_spellings() {
+    for value in [
+        "fact_00001",
+        "fact_+001",
+        "fact_1",
+        "fact_0000",
+        "fact_",
+        "fact_abcd",
+        "rumor_0001x",
+    ] {
+        FactId::try_new(value)
+            .err()
+            .or_else(|| RumorId::try_new(value).err())
+            .unwrap_or_else(|| {
+                panic!("expected {value} to be rejected");
+            });
+    }
+}
+
+#[test]
+fn knowledge_id_serializes_as_canonical_string_and_round_trips() {
+    let id = RumorId::try_new("rumor_0042").unwrap();
+    let json = serde_json::to_string(&id).unwrap();
+    assert_eq!(json, "\"rumor_0042\"");
+    let round_tripped: RumorId = serde_json::from_str(&json).unwrap();
+    assert_eq!(id, round_tripped);
+}
+
+#[test]
+fn knowledge_id_deserialize_rejects_invalid_grammar() {
+    let result: Result<FactId, _> = serde_json::from_str("\"not-a-fact-id\"");
+    assert!(result.is_err());
+}
+
+#[test]
+fn knowledge_id_rejects_sequence_above_sqlite_range() {
+    let error = FactId::try_new(format!("fact_{}", i64::MAX as u64 + 1)).expect_err("overflow must be rejected");
+    assert_eq!(error, KnowledgeIdError::SequenceOverflow);
 }

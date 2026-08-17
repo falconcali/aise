@@ -1,9 +1,9 @@
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{FactId, MemoryId, RumorId, TurnId};
+use crate::domain::ids::TurnId;
 use crate::domain::knowledge::fact::WorldFact;
 use crate::domain::knowledge::memory::MemoryEntry;
-use crate::domain::knowledge::query::KnowledgeSource;
+use crate::domain::knowledge::query::{KnowledgeSource, allocate_knowledge_ids};
 use crate::domain::knowledge::rumor::SharedRumor;
 use crate::domain::knowledge::{KnowledgeEntry, KnowledgeSourceId};
 use crate::domain::narrative::{EventKind, StoryEvent};
@@ -161,6 +161,17 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
         })
         .collect::<Vec<_>>();
 
+    let knowledge_add_kinds = extraction
+        .knowledge_changes
+        .iter()
+        .filter_map(|mutation| match mutation {
+            ProposedKnowledgeMutation::Add { value } => Some(value.kind()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let allocation = allocate_knowledge_ids(snapshot.knowledge_id_high_water(), &knowledge_add_kinds)
+        .map_err(|_| invariant("knowledge_id_allocation_overflow", "knowledge id allocation overflowed"))?;
+    let mut assigned_ids = allocation.assigned.into_iter();
     let knowledge_mutations = extraction
         .knowledge_changes
         .iter()
@@ -170,7 +181,7 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
                 .map_err(|_| invariant("knowledge_count_overflow", "knowledge change count exceeds u32"))?;
             let operation = make_knowledge_operation(
                 mutation,
-                ordinal,
+                &mut assigned_ids,
                 &turn_id,
                 ctx.budget().max_knowledge_change_bytes(),
                 ctx.identity().started_at_ms(),
@@ -178,6 +189,7 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
             Ok(ValidatedKnowledgeMutation { ordinal, operation })
         })
         .collect::<Result<Vec<_>, TurnExecutionError>>()?;
+    let knowledge_id_high_water = allocation.new_high_water;
 
     let mut narrative_events = Vec::new();
     for intent in &projection.plan.world_event_intents {
@@ -287,6 +299,7 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
         role_changes,
         relationship_changes,
         knowledge_mutations,
+        knowledge_id_high_water,
         narrative_events,
         narrative_resolution,
         constraint_change,
@@ -310,20 +323,17 @@ fn make_event(
 
 fn make_knowledge_operation(
     mutation: &ProposedKnowledgeMutation,
-    ordinal: u32,
+    assigned_ids: &mut impl Iterator<Item = KnowledgeSourceId>,
     turn_id: &TurnId,
     max_bytes: usize,
     created_at_ms: i64,
 ) -> Result<ValidatedKnowledgeOperation, TurnExecutionError> {
     match mutation {
         ProposedKnowledgeMutation::Add { value } => {
-            let entry = make_knowledge_entry(
-                value,
-                new_source_id(value, turn_id, ordinal)?,
-                turn_id,
-                max_bytes,
-                created_at_ms,
-            )?;
+            let source_id = assigned_ids
+                .next()
+                .ok_or_else(|| invariant("knowledge_id_allocation_missing", "knowledge id allocation ran out"))?;
+            let entry = make_knowledge_entry(value, source_id, turn_id, max_bytes, created_at_ms)?;
             Ok(ValidatedKnowledgeOperation::Add(entry))
         }
         ProposedKnowledgeMutation::Update { target, value } => {
@@ -337,26 +347,6 @@ fn make_knowledge_operation(
             Ok(ValidatedKnowledgeOperation::Delete { target: target.clone() })
         }
     }
-}
-
-fn new_source_id(
-    value: &ProposedKnowledgeValue,
-    turn_id: &TurnId,
-    ordinal: u32,
-) -> Result<KnowledgeSourceId, TurnExecutionError> {
-    Ok(match value {
-        ProposedKnowledgeValue::Fact { .. } => {
-            KnowledgeSourceId::Fact(FactId::from(format!("{}:fact:{ordinal}", turn_id.as_str())))
-        }
-        ProposedKnowledgeValue::Rumor { .. } => {
-            KnowledgeSourceId::Rumor(RumorId::from(format!("{}:rumor:{ordinal}", turn_id.as_str())))
-        }
-        ProposedKnowledgeValue::Memory { owner, .. } => KnowledgeSourceId::Memory(MemoryId::from(format!(
-            "{}:memory:{}:{ordinal}",
-            turn_id.as_str(),
-            owner.as_str()
-        ))),
-    })
 }
 
 fn make_knowledge_entry(
@@ -374,6 +364,7 @@ fn make_knowledge_entry(
             ProposedKnowledgeValue::Fact {
                 content,
                 proposition,
+                retrieval_hint,
                 entities,
                 topics,
                 salience,
@@ -384,6 +375,7 @@ fn make_knowledge_entry(
             key: None,
             text: bounded(content.as_str(), "fact_content", max_bytes)?,
             proposition: proposition.clone(),
+            retrieval_hint: retrieval_hint.clone(),
             entities: canonical(entities.clone()),
             topics: canonical(topics.clone()),
             salience: *salience,
@@ -393,6 +385,7 @@ fn make_knowledge_entry(
             ProposedKnowledgeValue::Rumor {
                 content,
                 claim,
+                retrieval_hint,
                 entities,
                 topics,
                 salience,
@@ -405,6 +398,7 @@ fn make_knowledge_entry(
             key: None,
             content: bounded(content.as_str(), "rumor_content", max_bytes)?,
             claim: claim.clone(),
+            retrieval_hint: retrieval_hint.clone(),
             entities: canonical(entities.clone()),
             topics: canonical(topics.clone()),
             salience: *salience,

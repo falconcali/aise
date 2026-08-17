@@ -66,6 +66,7 @@ pub struct MaterializedStoryInstanceSpec {
     pub roles: std::collections::BTreeMap<crate::domain::ids::RoleId, StoryRole>,
     pub relationships: Vec<crate::domain::story_instance::state::RelationshipState>,
     pub knowledge: Vec<crate::domain::knowledge::KnowledgeEntry>,
+    pub knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater,
     pub opening: crate::domain::asset::validation::BoundedText,
     pub narrative_state: crate::domain::narrative_graph::state::NarrativeRuntimeState,
     pub fact_values:

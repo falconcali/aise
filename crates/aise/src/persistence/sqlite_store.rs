@@ -151,8 +151,8 @@ impl Store for SqliteStore {
         sqlx::query(
             "INSERT INTO story_instances \
              (story_id, pack_id, settings_json, roles_json, relationships_json, \
-              narrative_state_json, fact_values_json, created_at_ms) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              narrative_state_json, fact_values_json, knowledge_id_high_water, created_at_ms) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(spec.story_id.as_str())
         .bind(spec.pack.pack_id.as_str())
@@ -161,6 +161,7 @@ impl Store for SqliteStore {
         .bind(&relationships_json)
         .bind(&narrative_state_json)
         .bind(&fact_values_json)
+        .bind(spec.knowledge_id_high_water.get() as i64)
         .bind(spec.created_at_ms)
         .execute(&mut *tx)
         .await
@@ -178,6 +179,7 @@ impl Store for SqliteStore {
                     source_id: source_id.as_str(),
                     memory_owner: entry.memory_owner().map(RoleId::as_str),
                     content: entry.content().as_str(),
+                    retrieval_hint: entry.retrieval_hint().map(|hint| hint.as_str()),
                     salience: entry.salience(),
                     source: entry.source(),
                     payload_json,
@@ -411,6 +413,7 @@ impl Store for SqliteStore {
             &roles,
             relationships_by_key.into_values().collect(),
             &narrative_state,
+            commit.changes.knowledge_id_high_water(),
         )
         .await?;
 
@@ -550,6 +553,7 @@ async fn persist_instance_state(
     roles: &std::collections::BTreeMap<RoleId, StoryRole>,
     relationships: Vec<RelationshipState>,
     narrative_state: &NarrativeRuntimeState,
+    knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater,
 ) -> Result<(), StoreError> {
     let roles_json = serde_json::to_string(roles).map_err(|_| StoreError::Serialization {
         kind: crate::persistence::store::StoreSerializationErrorKind::InvalidRoleState,
@@ -562,11 +566,12 @@ async fn persist_instance_state(
     })?;
     sqlx::query(
         "UPDATE story_instances SET roles_json = ?, relationships_json = ?, \
-         narrative_state_json = ? WHERE story_id = ?",
+         narrative_state_json = ?, knowledge_id_high_water = ? WHERE story_id = ?",
     )
     .bind(&roles_json)
     .bind(&relationships_json)
     .bind(&narrative_state_json)
+    .bind(knowledge_id_high_water.get() as i64)
     .bind(commit.story_id.as_str())
     .execute(&mut **tx)
     .await
@@ -588,6 +593,7 @@ struct KnowledgeEntryWrite<'a> {
     source_id: &'a str,
     memory_owner: Option<&'a str>,
     content: &'a str,
+    retrieval_hint: Option<&'a str>,
     salience: u8,
     source: &'a crate::domain::knowledge::KnowledgeSource,
     payload_json: String,
@@ -604,14 +610,16 @@ async fn insert_knowledge_entry(
     })?;
     sqlx::query(
         "INSERT INTO knowledge_entries \
-         (story_id, source_id, knowledge_kind, memory_owner_role_id, content, salience, source_json, payload_json) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+         (story_id, source_id, knowledge_kind, memory_owner_role_id, content, retrieval_hint, salience, \
+          source_json, payload_json) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(entry.story_id.as_str())
     .bind(entry.source_id)
     .bind(entry.knowledge_kind)
     .bind(entry.memory_owner)
     .bind(entry.content)
+    .bind(entry.retrieval_hint)
     .bind(i64::from(entry.salience))
     .bind(&source_json)
     .bind(&entry.payload_json)
@@ -696,6 +704,7 @@ async fn apply_knowledge_mutation(
                     source_id: source_id_value.as_str(),
                     memory_owner: entry.memory_owner().map(RoleId::as_str),
                     content: entry.content().as_str(),
+                    retrieval_hint: entry.retrieval_hint().map(|hint| hint.as_str()),
                     salience: entry.salience(),
                     source: entry.source(),
                     payload_json,
@@ -818,6 +827,7 @@ fn merge_knowledge_update(
                 key: old.key,
                 text: new.text,
                 proposition: new.proposition,
+                retrieval_hint: new.retrieval_hint,
                 entities: new.entities,
                 topics: new.topics,
                 salience: new.salience,
@@ -830,6 +840,7 @@ fn merge_knowledge_update(
                 key: old.key,
                 content: new.content,
                 claim: new.claim,
+                retrieval_hint: new.retrieval_hint,
                 entities: new.entities,
                 topics: new.topics,
                 salience: new.salience,

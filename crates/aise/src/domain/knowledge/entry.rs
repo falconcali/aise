@@ -80,4 +80,12 @@ impl KnowledgeEntry {
             _ => None,
         }
     }
+
+    pub fn retrieval_hint(&self) -> Option<&crate::domain::knowledge::RetrievalHint> {
+        match self {
+            Self::Fact(value) => Some(&value.retrieval_hint),
+            Self::Rumor(value) => Some(&value.retrieval_hint),
+            Self::Memory(_) => None,
+        }
+    }
 }

@@ -21,7 +21,7 @@ pub const STORY_GENERATOR_FTI_SLOT: &str = "context.story_generator.fti";
 #[derive(Debug, Clone, Serialize)]
 pub struct StoryGeneratorPromptContext {
     pub story_profile: StoryProfilePromptView,
-    pub instance_settings: Option<StoryGeneratorInstanceSettingsPromptView>,
+    pub instance_settings: StoryGeneratorInstanceSettingsPromptView,
     pub story_continuity: StoryContinuityPromptView,
     pub player_role: StoryGeneratorRolePromptView,
     pub ai_roles: Vec<StoryGeneratorRolePromptView>,
@@ -76,8 +76,7 @@ pub struct StoryGeneratorRoleStatePromptView {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct StoryGeneratorKnowledgePromptView {
-    pub entry_id: Option<KnowledgeSourceId>,
-    pub title: Option<BoundedText>,
+    pub entry_id: KnowledgeSourceId,
     pub kind: KnowledgeKind,
     pub scope: KnowledgeScopePromptView,
     pub content: BoundedText,
@@ -210,9 +209,9 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
         let active_story_constraints = project_constraints(baseline);
         let mut context = StoryGeneratorPromptContext {
             story_profile,
-            instance_settings: Some(StoryGeneratorInstanceSettingsPromptView {
+            instance_settings: StoryGeneratorInstanceSettingsPromptView {
                 cast_policy: baseline.instance_settings.cast_policy,
-            }),
+            },
             story_continuity,
             player_role,
             ai_roles,
@@ -317,8 +316,7 @@ fn project_writer_knowledge(
                 }
             };
             Ok(StoryGeneratorKnowledgePromptView {
-                entry_id: Some(item.provenance.source_id.clone()),
-                title: None,
+                entry_id: item.provenance.source_id.clone(),
                 kind: item.provenance.knowledge_kind,
                 scope,
                 content: item.content.clone(),
@@ -408,7 +406,7 @@ pub(crate) fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> Runt
         ),
         (
             "instance_settings".into(),
-            Value::String(render_instance_settings(context.instance_settings.as_ref())),
+            Value::String(render_instance_settings(&context.instance_settings)),
         ),
         (
             "story_summary".into(),
@@ -503,21 +501,22 @@ fn runtime_tokens(vars: &RuntimePromptVars) -> u64 {
 }
 
 fn render_story_profile(value: &StoryProfilePromptView) -> String {
-    [
-        format!("language: {}", quoted(value.language.as_str())),
-        format!("genre: {}", quoted_list(&value.genre)),
-        format!("themes: {}", quoted_list(&value.themes)),
-        format!("tone: {}", quoted_list(&value.tone)),
-        format!("point_of_view: {}", quoted(value.point_of_view.as_str())),
-        format!("tense: {}", quoted(value.tense.as_str())),
-    ]
-    .join("\n")
+    let mut lines = vec![format!("language: {}", quoted(value.language.as_str()))];
+    if !value.genre.is_empty() {
+        lines.push(format!("genre: {}", quoted_list(&value.genre)));
+    }
+    if !value.themes.is_empty() {
+        lines.push(format!("themes: {}", quoted_list(&value.themes)));
+    }
+    if !value.tone.is_empty() {
+        lines.push(format!("tone: {}", quoted_list(&value.tone)));
+    }
+    lines.push(format!("point_of_view: {}", quoted(value.point_of_view.as_str())));
+    lines.push(format!("tense: {}", quoted(value.tense.as_str())));
+    lines.join("\n")
 }
 
-fn render_instance_settings(value: Option<&StoryGeneratorInstanceSettingsPromptView>) -> String {
-    let Some(value) = value else {
-        return "None.".into();
-    };
+fn render_instance_settings(value: &StoryGeneratorInstanceSettingsPromptView) -> String {
     let policy = match value.cast_policy {
         CastPolicy::Open => "open",
         CastPolicy::IncidentalOnly => "incidental_only",
@@ -532,7 +531,7 @@ fn render_recent_story(values: &[BoundedText]) -> String {
 
 fn render_roles(values: &[StoryGeneratorRolePromptView]) -> String {
     if values.is_empty() {
-        return "None.".into();
+        return String::new();
     }
     values
         .iter()
@@ -545,20 +544,6 @@ fn render_role(value: &StoryGeneratorRolePromptView, prefix: Option<&str>) -> St
     let collection = prefix.is_some();
     let first = prefix.unwrap_or_default();
     let rest = if collection { "  " } else { "" };
-    let attributes = if value.state.attributes.is_empty() {
-        "None.".into()
-    } else {
-        format!(
-            "{{{}}}",
-            value
-                .state
-                .attributes
-                .iter()
-                .map(|(key, value)| format!("{}: {}", quoted(key.as_str()), render_scalar(value)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
     let dialogue_examples = value
         .dialogue_examples
         .iter()
@@ -586,14 +571,29 @@ fn render_role(value: &StoryGeneratorRolePromptView, prefix: Option<&str>) -> St
     }
     push_optional(&mut lines, rest, "background", value.background.as_ref());
     lines.push(format!("{rest}location: {}", quoted(value.state.location.as_str())));
-    lines.push(format!("{rest}goals: {}", quoted_list(&value.state.goals)));
-    lines.push(format!("{rest}attributes: {attributes}"));
+    if !value.state.goals.is_empty() {
+        lines.push(format!("{rest}goals: {}", quoted_list(&value.state.goals)));
+    }
+    if !value.state.attributes.is_empty() {
+        lines.push(format!("{rest}attributes: {}", render_attributes(&value.state.attributes)));
+    }
     lines.join("\n")
+}
+
+fn render_attributes(values: &BTreeMap<AttributeKey, ScalarValue>) -> String {
+    format!(
+        "{{{}}}",
+        values
+            .iter()
+            .map(|(key, value)| format!("{}: {}", quoted(key.as_str()), render_scalar(value)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 fn render_constraints(values: &[ActiveStoryConstraintPromptView]) -> String {
     if values.is_empty() {
-        return "None.".into();
+        return String::new();
     }
     values
         .iter()
@@ -613,19 +613,19 @@ fn render_constraints(values: &[ActiveStoryConstraintPromptView]) -> String {
 }
 
 fn render_narrative_direction(value: &StoryGeneratorNarrativeDirectionPromptView) -> String {
-    if value.active_goals.is_empty() && value.event_intents.is_empty() {
-        return "None.".into();
+    let mut parts = Vec::new();
+    if !value.active_goals.is_empty() {
+        parts.push(format!("active_goals: {}", quoted_list(&value.active_goals)));
     }
-    format!(
-        "active_goals: {}\nevent_intents: {}",
-        quoted_list(&value.active_goals),
-        quoted_list(&value.event_intents)
-    )
+    if !value.event_intents.is_empty() {
+        parts.push(format!("event_intents: {}", quoted_list(&value.event_intents)));
+    }
+    parts.join("\n")
 }
 
 fn render_knowledge(values: &[StoryGeneratorKnowledgePromptView]) -> String {
     if values.is_empty() {
-        return "None.".into();
+        return String::new();
     }
     values
         .iter()
@@ -642,18 +642,9 @@ fn render_knowledge(values: &[StoryGeneratorKnowledgePromptView]) -> String {
                     format!("character_memory:{}", quoted(owner.as_str()))
                 }
             };
-            let entry_id = value
-                .entry_id
-                .as_ref()
-                .map(|id| quoted(id.as_str()))
-                .unwrap_or_else(|| "None.".into());
-            let title = value
-                .title
-                .as_ref()
-                .map(|title| quoted(title.as_str()))
-                .unwrap_or_else(|| "None.".into());
             format!(
-                "- entry_id: {entry_id}\n  title: {title}\n  kind: {kind}\n  scope: {scope}\n  content: {}",
+                "- entry_id: {}\n  kind: {kind}\n  scope: {scope}\n  content: {}",
+                quoted(value.entry_id.as_str()),
                 quoted(value.content.as_str())
             )
         })
@@ -663,25 +654,27 @@ fn render_knowledge(values: &[StoryGeneratorKnowledgePromptView]) -> String {
 
 fn render_decisions(values: &[StoryGeneratorCharacterDecisionPromptView]) -> String {
     if values.is_empty() {
-        return "None.".into();
+        return String::new();
     }
     values
         .iter()
         .map(|value| {
-            let suggested_utterance = value
-                .suggested_utterance
-                .as_ref()
-                .map(|value| quoted(value.as_str()))
-                .unwrap_or_else(|| "None.".into());
-            format!(
-                "- role_id: {}\n  name: {}\n  decision: {}\n  suggested_utterance: {suggested_utterance}",
-                quoted(value.role_id.as_str()),
-                quoted(value.name.as_str()),
-                quoted(value.decision.as_str()),
-            )
+            let mut lines = vec![
+                format!("- role_id: {}", quoted(value.role_id.as_str())),
+                format!("  name: {}", quoted(value.name.as_str())),
+                format!("  decision: {}", quoted(value.decision.as_str())),
+            ];
+            if let Some(utterance) = non_empty(value.suggested_utterance.as_ref()) {
+                lines.push(format!("  suggested_utterance: {}", quoted(utterance)));
+            }
+            lines.join("\n")
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn non_empty(value: Option<&BoundedText>) -> Option<&str> {
+    value.map(BoundedText::as_str).filter(|value| !value.trim().is_empty())
 }
 
 fn render_story_summary(value: &str) -> String {
@@ -699,9 +692,6 @@ fn push_optional(lines: &mut Vec<String>, indent: &str, name: &str, value: Optio
 }
 
 fn quoted_list(values: &[BoundedText]) -> String {
-    if values.is_empty() {
-        return "None.".into();
-    }
     format!(
         "[{}]",
         values.iter().map(|value| quoted(value.as_str())).collect::<Vec<_>>().join(", ")
