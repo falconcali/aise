@@ -178,6 +178,79 @@ fn writer_planner_prompt_uses_relevant_characters_without_presence() {
 }
 
 #[test]
+fn writer_planner_indexed_targets_cover_role_and_knowledge_index_entries() {
+    let mut baseline = minimal_baseline();
+    baseline.role_index = vec![crate::domain::turn::RoleIndexEntry {
+        role_id: RoleId::try_new("npc-guard").unwrap(),
+        retrieval_hint: bounded("guards the gate"),
+    }];
+    baseline.knowledge_index = vec![crate::domain::turn::KnowledgeIndexEntry {
+        source_id: crate::domain::knowledge::KnowledgeSourceId::Fact(
+            crate::domain::ids::FactId::try_new("fact_0001").unwrap(),
+        ),
+        retrieval_hint: crate::domain::knowledge::RetrievalHint::try_new("the gate status").unwrap(),
+    }];
+    let projector = WriterPlannerPromptContextProjector;
+    let narrative_plan = NarrativePlan {
+        active_nodes: Vec::new(),
+        active_directions: Vec::new(),
+        world_event_intents: Vec::new(),
+        character_impulses: Vec::new(),
+        effect_dispositions: Vec::new(),
+    };
+    let player_input = bounded("go north");
+    let projection = projector
+        .project(&baseline, &narrative_plan, &player_input, &PlannerConfig::default(), 100_000)
+        .expect("writer planner projection");
+
+    assert!(matches!(
+        projection.context.indexed_targets.get("npc-guard"),
+        Some(IndexedRetrievalTarget::Role(role_id)) if role_id.as_str() == "npc-guard"
+    ));
+    assert!(matches!(
+        projection.context.indexed_targets.get("fact_0001"),
+        Some(IndexedRetrievalTarget::Knowledge(source_id)) if source_id.as_str() == "fact_0001"
+    ));
+}
+
+#[test]
+fn insert_target_accepts_repeated_identical_entry() {
+    let mut targets = std::collections::BTreeMap::new();
+    let role_id = RoleId::try_new("npc-guard").unwrap();
+    insert_target(
+        &mut targets,
+        "npc-guard".to_owned(),
+        IndexedRetrievalTarget::Role(role_id.clone()),
+    )
+    .unwrap();
+    insert_target(&mut targets, "npc-guard".to_owned(), IndexedRetrievalTarget::Role(role_id)).unwrap();
+    assert_eq!(targets.len(), 1);
+}
+
+#[test]
+fn insert_target_rejects_collision_across_target_domains() {
+    let mut targets = std::collections::BTreeMap::new();
+    insert_target(
+        &mut targets,
+        "collision".to_owned(),
+        IndexedRetrievalTarget::Role(RoleId::try_new("npc-guard").unwrap()),
+    )
+    .unwrap();
+    let error = insert_target(
+        &mut targets,
+        "collision".to_owned(),
+        IndexedRetrievalTarget::Knowledge(crate::domain::knowledge::KnowledgeSourceId::Fact(
+            crate::domain::ids::FactId::try_new("fact_0001").unwrap(),
+        )),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        WriterPlannerProjectionError::RetrievalTargetCollision { key } if key == "collision"
+    ));
+}
+
+#[test]
 fn writer_planner_renders_story_continuity_as_prose() {
     let mut baseline = minimal_baseline();
     baseline.story_continuity = StoryContinuity::try_new(
