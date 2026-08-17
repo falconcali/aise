@@ -22,7 +22,6 @@ pub struct CharacterThinkPromptContext {
     pub target_role: CharacterThinkRolePromptView,
     pub current_role_state: CharacterThinkStatePromptView,
     pub story_continuity: CharacterThinkStoryContinuityPromptView,
-    pub current_scene: CharacterThinkScenePromptView,
     pub relevant_character_knowledge: Vec<CharacterThinkKnowledgePromptView>,
     pub narrative_character_impulses: Vec<CharacterThinkImpulsePromptView>,
     pub thinking_focus: BoundedText,
@@ -59,14 +58,6 @@ pub struct CharacterStateAttributePromptView {
     pub value: ScalarValue,
 }
 
-#[derive(Debug, Clone)]
-pub struct CharacterThinkScenePromptView {
-    pub location: Option<BoundedText>,
-    pub time: Option<BoundedText>,
-    pub situation: Option<BoundedText>,
-    pub observable_conditions: Vec<BoundedText>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CharacterThinkKnowledgeKind {
     Rumor,
@@ -101,8 +92,6 @@ pub enum CharacterThinkProjectionError {
     UnknownRole { role_id: RoleId },
     #[error("character think role is player-controlled: {role_id}")]
     PlayerControlledRole { role_id: RoleId },
-    #[error("character think role is not present: {role_id}")]
-    RoleNotPresent { role_id: RoleId },
     #[error("character think private knowledge is unauthorized for role: {role_id}")]
     UnauthorizedKnowledge { role_id: RoleId },
     #[error("character think required prompt data exceeds budget")]
@@ -140,41 +129,18 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
         request: &CharacterThinkRequest,
     ) -> Result<CharacterThinkPromptProjection, CharacterThinkProjectionError> {
         let baseline = ctx.baseline().ok_or(CharacterThinkProjectionError::MissingStageState)?;
+        let snapshot = ctx.snapshot().ok_or(CharacterThinkProjectionError::MissingStageState)?;
         let _plan = ctx.plan().ok_or(CharacterThinkProjectionError::MissingStageState)?;
         if request.reason.as_str().trim().is_empty()
             || request.reason.as_str().len() > self.character_config.max_thinking_focus_bytes
         {
             return Err(CharacterThinkProjectionError::InvalidPromptField);
         }
-        if request.role_id == baseline.player_role.role_id {
-            return Err(CharacterThinkProjectionError::PlayerControlledRole {
+        let role = snapshot
+            .role(&request.role_id)
+            .ok_or_else(|| CharacterThinkProjectionError::UnknownRole {
                 role_id: request.role_id.clone(),
-            });
-        }
-        let role = baseline
-            .scene_roles
-            .iter()
-            .find(|candidate| candidate.role_id == request.role_id);
-        let Some(role) = role else {
-            if baseline
-                .referenced_roles
-                .iter()
-                .any(|candidate| candidate.role_id == request.role_id)
-                || baseline.role_index.iter().any(|candidate| candidate.role_id == request.role_id)
-            {
-                return Err(CharacterThinkProjectionError::RoleNotPresent {
-                    role_id: request.role_id.clone(),
-                });
-            }
-            return Err(CharacterThinkProjectionError::UnknownRole {
-                role_id: request.role_id.clone(),
-            });
-        };
-        if !baseline.current_scene.present_role_ids.contains(&request.role_id) {
-            return Err(CharacterThinkProjectionError::RoleNotPresent {
-                role_id: request.role_id.clone(),
-            });
-        }
+            })?;
         if !matches!(role.controller, RoleController::Ai) {
             return Err(CharacterThinkProjectionError::PlayerControlledRole {
                 role_id: request.role_id.clone(),
@@ -202,12 +168,15 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
             .collect();
         let mut target_role = CharacterThinkRolePromptView {
             role_id: role.role_id.clone(),
-            name: role.profile.name.clone(),
+            name: role.effective_profile.name.clone(),
             role_label: role.role_label.clone(),
-            appearance: role.profile.appearance.clone(),
-            personality: role.profile.personality.clone(),
-            speaking_style: role.profile.speaking_style.clone(),
-            dialogue_examples: select_dialogue_examples(&role.profile.dialogue_examples, &self.context_config),
+            appearance: role.effective_profile.appearance.clone(),
+            personality: role.effective_profile.personality.clone(),
+            speaking_style: role.effective_profile.speaking_style.clone(),
+            dialogue_examples: select_dialogue_examples(
+                &role.effective_profile.dialogue_examples,
+                &self.context_config,
+            ),
         };
         let current_role_state = CharacterThinkStatePromptView {
             location: role.state.location.clone(),
@@ -238,24 +207,10 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
                 .map(|segment| segment.text.clone())
                 .collect(),
         };
-        let current_scene = CharacterThinkScenePromptView {
-            location: Some(
-                BoundedText::try_new(
-                    baseline.current_scene.location_key.as_str().to_owned(),
-                    "scene_location",
-                    self.character_config.max_input_tokens.saturating_mul(4) as usize,
-                )
-                .map_err(|_| CharacterThinkProjectionError::InvalidPromptField)?,
-            ),
-            time: Some(baseline.current_scene.time.clone()),
-            situation: Some(baseline.current_scene.description.clone()),
-            observable_conditions: Vec::new(),
-        };
         let mut context = CharacterThinkPromptContext {
             target_role: target_role.clone(),
             current_role_state,
             story_continuity,
-            current_scene,
             relevant_character_knowledge,
             narrative_character_impulses,
             thinking_focus: request.reason.clone(),
@@ -352,10 +307,6 @@ fn render_runtime_vars(context: &CharacterThinkPromptContext) -> RuntimePromptVa
             Value::String(render_recent_story(&context.story_continuity.recent_story)),
         ),
         (
-            "current_scene".into(),
-            Value::String(render_current_scene(&context.current_scene)),
-        ),
-        (
             "relevant_character_knowledge".into(),
             Value::String(render_knowledge(&context.relevant_character_knowledge)),
         ),
@@ -431,16 +382,6 @@ fn render_recent_story(values: &[BoundedText]) -> String {
         .map(|value| format!("- text: {}", quoted(value.as_str())))
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn render_current_scene(value: &CharacterThinkScenePromptView) -> String {
-    [
-        format!("location: {}", render_optional(value.location.as_ref())),
-        format!("time: {}", render_optional(value.time.as_ref())),
-        format!("immediate_situation: {}", render_optional(value.situation.as_ref())),
-        format!("observable_conditions: {}", quoted_list(&value.observable_conditions)),
-    ]
-    .join("\n")
 }
 
 fn render_knowledge(values: &[CharacterThinkKnowledgePromptView]) -> String {

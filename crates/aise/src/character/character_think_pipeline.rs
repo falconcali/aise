@@ -62,9 +62,14 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                 })
                 .sum::<u64>();
             let omitted_dialogue_example_count = ctx
-                .baseline()
-                .and_then(|baseline| baseline.scene_roles.iter().find(|role| role.role_id == request.role_id))
-                .map(|role| role.profile.dialogue_examples.len().saturating_sub(dialogue_example_count))
+                .snapshot()
+                .and_then(|snapshot| snapshot.role(&request.role_id))
+                .map(|role| {
+                    role.effective_profile
+                        .dialogue_examples
+                        .len()
+                        .saturating_sub(dialogue_example_count)
+                })
                 .unwrap_or(0);
             let prompt_section_bytes = projection
                 .rc_vars
@@ -158,7 +163,6 @@ fn map_projection_error(error: CharacterThinkProjectionError) -> TurnExecutionEr
         CharacterThinkProjectionError::MissingStageState => "missing_stage_state",
         CharacterThinkProjectionError::UnknownRole { .. } => "unknown_role",
         CharacterThinkProjectionError::PlayerControlledRole { .. } => "player_controlled_role",
-        CharacterThinkProjectionError::RoleNotPresent { .. } => "role_not_present",
         CharacterThinkProjectionError::UnauthorizedKnowledge { .. } => "unauthorized_knowledge",
         CharacterThinkProjectionError::RequiredPromptDataExceedsBudget => "required_prompt_data_exceeds_budget",
         CharacterThinkProjectionError::InvalidPromptField => "invalid_prompt_field",

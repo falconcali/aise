@@ -8,7 +8,7 @@ use crate::domain::narrative::{StoryContinuity, StoryContinuityLimits};
 use crate::domain::narrative_graph::condition::NarrativeNodeState;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::role::{RoleController, StoryRoleState, StoryRoleView};
-use crate::domain::story_instance::state::{CurrentScene, InstanceSettings};
+use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::retrieval::RetrievalSignals;
 use crate::domain::turn::{RetrievalIndexScope, RetrievalTargetId};
@@ -22,8 +22,6 @@ pub struct SnapshotLimits {
     pub max_instance_setting_bytes: usize,
     pub max_roles: usize,
     pub max_role_bytes: usize,
-    pub max_scene_bytes: usize,
-    pub max_scene_roles: usize,
     pub max_relationships: usize,
     pub max_narrative_nodes: usize,
     pub max_condition_fact_values: usize,
@@ -104,9 +102,7 @@ pub struct BaselineContext {
     pub story_profile: StoryProfile,
     pub instance_settings: InstanceSettings,
     pub player_role: RoleContextView,
-    pub current_scene: CurrentScene,
-    pub scene_roles: Vec<RoleContextView>,
-    pub referenced_roles: Vec<RoleContextView>,
+    pub relevant_roles: Vec<RoleContextView>,
     pub relevant_knowledge: Vec<RelevantKnowledge>,
     pub role_index_scope: RetrievalIndexScope,
     pub knowledge_entry_index_scope: RetrievalIndexScope,
@@ -122,12 +118,8 @@ impl BaselineContext {
     pub fn estimate_tokens(&self) -> u64 {
         let mut total = self.story_continuity.estimate_tokens();
         total = total.saturating_add(estimate_text_tokens(self.story_profile.premise.as_str()));
-        total = total.saturating_add(estimate_text_tokens(self.current_scene.description.as_str()));
         total = total.saturating_add(estimate_text_tokens(self.player_role.profile.name.as_str()));
-        for role in &self.scene_roles {
-            total = total.saturating_add(estimate_text_tokens(role.profile.name.as_str()));
-        }
-        for role in &self.referenced_roles {
+        for role in &self.relevant_roles {
             total = total.saturating_add(estimate_text_tokens(role.profile.name.as_str()));
         }
         for entry in &self.relevant_knowledge {

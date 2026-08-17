@@ -1,5 +1,5 @@
 use crate::domain::asset::entity::KnowledgeEntity;
-use crate::domain::asset::ids::{LocationKey, SceneKey, TopicKey};
+use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeIndexMatch, KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 #[serde(rename_all = "snake_case")]
 pub enum RetrievalSignalOrigin {
     PlayerInput,
-    Scene,
+    RoleState,
     Narrative,
     RecentStory,
     Summary,
@@ -32,25 +32,10 @@ pub struct TopicSignal {
     pub priority: u8,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct RetrievalSignals {
-    pub scene_key: SceneKey,
-    pub location_key: LocationKey,
-    pub present_role_ids: Vec<RoleId>,
     pub entities: Vec<EntitySignal>,
     pub topics: Vec<TopicSignal>,
-}
-
-impl Default for RetrievalSignals {
-    fn default() -> Self {
-        Self {
-            scene_key: SceneKey::from("unset"),
-            location_key: LocationKey::from("unset"),
-            present_role_ids: Vec::new(),
-            entities: Vec::new(),
-            topics: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]

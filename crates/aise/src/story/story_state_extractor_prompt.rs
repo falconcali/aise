@@ -1,4 +1,4 @@
-use crate::domain::asset::ids::{AttributeKey, LocationKey, SceneKey};
+use crate::domain::asset::ids::{AttributeKey, LocationKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
@@ -18,7 +18,6 @@ pub const STORY_STATE_EXTRACTOR_FTI_SLOT: &str = "context.story_state_extractor.
 #[derive(Debug, Clone, Serialize)]
 pub struct StoryStateExtractorPromptContext {
     pub story_text: BoundedText,
-    pub current_scene: StoryStateExtractorScenePromptView,
     pub roles: Vec<StoryStateExtractorRolePromptView>,
     pub relationships: Vec<StoryStateExtractorRelationshipPromptView>,
     pub modifiable_knowledge: Vec<StoryStateExtractorKnowledgePromptView>,
@@ -31,15 +30,6 @@ pub struct StoryStateExtractorPromptContext {
 pub struct StoryStateExtractorConditionQueryPromptView {
     pub condition_key: crate::domain::asset::ids::NarrativeConditionKey,
     pub criterion: BoundedText,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct StoryStateExtractorScenePromptView {
-    pub scene_key: SceneKey,
-    pub location: BoundedText,
-    pub time: BoundedText,
-    pub description: BoundedText,
-    pub present_role_ids: Vec<RoleId>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,18 +111,6 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
         let snapshot = ctx.snapshot().ok_or(StoryStateExtractorProjectionError::MissingSnapshot)?;
 
         let story_text = story.story_text.clone();
-
-        let current_scene = StoryStateExtractorScenePromptView {
-            scene_key: snapshot.current_scene().scene_key.clone(),
-            location: bounded_key(
-                snapshot.current_scene().location_key.as_str(),
-                "scene_location",
-                ctx.budget().max_item_bytes(),
-            )?,
-            time: snapshot.current_scene().time.clone(),
-            description: snapshot.current_scene().description.clone(),
-            present_role_ids: snapshot.current_scene().present_role_ids.clone(),
-        };
 
         let roles = snapshot
             .roles()
@@ -228,7 +206,6 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
 
         let context = StoryStateExtractorPromptContext {
             story_text,
-            current_scene,
             roles,
             relationships,
             modifiable_knowledge,
@@ -341,7 +318,6 @@ fn project_location(
 fn render_runtime_vars(context: &StoryStateExtractorPromptContext) -> RuntimePromptVars {
     RuntimePromptVars::new(HashMap::from([
         ("story_text".into(), Value::String(quoted(context.story_text.as_str()))),
-        ("current_scene".into(), Value::String(render_scene(&context.current_scene))),
         ("roles".into(), Value::String(render_roles(&context.roles))),
         (
             "relationships".into(),
@@ -370,17 +346,6 @@ fn render_runtime_vars(context: &StoryStateExtractorPromptContext) -> RuntimePro
             Value::String(render_validation_issues(&context.validation_issues)),
         ),
     ]))
-}
-
-fn render_scene(value: &StoryStateExtractorScenePromptView) -> String {
-    format!(
-        "scene_key: {}\nlocation: {}\ntime: {}\ndescription: {}\npresent_role_ids: {}",
-        quoted(value.scene_key.as_str()),
-        quoted(value.location.as_str()),
-        quoted(value.time.as_str()),
-        quoted(value.description.as_str()),
-        id_list(&value.present_role_ids)
-    )
 }
 
 fn render_roles(values: &[StoryStateExtractorRolePromptView]) -> String {
@@ -514,16 +479,6 @@ fn render_validation_issues(values: &[StoryStateExtractorValidationIssuePromptVi
 }
 
 fn quoted_list(values: &[BoundedText]) -> String {
-    if values.is_empty() {
-        return "None.".into();
-    }
-    format!(
-        "[{}]",
-        values.iter().map(|value| quoted(value.as_str())).collect::<Vec<_>>().join(", ")
-    )
-}
-
-fn id_list(values: &[RoleId]) -> String {
     if values.is_empty() {
         return "None.".into();
     }

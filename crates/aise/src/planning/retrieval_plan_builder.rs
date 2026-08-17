@@ -6,6 +6,7 @@ use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::narrative_graph::projector::NarrativePlan;
+use crate::domain::story_instance::role::RoleController;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{
     BaselineContext, CharacterThinkRequest, EntitySignal, RetrievalAudience, RetrievalPlan, RetrievalRequest,
@@ -13,7 +14,7 @@ use crate::domain::turn::{
 };
 use crate::planning::error::PlanningError;
 use crate::planning::planner_output::PlannerOutput;
-use crate::planning::writer_planner_prompt::{WriterPlannerPromptContext, is_ai_role};
+use crate::planning::writer_planner_prompt::WriterPlannerPromptContext;
 use std::collections::BTreeSet;
 
 pub struct RetrievalPlanBuilder {
@@ -59,7 +60,7 @@ impl RetrievalPlanBuilder {
                 limit: "max_goal_bytes",
             });
         }
-        let think_requests = self.validate_think_requests(planner_output.character_think_requests, baseline)?;
+        let think_requests = self.validate_think_requests(planner_output.character_think_requests, snapshot)?;
         let mut requests = Vec::new();
         requests.extend(self.narrative_requests(narrative_plan)?);
         for gap in planner_output.context_gaps {
@@ -81,7 +82,7 @@ impl RetrievalPlanBuilder {
     fn validate_think_requests(
         &self,
         requests: Vec<CharacterThinkRequest>,
-        baseline: &BaselineContext,
+        snapshot: &StoryReadSnapshot,
     ) -> Result<Vec<CharacterThinkRequest>, PlanningError> {
         let mut out = Vec::new();
         let mut seen = BTreeSet::new();
@@ -96,10 +97,11 @@ impl RetrievalPlanBuilder {
                     code: "character_think_reason_empty",
                 });
             }
-            if request.role_id == baseline.player_role.role_id {
+            if &request.role_id == snapshot.player_role_id() {
                 return Err(PlanningError::PlayerRoleRequested);
             }
-            if !is_ai_role(baseline, &request.role_id) {
+            let role = snapshot.role(&request.role_id).ok_or(PlanningError::UnknownRole)?;
+            if !matches!(role.controller, RoleController::Ai) {
                 return Err(PlanningError::UnknownRole);
             }
             if !seen.insert(request.role_id.clone()) {

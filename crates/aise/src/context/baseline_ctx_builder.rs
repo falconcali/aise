@@ -9,7 +9,7 @@ use crate::domain::narrative::StoryContinuityLimits;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{
     BaselineContext, KnowledgeEntryIndexEntry, NarrativeGraphStateIndex, RelevantKnowledge, RetrievalAudience,
-    RetrievalIndexScope, RetrievalTargetId, RoleContextView, RoleIndexEntry, SnapshotLimits,
+    RetrievalIndexScope, RetrievalSignals, RetrievalTargetId, RoleContextView, RoleIndexEntry, SnapshotLimits,
 };
 use crate::persistence::knowledge_read_port::{
     EntityKnowledgeQuery, KnowledgeFilter, KnowledgeIndexQuery, KnowledgeLookupHit, KnowledgeReadPort,
@@ -21,7 +21,7 @@ use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::turn::turn_trace::{SpanPayload, ToolCallData};
 use async_trait::async_trait;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -117,10 +117,7 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
                 "story_id": story_id,
                 "turn_id": ctx.turn_id(),
                 "base_revision": snapshot.base_revision().get(),
-                "role_count": baseline.role_index.len()
-                    + baseline.scene_roles.len()
-                    + baseline.referenced_roles.len()
-                    + 1,
+                "relevant_role_count": baseline.relevant_roles.len(),
                 "constraint_count": baseline.active_story_constraints.len(),
                 "entity_signal_count": baseline.retrieval_signals.entities.len(),
                 "topic_signal_count": baseline.retrieval_signals.topics.len(),
@@ -131,7 +128,7 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
                 "story_id": story_id,
                 "turn_id": ctx.turn_id(),
                 "base_revision": snapshot.base_revision().get(),
-                "role_count": 0,
+                "relevant_role_count": 0,
                 "constraint_count": 0,
                 "entity_signal_count": 0,
                 "topic_signal_count": 0,
@@ -159,49 +156,24 @@ async fn build_baseline(
             code: "missing_player_role",
         })?;
     let player_role = project_role_context(player_role_view);
-    let mut seen_scene = BTreeSet::from([player_role.role_id.clone()]);
-    let mut scene_roles = Vec::new();
-    for role_id in &snapshot.current_scene().present_role_ids {
-        if role_id == &player_role.role_id {
-            continue;
-        }
-        if !seen_scene.insert(role_id.clone()) {
-            return Err(ContextError::SnapshotInconsistent {
-                code: "duplicate_scene_role",
-            });
-        }
-        let role = snapshot.role(role_id).ok_or(ContextError::SnapshotInconsistent {
-            code: "missing_scene_role",
-        })?;
-        scene_roles.push(project_role_context(role));
-        if scene_roles.len() > context_config.max_scene_roles {
-            return Err(ContextError::SignalLimitExceeded {
-                limit: "max_scene_roles",
-            });
-        }
-    }
-    scene_roles.sort_by(|left, right| left.role_id.cmp(&right.role_id));
     let retrieval_signals = signal_builder.build(snapshot, player_input)?;
-    let referenced_ids = referenced_role_ids(&retrieval_signals, &seen_scene);
-    let mut referenced_roles = Vec::new();
+    let relevant_roles = select_relevant_roles(snapshot, &retrieval_signals, context_config.max_relevant_roles);
+    let selected: BTreeSet<RoleId> = std::iter::once(player_role.role_id.clone())
+        .chain(relevant_roles.iter().map(|role| role.role_id.clone()))
+        .collect();
     let mut role_index = Vec::new();
     for (role_id, role) in snapshot.roles() {
-        if seen_scene.contains(role_id) {
+        if selected.contains(role_id) {
             continue;
         }
-        if referenced_ids.contains(role_id) {
-            referenced_roles.push(project_role_context(role));
-        } else {
-            role_index.push(RoleIndexEntry {
-                target_id: RetrievalTargetId::for_role(role_id),
-                role_id: role_id.clone(),
-                name: role.effective_profile.name.clone(),
-                role_label: role.role_label.clone(),
-                retrieval_hint: role.narrative_function.clone(),
-            });
-        }
+        role_index.push(RoleIndexEntry {
+            target_id: RetrievalTargetId::for_role(role_id),
+            role_id: role_id.clone(),
+            name: role.effective_profile.name.clone(),
+            role_label: role.role_label.clone(),
+            retrieval_hint: role.narrative_function.clone(),
+        });
     }
-    referenced_roles.sort_by(|left: &RoleContextView, right: &RoleContextView| left.role_id.cmp(&right.role_id));
     role_index.sort_by(|left, right| left.role_id.cmp(&right.role_id));
     let role_index_scope = if role_index.len() > context_config.max_role_index {
         role_index.truncate(context_config.max_role_index);
@@ -216,9 +188,7 @@ async fn build_baseline(
         story_profile: snapshot.story_profile().clone(),
         instance_settings: snapshot.instance_settings().clone(),
         player_role,
-        current_scene: snapshot.current_scene().clone(),
-        scene_roles,
-        referenced_roles,
+        relevant_roles,
         relevant_knowledge,
         role_index_scope,
         knowledge_entry_index_scope,
@@ -239,18 +209,33 @@ fn project_role_context(role: &crate::domain::story_instance::role::StoryRoleVie
     RoleContextView::from(role)
 }
 
-fn referenced_role_ids(
-    signals: &crate::domain::turn::RetrievalSignals,
-    provided: &BTreeSet<RoleId>,
-) -> BTreeSet<RoleId> {
-    signals
-        .entities
-        .iter()
-        .filter_map(|signal| match &signal.entity {
-            KnowledgeEntity::Role(role_id) => Some(role_id.clone()),
-            _ => None,
-        })
-        .filter(|role_id| !provided.contains(role_id))
+fn select_relevant_roles(
+    snapshot: &StoryReadSnapshot,
+    signals: &RetrievalSignals,
+    max_relevant_roles: usize,
+) -> Vec<RoleContextView> {
+    let player_role_id = snapshot.player_role_id();
+    let mut best_priority: BTreeMap<RoleId, u8> = BTreeMap::new();
+    for signal in &signals.entities {
+        if let KnowledgeEntity::Role(role_id) = &signal.entity {
+            if role_id == player_role_id {
+                continue;
+            }
+            best_priority
+                .entry(role_id.clone())
+                .and_modify(|priority| *priority = (*priority).min(signal.priority))
+                .or_insert(signal.priority);
+        }
+    }
+    let mut ranked: Vec<(u8, RoleId)> = best_priority
+        .into_iter()
+        .map(|(role_id, priority)| (priority, role_id))
+        .collect();
+    ranked.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    ranked
+        .into_iter()
+        .take(max_relevant_roles)
+        .filter_map(|(_, role_id)| snapshot.role(&role_id).map(project_role_context))
         .collect()
 }
 

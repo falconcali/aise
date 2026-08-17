@@ -5,7 +5,7 @@ use crate::domain::ids::{MemoryId, RoleId, RumorId};
 use crate::domain::knowledge::fact::Proposition;
 use crate::domain::knowledge::query::KnowledgeSourceId;
 use crate::domain::knowledge::rumor::{Claim, TruthValue};
-use crate::domain::story_instance::state::{CurrentScene, RelationshipState};
+use crate::domain::story_instance::state::RelationshipState;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -32,7 +32,6 @@ pub struct StoryStateExtractorOutput {
     pub role_states: Vec<ExtractedRoleState>,
     pub relationship_states: Vec<RelationshipState>,
     pub knowledge_changes: Vec<ProposedKnowledgeMutation>,
-    pub current_scene: CurrentScene,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -364,27 +363,11 @@ impl StoryStateExtractorOutput {
                 "trust": {"type": "integer", "minimum": -32768, "maximum": 32767}
             }
         });
-        let current_scene = json!({
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["scene_key", "location_key", "time", "description", "present_role_ids"],
-            "properties": {
-                "scene_key": {"type": "string", "minLength": 1},
-                "location_key": {"type": "string", "minLength": 1},
-                "time": bounded_string(),
-                "description": {"type": "string", "maxLength": limits.max_item_bytes},
-                "present_role_ids": {
-                    "type": "array",
-                    "maxItems": limits.max_role_states,
-                    "items": {"type": "string", "minLength": 1}
-                }
-            }
-        });
         json!({
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
             "additionalProperties": false,
-            "required": ["role_states", "relationship_states", "knowledge_changes", "current_scene"],
+            "required": ["role_states", "relationship_states", "knowledge_changes"],
             "properties": {
                 "role_states": {
                     "type": "array",
@@ -400,8 +383,7 @@ impl StoryStateExtractorOutput {
                     "type": "array",
                     "maxItems": limits.max_knowledge_changes,
                     "items": knowledge_mutation
-                },
-                "current_scene": current_scene
+                }
             }
         })
     }

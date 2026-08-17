@@ -481,28 +481,6 @@ body {
   color: var(--text);
 }
 
-#scene-box {
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  padding: 14px 24px;
-  font-size: 14px;
-  line-height: 1.7;
-  color: var(--text);
-  white-space: pre-wrap;
-  max-height: 160px;
-  overflow-y: auto;
-}
-
-#scene-box:empty {
-  display: none;
-}
-
-#scene-box .scene-label {
-  color: var(--accent);
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
 #trace-view.active {
   flex: 1;
   overflow-y: auto;

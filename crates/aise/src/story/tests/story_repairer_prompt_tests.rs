@@ -29,7 +29,6 @@ fn story_repairer_runtime_context_has_exact_section_order() {
         "### Story Continuity",
         "#### Story Summary",
         "#### Recent Story",
-        "### Current Scene",
         "### Player Character",
         "### AI Characters",
         "### Active Story Constraints",

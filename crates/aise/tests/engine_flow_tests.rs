@@ -136,7 +136,6 @@ async fn create_story_instance_flow_materializes_snapshot() {
         &NarrativeConfig::default(),
     );
     let snapshot = store.load_story_snapshot(&story.story_id, limits).await.expect("snapshot");
-    assert_eq!(snapshot.current_scene().description.as_str(), "The village wakes.");
     assert_eq!(snapshot.story_continuity().recent_segments().len(), 1);
     assert_eq!(
         snapshot.story_continuity().recent_segments()[0].text.as_str(),

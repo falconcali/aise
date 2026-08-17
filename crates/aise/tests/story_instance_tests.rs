@@ -1,9 +1,8 @@
 use aise::domain::asset::character_card::CharacterProfile;
-use aise::domain::asset::ids::{LocationKey, PlayerId, SceneKey};
+use aise::domain::asset::ids::{LocationKey, PlayerId};
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::RoleId;
 use aise::domain::story_instance::role::{RoleController, StoryRole, StoryRoleState, StoryRoleView};
-use aise::domain::story_instance::state::CurrentScene;
 
 fn sample_profile(name: &str) -> CharacterProfile {
     CharacterProfile {
@@ -52,20 +51,6 @@ fn story_role_view_from_preserves_story_fields() {
     assert_eq!(view.effective_profile.name, role.effective_profile.name);
     assert_eq!(view.state, role.state);
     assert!(view.source_character_id.is_none());
-}
-
-#[test]
-fn current_scene_is_structured_by_role_id() {
-    let scene = CurrentScene {
-        scene_key: SceneKey::from("scene_1"),
-        location_key: LocationKey::from("village"),
-        time: BoundedText::try_new("morning", "time", 64).unwrap(),
-        description: BoundedText::try_new("The village wakes.", "desc", 256).unwrap(),
-        present_role_ids: vec![RoleId::try_new("protagonist").unwrap()],
-    };
-    assert_eq!(scene.scene_key.as_str(), "scene_1");
-    assert_eq!(scene.present_role_ids.len(), 1);
-    assert_eq!(scene.present_role_ids[0].as_str(), "protagonist");
 }
 
 #[test]

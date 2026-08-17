@@ -1,11 +1,10 @@
 use crate::config::ContextPreparationConfig;
 use crate::domain::asset::character_card::DialogueExample;
 use crate::domain::asset::constraint::StoryConstraintRequirement;
-use crate::domain::asset::ids::{AttributeKey, LocationKey, SceneKey};
+use crate::domain::asset::ids::{AttributeKey, LocationKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
-use crate::domain::story_instance::role::RoleController;
 use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::{BaselineContext, RetrievalAudience, RoleContextView, StoryGeneratorOutput};
@@ -13,7 +12,7 @@ use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
 use crate::turn::turn_context::TurnExecutionContext;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 pub const STORY_GENERATOR_CSI_SLOT: &str = "context.story_generator.csi";
 pub const STORY_GENERATOR_RC_SLOT: &str = "context.story_generator.rc";
@@ -24,7 +23,6 @@ pub struct StoryGeneratorPromptContext {
     pub story_profile: StoryProfilePromptView,
     pub instance_settings: Option<StoryGeneratorInstanceSettingsPromptView>,
     pub story_continuity: StoryContinuityPromptView,
-    pub current_scene: StoryGeneratorScenePromptView,
     pub player_role: StoryGeneratorRolePromptView,
     pub ai_roles: Vec<StoryGeneratorRolePromptView>,
     pub relevant_writer_knowledge: Vec<StoryGeneratorKnowledgePromptView>,
@@ -64,28 +62,10 @@ pub struct RecentStoryPromptView {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct StoryGeneratorScenePromptView {
-    pub scene_key: Option<SceneKey>,
-    pub location: BoundedText,
-    pub time: BoundedText,
-    pub situation: BoundedText,
-    pub present_role_ids: Vec<RoleId>,
-    pub observable_conditions: Vec<BoundedText>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CharacterPresence {
-    Scene,
-    Referenced,
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub struct StoryGeneratorRolePromptView {
     pub role_id: RoleId,
     pub name: BoundedText,
     pub role_label: BoundedText,
-    pub presence: CharacterPresence,
     pub appearance: Option<BoundedText>,
     pub personality: Option<BoundedText>,
     pub speaking_style: Option<BoundedText>,
@@ -198,8 +178,8 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
         let plan = ctx.plan().ok_or(StoryGeneratorProjectionError::MissingWriterPlan)?;
         let player_input = BoundedText::try_new(ctx.player_input().to_owned(), "player_input", 4096)
             .map_err(|_| StoryGeneratorProjectionError::InvalidPlayerInput)?;
-        let player_role = project_role(&baseline.player_role, CharacterPresence::Scene, &self.config)?;
-        let ai_roles = project_ai_roles(baseline, &self.config)?;
+        let player_role = project_role(&baseline.player_role, &self.config)?;
+        let ai_roles = project_ai_roles(ctx, baseline, &self.config)?;
         let character_decisions = project_decisions(ctx, baseline, &ai_roles)?;
         let story_profile = StoryProfilePromptView {
             premise: baseline.story_profile.premise.clone(),
@@ -221,18 +201,6 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
                     text: segment.text.clone(),
                 })
                 .collect(),
-        };
-        let current_scene = StoryGeneratorScenePromptView {
-            scene_key: Some(baseline.current_scene.scene_key.clone()),
-            location: bounded_key(
-                baseline.current_scene.location_key.as_str(),
-                "scene_location",
-                ctx.budget().max_item_bytes(),
-            )?,
-            time: baseline.current_scene.time.clone(),
-            situation: baseline.current_scene.description.clone(),
-            present_role_ids: baseline.current_scene.present_role_ids.clone(),
-            observable_conditions: Vec::new(),
         };
         let relevant_writer_knowledge = project_writer_knowledge(ctx)?;
         let narrative_projection = ctx.narrative_projection();
@@ -257,7 +225,6 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
                 cast_policy: baseline.instance_settings.cast_policy,
             }),
             story_continuity,
-            current_scene,
             player_role,
             ai_roles,
             relevant_writer_knowledge,
@@ -281,43 +248,35 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
     }
 }
 
-fn bounded_key(
-    value: &str,
-    field: &'static str,
-    max_bytes: usize,
-) -> Result<BoundedText, StoryGeneratorProjectionError> {
-    BoundedText::try_new(value.to_owned(), field, max_bytes).map_err(|_| StoryGeneratorProjectionError::Invariant {
-        code: "invalid_key_text",
-    })
-}
-
 fn project_ai_roles(
+    ctx: &TurnExecutionContext,
     baseline: &BaselineContext,
     config: &ContextPreparationConfig,
 ) -> Result<Vec<StoryGeneratorRolePromptView>, StoryGeneratorProjectionError> {
-    let mut seen = HashSet::new();
-    baseline
-        .scene_roles
-        .iter()
-        .map(|role| (role, CharacterPresence::Scene))
-        .chain(
-            baseline
-                .referenced_roles
+    let snapshot = ctx.snapshot().ok_or(StoryGeneratorProjectionError::MissingBaseline)?;
+    let mut role_ids: BTreeSet<RoleId> = baseline.relevant_roles.iter().map(|role| role.role_id.clone()).collect();
+    if let Some(plan) = ctx.plan() {
+        role_ids.extend(plan.character_think_requests.iter().map(|request| request.role_id.clone()));
+    }
+    if let Some(projection) = ctx.narrative_projection() {
+        role_ids.extend(
+            projection
+                .plan
+                .character_impulses
                 .iter()
-                .map(|role| (role, CharacterPresence::Referenced)),
-        )
-        .filter(|(role, _)| {
-            role.role_id != baseline.player_role.role_id
-                && matches!(role.controller, RoleController::Ai)
-                && seen.insert(role.role_id.clone())
-        })
-        .map(|(role, presence)| project_role(role, presence, config))
+                .map(|impulse| impulse.target_role_id.clone()),
+        );
+    }
+    role_ids.remove(&baseline.player_role.role_id);
+    role_ids
+        .into_iter()
+        .filter_map(|role_id| snapshot.role(&role_id).map(RoleContextView::from))
+        .map(|role| project_role(&role, config))
         .collect()
 }
 
 fn project_role(
     role: &RoleContextView,
-    presence: CharacterPresence,
     config: &ContextPreparationConfig,
 ) -> Result<StoryGeneratorRolePromptView, StoryGeneratorProjectionError> {
     Ok(StoryGeneratorRolePromptView {
@@ -334,7 +293,6 @@ fn project_role(
             goals: role.state.goals.clone(),
             attributes: role.state.attributes.clone(),
         },
-        presence,
     })
 }
 
@@ -471,7 +429,6 @@ pub(crate) fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> Runt
             "recent_story".into(),
             Value::String(render_recent_story(&context.story_continuity.recent_story)),
         ),
-        ("current_scene".into(), Value::String(render_scene(&context.current_scene))),
         (
             "player_character".into(),
             Value::String(render_role(&context.player_role, None)),
@@ -592,25 +549,6 @@ fn render_recent_story(values: &[RecentStoryPromptView]) -> String {
         .join("\n")
 }
 
-fn render_scene(value: &StoryGeneratorScenePromptView) -> String {
-    [
-        format!(
-            "scene_key: {}",
-            value
-                .scene_key
-                .as_ref()
-                .map(|key| quoted(key.as_str()))
-                .unwrap_or_else(|| "None.".into())
-        ),
-        format!("location: {}", quoted(value.location.as_str())),
-        format!("time: {}", quoted(value.time.as_str())),
-        format!("situation: {}", quoted(value.situation.as_str())),
-        format!("present_role_ids: {}", id_list(&value.present_role_ids)),
-        format!("observable_conditions: {}", quoted_list(&value.observable_conditions)),
-    ]
-    .join("\n")
-}
-
 fn render_roles(values: &[StoryGeneratorRolePromptView]) -> String {
     if values.is_empty() {
         return "None.".into();
@@ -623,10 +561,6 @@ fn render_roles(values: &[StoryGeneratorRolePromptView]) -> String {
 }
 
 fn render_role(value: &StoryGeneratorRolePromptView, prefix: Option<&str>) -> String {
-    let presence = match value.presence {
-        CharacterPresence::Scene => "scene",
-        CharacterPresence::Referenced => "referenced",
-    };
     let collection = prefix.is_some();
     let first = prefix.unwrap_or_default();
     let rest = if collection { "  " } else { "" };
@@ -662,9 +596,6 @@ fn render_role(value: &StoryGeneratorRolePromptView, prefix: Option<&str>) -> St
     ];
     if value.role_label != value.name {
         lines.push(format!("{rest}role: {}", quoted(value.role_label.as_str())));
-    }
-    if collection {
-        lines.push(format!("{rest}presence: {presence}"));
     }
     push_optional(&mut lines, rest, "appearance", value.appearance.as_ref());
     push_optional(&mut lines, rest, "personality", value.personality.as_ref());
@@ -787,16 +718,6 @@ fn push_optional(lines: &mut Vec<String>, indent: &str, name: &str, value: Optio
 }
 
 fn quoted_list(values: &[BoundedText]) -> String {
-    if values.is_empty() {
-        return "None.".into();
-    }
-    format!(
-        "[{}]",
-        values.iter().map(|value| quoted(value.as_str())).collect::<Vec<_>>().join(", ")
-    )
-}
-
-fn id_list(values: &[RoleId]) -> String {
     if values.is_empty() {
         return "None.".into();
     }

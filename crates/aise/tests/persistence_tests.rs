@@ -170,14 +170,6 @@ fn commit_spec(
             role_changes: Vec::new(),
             relationship_changes: Vec::new(),
             knowledge_mutations: Vec::new(),
-            current_scene: aise::domain::story_instance::state::CurrentScene {
-                scene_key: aise::domain::asset::ids::SceneKey::from("scene_1"),
-                location_key: aise::domain::asset::ids::LocationKey::from("village"),
-                time: aise::domain::asset::validation::BoundedText::try_new("morning", "time", 256).unwrap(),
-                description: aise::domain::asset::validation::BoundedText::try_new("scene", "description", 1024)
-                    .unwrap(),
-                present_role_ids: Vec::new(),
-            },
             narrative_events: Vec::new(),
             narrative_resolution: ValidatedNarrativeResolution {
                 candidate_version: StoryCandidateVersion {
@@ -265,5 +257,38 @@ async fn turn_commit_assigns_next_story_sequence() {
         .commit_turn(&commit_spec(&story_id, StoryRevision::new(1), graph_revision, 1, "k2", "t2"))
         .await;
     assert!(second.is_ok(), "store assigns sequence independently of the proposal");
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn commit_turn_does_not_write_current_scene() {
+    let (store, story_id, db) = create_instance("no_scene_write").await;
+    let graph_revision = store
+        .load_story_snapshot(&story_id, limits())
+        .await
+        .expect("load")
+        .graph_revision();
+    store
+        .commit_turn(&commit_spec(&story_id, StoryRevision::new(0), graph_revision, 1, "k1", "t1"))
+        .await
+        .expect("commit should succeed without any current_scene column");
+
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&db)
+        .await
+        .expect("reconnect");
+    let columns: Vec<String> = sqlx::query("PRAGMA table_info(stories)")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| sqlx::Row::get::<String, _>(&row, "name"))
+        .collect();
+    assert!(
+        !columns.iter().any(|name| name == "current_scene"),
+        "commit_turn must not depend on a stories.current_scene column"
+    );
+    pool.close().await;
     let _ = std::fs::remove_file(&db);
 }

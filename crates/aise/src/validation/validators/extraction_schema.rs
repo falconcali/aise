@@ -94,14 +94,6 @@ impl DeterministicValidator for ExtractionSchemaValidator {
             }
         }
 
-        let scene = &extraction.current_scene;
-        if scene.description.as_str().len() > limits.max_item_bytes {
-            issues.push(count_issue("current_scene", "scene description exceeds its bound"));
-        }
-        if scene.present_role_ids.len() > limits.max_role_states {
-            issues.push(count_issue("current_scene", "present role count exceeds its bound"));
-        }
-
         Ok(issues)
     }
 }

@@ -15,7 +15,6 @@ pub use narrative::{
 };
 pub use story_instance::info::StoryInfo;
 pub use story_instance::snapshot::StoryReadSnapshot;
-pub use story_instance::state::CurrentScene;
 pub use story_sequence::{StoryContinuityError, StorySequence};
 pub use turn::{
     BaselineContext, CharacterDecision, CharacterThinkRequest, ContextItem, NarrativeGraphStateIndex,

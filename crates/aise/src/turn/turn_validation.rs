@@ -4,7 +4,7 @@ use crate::domain::knowledge::{KnowledgeEntry, KnowledgeSourceId};
 use crate::domain::narrative::StoryEvent;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::role::StoryRoleState;
-use crate::domain::story_instance::state::{CurrentScene, RelationshipKey, RelationshipState};
+use crate::domain::story_instance::state::{RelationshipKey, RelationshipState};
 use crate::domain::turn::{DeletableKnowledgeId, ValidatedNarrativeResolution};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::TurnStage;
@@ -327,7 +327,6 @@ pub struct ValidatedChangeSet {
     role_changes: Vec<RoleStateChange>,
     relationship_changes: Vec<RelationshipStateChange>,
     knowledge_mutations: Vec<ValidatedKnowledgeMutation>,
-    current_scene: CurrentScene,
     narrative_events: Vec<StoryEvent>,
     narrative_resolution: ValidatedNarrativeResolution,
     constraint_change: StateChange<Vec<ActiveStoryConstraint>>,
@@ -348,7 +347,6 @@ impl ValidatedChangeSet {
             role_changes: parts.role_changes,
             relationship_changes: parts.relationship_changes,
             knowledge_mutations: parts.knowledge_mutations,
-            current_scene: parts.current_scene,
             narrative_events: parts.narrative_events,
             narrative_resolution: parts.narrative_resolution,
             constraint_change: parts.constraint_change,
@@ -369,10 +367,6 @@ impl ValidatedChangeSet {
 
     pub fn knowledge_mutations(&self) -> &[ValidatedKnowledgeMutation] {
         &self.knowledge_mutations
-    }
-
-    pub fn current_scene(&self) -> &CurrentScene {
-        &self.current_scene
     }
 
     pub fn narrative_events(&self) -> &[StoryEvent] {
@@ -397,7 +391,6 @@ pub struct ValidatedChangeSetParts {
     pub role_changes: Vec<RoleStateChange>,
     pub relationship_changes: Vec<RelationshipStateChange>,
     pub knowledge_mutations: Vec<ValidatedKnowledgeMutation>,
-    pub current_scene: CurrentScene,
     pub narrative_events: Vec<StoryEvent>,
     pub narrative_resolution: ValidatedNarrativeResolution,
     pub constraint_change: StateChange<Vec<ActiveStoryConstraint>>,

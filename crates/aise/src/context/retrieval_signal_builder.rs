@@ -19,12 +19,8 @@ impl RetrievalSignalBuilder {
     }
 
     pub fn build(&self, snapshot: &StoryReadSnapshot, player_input: &str) -> Result<RetrievalSignals, ContextError> {
-        let scene = snapshot.current_scene();
         let mut entities = Vec::new();
         let mut topics = Vec::new();
-        let mut present = scene.present_role_ids.clone();
-        present.sort();
-        present.dedup();
 
         self.push_text_matches(
             player_input,
@@ -34,22 +30,26 @@ impl RetrievalSignalBuilder {
             &mut entities,
             &mut topics,
         )?;
-        self.push_structured_scene(scene, &mut entities)?;
-        self.push_text_matches(
-            scene.description.as_str(),
-            snapshot,
-            RetrievalSignalOrigin::Scene,
-            1,
-            &mut entities,
-            &mut topics,
-        )?;
-        let recent_limit = self.config.recent_segments_for_signals.min(2);
-        for segment in snapshot.story_continuity().recent_segments().iter().rev().take(recent_limit) {
+        self.push_player_role_state(snapshot, &mut entities)?;
+        for (recency_rank, segment) in snapshot
+            .story_continuity()
+            .recent_segments()
+            .iter()
+            .rev()
+            .take(self.config.recent_segments_for_signals)
+            .enumerate()
+        {
+            let recency_rank = u8::try_from(recency_rank).map_err(|_| ContextError::SignalLimitExceeded {
+                limit: "recent_segments_for_signals",
+            })?;
+            let priority = 2u8.checked_add(recency_rank).ok_or(ContextError::SignalLimitExceeded {
+                limit: "recent_segments_for_signals",
+            })?;
             self.push_text_matches(
                 segment.text.as_str(),
                 snapshot,
                 RetrievalSignalOrigin::RecentStory,
-                3,
+                priority,
                 &mut entities,
                 &mut topics,
             )?;
@@ -79,37 +79,25 @@ impl RetrievalSignalBuilder {
             });
         }
 
-        Ok(RetrievalSignals {
-            scene_key: scene.scene_key.clone(),
-            location_key: scene.location_key.clone(),
-            present_role_ids: present,
-            entities,
-            topics,
-        })
+        Ok(RetrievalSignals { entities, topics })
     }
 
-    fn push_structured_scene(
+    fn push_player_role_state(
         &self,
-        scene: &crate::domain::story_instance::state::CurrentScene,
+        snapshot: &StoryReadSnapshot,
         entities: &mut Vec<EntitySignal>,
     ) -> Result<(), ContextError> {
+        let player_role = snapshot.player_role();
         entities.push(EntitySignal {
-            entity: KnowledgeEntity::Scene(scene.scene_key.clone()),
-            origin: RetrievalSignalOrigin::Scene,
+            entity: KnowledgeEntity::Role(player_role.role_id.clone()),
+            origin: RetrievalSignalOrigin::RoleState,
             priority: 1,
         });
         entities.push(EntitySignal {
-            entity: KnowledgeEntity::Location(scene.location_key.clone()),
-            origin: RetrievalSignalOrigin::Scene,
+            entity: KnowledgeEntity::Location(player_role.state.location.clone()),
+            origin: RetrievalSignalOrigin::RoleState,
             priority: 1,
         });
-        for role_id in &scene.present_role_ids {
-            entities.push(EntitySignal {
-                entity: KnowledgeEntity::Role(role_id.clone()),
-                origin: RetrievalSignalOrigin::Scene,
-                priority: 1,
-            });
-        }
         if entities.len() > self.config.max_signal_entities {
             return Err(ContextError::SignalLimitExceeded {
                 limit: "max_signal_entities",

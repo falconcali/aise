@@ -11,16 +11,16 @@ use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::role::{StoryRole, StoryRoleView};
 use crate::domain::story_instance::snapshot::{KnowledgeSnapshotRef, StoryReadSnapshot, StoryReadSnapshotParts};
-use crate::domain::story_instance::state::{CurrentScene, InstanceSettings, RelationshipState};
+use crate::domain::story_instance::state::{InstanceSettings, RelationshipState};
 use crate::domain::turn::SnapshotLimits;
 use crate::persistence::sqlite_error::SqliteStoreError;
 use crate::persistence::store::StoreError;
 use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 
-type StoryInstanceRow = (i64, String, String, String, String, String, String, String, String, String);
+type StoryInstanceRow = (i64, String, String, String, String, String, String, String, String);
 type StoryPackRow = (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>);
-type InstanceProjectionLengths = (String, i64, i64, i64, i64, i64, i64, i64, i64);
+type InstanceProjectionLengths = (String, i64, i64, i64, i64, i64, i64, i64);
 type PackProjectionLengths = (i64, i64, i64);
 
 pub(crate) async fn load_story_snapshot(
@@ -32,7 +32,7 @@ pub(crate) async fn load_story_snapshot(
     let instance_lengths: Option<InstanceProjectionLengths> = sqlx::query_as(
         "SELECT i.pack_id, length(i.settings_json), length(i.roles_json), \
                 length(i.relationships_json), length(i.narrative_state_json), \
-                length(i.fact_values_json), length(s.current_scene), length(s.story_summary), \
+                length(i.fact_values_json), length(s.story_summary), \
                 length(s.active_constraints) \
          FROM stories s INNER JOIN story_instances i ON i.story_id = s.id WHERE s.id = ?",
     )
@@ -47,7 +47,6 @@ pub(crate) async fn load_story_snapshot(
         relationships_len,
         narrative_state_len,
         fact_values_len,
-        scene_len,
         summary_len,
         constraints_len,
     )) = instance_lengths
@@ -78,11 +77,6 @@ pub(crate) async fn load_story_snapshot(
         fact_values_len,
         projection_limit(limits.max_condition_fact_values, limits.max_constraint_bytes, 1024)?,
         "fact_values_json",
-    )?;
-    ensure_projection_length(
-        scene_len,
-        projection_limit(limits.max_scene_roles, 256, limits.max_scene_bytes)?,
-        "current_scene",
     )?;
     ensure_projection_length(
         summary_len,
@@ -136,7 +130,7 @@ pub(crate) async fn load_story_snapshot(
     let row: Option<StoryInstanceRow> = sqlx::query_as(
         "SELECT s.revision, i.pack_id, i.settings_json, i.roles_json, \
                 i.relationships_json, i.narrative_state_json, \
-                i.fact_values_json, s.current_scene, s.story_summary, s.active_constraints \
+                i.fact_values_json, s.story_summary, s.active_constraints \
          FROM stories s \
          INNER JOIN story_instances i ON i.story_id = s.id \
          WHERE s.id = ?",
@@ -153,7 +147,6 @@ pub(crate) async fn load_story_snapshot(
         relationships_json,
         narrative_state_json,
         fact_values_json,
-        current_scene_json,
         story_summary_json,
         active_constraints_json,
     )) = row
@@ -238,20 +231,6 @@ pub(crate) async fn load_story_snapshot(
         serde_json::from_str(&fact_values_json).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
         })?;
-    let current_scene: CurrentScene =
-        serde_json::from_str(&current_scene_json).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-        })?;
-    if current_scene.description.as_str().len() > limits.max_scene_bytes {
-        return Err(StoreError::ConstraintViolation {
-            constraint: "max_scene_bytes".into(),
-        });
-    }
-    if current_scene.present_role_ids.len() > limits.max_scene_roles {
-        return Err(StoreError::ConstraintViolation {
-            constraint: "max_scene_roles".into(),
-        });
-    }
     let summary: StorySummary = serde_json::from_str(&story_summary_json).map_err(|_| StoreError::Serialization {
         kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
     })?;
@@ -388,7 +367,6 @@ pub(crate) async fn load_story_snapshot(
         story_profile,
         instance_settings,
         roles,
-        current_scene,
         relationships,
         narrative_definition,
         narrative_state,

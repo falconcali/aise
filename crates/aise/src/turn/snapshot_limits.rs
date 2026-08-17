@@ -15,8 +15,6 @@ impl SnapshotLimits {
             max_instance_setting_bytes: content.max_instance_setting_bytes,
             max_roles: content.max_roles,
             max_role_bytes: content.max_role_bytes,
-            max_scene_bytes: content.max_scene_bytes,
-            max_scene_roles: context.max_scene_roles,
             max_relationships: context.max_relationships,
             max_narrative_nodes: narrative.max_graph_nodes,
             max_condition_fact_values: context.max_condition_fact_values,

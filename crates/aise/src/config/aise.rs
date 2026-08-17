@@ -73,9 +73,9 @@ impl AiseConfig {
         if self.context.recent_segments_for_signals > 2 {
             return Err(ConfigError::Invalid("context.recent_segments_for_signals must be <= 2".into()));
         }
-        if self.context.max_scene_roles > self.content.max_roles {
+        if self.context.max_relevant_roles > self.content.max_roles {
             return Err(ConfigError::Invalid(
-                "context.max_scene_roles must be <= content.max_roles".into(),
+                "context.max_relevant_roles must be <= content.max_roles".into(),
             ));
         }
         if self.context.max_role_index > self.content.max_roles {

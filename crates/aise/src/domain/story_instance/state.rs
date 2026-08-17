@@ -1,5 +1,5 @@
-use crate::domain::asset::ids::{InstanceSettingKey, LocationKey, RelationshipKind, SceneKey};
-use crate::domain::asset::validation::{BoundedText, ScalarValue};
+use crate::domain::asset::ids::{InstanceSettingKey, RelationshipKind};
+use crate::domain::asset::validation::ScalarValue;
 use crate::domain::ids::RoleId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -20,16 +20,6 @@ pub struct InstanceSettings {
     pub cast_policy: CastPolicy,
     #[serde(default)]
     pub values: BTreeMap<InstanceSettingKey, ScalarValue>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CurrentScene {
-    pub scene_key: SceneKey,
-    pub location_key: LocationKey,
-    pub time: BoundedText,
-    pub description: BoundedText,
-    pub present_role_ids: Vec<RoleId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

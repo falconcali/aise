@@ -1,12 +1,12 @@
 use aise::domain::asset::character_card::CharacterProfile;
-use aise::domain::asset::ids::{LocationKey, PlayerId, SceneKey, Sha256Digest};
+use aise::domain::asset::ids::{LocationKey, PlayerId, Sha256Digest};
 use aise::domain::asset::story_pack::{StoryProfile, StoryStyle};
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::RoleId;
 use aise::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySummary};
 use aise::domain::narrative_graph::projector::NarrativePlan;
 use aise::domain::story_instance::role::{RoleController, StoryRoleState};
-use aise::domain::story_instance::state::{CurrentScene, InstanceSettings};
+use aise::domain::story_instance::state::InstanceSettings;
 use aise::domain::turn::StoryGeneratorOutput;
 use aise::domain::turn::{BaselineContext, NarrativeGraphStateIndex, RetrievalSignals, RoleContextView};
 use aise::planning::WriterPlannerPromptContextProjector;
@@ -55,15 +55,7 @@ fn minimal_baseline(adversarial: &str) -> BaselineContext {
         },
         instance_settings: InstanceSettings::default(),
         player_role,
-        current_scene: CurrentScene {
-            scene_key: SceneKey::from("scene_1"),
-            location_key: LocationKey::from("village"),
-            time: bounded("morning"),
-            description: bounded("scene"),
-            present_role_ids: Vec::new(),
-        },
-        scene_roles: Vec::new(),
-        referenced_roles: Vec::new(),
+        relevant_roles: Vec::new(),
         relevant_knowledge: Vec::new(),
         role_index_scope: aise::domain::turn::RetrievalIndexScope::Complete,
         knowledge_entry_index_scope: aise::domain::turn::RetrievalIndexScope::Complete,
@@ -155,7 +147,6 @@ fn story_generator_composes_csi_runtime_context_and_fti() {
         ("instance_settings".into(), Value::String("cast_policy: closed".into())),
         ("story_summary".into(), Value::String("None.".into())),
         ("recent_story".into(), Value::String("None.".into())),
-        ("current_scene".into(), Value::String("scene".into())),
         ("player_character".into(), Value::String("player".into())),
         ("ai_characters".into(), Value::String("None.".into())),
         ("active_story_constraints".into(), Value::String("None.".into())),

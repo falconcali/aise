@@ -379,7 +379,7 @@ async fn instance_meta_exposes_roles() {
 }
 
 #[tokio::test]
-async fn instance_snapshot_loads_with_scene_and_roles() {
+async fn instance_snapshot_loads_with_roles() {
     let services = runtime_services("instance_snapshot").await;
     let json = valid_pack_json();
     let info = services
@@ -410,7 +410,6 @@ async fn instance_snapshot_loads_with_scene_and_roles() {
         .load_story_snapshot(&story_info.story_id, limits)
         .await
         .expect("instance snapshot should load");
-    assert_eq!(snapshot.current_scene().description.as_str(), "The village wakes.");
     assert_eq!(snapshot.player_role_id(), &RoleId::try_new("protagonist").unwrap());
     assert!(snapshot.player_role().is_player_controlled());
     assert_eq!(snapshot.roles().len(), 2);

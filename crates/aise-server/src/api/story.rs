@@ -39,7 +39,6 @@ pub struct StoryInstanceView {
     pub base_revision: u64,
     pub pack_id: String,
     pub player_role_id: String,
-    pub current_scene: String,
     pub opening: StoryOpeningView,
 }
 
@@ -48,7 +47,6 @@ pub struct StoryView {
     pub story_id: String,
     pub base_revision: u64,
     pub premise: String,
-    pub current_scene: String,
     pub player_role_id: String,
     pub opening: Option<StoryOpeningView>,
     pub turns: Vec<StoryTurnView>,
@@ -132,7 +130,6 @@ pub async fn create_story_instance(
             base_revision: info.base_revision.get(),
             pack_id: snapshot.pack().pack_id.to_string(),
             player_role_id: player_role_id.to_string(),
-            current_scene: snapshot.current_scene().description.to_string(),
             opening: snapshot
                 .story_continuity()
                 .recent_segments()
@@ -219,7 +216,6 @@ pub async fn get_story(
         story_id: snapshot.story_id().to_string(),
         base_revision: snapshot.base_revision().get(),
         premise: snapshot.story_profile().premise.to_string(),
-        current_scene: snapshot.current_scene().description.to_string(),
         player_role_id: snapshot.player_role_id().to_string(),
         opening: history.opening,
         turns: history.turns,

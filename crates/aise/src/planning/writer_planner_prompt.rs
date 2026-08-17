@@ -3,7 +3,6 @@ use crate::domain::asset::constraint::StoryConstraintRequirement;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::RoleId;
 use crate::domain::narrative_graph::projector::NarrativePlan;
-use crate::domain::story_instance::role::RoleController;
 use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::{BaselineContext, RetrievalTargetId, RoleContextView};
@@ -57,8 +56,7 @@ impl WriterPlannerPromptContextProjector {
         let mut knowledge_targets = BTreeMap::new();
         let knowledge_entry_index = render_knowledge_index(baseline, &mut knowledge_targets);
         let provided_role_ids = std::iter::once(baseline.player_role.role_id.clone())
-            .chain(baseline.scene_roles.iter().map(|role| role.role_id.clone()))
-            .chain(baseline.referenced_roles.iter().map(|role| role.role_id.clone()))
+            .chain(baseline.relevant_roles.iter().map(|role| role.role_id.clone()))
             .collect();
         let provided_knowledge_ids = baseline.relevant_knowledge.iter().map(|entry| entry.entry_id.clone()).collect();
         let continuity = &baseline.story_continuity;
@@ -73,13 +71,14 @@ impl WriterPlannerPromptContextProjector {
                 Value::String(render_optional_text(continuity.summary().text.as_str())),
             ),
             ("recent_story".into(), Value::String(render_recent_story(baseline))),
-            ("current_scene".into(), Value::String(render_current_scene(baseline))),
             (
                 "player_character".into(),
                 Value::String(render_role(&baseline.player_role, false)),
             ),
-            ("scene_characters".into(), Value::String(render_roles(&baseline.scene_roles))),
-            ("referenced_characters".into(), Value::String(render_referenced_roles(baseline))),
+            (
+                "relevant_characters".into(),
+                Value::String(render_roles(&baseline.relevant_roles)),
+            ),
             ("relevant_knowledge".into(), Value::String(render_relevant_knowledge(baseline))),
             ("character_index".into(), Value::String(role_index)),
             ("knowledge_entry_index".into(), Value::String(knowledge_entry_index)),
@@ -225,33 +224,11 @@ fn render_recent_story(baseline: &BaselineContext) -> String {
         .join("\n")
 }
 
-fn render_current_scene(baseline: &BaselineContext) -> String {
-    let scene = &baseline.current_scene;
-    [
-        format!("location: {}", quoted(scene.location_key.as_str())),
-        field("time", scene.time.as_str()),
-        field("immediate_situation", scene.description.as_str()),
-    ]
-    .join("\n")
-}
-
 fn render_roles(roles: &[RoleContextView]) -> String {
     if roles.is_empty() {
         return "None.".into();
     }
     roles.iter().map(|role| render_role(role, true)).collect::<Vec<_>>().join("\n")
-}
-
-fn render_referenced_roles(baseline: &BaselineContext) -> String {
-    if baseline.referenced_roles.is_empty() {
-        return "None.".into();
-    }
-    baseline
-        .referenced_roles
-        .iter()
-        .map(|role| format!("{}\n  presence: referenced_off_scene", render_role(role, true)))
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn render_relevant_knowledge(baseline: &BaselineContext) -> String {
@@ -461,16 +438,6 @@ fn scalar(value: &ScalarValue) -> String {
         ScalarValue::Integer(value) => value.to_string(),
         ScalarValue::Decimal(value) | ScalarValue::Text(value) => quoted(value),
     }
-}
-
-pub fn is_ai_role(baseline: &BaselineContext, role_id: &RoleId) -> bool {
-    baseline
-        .scene_roles
-        .iter()
-        .find(|role| &role.role_id == role_id)
-        .is_some_and(|role| {
-            matches!(role.controller, RoleController::Ai) && baseline.current_scene.present_role_ids.contains(role_id)
-        })
 }
 
 #[cfg(test)]

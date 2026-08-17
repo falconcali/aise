@@ -1,5 +1,5 @@
 use crate::domain::asset::entity::KnowledgeEntity;
-use crate::domain::asset::ids::{LocationKey, SceneKey};
+use crate::domain::asset::ids::LocationKey;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{DeletableKnowledgeId, ProposedKnowledgeMutation, ProposedKnowledgeValue};
@@ -27,11 +27,7 @@ impl DeterministicValidator for ReferenceValidator {
             if !known_roles.contains(&state.role_id) {
                 issues.push(issue("role_states", index, "role_id is not a known role"));
             }
-            if !location_key_resolves(
-                &state.location,
-                &snapshot.current_scene().location_key,
-                snapshot.entity_catalog(),
-            ) {
+            if !location_key_resolves(&state.location, snapshot) {
                 issues.push(issue("role_states", index, "location does not resolve to a known location"));
             }
         }
@@ -67,29 +63,6 @@ impl DeterministicValidator for ReferenceValidator {
                         issues.push(issue("knowledge_changes", index, "delete target is not modifiable"));
                     }
                 }
-            }
-        }
-
-        let scene = &extraction.current_scene;
-        if !scene_key_resolves(&scene.scene_key, &snapshot.current_scene().scene_key, snapshot.entity_catalog()) {
-            issues.push(issue("current_scene", 0, "scene_key does not resolve to a known scene"));
-        }
-        if !location_key_resolves(
-            &scene.location_key,
-            &snapshot.current_scene().location_key,
-            snapshot.entity_catalog(),
-        ) {
-            issues.push(issue("current_scene", 0, "location_key does not resolve to a known location"));
-        }
-        let mut seen = BTreeSet::new();
-        for role_id in &scene.present_role_ids {
-            if !known_roles.contains(role_id) || !seen.insert(role_id.clone()) {
-                issues.push(issue(
-                    "current_scene",
-                    0,
-                    "present_role_ids contains an unknown or duplicate id",
-                ));
-                break;
             }
         }
 
@@ -176,22 +149,13 @@ fn has_duplicates<T: Ord + Clone>(values: &[T]) -> bool {
 fn entity_resolves(entity: &KnowledgeEntity, snapshot: &StoryReadSnapshot) -> bool {
     match entity {
         KnowledgeEntity::Role(id) => snapshot.roles().contains_key(id),
-        KnowledgeEntity::Scene(key) => {
-            scene_key_resolves(key, &snapshot.current_scene().scene_key, snapshot.entity_catalog())
-        }
-        KnowledgeEntity::Location(key) => {
-            location_key_resolves(key, &snapshot.current_scene().location_key, snapshot.entity_catalog())
-        }
         _ => snapshot.entity_catalog().contains(entity),
     }
 }
 
-fn scene_key_resolves(key: &SceneKey, current: &SceneKey, catalog: &[KnowledgeEntity]) -> bool {
-    key == current || catalog.contains(&KnowledgeEntity::Scene(key.clone()))
-}
-
-fn location_key_resolves(key: &LocationKey, current: &LocationKey, catalog: &[KnowledgeEntity]) -> bool {
-    key == current || catalog.contains(&KnowledgeEntity::Location(key.clone()))
+fn location_key_resolves(key: &LocationKey, snapshot: &StoryReadSnapshot) -> bool {
+    snapshot.entity_catalog().contains(&KnowledgeEntity::Location(key.clone()))
+        || snapshot.roles().values().any(|role| &role.state.location == key)
 }
 
 fn issue(path: &str, index: usize, message: &str) -> ValidationIssue {

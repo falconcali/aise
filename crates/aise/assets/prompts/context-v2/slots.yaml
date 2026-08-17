@@ -10,7 +10,6 @@ slots:
       - { name: instance_settings, var_type: string, required: true }
       - { name: story_summary, var_type: string, required: true }
       - { name: recent_story, var_type: string, required: true }
-      - { name: current_scene, var_type: string, required: true }
       - { name: player_character, var_type: string, required: true }
       - { name: ai_characters, var_type: string, required: true }
       - { name: active_story_constraints, var_type: string, required: true }
@@ -37,10 +36,8 @@ slots:
       - { name: instance_settings, var_type: string, required: true }
       - { name: story_summary, var_type: string, required: true }
       - { name: recent_story, var_type: string, required: true }
-      - { name: current_scene, var_type: string, required: true }
       - { name: player_character, var_type: string, required: true }
-      - { name: scene_characters, var_type: string, required: true }
-      - { name: referenced_characters, var_type: string, required: true }
+      - { name: relevant_characters, var_type: string, required: true }
       - { name: relevant_knowledge, var_type: string, required: true }
       - { name: character_index, var_type: string, required: true }
       - { name: knowledge_entry_index, var_type: string, required: true }
@@ -63,7 +60,6 @@ slots:
       - { name: current_character_state, var_type: string, required: true }
       - { name: story_summary, var_type: string, required: true }
       - { name: recent_story, var_type: string, required: true }
-      - { name: current_scene, var_type: string, required: true }
       - { name: relevant_character_knowledge, var_type: string, required: true }
       - { name: narrative_character_impulses, var_type: string, required: true }
       - { name: thinking_focus, var_type: string, required: true }
@@ -84,7 +80,6 @@ slots:
       - { name: instance_settings, var_type: string, required: true }
       - { name: story_summary, var_type: string, required: true }
       - { name: recent_story, var_type: string, required: true }
-      - { name: current_scene, var_type: string, required: true }
       - { name: player_character, var_type: string, required: true }
       - { name: ai_characters, var_type: string, required: true }
       - { name: active_story_constraints, var_type: string, required: true }
@@ -106,7 +101,6 @@ slots:
     required: false
     vars:
       - { name: story_text, var_type: string, required: true }
-      - { name: current_scene, var_type: string, required: true }
       - { name: roles, var_type: string, required: true }
       - { name: relationships, var_type: string, required: true }
       - { name: modifiable_knowledge, var_type: string, required: true }

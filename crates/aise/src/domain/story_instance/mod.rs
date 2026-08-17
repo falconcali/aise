@@ -8,4 +8,4 @@ pub use constraint::{ActiveStoryConstraint, StoryConstraintDefinition, StoryCons
 pub use info::StoryInfo;
 pub use role::{RoleController, StoryRole, StoryRoleState, StoryRoleView};
 pub use snapshot::{KnowledgeSnapshotRef, StoryReadSnapshot, StorySnapshotError};
-pub use state::{CurrentScene, InstanceSettings, RelationshipState};
+pub use state::{InstanceSettings, RelationshipState};

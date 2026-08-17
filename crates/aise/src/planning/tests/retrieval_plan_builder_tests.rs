@@ -7,7 +7,7 @@ fn baseline_signal_entity_is_known_without_knowledge_catalog_entry() {
     let entity = KnowledgeEntity::Location(LocationKey::from("lodge_hall"));
     let signals = vec![EntitySignal {
         entity: entity.clone(),
-        origin: RetrievalSignalOrigin::Scene,
+        origin: RetrievalSignalOrigin::RoleState,
         priority: 1,
     }];
 

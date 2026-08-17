@@ -17,7 +17,7 @@ use crate::domain::narrative_graph::state_view::{NarrativeStateView, NarrativeSt
 use crate::domain::story_instance::constraint::{ActiveStoryConstraint, StoryConstraintSource};
 use crate::domain::story_instance::info::StoryInfo;
 use crate::domain::story_instance::role::{RoleController, StoryRole, StoryRoleState};
-use crate::domain::story_instance::state::{CurrentScene, InstanceSettings, RelationshipState};
+use crate::domain::story_instance::state::{InstanceSettings, RelationshipState};
 use crate::persistence::asset_store::{AssetStore, FrozenStoryPack};
 use crate::persistence::store::{MaterializedStoryInstanceSpec, Store, StoreError};
 use std::collections::{BTreeMap, BTreeSet};
@@ -221,13 +221,6 @@ impl StoryInstanceFactory {
                 })
             })
             .collect::<Result<Vec<_>, StoryInstantiationError>>()?;
-        let mut present_role_ids = roles
-            .values()
-            .filter(|role| role.state.location == pack.start.location_key)
-            .map(|role| role.role_id.clone())
-            .collect::<Vec<_>>();
-        present_role_ids.sort();
-        present_role_ids.dedup();
         let opening = pack.start.opening.clone();
         enforce_limit(opening.as_str().len(), self.limits.max_opening_bytes, "max_opening_bytes")?;
         let narrative_state = bootstrap_narrative_state(&pack.narrative, &roles, &relationships, self.narrative_limits)
@@ -241,13 +234,6 @@ impl StoryInstanceFactory {
             roles,
             relationships,
             knowledge,
-            scene: CurrentScene {
-                scene_key: pack.start.scene_key.clone(),
-                location_key: pack.start.location_key.clone(),
-                time: pack.start.time.clone(),
-                description: pack.start.description.clone(),
-                present_role_ids,
-            },
             narrative_state,
             fact_values: BTreeMap::new(),
             active_constraints,

@@ -66,8 +66,7 @@ impl TurnExecutionPipeline for StoryGenerator {
             .baseline()
             .map(|baseline| {
                 std::iter::once(&baseline.player_role)
-                    .chain(baseline.scene_roles.iter())
-                    .chain(baseline.referenced_roles.iter())
+                    .chain(baseline.relevant_roles.iter())
                     .map(|role| role.profile.dialogue_examples.len())
                     .sum::<usize>()
             })

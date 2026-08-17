@@ -126,9 +126,6 @@ impl Store for SqliteStore {
         let fact_values_json = serde_json::to_string(&spec.fact_values).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
         })?;
-        let scene_json = serde_json::to_string(&spec.scene).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-        })?;
         let constraints_json =
             serde_json::to_string(&spec.active_constraints).map_err(|_| StoreError::Serialization {
                 kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
@@ -140,13 +137,12 @@ impl Store for SqliteStore {
             .map(|role| role.role_id.as_str());
         sqlx::query(
             "INSERT INTO stories (id, revision, player_role_id, created_at, \
-             current_scene, story_summary, active_constraints) \
-             VALUES (?, 0, ?, ?, ?, ?, ?)",
+             story_summary, active_constraints) \
+             VALUES (?, 0, ?, ?, ?, ?)",
         )
         .bind(spec.story_id.as_str())
         .bind(player_role_id)
         .bind(spec.created_at_ms)
-        .bind(&scene_json)
         .bind("{\"text\":\"\",\"summarized_through\":null}")
         .bind(&constraints_json)
         .execute(&mut *tx)
@@ -467,19 +463,6 @@ impl Store for SqliteStore {
                 .bind(seq as i64)
                 .bind(event.kind.as_str())
                 .bind(&payload)
-                .execute(&mut *tx)
-                .await
-                .map_err(SqliteStoreError::from)?;
-        }
-
-        {
-            let scene_json =
-                serde_json::to_string(commit.changes.current_scene()).map_err(|_| StoreError::Serialization {
-                    kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-                })?;
-            sqlx::query("UPDATE stories SET current_scene = ? WHERE id = ?")
-                .bind(&scene_json)
-                .bind(commit.story_id.as_str())
                 .execute(&mut *tx)
                 .await
                 .map_err(SqliteStoreError::from)?;

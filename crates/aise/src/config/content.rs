@@ -6,7 +6,6 @@ pub struct TurnContentLimitsConfig {
     pub max_story_profile_bytes: usize,
     pub max_instance_settings: usize,
     pub max_instance_setting_bytes: usize,
-    pub max_scene_bytes: usize,
     pub max_summary_bytes: usize,
     pub max_constraints: usize,
     pub max_constraint_bytes: usize,
@@ -30,7 +29,6 @@ impl Default for TurnContentLimitsConfig {
             max_story_profile_bytes: 4096,
             max_instance_settings: 32,
             max_instance_setting_bytes: 256,
-            max_scene_bytes: 8192,
             max_summary_bytes: 4096,
             max_constraints: 16,
             max_constraint_bytes: 512,
@@ -62,9 +60,6 @@ impl TurnContentLimitsConfig {
             return Err(ConfigError::Invalid(
                 "content.max_instance_setting_bytes must be positive".into(),
             ));
-        }
-        if self.max_scene_bytes == 0 {
-            return Err(ConfigError::Invalid("content.max_scene_bytes must be positive".into()));
         }
         if self.max_summary_bytes == 0 {
             return Err(ConfigError::Invalid("content.max_summary_bytes must be positive".into()));

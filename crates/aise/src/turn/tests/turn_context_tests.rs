@@ -1,7 +1,7 @@
 use super::*;
 use crate::config::{NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
 use crate::domain::asset::character_card::CharacterProfile;
-use crate::domain::asset::ids::{LocationKey, PackId, PlayerId, SceneKey, SemanticVersion, Sha256Digest, StoryPackKey};
+use crate::domain::asset::ids::{LocationKey, PackId, PlayerId, SemanticVersion, Sha256Digest, StoryPackKey};
 use crate::domain::asset::story_pack::{StoryProfile, StoryStyle};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::{RoleId, StoryRevision};
@@ -10,7 +10,7 @@ use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::role::{RoleController, StoryRole, StoryRoleState};
 use crate::domain::story_instance::snapshot::{KnowledgeSnapshotRef, StoryReadSnapshotParts};
-use crate::domain::story_instance::state::{CurrentScene, InstanceSettings};
+use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::turn::{
     CharacterThinkRequest, NarrativeGraphStateIndex, RetrievalIndexScope, RetrievalPlan, RetrievalSignals,
     RoleContextView, WriterStoryGoal,
@@ -38,16 +38,6 @@ fn story_profile() -> StoryProfile {
             point_of_view: bounded("third"),
             tense: bounded("past"),
         },
-    }
-}
-
-fn scene() -> CurrentScene {
-    CurrentScene {
-        scene_key: SceneKey::from("scene_1"),
-        location_key: LocationKey::from("village"),
-        time: bounded("morning"),
-        description: bounded("scene"),
-        present_role_ids: Vec::new(),
     }
 }
 
@@ -96,9 +86,7 @@ fn sample_baseline(player: &StoryRole) -> BaselineContext {
         story_profile: story_profile(),
         instance_settings: InstanceSettings::default(),
         player_role: RoleContextView::from(&crate::domain::story_instance::role::StoryRoleView::from(player)),
-        current_scene: scene(),
-        scene_roles: Vec::new(),
-        referenced_roles: Vec::new(),
+        relevant_roles: Vec::new(),
         relevant_knowledge: Vec::new(),
         role_index_scope: RetrievalIndexScope::Complete,
         knowledge_entry_index_scope: RetrievalIndexScope::Complete,
@@ -133,7 +121,6 @@ fn sample_snapshot(player: &StoryRole) -> StoryReadSnapshot {
         story_profile: story_profile(),
         instance_settings: InstanceSettings::default(),
         roles,
-        current_scene: scene(),
         relationships: Vec::new(),
         narrative_definition: NarrativeGraphDefinition {
             entry_nodes: Vec::new(),

@@ -10,7 +10,6 @@ use crate::domain::narrative_graph::definition::{
 use crate::domain::narrative_graph::resolver::{NarrativeResolutionInput, NarrativeResolver};
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::narrative_graph::state_view::{NarrativeStateView, NarrativeStateViewError};
-use crate::domain::story_instance::state::CurrentScene;
 use crate::domain::turn::{StoryCandidateVersion, StoryStateExtractionEnvelope, StoryStateExtractorOutput};
 use std::collections::BTreeMap;
 
@@ -69,13 +68,6 @@ fn empty_extraction(expected_graph_revision: u64) -> StoryStateExtractionEnvelop
             role_states: Vec::new(),
             relationship_states: Vec::new(),
             knowledge_changes: Vec::new(),
-            current_scene: CurrentScene {
-                scene_key: crate::domain::asset::ids::SceneKey::try_new("scene.example").unwrap(),
-                location_key: crate::domain::asset::ids::LocationKey::try_new("location.example").unwrap(),
-                time: BoundedText::try_new("morning", "time", 64).unwrap(),
-                description: BoundedText::try_new("a quiet room", "description", 256).unwrap(),
-                present_role_ids: Vec::new(),
-            },
         },
         narrative_condition_results: Vec::new(),
     }

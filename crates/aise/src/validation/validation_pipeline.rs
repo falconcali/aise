@@ -179,8 +179,6 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
         })
         .collect::<Result<Vec<_>, TurnExecutionError>>()?;
 
-    let current_scene = extraction.current_scene.clone();
-
     let mut narrative_events = Vec::new();
     for intent in &projection.plan.world_event_intents {
         let index = narrative_events.len();
@@ -289,7 +287,6 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
         role_changes,
         relationship_changes,
         knowledge_mutations,
-        current_scene,
         narrative_events,
         narrative_resolution,
         constraint_change,

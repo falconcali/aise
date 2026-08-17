@@ -22,7 +22,6 @@ const sendBtn = $("send-btn");
 const traceToggle = $("trace-toggle");
 const tabStory = $("tab-story");
 const tabTrace = $("tab-trace");
-const sceneBox = $("scene-box");
 const gameTitleEl = $("game-title");
 const gameRoleEl = $("game-role");
 const backToDetailBtn = $("back-to-detail");
@@ -362,7 +361,6 @@ async function openGame(session, initialStory = null) {
   renderSessions();
   gameTitleEl.textContent = session.name;
   gameRoleEl.textContent = "";
-  sceneBox.innerHTML = "";
   storyEl.textContent = "";
   resetTraceView();
   roleStateEl.innerHTML = `<p class="muted">加载中…</p>`;
@@ -394,11 +392,6 @@ async function loadStory(storyId, initialOpening = null) {
 function renderStory() {
   const story = currentStory;
   if (!story) return;
-  if (story.current_scene) {
-    sceneBox.innerHTML = `<div class="scene-label">当前场景</div>${escapeHtml(story.current_scene)}`;
-  } else {
-    sceneBox.innerHTML = "";
-  }
   if (story.player_role_id) {
     const label = currentPackJson?.roles?.[story.player_role_id]?.role_label || story.player_role_id;
     gameRoleEl.textContent = `扮演：${label}`;

@@ -4,7 +4,6 @@ use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::info::StoryInfo;
 use crate::domain::story_instance::role::StoryRole;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
-use crate::domain::story_instance::state::CurrentScene;
 use crate::domain::turn::SnapshotLimits;
 use crate::turn::turn_contract::{CommittedTurnResult, IdempotencyKey, RequestDigest};
 use async_trait::async_trait;
@@ -67,7 +66,6 @@ pub struct MaterializedStoryInstanceSpec {
     pub roles: std::collections::BTreeMap<crate::domain::ids::RoleId, StoryRole>,
     pub relationships: Vec<crate::domain::story_instance::state::RelationshipState>,
     pub knowledge: Vec<crate::domain::knowledge::KnowledgeEntry>,
-    pub scene: CurrentScene,
     pub opening: crate::domain::asset::validation::BoundedText,
     pub narrative_state: crate::domain::narrative_graph::state::NarrativeRuntimeState,
     pub fact_values:

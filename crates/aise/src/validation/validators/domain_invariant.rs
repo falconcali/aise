@@ -18,11 +18,6 @@ impl DeterministicValidator for DomainInvariantValidator {
         };
         let mut issues = Vec::new();
 
-        let scene = &extraction.current_scene;
-        if scene.time.as_str().trim().is_empty() || scene.description.as_str().trim().is_empty() {
-            issues.push(issue("current_scene", 0, "scene time and description must be non-empty"));
-        }
-
         let modifiable = modifiable_knowledge_index(ctx);
         for (index, mutation) in extraction.knowledge_changes.iter().enumerate() {
             match mutation {

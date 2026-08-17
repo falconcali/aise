@@ -10,7 +10,7 @@ use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::role::StoryRoleView;
-use crate::domain::story_instance::state::{CurrentScene, InstanceSettings, RelationshipState};
+use crate::domain::story_instance::state::{InstanceSettings, RelationshipState};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,7 +35,6 @@ pub struct StoryReadSnapshot {
     instance_settings: InstanceSettings,
     roles: BTreeMap<RoleId, StoryRoleView>,
     player_role_id: RoleId,
-    current_scene: CurrentScene,
     relationships: Vec<RelationshipState>,
     narrative_definition: NarrativeGraphDefinition,
     narrative_state: NarrativeRuntimeState,
@@ -55,7 +54,6 @@ pub struct StoryReadSnapshotParts {
     pub story_profile: StoryProfile,
     pub instance_settings: InstanceSettings,
     pub roles: BTreeMap<RoleId, StoryRoleView>,
-    pub current_scene: CurrentScene,
     pub relationships: Vec<RelationshipState>,
     pub narrative_definition: NarrativeGraphDefinition,
     pub narrative_state: NarrativeRuntimeState,
@@ -76,7 +74,6 @@ impl StoryReadSnapshot {
             story_profile,
             instance_settings,
             roles,
-            current_scene,
             relationships,
             narrative_definition,
             narrative_state,
@@ -118,10 +115,6 @@ impl StoryReadSnapshot {
             }
             first.expect("checked above")
         };
-        validate_sorted_unique(&current_scene.present_role_ids, "scene_role_order")?;
-        if current_scene.present_role_ids.iter().any(|id| !roles.contains_key(id)) {
-            return inconsistent("scene_role_missing");
-        }
         let mut relationship_keys = BTreeSet::new();
         for relationship in &relationships {
             if !roles.contains_key(&relationship.source_role_id) || !roles.contains_key(&relationship.target_role_id) {
@@ -167,7 +160,6 @@ impl StoryReadSnapshot {
             instance_settings,
             roles,
             player_role_id,
-            current_scene,
             relationships,
             narrative_definition,
             narrative_state,
@@ -216,10 +208,6 @@ impl StoryReadSnapshot {
         self.roles
             .get(&self.player_role_id)
             .expect("player role id is validated at construction")
-    }
-
-    pub fn current_scene(&self) -> &CurrentScene {
-        &self.current_scene
     }
 
     pub fn relationships(&self) -> &[RelationshipState] {
