@@ -1,6 +1,6 @@
 {
-  "spec": "aise_story_v4",
-  "spec_version": "4.0",
+  "spec": "aise_story_v5",
+  "spec_version": "5.0",
   "meta": {
     "pack_key": "forest_lodge",
     "title": "林间木屋",
@@ -11,7 +11,6 @@
     "cover_asset": null
   },
   "story": {
-    "premise": "你在林中醒来，发现自己身处一座陌生的木屋。门外有脚步声。",
     "language": "zh-CN",
     "genre": ["mystery"],
     "themes": ["discovery"],

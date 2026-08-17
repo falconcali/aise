@@ -46,7 +46,6 @@ pub struct StoryInstanceView {
 pub struct StoryView {
     pub story_id: String,
     pub base_revision: u64,
-    pub premise: String,
     pub player_role_id: String,
     pub opening: Option<StoryOpeningView>,
     pub turns: Vec<StoryTurnView>,
@@ -215,7 +214,6 @@ pub async fn get_story(
     Ok(Json(StoryView {
         story_id: snapshot.story_id().to_string(),
         base_revision: snapshot.base_revision().get(),
-        premise: snapshot.story_profile().premise.to_string(),
         player_role_id: snapshot.player_role_id().to_string(),
         opening: history.opening,
         turns: history.turns,

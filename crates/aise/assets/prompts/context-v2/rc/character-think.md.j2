@@ -9,16 +9,20 @@
 
 {{ current_character_state }}
 
+{% if story_summary or recent_story %}
 ## Story Continuity
 
+{% if story_summary %}
 ### Story Summary
 
 {{ story_summary }}
-
+{% endif %}
+{% if recent_story %}
 ### Recent Story
 
 {{ recent_story }}
-
+{% endif %}
+{% endif %}
 ## Relevant Character Knowledge / Memory
 
 {{ relevant_character_knowledge }}

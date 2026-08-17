@@ -15,6 +15,8 @@ pub enum AssetSpecVersion {
     V3_0,
     #[serde(rename = "4.0")]
     V4_0,
+    #[serde(rename = "5.0")]
+    V5_0,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

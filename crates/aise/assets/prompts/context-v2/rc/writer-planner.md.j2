@@ -9,16 +9,20 @@
 
 {{ instance_settings }}
 
+{% if story_summary or recent_story %}
 ## Story Continuity
 
+{% if story_summary %}
 ### Story Summary
 
 {{ story_summary }}
-
+{% endif %}
+{% if recent_story %}
 ### Recent Story
 
 {{ recent_story }}
-
+{% endif %}
+{% endif %}
 ## Player Character
 
 {{ player_character }}

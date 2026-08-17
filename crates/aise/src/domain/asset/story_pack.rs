@@ -31,8 +31,8 @@ pub struct StoryPack {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StorySpec {
-    #[serde(rename = "aise_story_v4")]
-    V4,
+    #[serde(rename = "aise_story_v5")]
+    V5,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,7 +51,6 @@ pub struct StoryPackMeta {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StoryProfile {
-    pub premise: BoundedText,
     pub language: BoundedText,
     pub genre: Vec<BoundedText>,
     pub themes: Vec<BoundedText>,

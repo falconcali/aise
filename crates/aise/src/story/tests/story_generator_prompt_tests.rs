@@ -29,7 +29,6 @@ fn bounded(value: &str) -> BoundedText {
 fn prompt_context() -> StoryGeneratorPromptContext {
     StoryGeneratorPromptContext {
         story_profile: StoryProfilePromptView {
-            premise: bounded("premise"),
             language: bounded("zh-CN"),
             genre: Vec::new(),
             themes: Vec::new(),
@@ -42,10 +41,7 @@ fn prompt_context() -> StoryGeneratorPromptContext {
         }),
         story_continuity: StoryContinuityPromptView {
             story_summary: bounded("summary"),
-            recent_story: vec![RecentStoryPromptView {
-                sequence: 4,
-                text: bounded("recent"),
-            }],
+            recent_story: vec![bounded("recent")],
         },
         player_role: role("player"),
         ai_roles: vec![role("npc")],
@@ -181,6 +177,19 @@ fn runtime_projection_contains_only_allowlisted_semantic_sections() {
 }
 
 #[test]
+fn story_generator_renders_story_continuity_as_prose() {
+    let mut context = prompt_context();
+    context.story_continuity = StoryContinuityPromptView {
+        story_summary: bounded("summary-one"),
+        recent_story: vec![bounded("recent-one"), bounded("recent-two")],
+    };
+    let vars = render_runtime_vars(&context);
+    let values = vars.as_map();
+    assert_eq!(values["story_summary"].as_str().unwrap(), "summary-one");
+    assert_eq!(values["recent_story"].as_str().unwrap(), "recent-one\n\nrecent-two");
+}
+
+#[test]
 fn story_generator_schema_is_closed_and_complete() {
     let schema = StoryGeneratorOutput::json_schema(8192);
     let required = schema["required"].as_array().unwrap();
@@ -256,7 +265,6 @@ fn digest() -> Sha256Digest {
 
 fn story_profile() -> StoryProfile {
     StoryProfile {
-        premise: bounded("premise"),
         language: bounded("zh-CN"),
         genre: Vec::new(),
         themes: Vec::new(),

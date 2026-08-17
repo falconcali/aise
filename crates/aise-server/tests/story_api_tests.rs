@@ -1,6 +1,6 @@
 use aise::domain::story_sequence::StorySequence;
 use aise::persistence::StoryOpeningView;
-use aise_server::api::story::StoryInstanceView;
+use aise_server::api::story::{StoryInstanceView, StoryView};
 
 #[test]
 fn legacy_story_create_path_is_retired_in_favor_of_instances() {
@@ -41,5 +41,22 @@ fn story_api_omits_current_scene() {
     };
 
     let json = serde_json::to_value(view).unwrap();
+    assert!(json.get("current_scene").is_none());
+}
+
+#[test]
+fn story_api_omits_removed_context_fields() {
+    let view = StoryView {
+        story_id: "story-1".into(),
+        base_revision: 0,
+        player_role_id: "protagonist".into(),
+        opening: None,
+        turns: Vec::new(),
+        next_turn_after: None,
+        roles: Vec::new(),
+    };
+
+    let json = serde_json::to_value(view).unwrap();
+    assert!(json.get("premise").is_none());
     assert!(json.get("current_scene").is_none());
 }

@@ -338,11 +338,6 @@ pub(crate) async fn load_story_snapshot(
             });
         }
     }
-    if story_profile.premise.as_str().len() > limits.max_story_profile_bytes {
-        return Err(StoreError::ConstraintViolation {
-            constraint: "max_story_profile_bytes".into(),
-        });
-    }
     let pack_ref = FrozenStoryPackRef {
         pack_id: PackId::from(pack_id),
         pack_key: crate::domain::asset::ids::StoryPackKey::from(pack_key),

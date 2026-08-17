@@ -25,8 +25,8 @@ fn temp_db_path(label: &str) -> String {
 
 fn valid_pack_json() -> String {
     serde_json::json!({
-        "spec": "aise_story_v4",
-        "spec_version": "4.0",
+        "spec": "aise_story_v5",
+        "spec_version": "5.0",
         "meta": {
             "pack_key": "demo",
             "title": "Demo",
@@ -37,7 +37,6 @@ fn valid_pack_json() -> String {
             "cover_asset": null
         },
         "story": {
-            "premise": "A quiet village.",
             "language": "zh-CN",
             "genre": ["adventure"],
             "themes": ["hope"],
@@ -269,7 +268,7 @@ async fn reject_duplicate_key_version_with_different_digest() {
         .await
         .expect("first import should succeed");
     let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
-    value["story"]["premise"] = serde_json::json!("changed premise");
+    value["story"]["themes"] = serde_json::json!(["changed"]);
     let changed = value.to_string();
     let result = services.pack_service.import(AssetInput::Json(changed.as_bytes())).await;
     assert!(result.is_err());

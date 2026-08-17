@@ -133,13 +133,25 @@ fn character_decision_output_schema_is_closed() {
     assert_eq!(schema["required"].as_array().unwrap().len(), 1);
 }
 
+#[test]
+fn character_think_renders_story_continuity_as_prose() {
+    let mut context = prompt_context();
+    context.story_continuity = CharacterThinkStoryContinuityPromptView {
+        story_summary: bounded("summary-one"),
+        recent_story: vec![bounded("recent-one"), bounded("recent-two")],
+    };
+    let vars = render_runtime_vars(&context);
+    let values = vars.as_map();
+    assert_eq!(values["story_summary"].as_str().unwrap(), "summary-one");
+    assert_eq!(values["recent_story"].as_str().unwrap(), "recent-one\n\nrecent-two");
+}
+
 fn digest() -> Sha256Digest {
     Sha256Digest::try_new("sha256:0000000000000000000000000000000000000000000000000000000000000000").unwrap()
 }
 
 fn story_profile() -> StoryProfile {
     StoryProfile {
-        premise: bounded("premise"),
         language: bounded("zh-CN"),
         genre: Vec::new(),
         themes: Vec::new(),

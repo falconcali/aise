@@ -87,14 +87,14 @@ impl TurnExecutionPipeline for StoryGenerator {
             .story_continuity
             .recent_story
             .iter()
-            .map(|segment| segment.text.as_str().len())
+            .map(|segment| segment.as_str().len())
             .sum::<usize>();
         let recent_story_tokens = projection
             .context
             .story_continuity
             .recent_story
             .iter()
-            .map(|segment| estimate_text_tokens(segment.text.as_str()))
+            .map(|segment| estimate_text_tokens(segment.as_str()))
             .sum::<u64>();
         let writer_fact_count = projection
             .context

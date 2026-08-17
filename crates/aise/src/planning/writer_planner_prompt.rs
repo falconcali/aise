@@ -68,7 +68,7 @@ impl WriterPlannerPromptContextProjector {
             ),
             (
                 "story_summary".into(),
-                Value::String(render_optional_text(continuity.summary().text.as_str())),
+                Value::String(render_story_summary(continuity.summary().text.as_str())),
             ),
             ("recent_story".into(), Value::String(render_recent_story(baseline))),
             (
@@ -186,7 +186,6 @@ pub fn writer_planner_output_schema(config: &PlannerConfig) -> Value {
 fn render_story_profile(baseline: &BaselineContext) -> String {
     let profile = &baseline.story_profile;
     [
-        field("premise", profile.premise.as_str()),
         field("language", profile.language.as_str()),
         list_field("genre", &profile.genre),
         list_field("themes", &profile.themes),
@@ -207,21 +206,13 @@ fn render_instance_settings(policy: CastPolicy) -> String {
 }
 
 fn render_recent_story(baseline: &BaselineContext) -> String {
-    let segments = baseline.story_continuity.recent_segments();
-    if segments.is_empty() {
-        return "None.".into();
-    }
-    segments
+    baseline
+        .story_continuity
+        .recent_segments()
         .iter()
-        .map(|segment| {
-            format!(
-                "- sequence: {}\n  text: {}",
-                segment.sequence.get(),
-                quoted(segment.text.as_str())
-            )
-        })
+        .map(|segment| segment.text.as_str())
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n\n")
 }
 
 fn render_roles(roles: &[RoleContextView]) -> String {
@@ -387,11 +378,11 @@ fn render_constraints(baseline: &BaselineContext) -> String {
         .join("\n")
 }
 
-fn render_optional_text(value: &str) -> String {
+fn render_story_summary(value: &str) -> String {
     if value.trim().is_empty() {
-        "None.".into()
+        String::new()
     } else {
-        render_data(value)
+        value.to_owned()
     }
 }
 

@@ -29,7 +29,6 @@ fn digest() -> Sha256Digest {
 
 fn story_profile() -> StoryProfile {
     StoryProfile {
-        premise: bounded("premise"),
         language: bounded("zh-CN"),
         genre: Vec::new(),
         themes: Vec::new(),

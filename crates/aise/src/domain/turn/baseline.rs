@@ -117,7 +117,6 @@ pub struct BaselineContext {
 impl BaselineContext {
     pub fn estimate_tokens(&self) -> u64 {
         let mut total = self.story_continuity.estimate_tokens();
-        total = total.saturating_add(estimate_text_tokens(self.story_profile.premise.as_str()));
         total = total.saturating_add(estimate_text_tokens(self.player_role.profile.name.as_str()));
         for role in &self.relevant_roles {
             total = total.saturating_add(estimate_text_tokens(role.profile.name.as_str()));

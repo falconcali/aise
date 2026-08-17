@@ -300,7 +300,7 @@ fn render_runtime_vars(context: &CharacterThinkPromptContext) -> RuntimePromptVa
         ),
         (
             "story_summary".into(),
-            Value::String(render_optional_text(context.story_continuity.story_summary.as_str())),
+            Value::String(render_story_summary(context.story_continuity.story_summary.as_str())),
         ),
         (
             "recent_story".into(),
@@ -374,14 +374,7 @@ fn render_role_state(value: &CharacterThinkStatePromptView) -> String {
 }
 
 fn render_recent_story(values: &[BoundedText]) -> String {
-    if values.is_empty() {
-        return "None.".into();
-    }
-    values
-        .iter()
-        .map(|value| format!("- text: {}", quoted(value.as_str())))
-        .collect::<Vec<_>>()
-        .join("\n")
+    values.iter().map(|value| value.as_str()).collect::<Vec<_>>().join("\n\n")
 }
 
 fn render_knowledge(values: &[CharacterThinkKnowledgePromptView]) -> String {
@@ -461,11 +454,11 @@ fn runtime_tokens(vars: &RuntimePromptVars) -> u64 {
         .fold(0u64, u64::saturating_add)
 }
 
-fn render_optional_text(value: &str) -> String {
+fn render_story_summary(value: &str) -> String {
     if value.trim().is_empty() {
-        "None.".into()
+        String::new()
     } else {
-        quoted(value)
+        value.to_owned()
     }
 }
 

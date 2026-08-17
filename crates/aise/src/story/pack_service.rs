@@ -402,7 +402,7 @@ impl NativeAssetImporter {
 
     pub fn validate_pack_value(&self, value: &serde_json::Value, report: &mut ValidationReport) {
         match value.get("spec").and_then(serde_json::Value::as_str) {
-            Some("aise_story_v4") => {}
+            Some("aise_story_v5") => {}
             Some(other) => {
                 report.push(AssetValidationIssue::new(
                     AssetValidationCode::UnsupportedSpec,
@@ -421,7 +421,7 @@ impl NativeAssetImporter {
             }
         }
         match value.get("spec_version").and_then(serde_json::Value::as_str) {
-            Some("4.0") => {}
+            Some("5.0") => {}
             Some(other) => {
                 report.push(AssetValidationIssue::new(
                     AssetValidationCode::UnsupportedSpecVersion,
@@ -438,6 +438,21 @@ impl NativeAssetImporter {
                 ));
                 return;
             }
+        }
+        if value.pointer("/story/premise").is_some() {
+            report.push(AssetValidationIssue::new(
+                AssetValidationCode::SchemaInvalid,
+                "/story/premise",
+                "premise is not supported",
+            ));
+            return;
+        }
+        if serde_json::from_value::<StoryPack>(value.clone()).is_err() {
+            report.push(AssetValidationIssue::new(
+                AssetValidationCode::SchemaInvalid,
+                "/",
+                "pack JSON does not match the final schema",
+            ));
         }
         self.check_forbidden_fields(value, "/", report, 0);
         let role_ids = self.validate_roles(value, report);

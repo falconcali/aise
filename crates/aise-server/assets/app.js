@@ -284,7 +284,6 @@ function renderPackDetail(pack) {
     `<div class="kv"><span class="k">标签</span><span>${tags}</span></div>` +
     `</div>` +
     `<div class="detail-section"><h3>故事设定</h3>` +
-    `<div class="kv"><span class="k">前提</span><span>${escapeHtml(story.premise || "")}</span></div>` +
     `<div class="kv"><span class="k">语言</span><span>${escapeHtml(story.language || "")}</span></div>` +
     `<div class="kv"><span class="k">类型</span><span>${genre}</span></div>` +
     `<div class="kv"><span class="k">主题</span><span>${themes}</span></div>` +

@@ -35,7 +35,6 @@ pub struct StoryGeneratorPromptContext {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct StoryProfilePromptView {
-    pub premise: BoundedText,
     pub language: BoundedText,
     pub genre: Vec<BoundedText>,
     pub themes: Vec<BoundedText>,
@@ -52,13 +51,7 @@ pub struct StoryGeneratorInstanceSettingsPromptView {
 #[derive(Debug, Clone, Serialize)]
 pub struct StoryContinuityPromptView {
     pub story_summary: BoundedText,
-    pub recent_story: Vec<RecentStoryPromptView>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RecentStoryPromptView {
-    pub sequence: u64,
-    pub text: BoundedText,
+    pub recent_story: Vec<BoundedText>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -182,7 +175,6 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
         let ai_roles = project_ai_roles(ctx, baseline, &self.config)?;
         let character_decisions = project_decisions(ctx, baseline, &ai_roles)?;
         let story_profile = StoryProfilePromptView {
-            premise: baseline.story_profile.premise.clone(),
             language: baseline.story_profile.language.clone(),
             genre: baseline.story_profile.genre.clone(),
             themes: baseline.story_profile.themes.clone(),
@@ -196,10 +188,7 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
                 .story_continuity
                 .recent_segments()
                 .iter()
-                .map(|segment| RecentStoryPromptView {
-                    sequence: segment.sequence.get(),
-                    text: segment.text.clone(),
-                })
+                .map(|segment| segment.text.clone())
                 .collect(),
         };
         let relevant_writer_knowledge = project_writer_knowledge(ctx)?;
@@ -423,7 +412,7 @@ pub(crate) fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> Runt
         ),
         (
             "story_summary".into(),
-            Value::String(render_optional_text(context.story_continuity.story_summary.as_str())),
+            Value::String(render_story_summary(context.story_continuity.story_summary.as_str())),
         ),
         (
             "recent_story".into(),
@@ -515,7 +504,6 @@ fn runtime_tokens(vars: &RuntimePromptVars) -> u64 {
 
 fn render_story_profile(value: &StoryProfilePromptView) -> String {
     [
-        format!("premise: {}", quoted(value.premise.as_str())),
         format!("language: {}", quoted(value.language.as_str())),
         format!("genre: {}", quoted_list(&value.genre)),
         format!("themes: {}", quoted_list(&value.themes)),
@@ -538,15 +526,8 @@ fn render_instance_settings(value: Option<&StoryGeneratorInstanceSettingsPromptV
     format!("cast_policy: {policy}")
 }
 
-fn render_recent_story(values: &[RecentStoryPromptView]) -> String {
-    if values.is_empty() {
-        return "None.".into();
-    }
-    values
-        .iter()
-        .map(|value| format!("- sequence: {}\n  text: {}", value.sequence, quoted(value.text.as_str())))
-        .collect::<Vec<_>>()
-        .join("\n")
+fn render_recent_story(values: &[BoundedText]) -> String {
+    values.iter().map(|value| value.as_str()).collect::<Vec<_>>().join("\n\n")
 }
 
 fn render_roles(values: &[StoryGeneratorRolePromptView]) -> String {
@@ -703,11 +684,11 @@ fn render_decisions(values: &[StoryGeneratorCharacterDecisionPromptView]) -> Str
         .join("\n")
 }
 
-fn render_optional_text(value: &str) -> String {
+fn render_story_summary(value: &str) -> String {
     if value.trim().is_empty() {
-        "None.".into()
+        String::new()
     } else {
-        quoted(value)
+        value.to_owned()
     }
 }
 

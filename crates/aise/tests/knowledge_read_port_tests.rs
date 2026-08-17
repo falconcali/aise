@@ -28,8 +28,8 @@ fn temp_db_path(label: &str) -> String {
 
 fn valid_pack_json() -> String {
     serde_json::json!({
-        "spec": "aise_story_v4",
-        "spec_version": "4.0",
+        "spec": "aise_story_v5",
+        "spec_version": "5.0",
         "meta": {
             "pack_key": "demo",
             "title": "Demo",
@@ -40,7 +40,6 @@ fn valid_pack_json() -> String {
             "cover_asset": null
         },
         "story": {
-            "premise": "A quiet village.",
             "language": "zh-CN",
             "genre": ["adventure"],
             "themes": ["hope"],

@@ -2,7 +2,10 @@ use super::*;
 use crate::domain::asset::character_card::CharacterProfile;
 use crate::domain::asset::ids::{LocationKey, Sha256Digest};
 use crate::domain::asset::story_pack::{StoryProfile, StoryStyle};
-use crate::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySummary};
+use crate::domain::ids::TurnId;
+use crate::domain::narrative::{
+    StoryContinuity, StoryContinuityLimits, StorySegment, StorySegmentOrigin, StorySummary,
+};
 use crate::domain::story_instance::role::{RoleController, StoryRoleState};
 use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::turn::{NarrativeGraphStateIndex, RetrievalIndexScope, RetrievalSignals};
@@ -91,7 +94,6 @@ fn digest() -> Sha256Digest {
 fn minimal_baseline() -> BaselineContext {
     BaselineContext {
         story_profile: StoryProfile {
-            premise: bounded("premise"),
             language: bounded("zh-CN"),
             genre: Vec::new(),
             themes: Vec::new(),
@@ -161,4 +163,51 @@ fn writer_planner_prompt_uses_relevant_characters_without_presence() {
     let relevant_characters = vars["relevant_characters"].as_str().unwrap();
     assert!(!relevant_characters.contains("presence:"));
     assert!(relevant_characters.contains("guard"));
+}
+
+#[test]
+fn writer_planner_renders_story_continuity_as_prose() {
+    let mut baseline = minimal_baseline();
+    baseline.story_continuity = StoryContinuity::try_new(
+        StorySummary {
+            text: bounded("summary-one"),
+            summarized_through: Some(crate::domain::StorySequence::try_new(1).unwrap()),
+        },
+        vec![
+            StorySegment {
+                sequence: crate::domain::StorySequence::try_new(2).unwrap(),
+                origin: StorySegmentOrigin::Opening,
+                text: bounded("recent-one"),
+            },
+            StorySegment {
+                sequence: crate::domain::StorySequence::try_new(3).unwrap(),
+                origin: StorySegmentOrigin::Turn {
+                    turn_id: TurnId::try_new("t1").unwrap(),
+                },
+                text: bounded("recent-two"),
+            },
+        ],
+        StoryContinuityLimits {
+            max_summary_bytes: 256,
+            max_recent_segments: 4,
+            max_recent_segment_bytes: 128,
+            max_recent_segment_tokens: 32,
+        },
+    )
+    .unwrap();
+    let projector = WriterPlannerPromptContextProjector;
+    let narrative_plan = NarrativePlan {
+        active_nodes: Vec::new(),
+        active_directions: Vec::new(),
+        world_event_intents: Vec::new(),
+        character_impulses: Vec::new(),
+        effect_dispositions: Vec::new(),
+    };
+    let player_input = bounded("go north");
+    let projection = projector
+        .project(&baseline, &narrative_plan, &player_input, &PlannerConfig::default(), 100_000)
+        .expect("writer planner projection");
+    let vars = projection.rc_vars.as_map();
+    assert_eq!(vars["story_summary"].as_str().unwrap(), "summary-one");
+    assert_eq!(vars["recent_story"].as_str().unwrap(), "recent-one\n\nrecent-two");
 }

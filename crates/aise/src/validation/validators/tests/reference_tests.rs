@@ -58,7 +58,6 @@ fn sample_snapshot(roles: &[StoryRole], entity_catalog: Vec<KnowledgeEntity>) ->
             digest: digest(),
         },
         story_profile: StoryProfile {
-            premise: bounded("premise"),
             language: bounded("zh-CN"),
             genre: Vec::new(),
             themes: Vec::new(),

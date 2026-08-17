@@ -29,8 +29,8 @@ async fn pack_service(label: &str) -> (PackService, String) {
 
 fn valid_pack_json() -> String {
     serde_json::json!({
-        "spec": "aise_story_v4",
-        "spec_version": "4.0",
+        "spec": "aise_story_v5",
+        "spec_version": "5.0",
         "meta": {
             "pack_key": "demo",
             "title": "Demo",
@@ -41,7 +41,6 @@ fn valid_pack_json() -> String {
             "cover_asset": null
         },
         "story": {
-            "premise": "A quiet village.",
             "language": "zh-CN",
             "genre": ["adventure"],
             "themes": ["hope"],
@@ -122,7 +121,7 @@ fn demo_pack_passes_validation() {
 #[test]
 fn rejects_unknown_spec() {
     let importer = importer();
-    let json = valid_pack_json().replace("\"aise_story_v4\"", "\"aise_story_v2\"");
+    let json = valid_pack_json().replace("\"aise_story_v5\"", "\"aise_story_v2\"");
     let report = importer.parse(AssetInput::Json(json.as_bytes()));
     assert!(!report.valid);
     assert!(
@@ -134,9 +133,25 @@ fn rejects_unknown_spec() {
 }
 
 #[test]
+fn rejects_story_pack_v4() {
+    let importer = importer();
+    let json = valid_pack_json()
+        .replace("\"aise_story_v5\"", "\"aise_story_v4\"")
+        .replace("\"5.0\"", "\"4.0\"");
+    let report = importer.parse(AssetInput::Json(json.as_bytes()));
+    assert!(!report.valid);
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.code == AssetValidationCode::UnsupportedSpec && issue.path == "/spec")
+    );
+}
+
+#[test]
 fn rejects_unsupported_spec_version() {
     let importer = importer();
-    let json = valid_pack_json().replace("\"4.0\"", "\"5.0\"");
+    let json = valid_pack_json().replace("\"5.0\"", "\"6.0\"");
     let report = importer.parse(AssetInput::Json(json.as_bytes()));
     assert!(!report.valid);
     assert!(
@@ -148,17 +163,31 @@ fn rejects_unsupported_spec_version() {
 }
 
 #[test]
-fn rejects_crossed_spec_and_version_pair() {
+fn rejects_crossed_v5_spec_and_version() {
     let importer = importer();
-    let json = valid_pack_json().replace("\"4.0\"", "\"3.0\"");
+    let json = valid_pack_json().replace("\"5.0\"", "\"4.0\"");
     let report = importer.parse(AssetInput::Json(json.as_bytes()));
     assert!(!report.valid);
     assert!(
-        report
-            .issues
-            .iter()
-            .any(|issue| issue.code == AssetValidationCode::UnsupportedSpecVersion)
+        report.issues.iter().any(|issue| {
+            issue.code == AssetValidationCode::UnsupportedSpecVersion && issue.path == "/spec_version"
+        })
     );
+}
+
+#[test]
+fn rejects_removed_story_premise() {
+    let importer = importer();
+    let mut value: serde_json::Value = serde_json::from_str(&valid_pack_json()).unwrap();
+    value["story"]["premise"] = serde_json::json!("A quiet village.");
+    let json = value.to_string();
+    let report = importer.parse(AssetInput::Json(json.as_bytes()));
+    assert!(!report.valid);
+    assert!(report.issues.iter().any(|issue| {
+        issue.code == AssetValidationCode::SchemaInvalid
+            && issue.path == "/story/premise"
+            && issue.message.contains("premise is not supported")
+    }));
 }
 
 #[test]
@@ -598,6 +627,46 @@ async fn full_import_of_zero_character_card_pack_succeeds_and_round_trips() {
             original["world_book"]["topics"] = serde_json::json!({});
             let round_tripped: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(original, round_tripped);
+        }
+        other => panic!("expected JSON export, got {other:?}"),
+    }
+    let _ = std::fs::remove_file(&db);
+}
+
+#[test]
+fn story_pack_v5_discriminator_roundtrip() {
+    use aise::domain::asset::character_card::AssetSpecVersion;
+    use aise::domain::asset::story_pack::StorySpec;
+
+    let spec_value = serde_json::to_value(StorySpec::V5).unwrap();
+    assert_eq!(spec_value, serde_json::json!("aise_story_v5"));
+    let spec: StorySpec = serde_json::from_value(spec_value).unwrap();
+    assert_eq!(spec, StorySpec::V5);
+
+    let version_value = serde_json::to_value(AssetSpecVersion::V5_0).unwrap();
+    assert_eq!(version_value, serde_json::json!("5.0"));
+    let version: AssetSpecVersion = serde_json::from_value(version_value).unwrap();
+    assert_eq!(version, AssetSpecVersion::V5_0);
+}
+
+#[tokio::test]
+async fn story_pack_v5_import_export_roundtrip() {
+    let (service, db) = pack_service("v5_import_export_roundtrip").await;
+    let json = valid_pack_json();
+    let info = service
+        .import(AssetInput::Json(json.as_bytes()))
+        .await
+        .expect("v5 pack without premise should import");
+    let exported = service
+        .export(&info.pack_id, aise::story::pack_service::PackExportFormat::Json)
+        .await
+        .expect("export should succeed");
+    match exported {
+        aise::story::pack_service::PackExport::Json(bytes) => {
+            let round_tripped: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(round_tripped["spec"], serde_json::json!("aise_story_v5"));
+            assert_eq!(round_tripped["spec_version"], serde_json::json!("5.0"));
+            assert!(round_tripped["story"].get("premise").is_none());
         }
         other => panic!("expected JSON export, got {other:?}"),
     }
