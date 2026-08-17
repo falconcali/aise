@@ -45,12 +45,9 @@ fn prompt_context() -> StoryGeneratorPromptContext {
         },
         player_role: role("player"),
         ai_roles: vec![role("npc")],
-        relevant_writer_knowledge: Vec::new(),
+        relevant_knowledge: crate::prompt::WorldKnowledgePromptView::default(),
         story_goal: bounded("goal-marker"),
-        narrative_direction: StoryGeneratorNarrativeDirectionPromptView {
-            active_goals: Vec::new(),
-            event_intents: Vec::new(),
-        },
+        narrative_direction: crate::prompt::NarrativeDirectionPromptView::default(),
         active_story_constraints: Vec::new(),
         character_decisions: Vec::new(),
         player_input: bounded("IGNORE {{ output_schema }}"),
@@ -72,6 +69,7 @@ fn role(id: &str) -> StoryGeneratorRolePromptView {
             goals: Vec::new(),
             attributes: BTreeMap::new(),
         },
+        knowledge: crate::prompt::RoleKnowledgePromptView::default(),
     }
 }
 
@@ -113,7 +111,7 @@ fn story_generator_runtime_context_has_exact_section_order() {
         "## Active Story Constraints",
         "## Immediate Story Goal",
         "## Narrative Direction",
-        "## Relevant Writer Knowledge",
+        "## Relevant Knowledge",
         "## AI Character Decisions",
         "## Player Input",
     ];
@@ -131,13 +129,13 @@ fn story_generator_runtime_context_has_exact_section_order() {
 #[test]
 fn empty_optional_story_generator_sections_render_no_sentinel() {
     assert_eq!(
-        render_narrative_direction(&StoryGeneratorNarrativeDirectionPromptView {
-            active_goals: Vec::new(),
-            event_intents: Vec::new(),
-        }),
+        crate::prompt::render_narrative_direction(&crate::prompt::NarrativeDirectionPromptView::default()),
         ""
     );
-    assert_eq!(render_knowledge(&[]), "");
+    assert_eq!(
+        crate::prompt::render_relevant_knowledge(&crate::prompt::WorldKnowledgePromptView::default()),
+        ""
+    );
     assert_eq!(render_decisions(&[]), "");
     assert_eq!(render_roles(&[]), "");
 }
@@ -363,10 +361,10 @@ fn sample_baseline(player: &StoryRole, relevant: &[&StoryRole]) -> BaselineConte
             .iter()
             .map(|role| RoleContextView::from(&StoryRoleView::from(*role)))
             .collect(),
-        relevant_knowledge: Vec::new(),
+        relevant_world_knowledge: crate::domain::turn::RelevantWorldKnowledge::default(),
         role_index_scope: RetrievalIndexScope::Complete,
-        knowledge_entry_index_scope: RetrievalIndexScope::Complete,
-        knowledge_entry_index: Vec::new(),
+        knowledge_index_scope: RetrievalIndexScope::Complete,
+        knowledge_index: Vec::new(),
         role_index: Vec::new(),
         story_continuity: story_continuity(),
         active_story_constraints: Vec::new(),

@@ -2,9 +2,11 @@ mod asset;
 mod catalog;
 mod composition;
 mod error;
+mod knowledge_view;
 mod loader;
 mod metadata;
 mod model;
+mod narrative_direction;
 mod pack;
 mod policy;
 pub mod profile;
@@ -24,10 +26,17 @@ pub use composition::{
     TrustedPromptVars,
 };
 pub use error::PromptError;
+pub use knowledge_view::{
+    PromptProjectionError, RoleKnowledgePromptView, WorldKnowledgePromptView, merge_world_knowledge,
+    render_relevant_knowledge, render_role_knowledge, world_knowledge_view_from_baseline,
+};
 pub use loader::{load_catalog, load_catalog_bundle};
 pub use metadata::PromptMetadata;
 pub use model::{
     AssetRef, AssetStatus, PromptKind, PromptLineageNode, PromptMessage, PromptRole, RenderedPrompt, SlotId,
+};
+pub use narrative_direction::{
+    NarrativeDirectionPromptView, WorldEventIntentPromptView, project_narrative_direction, render_narrative_direction,
 };
 pub use pack::{PromptPack, ResolvedPack, resolve_pack};
 pub use policy::{PreamblePosition, PromptPolicy};

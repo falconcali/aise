@@ -1,5 +1,5 @@
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::turn::{CharacterThinkRequest, RetrievalAudience, RetrievalTargetId};
+use crate::domain::turn::{CharacterThinkRequest, KnowledgeDelivery};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -13,8 +13,8 @@ pub struct PlannerOutput {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlannerContextGap {
-    pub audience: RetrievalAudience,
-    pub target_id: Option<RetrievalTargetId>,
+    pub delivery: KnowledgeDelivery,
+    pub target_id: Option<String>,
     pub query_text: Option<BoundedText>,
     pub reason: BoundedText,
 }

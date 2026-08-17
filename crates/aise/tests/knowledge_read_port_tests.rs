@@ -4,7 +4,7 @@ use aise::domain::asset::ids::{LocationKey, PlayerId, SceneKey, TopicKey};
 use aise::domain::ids::{RoleId, StoryId};
 use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::story_instance::snapshot::KnowledgeSnapshotRef;
-use aise::domain::turn::RetrievalAudience;
+use aise::domain::turn::KnowledgeDelivery;
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::knowledge_read_port::{
     EntityKnowledgeQuery, KnowledgeFilter, KnowledgeIndexQuery, KnowledgeIndexRecord, KnowledgeLookupHit,
@@ -210,8 +210,8 @@ async fn character_fact_request_is_rejected_before_store_lookup() {
     };
     let counting = Arc::new(counting);
     let retriever = aise::context::EntityCandidateRetriever::new(counting.clone() as Arc<dyn KnowledgeReadPort>);
-    let request = aise::domain::turn::RetrievalRequest {
-        audience: RetrievalAudience::Character {
+    let request = aise::domain::turn::KnowledgeRetrievalRequest {
+        delivery: KnowledgeDelivery::Character {
             role_id: RoleId::try_new("c-npc").unwrap(),
         },
         target_source_id: None,
@@ -221,7 +221,6 @@ async fn character_fact_request_is_rejected_before_store_lookup() {
         ))],
         topics: Vec::new(),
         query_text: None,
-        authorized_memory_owners: Vec::new(),
         reason: aise::domain::asset::validation::BoundedText::try_new("x", "r", 32).unwrap(),
         origin: aise::domain::turn::RetrievalRequestOrigin::Planner,
         signal_priority: 0,
@@ -244,9 +243,8 @@ async fn character_fact_request_is_rejected_before_store_lookup() {
 async fn zero_result_request_never_falls_back_to_full_scan() {
     let (sqlite, snapshot, db) = seeded_store("zero").await;
     let filter = KnowledgeFilter {
-        audience: RetrievalAudience::GlobalWriter,
+        delivery: KnowledgeDelivery::Writer,
         knowledge_kinds: vec![KnowledgeKind::Fact],
-        authorized_memory_owners: Vec::new(),
         max_item_bytes: 4096,
     };
     let records = sqlite
@@ -266,9 +264,8 @@ async fn zero_result_request_never_falls_back_to_full_scan() {
 async fn sqlite_entity_query_accepts_multiple_selectors() {
     let (sqlite, snapshot, db) = seeded_store("entity_multiple").await;
     let filter = KnowledgeFilter {
-        audience: RetrievalAudience::GlobalWriter,
+        delivery: KnowledgeDelivery::Writer,
         knowledge_kinds: vec![KnowledgeKind::Fact],
-        authorized_memory_owners: Vec::new(),
         max_item_bytes: 4096,
     };
     let records = sqlite
@@ -301,9 +298,8 @@ async fn knowledge_index_targets_support_exact_lookup() {
         .expect("index");
     assert!(!index.is_empty());
     let filter = KnowledgeFilter {
-        audience: RetrievalAudience::GlobalWriter,
-        knowledge_kinds: vec![index[0].kind],
-        authorized_memory_owners: Vec::new(),
+        delivery: KnowledgeDelivery::Writer,
+        knowledge_kinds: vec![index[0].source_id.kind()],
         max_item_bytes: 4096,
     };
     let records = sqlite
@@ -325,9 +321,8 @@ async fn knowledge_read_rejects_revision_or_digest_mismatch() {
     let (sqlite, mut snapshot, db) = seeded_store("conflict").await;
     snapshot.base_revision = aise::domain::ids::StoryRevision::new(999);
     let filter = KnowledgeFilter {
-        audience: RetrievalAudience::GlobalWriter,
+        delivery: KnowledgeDelivery::Writer,
         knowledge_kinds: vec![KnowledgeKind::Fact],
-        authorized_memory_owners: Vec::new(),
         max_item_bytes: 4096,
     };
     let err = sqlite

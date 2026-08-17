@@ -1,7 +1,7 @@
 use crate::domain::asset::ids::{AttributeKey, LocationKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
-use crate::domain::ids::RoleId;
-use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
+use crate::domain::ids::{MemoryId, RoleId};
+use crate::domain::knowledge::KnowledgeSourceId;
 use crate::domain::text::estimate_text_tokens;
 use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
 use crate::turn::turn_context::TurnExecutionContext;
@@ -20,7 +20,7 @@ pub struct StoryStateExtractorPromptContext {
     pub story_text: BoundedText,
     pub roles: Vec<StoryStateExtractorRolePromptView>,
     pub relationships: Vec<StoryStateExtractorRelationshipPromptView>,
-    pub modifiable_knowledge: Vec<StoryStateExtractorKnowledgePromptView>,
+    pub modifiable_knowledge: ModifiableWorldKnowledgePromptView,
     pub condition_queries: Vec<StoryStateExtractorConditionQueryPromptView>,
     pub previous_extraction: Option<BoundedText>,
     pub validation_issues: Vec<StoryStateExtractorValidationIssuePromptView>,
@@ -40,6 +40,7 @@ pub struct StoryStateExtractorRolePromptView {
     pub location: LocationKey,
     pub goals: Vec<BoundedText>,
     pub attributes: BTreeMap<AttributeKey, ScalarValue>,
+    pub memories: Vec<ModifiableMemoryPromptView>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -51,11 +52,21 @@ pub struct StoryStateExtractorRelationshipPromptView {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct StoryStateExtractorKnowledgePromptView {
-    pub source_id: KnowledgeSourceId,
-    pub kind: KnowledgeKind,
+pub struct ModifiableKnowledgePromptItem {
+    pub id: KnowledgeSourceId,
     pub content: BoundedText,
-    pub memory_owner: Option<RoleId>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModifiableWorldKnowledgePromptView {
+    pub facts: Vec<ModifiableKnowledgePromptItem>,
+    pub rumors: Vec<ModifiableKnowledgePromptItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ModifiableMemoryPromptView {
+    pub id: MemoryId,
+    pub content: BoundedText,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -123,6 +134,7 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
                     location: role.state.location.clone(),
                     goals: role.state.goals.clone(),
                     attributes: role.state.attributes.clone(),
+                    memories: role_memories(ctx, &role.role_id)?,
                 })
             })
             .collect::<Result<Vec<_>, StoryStateExtractorProjectionError>>()?;
@@ -143,7 +155,7 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
             })
             .collect::<Result<Vec<_>, StoryStateExtractorProjectionError>>()?;
 
-        let modifiable_knowledge = modifiable_knowledge_view(ctx)?;
+        let modifiable_knowledge = modifiable_knowledge_view(ctx);
 
         let condition_queries = ctx
             .narrative_projection()
@@ -246,65 +258,80 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
     }
 }
 
-fn modifiable_knowledge_view(
-    ctx: &TurnExecutionContext,
-) -> Result<Vec<StoryStateExtractorKnowledgePromptView>, StoryStateExtractorProjectionError> {
-    let mut index = BTreeMap::new();
+fn modifiable_knowledge_view(ctx: &TurnExecutionContext) -> ModifiableWorldKnowledgePromptView {
+    let mut facts: BTreeMap<KnowledgeSourceId, BoundedText> = BTreeMap::new();
+    let mut fact_order = Vec::new();
+    let mut rumors: BTreeMap<KnowledgeSourceId, BoundedText> = BTreeMap::new();
+    let mut rumor_order = Vec::new();
     if let Some(baseline) = ctx.baseline() {
-        for entry in &baseline.relevant_knowledge {
-            let view = build_modifiable_item(entry.entry_id.clone(), entry.kind, entry.content.clone(), None)?;
-            index.insert(entry.entry_id.clone(), view);
+        for entry in &baseline.relevant_world_knowledge.facts {
+            insert_modifiable(&mut facts, &mut fact_order, entry.source_id.clone(), entry.content.clone());
+        }
+        for entry in &baseline.relevant_world_knowledge.rumors {
+            insert_modifiable(&mut rumors, &mut rumor_order, entry.source_id.clone(), entry.content.clone());
         }
     }
-    for item in ctx.retrieved().writer() {
-        let view = build_modifiable_item(
-            item.provenance.source_id.clone(),
-            item.provenance.knowledge_kind,
-            item.content.clone(),
-            item.provenance.memory_owner.clone(),
-        )?;
-        index.insert(item.provenance.source_id.clone(), view);
+    for item in &ctx.retrieved().world().facts {
+        insert_modifiable(&mut facts, &mut fact_order, item.source_id.clone(), item.content.clone());
     }
-    for items in ctx.retrieved().roles().values() {
-        for item in items {
-            let view = build_modifiable_item(
-                item.provenance.source_id.clone(),
-                item.provenance.knowledge_kind,
-                item.content.clone(),
-                item.provenance.memory_owner.clone(),
-            )?;
-            index.insert(item.provenance.source_id.clone(), view);
+    for item in &ctx.retrieved().world().rumors {
+        insert_modifiable(&mut rumors, &mut rumor_order, item.source_id.clone(), item.content.clone());
+    }
+    for character in ctx.retrieved().characters().values() {
+        for item in &character.known_rumors {
+            insert_modifiable(&mut rumors, &mut rumor_order, item.source_id.clone(), item.content.clone());
         }
     }
-    Ok(index.into_values().collect())
+    ModifiableWorldKnowledgePromptView {
+        facts: fact_order
+            .into_iter()
+            .map(|id| ModifiableKnowledgePromptItem {
+                content: facts.remove(&id).expect("tracked fact id present"),
+                id,
+            })
+            .collect(),
+        rumors: rumor_order
+            .into_iter()
+            .map(|id| ModifiableKnowledgePromptItem {
+                content: rumors.remove(&id).expect("tracked rumor id present"),
+                id,
+            })
+            .collect(),
+    }
 }
 
-fn build_modifiable_item(
-    source_id: KnowledgeSourceId,
-    kind: KnowledgeKind,
+fn insert_modifiable(
+    map: &mut BTreeMap<KnowledgeSourceId, BoundedText>,
+    order: &mut Vec<KnowledgeSourceId>,
+    id: KnowledgeSourceId,
     content: BoundedText,
-    memory_owner: Option<RoleId>,
-) -> Result<StoryStateExtractorKnowledgePromptView, StoryStateExtractorProjectionError> {
-    match (kind, memory_owner) {
-        (KnowledgeKind::Memory, None) => Err(StoryStateExtractorProjectionError::Invariant {
-            code: "modifiable_memory_owner_missing",
-        }),
-        (KnowledgeKind::Memory, Some(owner)) => Ok(StoryStateExtractorKnowledgePromptView {
-            source_id,
-            kind,
-            content,
-            memory_owner: Some(owner),
-        }),
-        (_, None) => Ok(StoryStateExtractorKnowledgePromptView {
-            source_id,
-            kind,
-            content,
-            memory_owner: None,
-        }),
-        (_, Some(_)) => Err(StoryStateExtractorProjectionError::Invariant {
-            code: "modifiable_knowledge_owner_invalid",
-        }),
+) {
+    if !map.contains_key(&id) {
+        order.push(id.clone());
     }
+    map.insert(id, content);
+}
+
+fn role_memories(
+    ctx: &TurnExecutionContext,
+    role_id: &RoleId,
+) -> Result<Vec<ModifiableMemoryPromptView>, StoryStateExtractorProjectionError> {
+    let Some(character) = ctx.retrieved().character(role_id) else {
+        return Ok(Vec::new());
+    };
+    character
+        .memories
+        .iter()
+        .map(|item| match &item.source_id {
+            KnowledgeSourceId::Memory(memory_id) => Ok(ModifiableMemoryPromptView {
+                id: memory_id.clone(),
+                content: item.content.clone(),
+            }),
+            _ => Err(StoryStateExtractorProjectionError::Invariant {
+                code: "modifiable_knowledge_owner_invalid",
+            }),
+        })
+        .collect()
 }
 
 fn bounded_key(
@@ -347,7 +374,7 @@ fn render_runtime_vars(context: &StoryStateExtractorPromptContext) -> RuntimePro
         ),
         (
             "modifiable_knowledge".into(),
-            Value::String(render_knowledge(&context.modifiable_knowledge)),
+            Value::String(render_modifiable_knowledge(&context.modifiable_knowledge)),
         ),
         (
             "condition_queries".into(),
@@ -394,6 +421,21 @@ fn render_roles(values: &[StoryStateExtractorRolePromptView]) -> String {
                     .join(", ");
                 lines.push(format!("  attributes: {{{attributes}}}"));
             }
+            if !value.memories.is_empty() {
+                let memories = value
+                    .memories
+                    .iter()
+                    .map(|memory| {
+                        format!(
+                            "    - id: {}\n      content: {}",
+                            quoted(memory.id.as_str()),
+                            quoted(memory.content.as_str())
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                lines.push(format!("  memories:\n{memories}"));
+            }
             lines.join("\n")
         })
         .collect::<Vec<_>>()
@@ -419,30 +461,39 @@ fn render_relationships(values: &[StoryStateExtractorRelationshipPromptView]) ->
         .join("\n")
 }
 
-fn render_knowledge(values: &[StoryStateExtractorKnowledgePromptView]) -> String {
-    if values.is_empty() {
-        return String::new();
+fn render_modifiable_knowledge(value: &ModifiableWorldKnowledgePromptView) -> String {
+    let mut sections = Vec::new();
+    if !value.facts.is_empty() {
+        let items = value
+            .facts
+            .iter()
+            .map(|item| {
+                format!(
+                    "- id: {}\n  content: {}",
+                    quoted(item.id.as_str()),
+                    quoted(item.content.as_str())
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        sections.push(format!("### Facts\n\n{items}"));
     }
-    values
-        .iter()
-        .map(|value| {
-            let kind = match value.kind {
-                KnowledgeKind::Fact => "fact",
-                KnowledgeKind::Rumor => "rumor",
-                KnowledgeKind::Memory => "memory",
-            };
-            let mut lines = vec![
-                format!("- source_id: {}", quoted(value.source_id.as_str())),
-                format!("  kind: {kind}"),
-            ];
-            if let Some(owner) = value.memory_owner.as_ref() {
-                lines.push(format!("  memory_owner: {}", quoted(owner.as_str())));
-            }
-            lines.push(format!("  content: {}", quoted(value.content.as_str())));
-            lines.join("\n")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    if !value.rumors.is_empty() {
+        let items = value
+            .rumors
+            .iter()
+            .map(|item| {
+                format!(
+                    "- id: {}\n  content: {}",
+                    quoted(item.id.as_str()),
+                    quoted(item.content.as_str())
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        sections.push(format!("### Rumors\n\n{items}"));
+    }
+    sections.join("\n\n")
 }
 
 fn render_condition_queries(values: &[StoryStateExtractorConditionQueryPromptView]) -> String {

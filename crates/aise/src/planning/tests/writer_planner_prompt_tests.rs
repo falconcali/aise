@@ -122,10 +122,10 @@ fn minimal_baseline() -> BaselineContext {
             player
         },
         relevant_roles: vec![role()],
-        relevant_knowledge: Vec::new(),
+        relevant_world_knowledge: crate::domain::turn::RelevantWorldKnowledge::default(),
         role_index_scope: RetrievalIndexScope::Complete,
-        knowledge_entry_index_scope: RetrievalIndexScope::Complete,
-        knowledge_entry_index: Vec::new(),
+        knowledge_index_scope: RetrievalIndexScope::Complete,
+        knowledge_index: Vec::new(),
         role_index: Vec::new(),
         story_continuity: StoryContinuity::try_new(
             StorySummary {

@@ -7,8 +7,8 @@ pub mod retrieval;
 pub mod story_generation;
 
 pub use baseline::{
-    BaselineContext, KnowledgeEntryIndexEntry, NarrativeGraphStateIndex, RelevantKnowledge, RoleContextView,
-    RoleIndexEntry, SnapshotLimits,
+    BaselineContext, KnowledgeIndexEntry, NarrativeGraphStateIndex, RelevantWorldKnowledge, RelevantWorldKnowledgeItem,
+    RoleContextView, RoleIndexEntry, SnapshotLimits,
 };
 pub use character::CharacterDecision;
 pub use extraction::{
@@ -18,13 +18,13 @@ pub use extraction::{
     StoryStateExtractorOutput,
 };
 pub use planning::{
-    CharacterThinkRequest, RetrievalAudience, RetrievalIndexScope, RetrievalPlan, RetrievalRequest,
-    RetrievalRequestOrigin, RetrievalTargetId, WriterPlan, WriterStoryGoal,
+    CharacterRetrievalRequest, CharacterThinkRequest, KnowledgeDelivery, KnowledgeRetrievalRequest,
+    RetrievalIndexScope, RetrievalPlan, RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
 };
 pub use proposal::ValidatedNarrativeResolution;
 pub use retrieval::{
-    CandidateMatch, CandidateRetrieverKind, ContextItem, ContextProvenance, EntitySignal, MatchLevel, ProviderEvidence,
-    RelevanceRank, RetrievalSignalOrigin, RetrievalSignals, RetrievedContext, RetrievedContextError,
-    RetrievedContextLimits, TopicSignal,
+    CandidateMatch, CandidateRetrieverKind, EntitySignal, MatchLevel, ProviderEvidence, RelevanceRank,
+    RetrievalSignalOrigin, RetrievalSignals, RetrievedCharacterContext, RetrievedContext, RetrievedContextError,
+    RetrievedContextLimits, RetrievedKnowledgeItem, RetrievedWorldKnowledge, TopicSignal,
 };
 pub use story_generation::StoryGeneratorOutput;

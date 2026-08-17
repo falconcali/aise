@@ -3,15 +3,15 @@ use crate::domain::asset::ids::{NarrativeNodeKey, Sha256Digest};
 use crate::domain::asset::story_pack::StoryProfile;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
-use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
+use crate::domain::knowledge::{KnowledgeSourceId, RetrievalHint};
 use crate::domain::narrative::{StoryContinuity, StoryContinuityLimits};
 use crate::domain::narrative_graph::condition::NarrativeNodeState;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::role::{RoleController, StoryRoleState, StoryRoleView};
 use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::text::estimate_text_tokens;
+use crate::domain::turn::planning::RetrievalIndexScope;
 use crate::domain::turn::retrieval::RetrievalSignals;
-use crate::domain::turn::{RetrievalIndexScope, RetrievalTargetId};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -66,28 +66,28 @@ impl RoleContextView {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RoleIndexEntry {
-    pub target_id: RetrievalTargetId,
     pub role_id: RoleId,
-    pub name: BoundedText,
-    pub role_label: BoundedText,
     pub retrieval_hint: BoundedText,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct RelevantKnowledge {
-    pub entry_id: KnowledgeSourceId,
-    pub kind: KnowledgeKind,
+pub struct RelevantWorldKnowledgeItem {
+    pub source_id: KnowledgeSourceId,
     pub content: BoundedText,
     pub source_priority: u8,
     pub salience: u8,
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RelevantWorldKnowledge {
+    pub facts: Vec<RelevantWorldKnowledgeItem>,
+    pub rumors: Vec<RelevantWorldKnowledgeItem>,
+}
+
 #[derive(Debug, Clone, Serialize)]
-pub struct KnowledgeEntryIndexEntry {
-    pub target_id: RetrievalTargetId,
-    pub entry_id: KnowledgeSourceId,
-    pub kind: KnowledgeKind,
-    pub retrieval_hint: BoundedText,
+pub struct KnowledgeIndexEntry {
+    pub source_id: KnowledgeSourceId,
+    pub retrieval_hint: RetrievalHint,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -103,11 +103,11 @@ pub struct BaselineContext {
     pub instance_settings: InstanceSettings,
     pub player_role: RoleContextView,
     pub relevant_roles: Vec<RoleContextView>,
-    pub relevant_knowledge: Vec<RelevantKnowledge>,
+    pub relevant_world_knowledge: RelevantWorldKnowledge,
     pub role_index_scope: RetrievalIndexScope,
-    pub knowledge_entry_index_scope: RetrievalIndexScope,
-    pub knowledge_entry_index: Vec<KnowledgeEntryIndexEntry>,
     pub role_index: Vec<RoleIndexEntry>,
+    pub knowledge_index_scope: RetrievalIndexScope,
+    pub knowledge_index: Vec<KnowledgeIndexEntry>,
     pub story_continuity: StoryContinuity,
     pub active_story_constraints: Vec<ActiveStoryConstraint>,
     pub narrative_graph_state_index: NarrativeGraphStateIndex,
@@ -121,11 +121,16 @@ impl BaselineContext {
         for role in &self.relevant_roles {
             total = total.saturating_add(estimate_text_tokens(role.profile.name.as_str()));
         }
-        for entry in &self.relevant_knowledge {
+        for entry in self
+            .relevant_world_knowledge
+            .facts
+            .iter()
+            .chain(self.relevant_world_knowledge.rumors.iter())
+        {
             total = total.saturating_add(estimate_text_tokens(entry.content.as_str()));
         }
         for entry in &self.role_index {
-            total = total.saturating_add(estimate_text_tokens(entry.name.as_str()));
+            total = total.saturating_add(estimate_text_tokens(entry.retrieval_hint.as_str()));
         }
         for constraint in &self.active_story_constraints {
             let statement = match &constraint.requirement {

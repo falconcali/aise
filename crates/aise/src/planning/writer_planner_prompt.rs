@@ -2,11 +2,15 @@ use crate::config::PlannerConfig;
 use crate::domain::asset::constraint::StoryConstraintRequirement;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::RoleId;
+use crate::domain::knowledge::KnowledgeSourceId;
 use crate::domain::narrative_graph::projector::NarrativePlan;
 use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::{BaselineContext, RetrievalTargetId, RoleContextView};
-use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
+use crate::domain::turn::{BaselineContext, RoleContextView};
+use crate::prompt::{
+    RuntimePromptVars, TrustedPromptVars, project_narrative_direction, render_narrative_direction,
+    render_relevant_knowledge, world_knowledge_view_from_baseline,
+};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 
@@ -14,12 +18,17 @@ pub const WRITER_PLANNER_CSI_SLOT: &str = "context.writer_planner.csi";
 pub const WRITER_PLANNER_RC_SLOT: &str = "context.writer_planner.rc";
 pub const WRITER_PLANNER_FTI_SLOT: &str = "context.writer_planner.fti";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IndexedRetrievalTarget {
+    Role(RoleId),
+    Knowledge(KnowledgeSourceId),
+}
+
 #[derive(Debug, Clone)]
 pub struct WriterPlannerPromptContext {
-    pub role_targets: BTreeMap<RetrievalTargetId, RoleId>,
-    pub knowledge_targets: BTreeMap<RetrievalTargetId, crate::domain::knowledge::KnowledgeSourceId>,
+    pub indexed_targets: BTreeMap<String, IndexedRetrievalTarget>,
     pub provided_role_ids: Vec<RoleId>,
-    pub provided_knowledge_ids: Vec<crate::domain::knowledge::KnowledgeSourceId>,
+    pub provided_knowledge_ids: Vec<KnowledgeSourceId>,
 }
 
 pub struct WriterPlannerPromptProjection {
@@ -36,6 +45,8 @@ pub enum WriterPlannerProjectionError {
     PlayerRoleTarget { role_id: RoleId },
     #[error("writer planner role target is duplicated: {role_id}")]
     DuplicateRoleTarget { role_id: RoleId },
+    #[error("writer planner retrieval target key collides across target domains: {key}")]
+    RetrievalTargetCollision { key: String },
     #[error("writer planner required prompt data exceeds budget")]
     RequiredPromptDataExceedsBudget,
 }
@@ -51,15 +62,33 @@ impl WriterPlannerPromptContextProjector {
         config: &PlannerConfig,
         max_input_tokens: u64,
     ) -> Result<WriterPlannerPromptProjection, WriterPlannerProjectionError> {
-        let mut role_targets = BTreeMap::new();
-        let role_index = render_role_index(baseline, &mut role_targets);
-        let mut knowledge_targets = BTreeMap::new();
-        let knowledge_entry_index = render_knowledge_index(baseline, &mut knowledge_targets);
+        let mut indexed_targets = BTreeMap::new();
+        for entry in &baseline.role_index {
+            insert_target(
+                &mut indexed_targets,
+                entry.role_id.as_str().to_owned(),
+                IndexedRetrievalTarget::Role(entry.role_id.clone()),
+            )?;
+        }
+        for entry in &baseline.knowledge_index {
+            insert_target(
+                &mut indexed_targets,
+                entry.source_id.as_str().to_owned(),
+                IndexedRetrievalTarget::Knowledge(entry.source_id.clone()),
+            )?;
+        }
         let provided_role_ids = std::iter::once(baseline.player_role.role_id.clone())
             .chain(baseline.relevant_roles.iter().map(|role| role.role_id.clone()))
             .collect();
-        let provided_knowledge_ids = baseline.relevant_knowledge.iter().map(|entry| entry.entry_id.clone()).collect();
+        let provided_knowledge_ids = baseline
+            .relevant_world_knowledge
+            .facts
+            .iter()
+            .chain(baseline.relevant_world_knowledge.rumors.iter())
+            .map(|entry| entry.source_id.clone())
+            .collect();
         let continuity = &baseline.story_continuity;
+        let narrative_direction = project_narrative_direction(narrative_plan);
         let rc_vars = HashMap::from([
             ("story_profile".into(), Value::String(render_story_profile(baseline))),
             (
@@ -79,10 +108,18 @@ impl WriterPlannerPromptContextProjector {
                 "relevant_characters".into(),
                 Value::String(render_roles(&baseline.relevant_roles)),
             ),
-            ("relevant_knowledge".into(), Value::String(render_relevant_knowledge(baseline))),
-            ("character_index".into(), Value::String(role_index)),
-            ("knowledge_entry_index".into(), Value::String(knowledge_entry_index)),
-            ("narrative_plan".into(), Value::String(render_narrative_plan(narrative_plan))),
+            (
+                "relevant_knowledge".into(),
+                Value::String(render_relevant_knowledge(&world_knowledge_view_from_baseline(
+                    &baseline.relevant_world_knowledge,
+                ))),
+            ),
+            ("character_index".into(), Value::String(render_role_index(baseline))),
+            ("knowledge_index".into(), Value::String(render_knowledge_index(baseline))),
+            (
+                "narrative_direction".into(),
+                Value::String(render_narrative_direction(&narrative_direction)),
+            ),
             ("active_story_constraints".into(), Value::String(render_constraints(baseline))),
             ("player_input".into(), Value::String(render_data(player_input.as_str()))),
         ]);
@@ -100,14 +137,27 @@ impl WriterPlannerPromptContextProjector {
         }
         Ok(WriterPlannerPromptProjection {
             context: WriterPlannerPromptContext {
-                role_targets,
-                knowledge_targets,
+                indexed_targets,
                 provided_role_ids,
                 provided_knowledge_ids,
             },
             rc_vars: RuntimePromptVars::new(rc_vars),
             fti_vars: TrustedPromptVars::new(fti_vars),
         })
+    }
+}
+
+fn insert_target(
+    targets: &mut BTreeMap<String, IndexedRetrievalTarget>,
+    key: String,
+    target: IndexedRetrievalTarget,
+) -> Result<(), WriterPlannerProjectionError> {
+    match targets.get(&key) {
+        Some(existing) if existing != &target => Err(WriterPlannerProjectionError::RetrievalTargetCollision { key }),
+        _ => {
+            targets.insert(key, target);
+            Ok(())
+        }
     }
 }
 
@@ -125,15 +175,15 @@ pub fn writer_planner_output_schema(config: &PlannerConfig) -> Value {
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["audience", "target_id", "query_text", "reason"],
+                    "required": ["delivery", "target_id", "query_text", "reason"],
                     "properties": {
-                        "audience": {
+                        "delivery": {
                             "oneOf": [
                                 {
                                     "type": "object",
                                     "additionalProperties": false,
                                     "required": ["kind"],
-                                    "properties": {"kind": {"const": "global_writer"}}
+                                    "properties": {"kind": {"const": "writer"}}
                                 },
                                 {
                                     "type": "object",
@@ -226,30 +276,6 @@ fn render_roles(roles: &[RoleContextView]) -> String {
     roles.iter().map(|role| render_role(role, true)).collect::<Vec<_>>().join("\n")
 }
 
-fn render_relevant_knowledge(baseline: &BaselineContext) -> String {
-    if baseline.relevant_knowledge.is_empty() {
-        return String::new();
-    }
-    baseline
-        .relevant_knowledge
-        .iter()
-        .map(|entry| {
-            let (kind, scope) = match entry.kind {
-                crate::domain::knowledge::KnowledgeKind::Fact => ("fact", "objective_world"),
-                crate::domain::knowledge::KnowledgeKind::Rumor => ("rumor", "public_claim"),
-                crate::domain::knowledge::KnowledgeKind::Memory => ("memory", "character_limited"),
-            };
-            format!(
-                "- entry_id: {}\n  title: {}\n  kind: {kind}\n  scope: {scope}\n  content: {}",
-                quoted(entry.entry_id.as_str()),
-                quoted(entry.entry_id.as_str()),
-                quoted(entry.content.as_str())
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn render_role(role: &RoleContextView, collection: bool) -> String {
     let profile = &role.profile;
     let first = if collection { "- " } else { "" };
@@ -275,7 +301,7 @@ fn render_role(role: &RoleContextView, collection: bool) -> String {
     lines.join("\n")
 }
 
-fn render_role_index(baseline: &BaselineContext, targets: &mut BTreeMap<RetrievalTargetId, RoleId>) -> String {
+fn render_role_index(baseline: &BaselineContext) -> String {
     let scope = match baseline.role_index_scope {
         crate::domain::turn::RetrievalIndexScope::Complete => "complete",
         crate::domain::turn::RetrievalIndexScope::Prefiltered => "prefiltered",
@@ -287,78 +313,46 @@ fn render_role_index(baseline: &BaselineContext, targets: &mut BTreeMap<Retrieva
         .role_index
         .iter()
         .map(|entry| {
-            targets.insert(entry.target_id.clone(), entry.role_id.clone());
-            let mut lines = vec![
-                format!("- target_id: {}", quoted(entry.target_id.as_str())),
-                format!("  role_id: {}", quoted(entry.role_id.as_str())),
-                format!("  name: {}", quoted(entry.name.as_str())),
-            ];
-            if entry.role_label != entry.name {
-                lines.push(format!("  role: {}", quoted(entry.role_label.as_str())));
-            }
-            lines.push(format!("  retrieval_hint: {}", quoted(entry.retrieval_hint.as_str())));
-            lines.join("\n")
-        })
-        .collect::<Vec<_>>();
-    format!("scope: {scope}\nentries:\n{}", entries.join("\n"))
-}
-
-fn render_knowledge_index(
-    baseline: &BaselineContext,
-    targets: &mut BTreeMap<RetrievalTargetId, crate::domain::knowledge::KnowledgeSourceId>,
-) -> String {
-    let scope = match baseline.knowledge_entry_index_scope {
-        crate::domain::turn::RetrievalIndexScope::Complete => "complete",
-        crate::domain::turn::RetrievalIndexScope::Prefiltered => "prefiltered",
-    };
-    if baseline.knowledge_entry_index.is_empty() {
-        return format!("scope: {scope}");
-    }
-    let entries = baseline
-        .knowledge_entry_index
-        .iter()
-        .map(|entry| {
-            targets.insert(entry.target_id.clone(), entry.entry_id.clone());
-            let kind = match entry.kind {
-                crate::domain::knowledge::KnowledgeKind::Fact => "fact",
-                crate::domain::knowledge::KnowledgeKind::Rumor => "rumor",
-                crate::domain::knowledge::KnowledgeKind::Memory => "memory",
-            };
             format!(
-                "- target_id: {}\n  title: {}\n  kind: {kind}\n  retrieval_hint: {}",
-                quoted(entry.target_id.as_str()),
-                quoted(entry.entry_id.as_str()),
+                "- target_id: {}\n  retrieval_hint: {}",
+                quoted(entry.role_id.as_str()),
                 quoted(entry.retrieval_hint.as_str())
             )
         })
         .collect::<Vec<_>>();
-    format!("scope: {scope}\nentries:\n{}", entries.join("\n"))
+    format!("scope: {scope}\n\n### Retrievable Characters\n\n{}", entries.join("\n"))
 }
 
-fn render_narrative_plan(plan: &NarrativePlan) -> String {
-    let mut parts = Vec::new();
-    if !plan.active_directions.is_empty() {
-        let directions = plan
-            .active_directions
-            .iter()
-            .map(|direction| quoted(direction.dramatic_focus.as_str()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        parts.push(format!("active_directions: [{directions}]"));
+fn render_knowledge_index(baseline: &BaselineContext) -> String {
+    let scope = match baseline.knowledge_index_scope {
+        crate::domain::turn::RetrievalIndexScope::Complete => "complete",
+        crate::domain::turn::RetrievalIndexScope::Prefiltered => "prefiltered",
+    };
+    if baseline.knowledge_index.is_empty() {
+        return format!("scope: {scope}");
     }
-    if !plan.character_impulses.is_empty() {
-        let impulses = plan
-            .character_impulses
-            .iter()
-            .map(|impulse| format!("{}: {}", quoted(impulse.target_role_id.as_str()), quoted(impulse.goal.as_str())))
-            .collect::<Vec<_>>()
-            .join(", ");
-        parts.push(format!("character_impulses: [{impulses}]"));
+    let mut facts = Vec::new();
+    let mut rumors = Vec::new();
+    for entry in &baseline.knowledge_index {
+        let line = format!(
+            "- target_id: {}\n  retrieval_hint: {}",
+            quoted(entry.source_id.as_str()),
+            quoted(entry.retrieval_hint.as_str())
+        );
+        match entry.source_id.kind() {
+            crate::domain::knowledge::KnowledgeKind::Fact => facts.push(line),
+            crate::domain::knowledge::KnowledgeKind::Rumor => rumors.push(line),
+            crate::domain::knowledge::KnowledgeKind::Memory => {}
+        }
     }
-    if !plan.world_event_intents.is_empty() {
-        parts.push(format!("world_event_intent_count: {}", plan.world_event_intents.len()));
+    let mut sections = vec![format!("scope: {scope}")];
+    if !facts.is_empty() {
+        sections.push(format!("### Retrievable Facts\n\n{}", facts.join("\n")));
     }
-    parts.join("\n")
+    if !rumors.is_empty() {
+        sections.push(format!("### Retrievable Rumors\n\n{}", rumors.join("\n")));
+    }
+    sections.join("\n\n")
 }
 
 fn render_constraints(baseline: &BaselineContext) -> String {

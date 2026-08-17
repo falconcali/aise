@@ -4,7 +4,7 @@ use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeIndexMatch, KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
-use crate::domain::turn::RetrievalAudience;
+use crate::domain::turn::KnowledgeDelivery;
 use crate::persistence::knowledge_read_port::{
     EntityKnowledgeQuery, KnowledgeFilter, KnowledgeIndexQuery, KnowledgeIndexRecord, KnowledgeLookupHit,
     KnowledgeReadPort, KnowledgeRecord, SourceKnowledgeQuery, TopicKnowledgeQuery,
@@ -155,13 +155,16 @@ async fn load_index(
         let kind_raw: String = row.try_get("knowledge_kind").map_err(SqliteStoreError::from)?;
         let retrieval_hint_raw: Option<String> = row.try_get("retrieval_hint").map_err(SqliteStoreError::from)?;
         let kind = parse_kind(&kind_raw)?;
+        if kind == KnowledgeKind::Memory {
+            return Err(invalid_record());
+        }
         let retrieval_hint = retrieval_hint_raw
             .map(crate::domain::knowledge::RetrievalHint::try_new)
             .transpose()
-            .map_err(|_| invalid_record())?;
+            .map_err(|_| invalid_record())?
+            .ok_or_else(invalid_record)?;
         records.push(KnowledgeIndexRecord {
             source_id: make_source_id(kind, source_id)?,
-            kind,
             retrieval_hint,
         });
     }
@@ -238,22 +241,16 @@ fn validate_query(filter: &KnowledgeFilter, selector: &Selector<'_>, limit: usiz
         });
     }
     let includes_memory = filter.knowledge_kinds.contains(&KnowledgeKind::Memory);
-    match &filter.audience {
-        RetrievalAudience::GlobalWriter if includes_memory && filter.authorized_memory_owners.is_empty() => {
+    let includes_fact = filter.knowledge_kinds.contains(&KnowledgeKind::Fact);
+    match &filter.delivery {
+        KnowledgeDelivery::Writer if includes_memory => {
             return Err(StoreError::ConstraintViolation {
-                constraint: "memory_owner_authorization_empty".into(),
+                constraint: "memory_forbidden_for_writer_delivery".into(),
             });
         }
-        RetrievalAudience::Character { role_id }
-            if includes_memory && filter.authorized_memory_owners.as_slice() != [role_id.clone()] =>
-        {
+        KnowledgeDelivery::Character { .. } if includes_fact => {
             return Err(StoreError::ConstraintViolation {
-                constraint: "memory_owner_authorization_mismatch".into(),
-            });
-        }
-        _ if !includes_memory && !filter.authorized_memory_owners.is_empty() => {
-            return Err(StoreError::ConstraintViolation {
-                constraint: "unexpected_memory_owner_authorization".into(),
+                constraint: "fact_forbidden_for_character_delivery".into(),
             });
         }
         _ => {}
@@ -262,18 +259,9 @@ fn validate_query(filter: &KnowledgeFilter, selector: &Selector<'_>, limit: usiz
 }
 
 fn push_authorization(builder: &mut QueryBuilder<'_, Sqlite>, filter: &KnowledgeFilter) -> Result<(), StoreError> {
-    match &filter.audience {
-        RetrievalAudience::GlobalWriter => {
-            if filter.knowledge_kinds.contains(&KnowledgeKind::Memory) {
-                builder.push(" AND (e.knowledge_kind != 'memory' OR e.memory_owner_role_id IN (");
-                let mut separated = builder.separated(", ");
-                for owner in &filter.authorized_memory_owners {
-                    separated.push_bind(owner.as_str().to_owned());
-                }
-                builder.push("))");
-            }
-        }
-        RetrievalAudience::Character { role_id } => {
+    match &filter.delivery {
+        KnowledgeDelivery::Writer => {}
+        KnowledgeDelivery::Character { role_id } => {
             builder.push(" AND e.knowledge_kind != 'fact'");
             builder.push(" AND (e.knowledge_kind != 'memory' OR e.memory_owner_role_id = ");
             builder.push_bind(role_id.as_str().to_owned());

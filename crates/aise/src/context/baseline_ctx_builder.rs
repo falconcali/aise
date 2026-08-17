@@ -2,14 +2,13 @@ use crate::config::{AssetLimitsConfig, ContextPreparationConfig, RetrievalConfig
 use crate::context::error::ContextError;
 use crate::context::retrieval_signal_builder::RetrievalSignalBuilder;
 use crate::domain::asset::entity::KnowledgeEntity;
-use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeIndexMatch, KnowledgeKind};
 use crate::domain::narrative::StoryContinuityLimits;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{
-    BaselineContext, KnowledgeEntryIndexEntry, NarrativeGraphStateIndex, RelevantKnowledge, RetrievalAudience,
-    RetrievalIndexScope, RetrievalSignals, RetrievalTargetId, RoleContextView, RoleIndexEntry, SnapshotLimits,
+    BaselineContext, KnowledgeDelivery, KnowledgeIndexEntry, NarrativeGraphStateIndex, RelevantWorldKnowledge,
+    RelevantWorldKnowledgeItem, RetrievalIndexScope, RetrievalSignals, RoleContextView, RoleIndexEntry, SnapshotLimits,
 };
 use crate::persistence::knowledge_read_port::{
     EntityKnowledgeQuery, KnowledgeFilter, KnowledgeIndexQuery, KnowledgeLookupHit, KnowledgeReadPort,
@@ -167,10 +166,7 @@ async fn build_baseline(
             continue;
         }
         role_index.push(RoleIndexEntry {
-            target_id: RetrievalTargetId::for_role(role_id),
             role_id: role_id.clone(),
-            name: role.effective_profile.name.clone(),
-            role_label: role.role_label.clone(),
             retrieval_hint: role.narrative_function.clone(),
         });
     }
@@ -181,19 +177,20 @@ async fn build_baseline(
     } else {
         RetrievalIndexScope::Complete
     };
-    let relevant_knowledge = load_relevant_knowledge(snapshot, &retrieval_signals, retrieval_config, knowledge).await?;
-    let (knowledge_entry_index_scope, knowledge_entry_index) =
-        load_knowledge_index(snapshot, &relevant_knowledge, retrieval_config, knowledge).await?;
+    let relevant_world_knowledge =
+        load_relevant_knowledge(snapshot, &retrieval_signals, retrieval_config, knowledge).await?;
+    let (knowledge_index_scope, knowledge_index) =
+        load_knowledge_index(snapshot, &relevant_world_knowledge, retrieval_config, knowledge).await?;
     Ok(BaselineContext {
         story_profile: snapshot.story_profile().clone(),
         instance_settings: snapshot.instance_settings().clone(),
         player_role,
         relevant_roles,
-        relevant_knowledge,
+        relevant_world_knowledge,
         role_index_scope,
-        knowledge_entry_index_scope,
-        knowledge_entry_index,
         role_index,
+        knowledge_index_scope,
+        knowledge_index,
         story_continuity: snapshot.story_continuity().clone(),
         active_story_constraints: snapshot.active_constraints().to_vec(),
         narrative_graph_state_index: NarrativeGraphStateIndex {
@@ -244,11 +241,10 @@ async fn load_relevant_knowledge(
     signals: &crate::domain::turn::RetrievalSignals,
     config: &RetrievalConfig,
     knowledge: &Arc<dyn KnowledgeReadPort>,
-) -> Result<Vec<RelevantKnowledge>, ContextError> {
+) -> Result<RelevantWorldKnowledge, ContextError> {
     let filter = KnowledgeFilter {
-        audience: RetrievalAudience::GlobalWriter,
+        delivery: KnowledgeDelivery::Writer,
         knowledge_kinds: vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
-        authorized_memory_owners: Vec::new(),
         max_item_bytes: config.max_item_bytes,
     };
     let entities = signals.entities.iter().map(|signal| signal.entity.clone()).collect::<Vec<_>>();
@@ -283,10 +279,10 @@ async fn load_relevant_knowledge(
 
 async fn load_knowledge_index(
     snapshot: &StoryReadSnapshot,
-    relevant: &[RelevantKnowledge],
+    relevant: &RelevantWorldKnowledge,
     config: &RetrievalConfig,
     knowledge: &Arc<dyn KnowledgeReadPort>,
-) -> Result<(RetrievalIndexScope, Vec<KnowledgeEntryIndexEntry>), ContextError> {
+) -> Result<(RetrievalIndexScope, Vec<KnowledgeIndexEntry>), ContextError> {
     let requested = config.max_candidates_total.saturating_add(1);
     let records = knowledge
         .list_index(KnowledgeIndexQuery {
@@ -300,26 +296,20 @@ async fn load_knowledge_index(
     } else {
         RetrievalIndexScope::Complete
     };
-    let provided = relevant.iter().map(|entry| &entry.entry_id).collect::<BTreeSet<_>>();
+    let provided = relevant
+        .facts
+        .iter()
+        .chain(relevant.rumors.iter())
+        .map(|entry| &entry.source_id)
+        .collect::<BTreeSet<_>>();
     let mut entries = Vec::new();
     for record in records.into_iter().take(config.max_candidates_total) {
         if provided.contains(&record.source_id) {
             continue;
         }
-        let hint = match record.kind {
-            KnowledgeKind::Fact => "objective fact entry",
-            KnowledgeKind::Rumor => "public claim entry",
-            KnowledgeKind::Memory => "character memory entry",
-        };
-        entries.push(KnowledgeEntryIndexEntry {
-            target_id: RetrievalTargetId::for_knowledge(&record.source_id),
-            entry_id: record.source_id,
-            kind: record.kind,
-            retrieval_hint: BoundedText::try_new(hint, "retrieval_hint", 128).map_err(|_| {
-                ContextError::InvalidRecord {
-                    code: "retrieval_hint_invalid",
-                }
-            })?,
+        entries.push(KnowledgeIndexEntry {
+            source_id: record.source_id,
+            retrieval_hint: record.retrieval_hint,
         });
     }
     Ok((scope, entries))
@@ -329,7 +319,7 @@ fn normalize_relevant_knowledge(
     hits: Vec<KnowledgeLookupHit>,
     signals: &crate::domain::turn::RetrievalSignals,
     config: &RetrievalConfig,
-) -> Result<Vec<RelevantKnowledge>, ContextError> {
+) -> Result<RelevantWorldKnowledge, ContextError> {
     let mut by_id = std::collections::BTreeMap::new();
     for hit in hits {
         let priority = hit
@@ -351,16 +341,15 @@ fn normalize_relevant_knowledge(
             .ok_or(ContextError::InvalidRecord {
                 code: "preplanning_match_missing",
             })?;
-        let entry = RelevantKnowledge {
-            entry_id: hit.record.source_id.clone(),
-            kind: hit.record.kind,
+        let entry = RelevantWorldKnowledgeItem {
+            source_id: hit.record.source_id.clone(),
             content: hit.record.content,
             source_priority: priority,
             salience: hit.record.salience,
         };
         by_id
             .entry(hit.record.source_id)
-            .and_modify(|existing: &mut RelevantKnowledge| {
+            .and_modify(|existing: &mut RelevantWorldKnowledgeItem| {
                 existing.source_priority = existing.source_priority.min(priority);
             })
             .or_insert(entry);
@@ -370,7 +359,7 @@ fn normalize_relevant_knowledge(
         left.source_priority
             .cmp(&right.source_priority)
             .then_with(|| right.salience.cmp(&left.salience))
-            .then_with(|| left.entry_id.cmp(&right.entry_id))
+            .then_with(|| left.source_id.cmp(&right.source_id))
     });
     entries.truncate(config.max_items_per_audience);
     let mut tokens = 0u64;
@@ -383,7 +372,15 @@ fn normalize_relevant_knowledge(
             true
         }
     });
-    Ok(entries)
+    let mut result = RelevantWorldKnowledge::default();
+    for entry in entries {
+        match entry.source_id.kind() {
+            KnowledgeKind::Fact => result.facts.push(entry),
+            KnowledgeKind::Rumor => result.rumors.push(entry),
+            KnowledgeKind::Memory => {}
+        }
+    }
+    Ok(result)
 }
 
 fn map_baseline_error(error: ContextError) -> TurnExecutionError {

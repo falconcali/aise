@@ -1,12 +1,7 @@
-use crate::domain::ids::{RoleId, StoryId, TurnId};
-use crate::domain::knowledge::KnowledgeKind;
+use crate::domain::ids::{StoryId, TurnId};
 use crate::domain::narrative_graph::projector::NarrativeProjection;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
-use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::{
-    BaselineContext, CharacterDecision, ContextItem, RetrievalAudience, RetrievedContext, RetrievedContextLimits,
-    WriterPlan,
-};
+use crate::domain::turn::{BaselineContext, CharacterDecision, RetrievedContext, RetrievedContextLimits, WriterPlan};
 use crate::domain::turn::{StoryGeneratorOutput, StoryStateExtractionEnvelope, StoryStateExtractorOutput};
 use crate::turn::turn_budget::{CorrectionKind, TurnBudget};
 use crate::turn::turn_contract::{
@@ -258,25 +253,16 @@ impl TurnExecutionContext {
             max_total_tokens: self.budget.max_retrieved_tokens(),
             max_item_bytes: self.budget.max_item_bytes(),
         };
-        let authorized_writer_memory_owners = self
-            .plan
-            .as_ref()
-            .into_iter()
-            .flat_map(|plan| plan.retrieval_plan.requests.iter())
-            .flat_map(|request| request.authorized_memory_owners.iter().cloned())
-            .collect::<std::collections::BTreeSet<_>>();
-        self.validate_retrieved_partition(
-            context.writer(),
-            &RetrievalAudience::GlobalWriter,
-            &authorized_writer_memory_owners,
-            limits,
-        )?;
-        for (role_id, items) in context.roles() {
-            if !self
-                .plan
-                .as_ref()
-                .is_some_and(|plan| plan.character_think_requests.iter().any(|request| &request.role_id == role_id))
-            {
+        let plan = self.plan.as_ref().ok_or_else(|| {
+            TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "missing_writer_plan",
+                Some(TurnStage::Context),
+                "writer plan is required before retrieval",
+            )
+        })?;
+        for role_id in context.characters().keys() {
+            if !plan.character_think_requests.iter().any(|request| &request.role_id == role_id) {
                 return Err(TurnExecutionError::new(
                     TurnFailureKind::InvariantViolation,
                     "retrieved_character_audience_unauthorized",
@@ -284,52 +270,17 @@ impl TurnExecutionContext {
                     "retrieved character audience has no matching character think request",
                 ));
             }
-            self.validate_retrieved_partition(
-                items,
-                &RetrievalAudience::Character {
-                    role_id: role_id.clone(),
-                },
-                &authorized_writer_memory_owners,
-                limits,
-            )?;
         }
-        if context.roles().len() > limits.max_role_audiences {
-            return Err(TurnExecutionError::new(
-                TurnFailureKind::InvariantViolation,
-                "retrieved_character_audience_limit",
-                Some(TurnStage::Context),
-                format!(
-                    "retrieved character audiences {} exceeds budget {}",
-                    context.roles().len(),
-                    limits.max_role_audiences
-                ),
-            ));
-        }
-        if context.total_items() > limits.max_total_items {
-            return Err(TurnExecutionError::new(
-                TurnFailureKind::InvariantViolation,
-                "retrieved_item_limit",
-                Some(TurnStage::Context),
-                format!(
-                    "retrieved context {} exceeds budget {}",
-                    context.total_items(),
-                    limits.max_total_items
-                ),
-            ));
-        }
-        if context.total_tokens() > limits.max_total_tokens {
-            return Err(TurnExecutionError::new(
-                TurnFailureKind::InvariantViolation,
-                "retrieved_token_limit",
-                Some(TurnStage::Context),
-                format!(
-                    "retrieved context {} tokens exceeds budget {}",
-                    context.total_tokens(),
-                    limits.max_total_tokens
-                ),
-            ));
-        }
-        self.retrieved = context;
+        let revalidated = RetrievedContext::try_new(context.world().clone(), context.characters().clone(), limits)
+            .map_err(|error| {
+                TurnExecutionError::new(
+                    TurnFailureKind::InvariantViolation,
+                    "retrieved_context_limit",
+                    Some(TurnStage::Context),
+                    error.to_string(),
+                )
+            })?;
+        self.retrieved = revalidated;
         Ok(())
     }
 
@@ -442,7 +393,7 @@ impl TurnExecutionContext {
                 "writer plan is required before retrieval",
             )
         })?;
-        Ok(!plan.retrieval_plan.requests.is_empty())
+        Ok(!plan.retrieval_plan.character_requests.is_empty() || !plan.retrieval_plan.knowledge_requests.is_empty())
     }
 
     pub fn skip_retrieval(&mut self) -> Result<(), TurnExecutionError> {
@@ -754,104 +705,6 @@ impl TurnExecutionContext {
 
     pub fn is_terminal(&self) -> bool {
         self.phase.is_terminal()
-    }
-
-    fn validate_retrieved_partition(
-        &self,
-        items: &[ContextItem],
-        expected_audience: &RetrievalAudience,
-        authorized_writer_memory_owners: &std::collections::BTreeSet<RoleId>,
-        limits: RetrievedContextLimits,
-    ) -> Result<(), TurnExecutionError> {
-        if items.len() > limits.max_items_per_audience {
-            return Err(TurnExecutionError::new(
-                TurnFailureKind::InvariantViolation,
-                "retrieved_audience_item_limit",
-                Some(TurnStage::Context),
-                format!(
-                    "retrieved audience items {} exceeds budget {}",
-                    items.len(),
-                    limits.max_items_per_audience
-                ),
-            ));
-        }
-        let mut tokens = 0u64;
-        for item in items {
-            if item.content.as_str().len() > limits.max_item_bytes {
-                return Err(TurnExecutionError::new(
-                    TurnFailureKind::InvariantViolation,
-                    "retrieved_item_byte_limit",
-                    Some(TurnStage::Context),
-                    format!(
-                        "retrieved item {} bytes exceeds budget {}",
-                        item.content.as_str().len(),
-                        limits.max_item_bytes
-                    ),
-                ));
-            }
-            if item.token_cost != estimate_text_tokens(item.content.as_str()) {
-                return Err(TurnExecutionError::new(
-                    TurnFailureKind::InvariantViolation,
-                    "retrieved_token_cost_mismatch",
-                    Some(TurnStage::Context),
-                    "retrieved item token_cost does not match content",
-                ));
-            }
-            if &item.provenance.audience != expected_audience {
-                return Err(TurnExecutionError::new(
-                    TurnFailureKind::InvariantViolation,
-                    "retrieved_audience_mismatch",
-                    Some(TurnStage::Context),
-                    "retrieved item provenance audience does not match partition",
-                ));
-            }
-            match (
-                &item.provenance.knowledge_kind,
-                &item.provenance.memory_owner,
-                expected_audience,
-            ) {
-                (KnowledgeKind::Memory, Some(owner), RetrievalAudience::Character { role_id }) if owner == role_id => {}
-                (KnowledgeKind::Memory, Some(owner), RetrievalAudience::GlobalWriter)
-                    if authorized_writer_memory_owners.contains(owner) => {}
-                (KnowledgeKind::Memory, _, _) => {
-                    return Err(TurnExecutionError::new(
-                        TurnFailureKind::InvariantViolation,
-                        "retrieved_memory_owner_invalid",
-                        Some(TurnStage::Context),
-                        "memory items require matching character audience and owner",
-                    ));
-                }
-                (_, Some(_), _) => {
-                    return Err(TurnExecutionError::new(
-                        TurnFailureKind::InvariantViolation,
-                        "retrieved_memory_owner_invalid",
-                        Some(TurnStage::Context),
-                        "non-memory items must not set memory_owner",
-                    ));
-                }
-                _ => {}
-            }
-            tokens = tokens.checked_add(item.token_cost).ok_or_else(|| {
-                TurnExecutionError::new(
-                    TurnFailureKind::InvariantViolation,
-                    "retrieved_context_limit",
-                    Some(TurnStage::Context),
-                    "retrieved audience token arithmetic overflow",
-                )
-            })?;
-        }
-        if tokens > limits.max_tokens_per_audience {
-            return Err(TurnExecutionError::new(
-                TurnFailureKind::InvariantViolation,
-                "retrieved_audience_token_limit",
-                Some(TurnStage::Context),
-                format!(
-                    "retrieved audience tokens {tokens} exceeds budget {}",
-                    limits.max_tokens_per_audience
-                ),
-            ));
-        }
-        Ok(())
     }
 
     fn expect_terminal(&self, expected: crate::turn::turn_error::TurnTerminalKind) -> Result<(), TurnExecutionError> {

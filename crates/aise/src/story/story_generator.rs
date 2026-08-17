@@ -1,5 +1,4 @@
 use crate::config::ContextPreparationConfig;
-use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::StoryGeneratorOutput;
 use crate::llm::gateway::LlmGateway;
@@ -45,10 +44,11 @@ impl TurnExecutionPipeline for StoryGenerator {
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;
         let projection_ms = projection_started.elapsed().as_millis() as u64;
         let decision_role_count = projection.context.character_decisions.len();
-        let writer_knowledge_count = projection.context.relevant_writer_knowledge.len();
+        let writer_knowledge_count =
+            projection.context.relevant_knowledge.facts.len() + projection.context.relevant_knowledge.rumors.len();
         let constraint_count = projection.context.active_story_constraints.len();
-        let active_goal_count = projection.context.narrative_direction.active_goals.len();
-        let event_intent_count = projection.context.narrative_direction.event_intents.len();
+        let active_direction_count = projection.context.narrative_direction.active_directions.len();
+        let world_event_intent_count = projection.context.narrative_direction.world_event_intents.len();
         let ai_role_count = projection.context.ai_roles.len();
         let dialogue_example_count = std::iter::once(&projection.context.player_role)
             .chain(projection.context.ai_roles.iter())
@@ -96,24 +96,8 @@ impl TurnExecutionPipeline for StoryGenerator {
             .iter()
             .map(|segment| estimate_text_tokens(segment.as_str()))
             .sum::<u64>();
-        let writer_fact_count = projection
-            .context
-            .relevant_writer_knowledge
-            .iter()
-            .filter(|entry| entry.kind == KnowledgeKind::Fact)
-            .count();
-        let writer_rumor_count = projection
-            .context
-            .relevant_writer_knowledge
-            .iter()
-            .filter(|entry| entry.kind == KnowledgeKind::Rumor)
-            .count();
-        let writer_memory_count = projection
-            .context
-            .relevant_writer_knowledge
-            .iter()
-            .filter(|entry| entry.kind == KnowledgeKind::Memory)
-            .count();
+        let writer_fact_count = projection.context.relevant_knowledge.facts.len();
+        let writer_rumor_count = projection.context.relevant_knowledge.rumors.len();
         let cast_policy = match projection.context.instance_settings.cast_policy {
             crate::domain::story_instance::state::CastPolicy::Open => "open",
             crate::domain::story_instance::state::CastPolicy::IncidentalOnly => "incidental_only",
@@ -130,8 +114,8 @@ impl TurnExecutionPipeline for StoryGenerator {
             decision_role_count,
             writer_knowledge_count,
             constraint_count,
-            active_goal_count,
-            event_intent_count,
+            active_direction_count,
+            world_event_intent_count,
             ai_role_count,
             dialogue_example_count,
             dialogue_example_tokens,
@@ -144,7 +128,6 @@ impl TurnExecutionPipeline for StoryGenerator {
             recent_story_tokens,
             writer_fact_count,
             writer_rumor_count,
-            writer_memory_count,
             cast_policy,
             projection_ms,
             "story generator prompt projected"

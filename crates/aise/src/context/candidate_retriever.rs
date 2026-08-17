@@ -1,6 +1,6 @@
 use crate::context::error::ContextError;
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
-use crate::domain::turn::{CandidateRetrieverKind, ProviderEvidence, RetrievalAudience, RetrievalRequest};
+use crate::domain::turn::{CandidateRetrieverKind, KnowledgeDelivery, KnowledgeRetrievalRequest, ProviderEvidence};
 use crate::persistence::knowledge_read_port::{KnowledgeLookupHit, KnowledgeRecord};
 use async_trait::async_trait;
 use std::collections::BTreeMap;
@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone)]
 pub struct CandidateRetrievalRequest<'a> {
     pub snapshot: &'a KnowledgeSnapshotRef,
-    pub request: &'a RetrievalRequest,
+    pub request: &'a KnowledgeRetrievalRequest,
     pub limit: usize,
     pub max_item_bytes: usize,
 }
@@ -16,7 +16,7 @@ pub struct CandidateRetrievalRequest<'a> {
 #[derive(Debug, Clone)]
 pub struct ContextCandidate {
     pub record: KnowledgeRecord,
-    pub audience: RetrievalAudience,
+    pub delivery: KnowledgeDelivery,
     pub evidence: BTreeMap<CandidateRetrieverKind, ProviderEvidence>,
     pub signal_priority: u8,
 }
@@ -24,7 +24,7 @@ pub struct ContextCandidate {
 impl ContextCandidate {
     pub fn from_hit(
         hit: KnowledgeLookupHit,
-        audience: RetrievalAudience,
+        delivery: KnowledgeDelivery,
         retriever: CandidateRetrieverKind,
         provider_rank: u32,
         signal_priority: u8,
@@ -36,7 +36,7 @@ impl ContextCandidate {
         }
         Ok(Self {
             record: hit.record,
-            audience,
+            delivery,
             evidence: BTreeMap::from([(
                 retriever,
                 ProviderEvidence {

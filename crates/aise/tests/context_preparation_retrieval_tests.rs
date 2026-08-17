@@ -7,7 +7,7 @@ use aise::domain::ids::RoleId;
 use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::text::estimate_text_tokens;
 use aise::domain::turn::{
-    CandidateRetrieverKind, CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest,
+    CandidateRetrieverKind, CharacterThinkRequest, KnowledgeDelivery, KnowledgeRetrievalRequest, RetrievalPlan,
     RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
 };
 use aise::planning::planner_output::PlannerOutput;
@@ -91,14 +91,14 @@ fn automatic_requests_run_when_planner_gaps_are_empty() {
             summary: BoundedText::try_new("goal", "goal", 64).unwrap(),
         },
         retrieval_plan: RetrievalPlan {
-            requests: vec![RetrievalRequest {
-                audience: RetrievalAudience::GlobalWriter,
+            character_requests: Vec::new(),
+            knowledge_requests: vec![KnowledgeRetrievalRequest {
+                delivery: KnowledgeDelivery::Writer,
                 target_source_id: None,
                 knowledge_kinds: vec![KnowledgeKind::Fact],
                 entities: Vec::new(),
                 topics: vec![TopicKey::from("gate")],
                 query_text: None,
-                authorized_memory_owners: Vec::new(),
                 reason: BoundedText::try_new("automatic", "reason", 64).unwrap(),
                 origin: RetrievalRequestOrigin::Automatic,
                 signal_priority: 0,
@@ -106,7 +106,7 @@ fn automatic_requests_run_when_planner_gaps_are_empty() {
         },
         character_think_requests: Vec::new(),
     };
-    assert!(!plan.retrieval_plan.requests.is_empty());
+    assert!(!plan.retrieval_plan.knowledge_requests.is_empty());
     assert!(plan.character_think_requests.is_empty());
     let _ = RetrievalPlanBuilder::new(RetrievalConfig::default(), PlannerConfig::default());
 }
@@ -114,26 +114,24 @@ fn automatic_requests_run_when_planner_gaps_are_empty() {
 #[test]
 fn retrieval_plan_merge_is_deterministic() {
     let mut left = vec![
-        RetrievalRequest {
-            audience: RetrievalAudience::GlobalWriter,
+        KnowledgeRetrievalRequest {
+            delivery: KnowledgeDelivery::Writer,
             target_source_id: None,
             knowledge_kinds: vec![KnowledgeKind::Fact],
             entities: Vec::new(),
             topics: vec![TopicKey::from("b")],
             query_text: None,
-            authorized_memory_owners: Vec::new(),
             reason: BoundedText::try_new("b", "reason", 64).unwrap(),
             origin: RetrievalRequestOrigin::Automatic,
             signal_priority: 1,
         },
-        RetrievalRequest {
-            audience: RetrievalAudience::GlobalWriter,
+        KnowledgeRetrievalRequest {
+            delivery: KnowledgeDelivery::Writer,
             target_source_id: None,
             knowledge_kinds: vec![KnowledgeKind::Fact],
             entities: Vec::new(),
             topics: vec![TopicKey::from("a")],
             query_text: None,
-            authorized_memory_owners: Vec::new(),
             reason: BoundedText::try_new("a", "reason", 64).unwrap(),
             origin: RetrievalRequestOrigin::Automatic,
             signal_priority: 0,
@@ -143,8 +141,16 @@ fn retrieval_plan_merge_is_deterministic() {
     right.reverse();
     left.sort_by(|a, b| a.signal_priority.cmp(&b.signal_priority).then_with(|| a.topics.cmp(&b.topics)));
     right.sort_by(|a, b| a.signal_priority.cmp(&b.signal_priority).then_with(|| a.topics.cmp(&b.topics)));
-    let left_json = serde_json::to_string(&RetrievalPlan { requests: left }).unwrap();
-    let right_json = serde_json::to_string(&RetrievalPlan { requests: right }).unwrap();
+    let left_json = serde_json::to_string(&RetrievalPlan {
+        character_requests: Vec::new(),
+        knowledge_requests: left,
+    })
+    .unwrap();
+    let right_json = serde_json::to_string(&RetrievalPlan {
+        character_requests: Vec::new(),
+        knowledge_requests: right,
+    })
+    .unwrap();
     assert_eq!(left_json, right_json);
 }
 
@@ -163,21 +169,21 @@ fn retrieval_and_character_think_are_enabled_from_plan_collections() {
         retrieval_plan: RetrievalPlan::default(),
         character_think_requests: Vec::new(),
     };
-    assert!(empty.retrieval_plan.requests.is_empty());
+    assert!(empty.retrieval_plan.knowledge_requests.is_empty());
     assert!(empty.character_think_requests.is_empty());
     let filled = WriterPlan {
         story_goal: WriterStoryGoal {
             summary: BoundedText::try_new("goal", "goal", 64).unwrap(),
         },
         retrieval_plan: RetrievalPlan {
-            requests: vec![RetrievalRequest {
-                audience: RetrievalAudience::GlobalWriter,
+            character_requests: Vec::new(),
+            knowledge_requests: vec![KnowledgeRetrievalRequest {
+                delivery: KnowledgeDelivery::Writer,
                 target_source_id: None,
                 knowledge_kinds: vec![KnowledgeKind::Rumor],
                 entities: Vec::new(),
                 topics: Vec::new(),
                 query_text: Some(BoundedText::try_new("q", "q", 64).unwrap()),
-                authorized_memory_owners: Vec::new(),
                 reason: BoundedText::try_new("gap", "reason", 64).unwrap(),
                 origin: RetrievalRequestOrigin::Planner,
                 signal_priority: 4,
@@ -188,7 +194,7 @@ fn retrieval_and_character_think_are_enabled_from_plan_collections() {
             reason: BoundedText::try_new("present", "reason", 64).unwrap(),
         }],
     };
-    assert_eq!(filled.retrieval_plan.requests.len(), 1);
+    assert_eq!(filled.retrieval_plan.knowledge_requests.len(), 1);
     assert_eq!(filled.character_think_requests.len(), 1);
     assert!(matches!(CandidateRetrieverKind::Bm25, CandidateRetrieverKind::Bm25));
 }

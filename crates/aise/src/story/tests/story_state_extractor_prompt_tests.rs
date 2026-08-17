@@ -78,6 +78,7 @@ fn extractor_role_rendering_contains_state_identity_only() {
         location: LocationKey::from("gate"),
         goals: vec![bounded("hold the gate")],
         attributes: BTreeMap::new(),
+        memories: Vec::new(),
     }]);
     assert!(rendered.contains("- role_id: \"guard\""));
     assert!(rendered.contains("  name: \"Guard\""));

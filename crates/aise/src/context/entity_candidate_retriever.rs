@@ -30,9 +30,8 @@ impl CandidateRetriever for EntityCandidateRetriever {
         }
         authorize_request(request.request)?;
         let filter = KnowledgeFilter {
-            audience: request.request.audience.clone(),
+            delivery: request.request.delivery.clone(),
             knowledge_kinds: request.request.knowledge_kinds.clone(),
-            authorized_memory_owners: request.request.authorized_memory_owners.clone(),
             max_item_bytes: request.max_item_bytes,
         };
         let records = if let Some(source_id) = &request.request.target_source_id {
@@ -75,7 +74,7 @@ impl CandidateRetriever for EntityCandidateRetriever {
                 .ok_or(ContextError::CandidateLimitExceeded)?;
             candidates.push(ContextCandidate::from_hit(
                 hit,
-                request.request.audience.clone(),
+                request.request.delivery.clone(),
                 CandidateRetrieverKind::Entity,
                 provider_rank,
                 request.request.signal_priority,
@@ -85,15 +84,15 @@ impl CandidateRetriever for EntityCandidateRetriever {
     }
 }
 
-fn authorize_request(request: &crate::domain::turn::RetrievalRequest) -> Result<(), ContextError> {
-    match &request.audience {
-        crate::domain::turn::RetrievalAudience::GlobalWriter => {
-            if request.knowledge_kinds.contains(&KnowledgeKind::Memory) && request.authorized_memory_owners.is_empty() {
+fn authorize_request(request: &crate::domain::turn::KnowledgeRetrievalRequest) -> Result<(), ContextError> {
+    match &request.delivery {
+        crate::domain::turn::KnowledgeDelivery::Writer => {
+            if request.knowledge_kinds.contains(&KnowledgeKind::Memory) {
                 return Err(ContextError::KnowledgeAudienceViolation);
             }
             Ok(())
         }
-        crate::domain::turn::RetrievalAudience::Character { .. } => {
+        crate::domain::turn::KnowledgeDelivery::Character { .. } => {
             if request.knowledge_kinds.contains(&KnowledgeKind::Fact) {
                 return Err(ContextError::KnowledgeAudienceViolation);
             }

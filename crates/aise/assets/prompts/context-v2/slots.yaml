@@ -15,7 +15,7 @@ slots:
       - { name: active_story_constraints, var_type: string, required: true }
       - { name: story_goal, var_type: string, required: true }
       - { name: narrative_direction, var_type: string, required: true }
-      - { name: relevant_writer_knowledge, var_type: string, required: true }
+      - { name: relevant_knowledge, var_type: string, required: true }
       - { name: character_decisions, var_type: string, required: true }
       - { name: player_input, var_type: string, required: true }
       - { name: previous_story_text, var_type: string, required: true }
@@ -40,8 +40,8 @@ slots:
       - { name: relevant_characters, var_type: string, required: true }
       - { name: relevant_knowledge, var_type: string, required: true }
       - { name: character_index, var_type: string, required: true }
-      - { name: knowledge_entry_index, var_type: string, required: true }
-      - { name: narrative_plan, var_type: string, required: true }
+      - { name: knowledge_index, var_type: string, required: true }
+      - { name: narrative_direction, var_type: string, required: true }
       - { name: active_story_constraints, var_type: string, required: true }
       - { name: player_input, var_type: string, required: true }
   - slot_id: context.writer_planner.fti
@@ -60,7 +60,6 @@ slots:
       - { name: current_character_state, var_type: string, required: true }
       - { name: story_summary, var_type: string, required: true }
       - { name: recent_story, var_type: string, required: true }
-      - { name: relevant_character_knowledge, var_type: string, required: true }
       - { name: narrative_character_impulses, var_type: string, required: true }
       - { name: thinking_focus, var_type: string, required: true }
       - { name: player_input, var_type: string, required: true }
@@ -85,7 +84,7 @@ slots:
       - { name: active_story_constraints, var_type: string, required: true }
       - { name: story_goal, var_type: string, required: true }
       - { name: narrative_direction, var_type: string, required: true }
-      - { name: relevant_writer_knowledge, var_type: string, required: true }
+      - { name: relevant_knowledge, var_type: string, required: true }
       - { name: character_decisions, var_type: string, required: true }
       - { name: player_input, var_type: string, required: true }
   - slot_id: context.story_generator.fti

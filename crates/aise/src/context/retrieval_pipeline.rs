@@ -2,10 +2,10 @@ use crate::config::RetrievalConfig;
 use crate::context::candidate_retriever::{CandidateRetrievalRequest, CandidateRetriever, ContextCandidate};
 use crate::context::error::ContextError;
 use crate::domain::ids::RoleId;
-use crate::domain::knowledge::KnowledgeSourceId;
+use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use crate::domain::turn::{
-    CandidateMatch, CandidateRetrieverKind, ContextItem, ContextProvenance, MatchLevel, RelevanceRank,
-    RetrievalAudience, RetrievedContext, RetrievedContextLimits,
+    CandidateMatch, CandidateRetrieverKind, KnowledgeDelivery, MatchLevel, RelevanceRank, RetrievedCharacterContext,
+    RetrievedContext, RetrievedContextLimits, RetrievedKnowledgeItem, RetrievedWorldKnowledge, RoleContextView,
 };
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
@@ -64,11 +64,21 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
             })?
             .clone();
         let pending = ctx.trace().begin_span("context.retrieve", "context.retrieve");
+        let mut role_views: BTreeMap<RoleId, RoleContextView> = BTreeMap::new();
+        for request in &plan.retrieval_plan.character_requests {
+            let role = snapshot.role(&request.role_id).ok_or_else(|| {
+                map_context_error(ContextError::SnapshotInconsistent {
+                    code: "unknown_character_request_role",
+                })
+            })?;
+            role_views.insert(request.role_id.clone(), RoleContextView::from(role));
+        }
         let mut candidates = Vec::new();
         let mut total_collected = 0usize;
-        let mut entity_candidate_count = 0usize;
-        let mut topic_candidate_count = 0usize;
-        for request in &plan.retrieval_plan.requests {
+        let mut fact_candidate_count = 0usize;
+        let mut rumor_candidate_count = 0usize;
+        let mut memory_candidate_count = 0usize;
+        for request in &plan.retrieval_plan.knowledge_requests {
             for retriever in &self.retrievers {
                 if total_collected >= self.config.max_candidates_total {
                     break;
@@ -89,10 +99,12 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
                     .await
                     .map_err(map_context_error)?;
                 total_collected = total_collected.saturating_add(batch.len());
-                match retriever.kind() {
-                    CandidateRetrieverKind::Entity => entity_candidate_count += batch.len(),
-                    CandidateRetrieverKind::Topic => topic_candidate_count += batch.len(),
-                    CandidateRetrieverKind::Bm25 | CandidateRetrieverKind::Embedding => {}
+                for candidate in &batch {
+                    match candidate.record.kind {
+                        KnowledgeKind::Fact => fact_candidate_count += 1,
+                        KnowledgeKind::Rumor => rumor_candidate_count += 1,
+                        KnowledgeKind::Memory => memory_candidate_count += 1,
+                    }
                 }
                 candidates.extend(batch);
             }
@@ -109,7 +121,11 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
             max_item_bytes: self.config.max_item_bytes,
         };
         let trimmed = trim_round_robin(partitions, limits)?;
-        let context = RetrievedContext::try_new(trimmed.writer, trimmed.roles, limits).map_err(|error| {
+        let (world, mut characters) = split_partitions(trimmed);
+        for (role_id, role_view) in role_views {
+            characters.entry(role_id).or_default().role = Some(role_view);
+        }
+        let context = RetrievedContext::try_new(world, characters, limits).map_err(|error| {
             TurnExecutionError::new(
                 TurnFailureKind::InvariantViolation,
                 "retrieval_context_limit",
@@ -121,12 +137,14 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
             "story_id": ctx.story_id(),
             "turn_id": ctx.turn_id(),
             "base_revision": snapshot.base_revision().get(),
-            "request_count": plan.retrieval_plan.requests.len(),
-            "entity_candidate_count": entity_candidate_count,
-            "topic_candidate_count": topic_candidate_count,
+            "character_request_count": plan.retrieval_plan.character_requests.len(),
+            "knowledge_request_count": plan.retrieval_plan.knowledge_requests.len(),
+            "fact_candidate_count": fact_candidate_count,
+            "rumor_candidate_count": rumor_candidate_count,
+            "memory_candidate_count": memory_candidate_count,
             "merged_count": merged_count,
-            "writer_item_count": context.writer().len(),
-            "character_partition_count": context.roles().len(),
+            "world_item_count": context.world().facts.len() + context.world().rumors.len(),
+            "character_partition_count": context.characters().len(),
             "total_tokens": context.total_tokens(),
             "status": "ok",
             "error_code": null,
@@ -137,14 +155,14 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
 }
 
 struct PartitionedItems {
-    writer: Vec<ContextItem>,
-    roles: BTreeMap<RoleId, Vec<ContextItem>>,
+    world: Vec<RetrievedKnowledgeItem>,
+    characters: BTreeMap<RoleId, Vec<RetrievedKnowledgeItem>>,
 }
 
 fn merge_candidates(candidates: Vec<ContextCandidate>) -> Result<Vec<ContextCandidate>, TurnExecutionError> {
-    let mut by_key: BTreeMap<(RetrievalAudience, KnowledgeSourceId), ContextCandidate> = BTreeMap::new();
+    let mut by_key: BTreeMap<(KnowledgeDelivery, KnowledgeSourceId), ContextCandidate> = BTreeMap::new();
     for candidate in candidates {
-        let key = (candidate.audience.clone(), candidate.record.source_id.clone());
+        let key = (candidate.delivery.clone(), candidate.record.source_id.clone());
         match by_key.get_mut(&key) {
             Some(existing) => {
                 for (provider, evidence) in candidate.evidence {
@@ -190,31 +208,32 @@ fn partition_and_rank(
     candidates: Vec<ContextCandidate>,
     config: &RetrievalConfig,
 ) -> Result<PartitionedItems, TurnExecutionError> {
-    let mut writer = Vec::new();
-    let mut roles: BTreeMap<RoleId, Vec<ContextItem>> = BTreeMap::new();
+    let mut world = Vec::new();
+    let mut characters: BTreeMap<RoleId, Vec<RetrievedKnowledgeItem>> = BTreeMap::new();
     for candidate in candidates {
+        let delivery = candidate.delivery.clone();
         let item = candidate_to_item(candidate)?;
-        match &item.provenance.audience {
-            RetrievalAudience::GlobalWriter => writer.push(item),
-            RetrievalAudience::Character { role_id } => {
-                roles.entry(role_id.clone()).or_default().push(item);
+        match delivery {
+            KnowledgeDelivery::Writer => world.push(item),
+            KnowledgeDelivery::Character { role_id } => {
+                characters.entry(role_id).or_default().push(item);
             }
         }
     }
-    sort_partition(&mut writer);
-    for items in roles.values_mut() {
+    sort_partition(&mut world);
+    for items in characters.values_mut() {
         sort_partition(items);
     }
-    writer.truncate(config.max_items_per_audience);
-    trim_tokens(&mut writer, config.max_tokens_per_audience);
-    for items in roles.values_mut() {
+    world.truncate(config.max_items_per_audience);
+    trim_tokens(&mut world, config.max_tokens_per_audience);
+    for items in characters.values_mut() {
         items.truncate(config.max_items_per_audience);
         trim_tokens(items, config.max_tokens_per_audience);
     }
-    Ok(PartitionedItems { writer, roles })
+    Ok(PartitionedItems { world, characters })
 }
 
-fn candidate_to_item(candidate: ContextCandidate) -> Result<ContextItem, TurnExecutionError> {
+fn candidate_to_item(candidate: ContextCandidate) -> Result<RetrievedKnowledgeItem, TurnExecutionError> {
     let matches = candidate
         .evidence
         .values()
@@ -223,20 +242,18 @@ fn candidate_to_item(candidate: ContextCandidate) -> Result<ContextItem, TurnExe
         .into_iter()
         .collect::<Vec<_>>();
     let match_level = match_level_from(&matches)?;
-    let provenance = ContextProvenance {
-        source_id: candidate.record.source_id,
-        knowledge_kind: candidate.record.kind,
-        source: candidate.record.source,
-        audience: candidate.audience,
-        memory_owner: candidate.record.memory_owner,
-        evidence: candidate.evidence,
-    };
     let relevance = RelevanceRank {
         match_level,
         signal_priority: candidate.signal_priority,
         salience: candidate.record.salience,
     };
-    Ok(ContextItem::from_parts(candidate.record.content, provenance, relevance))
+    Ok(RetrievedKnowledgeItem::from_parts(
+        candidate.record.source_id,
+        candidate.record.content,
+        candidate.record.source,
+        relevance,
+        candidate.evidence,
+    ))
 }
 
 fn match_level_from(matches: &[CandidateMatch]) -> Result<MatchLevel, TurnExecutionError> {
@@ -252,15 +269,15 @@ fn match_level_from(matches: &[CandidateMatch]) -> Result<MatchLevel, TurnExecut
     }
 }
 
-fn sort_partition(items: &mut [ContextItem]) {
+fn sort_partition(items: &mut [RetrievedKnowledgeItem]) {
     items.sort_by(|left, right| {
         rank_key(right)
             .cmp(&rank_key(left))
-            .then_with(|| left.provenance.source_id.cmp(&right.provenance.source_id))
+            .then_with(|| left.source_id.cmp(&right.source_id))
     });
 }
 
-fn rank_key(item: &ContextItem) -> (u8, u8, u8) {
+fn rank_key(item: &RetrievedKnowledgeItem) -> (u8, u8, u8) {
     let level = match item.relevance.match_level {
         MatchLevel::EntityAndTopic => 2,
         MatchLevel::Entity => 1,
@@ -269,7 +286,7 @@ fn rank_key(item: &ContextItem) -> (u8, u8, u8) {
     (level, u8::MAX - item.relevance.signal_priority, item.relevance.salience)
 }
 
-fn trim_tokens(items: &mut Vec<ContextItem>, max_tokens: u64) {
+fn trim_tokens(items: &mut Vec<RetrievedKnowledgeItem>, max_tokens: u64) {
     let mut total = 0u64;
     let mut keep = 0usize;
     for item in items.iter() {
@@ -287,50 +304,50 @@ fn trim_round_robin(
     mut partitions: PartitionedItems,
     limits: RetrievedContextLimits,
 ) -> Result<PartitionedItems, TurnExecutionError> {
-    let mut role_ids: Vec<RoleId> = partitions.roles.keys().cloned().collect();
+    let mut role_ids: Vec<RoleId> = partitions.characters.keys().cloned().collect();
     role_ids.sort();
-    let mut writer_idx = 0usize;
+    let mut world_idx = 0usize;
     let mut role_idxs: BTreeMap<RoleId, usize> = role_ids.iter().cloned().map(|id| (id, 0)).collect();
-    let mut out_writer = Vec::new();
-    let mut out_roles: BTreeMap<RoleId, Vec<ContextItem>> = BTreeMap::new();
+    let mut out_world = Vec::new();
+    let mut out_characters: BTreeMap<RoleId, Vec<RetrievedKnowledgeItem>> = BTreeMap::new();
     let mut total_items = 0usize;
     let mut total_tokens = 0u64;
     loop {
         let mut progressed = false;
-        if writer_idx < partitions.writer.len()
+        if world_idx < partitions.world.len()
             && total_items < limits.max_total_items
-            && out_writer.len() < limits.max_items_per_audience
+            && out_world.len() < limits.max_items_per_audience
         {
-            let item = &partitions.writer[writer_idx];
+            let item = &partitions.world[world_idx];
             let next_tokens = total_tokens.saturating_add(item.token_cost);
-            let audience_tokens: u64 = out_writer.iter().map(|item: &ContextItem| item.token_cost).sum();
+            let audience_tokens: u64 = out_world.iter().map(|item: &RetrievedKnowledgeItem| item.token_cost).sum();
             if next_tokens <= limits.max_total_tokens
                 && audience_tokens.saturating_add(item.token_cost) <= limits.max_tokens_per_audience
             {
-                out_writer.push(partitions.writer[writer_idx].clone());
-                writer_idx += 1;
+                out_world.push(partitions.world[world_idx].clone());
+                world_idx += 1;
                 total_items += 1;
                 total_tokens = next_tokens;
                 progressed = true;
             } else {
-                writer_idx = partitions.writer.len();
+                world_idx = partitions.world.len();
             }
         }
         for role_id in &role_ids {
             let idx = role_idxs.get(role_id).copied().unwrap_or(0);
-            let Some(source) = partitions.roles.get_mut(role_id) else {
+            let Some(source) = partitions.characters.get_mut(role_id) else {
                 continue;
             };
             if idx >= source.len() || total_items >= limits.max_total_items {
                 continue;
             }
-            let out = out_roles.entry(role_id.clone()).or_default();
+            let out = out_characters.entry(role_id.clone()).or_default();
             if out.len() >= limits.max_items_per_audience {
                 continue;
             }
             let item = &source[idx];
             let next_tokens = total_tokens.saturating_add(item.token_cost);
-            let audience_tokens: u64 = out.iter().map(|item: &ContextItem| item.token_cost).sum();
+            let audience_tokens: u64 = out.iter().map(|item: &RetrievedKnowledgeItem| item.token_cost).sum();
             if next_tokens <= limits.max_total_tokens
                 && audience_tokens.saturating_add(item.token_cost) <= limits.max_tokens_per_audience
             {
@@ -348,9 +365,35 @@ fn trim_round_robin(
         }
     }
     Ok(PartitionedItems {
-        writer: out_writer,
-        roles: out_roles,
+        world: out_world,
+        characters: out_characters,
     })
+}
+
+fn split_partitions(
+    partitions: PartitionedItems,
+) -> (RetrievedWorldKnowledge, BTreeMap<RoleId, RetrievedCharacterContext>) {
+    let mut world = RetrievedWorldKnowledge::default();
+    for item in partitions.world {
+        match item.source_id.kind() {
+            KnowledgeKind::Fact => world.facts.push(item),
+            KnowledgeKind::Rumor => world.rumors.push(item),
+            KnowledgeKind::Memory => {}
+        }
+    }
+    let mut characters = BTreeMap::new();
+    for (role_id, items) in partitions.characters {
+        let mut character = RetrievedCharacterContext::default();
+        for item in items {
+            match item.source_id.kind() {
+                KnowledgeKind::Rumor => character.known_rumors.push(item),
+                KnowledgeKind::Memory => character.memories.push(item),
+                KnowledgeKind::Fact => {}
+            }
+        }
+        characters.insert(role_id, character);
+    }
+    (world, characters)
 }
 
 fn map_context_error(error: ContextError) -> TurnExecutionError {

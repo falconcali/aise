@@ -2,39 +2,8 @@ use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
-use crate::domain::knowledge::KnowledgeKind;
+use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RetrievalTargetId(Arc<str>);
-
-impl RetrievalTargetId {
-    pub fn try_new(value: impl AsRef<str>) -> Result<Self, &'static str> {
-        let value = value.as_ref();
-        if value.is_empty() || value.len() > 256 || value.chars().any(char::is_whitespace) {
-            return Err("invalid retrieval target id");
-        }
-        Ok(Self(Arc::from(value)))
-    }
-
-    pub fn for_role(role_id: &RoleId) -> Self {
-        Self(Arc::from(format!("role:{}", role_id.as_str())))
-    }
-
-    pub fn for_knowledge(source_id: &crate::domain::knowledge::KnowledgeSourceId) -> Self {
-        let kind = match source_id {
-            crate::domain::knowledge::KnowledgeSourceId::Fact(_) => "fact",
-            crate::domain::knowledge::KnowledgeSourceId::Rumor(_) => "rumor",
-            crate::domain::knowledge::KnowledgeSourceId::Memory(_) => "memory",
-        };
-        Self(Arc::from(format!("knowledge:{kind}:{}", source_id.as_str())))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,41 +12,22 @@ pub enum RetrievalIndexScope {
     Prefiltered,
 }
 
-impl std::fmt::Display for RetrievalTargetId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl Serialize for RetrievalTargetId {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for RetrievalTargetId {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        Self::try_new(value).map_err(serde::de::Error::custom)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum RetrievalAudience {
-    GlobalWriter,
+pub enum KnowledgeDelivery {
+    Writer,
     Character { role_id: RoleId },
 }
 
-impl Serialize for RetrievalAudience {
+impl Serialize for KnowledgeDelivery {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(Some(match self {
-            Self::GlobalWriter => 1,
+            Self::Writer => 1,
             Self::Character { .. } => 2,
         }))?;
         match self {
-            Self::GlobalWriter => {
-                map.serialize_entry("kind", "global_writer")?;
+            Self::Writer => {
+                map.serialize_entry("kind", "writer")?;
             }
             Self::Character { role_id } => {
                 map.serialize_entry("kind", "character")?;
@@ -88,15 +38,15 @@ impl Serialize for RetrievalAudience {
     }
 }
 
-impl<'de> Deserialize<'de> for RetrievalAudience {
+impl<'de> Deserialize<'de> for KnowledgeDelivery {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut object = serde_json::Map::<String, serde_json::Value>::deserialize(deserializer)?;
         let kind = object
             .remove("kind")
             .and_then(|value| value.as_str().map(str::to_owned))
-            .ok_or_else(|| serde::de::Error::custom("audience kind is required"))?;
+            .ok_or_else(|| serde::de::Error::custom("delivery kind is required"))?;
         match kind.as_str() {
-            "global_writer" if object.is_empty() => Ok(Self::GlobalWriter),
+            "writer" if object.is_empty() => Ok(Self::Writer),
             "character" if object.len() == 1 => {
                 let role_id = object
                     .remove("role_id")
@@ -105,7 +55,7 @@ impl<'de> Deserialize<'de> for RetrievalAudience {
                 let role_id = RoleId::try_new(role_id).map_err(|_| serde::de::Error::custom("role_id is invalid"))?;
                 Ok(Self::Character { role_id })
             }
-            _ => Err(serde::de::Error::custom("invalid retrieval audience shape")),
+            _ => Err(serde::de::Error::custom("invalid knowledge delivery shape")),
         }
     }
 }
@@ -120,14 +70,21 @@ pub enum RetrievalRequestOrigin {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RetrievalRequest {
-    pub audience: RetrievalAudience,
-    pub target_source_id: Option<crate::domain::knowledge::KnowledgeSourceId>,
+pub struct CharacterRetrievalRequest {
+    pub role_id: RoleId,
+    pub reason: BoundedText,
+    pub origin: RetrievalRequestOrigin,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgeRetrievalRequest {
+    pub delivery: KnowledgeDelivery,
+    pub target_source_id: Option<KnowledgeSourceId>,
     pub knowledge_kinds: Vec<KnowledgeKind>,
     pub entities: Vec<KnowledgeEntity>,
     pub topics: Vec<TopicKey>,
     pub query_text: Option<BoundedText>,
-    pub authorized_memory_owners: Vec<RoleId>,
     pub reason: BoundedText,
     pub origin: RetrievalRequestOrigin,
     pub signal_priority: u8,
@@ -136,7 +93,8 @@ pub struct RetrievalRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetrievalPlan {
-    pub requests: Vec<RetrievalRequest>,
+    pub character_requests: Vec<CharacterRetrievalRequest>,
+    pub knowledge_requests: Vec<KnowledgeRetrievalRequest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

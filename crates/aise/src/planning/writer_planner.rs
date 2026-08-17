@@ -110,9 +110,22 @@ impl TurnExecutionPipeline for WriterPlanner {
                 ctx.budget().max_context_tokens(),
             )
             .map_err(|error| {
+                let code = match &error {
+                    crate::planning::WriterPlannerProjectionError::UnknownRoleTarget { .. } => "unknown_role_target",
+                    crate::planning::WriterPlannerProjectionError::PlayerRoleTarget { .. } => "player_role_target",
+                    crate::planning::WriterPlannerProjectionError::DuplicateRoleTarget { .. } => {
+                        "duplicate_role_target"
+                    }
+                    crate::planning::WriterPlannerProjectionError::RetrievalTargetCollision { .. } => {
+                        "retrieval_target_collision"
+                    }
+                    crate::planning::WriterPlannerProjectionError::RequiredPromptDataExceedsBudget => {
+                        "required_prompt_data_exceeds_budget"
+                    }
+                };
                 TurnExecutionError::new(
                     TurnFailureKind::InvariantViolation,
-                    "required_prompt_data_exceeds_budget",
+                    code,
                     Some(TurnStage::WriterPlanner),
                     error.to_string(),
                 )

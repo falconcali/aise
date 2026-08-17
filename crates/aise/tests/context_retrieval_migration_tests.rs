@@ -235,6 +235,59 @@ async fn migration_converts_identical_role_openings_to_story_opening() {
 }
 
 #[tokio::test]
+async fn migration_0020_initializes_high_water_and_hint_columns_on_empty_store() {
+    let db = temp_db_path("narrative_knowledge_context_fresh");
+    let options = SqliteConnectOptions::from_str(&db)
+        .unwrap()
+        .create_if_missing(true)
+        .foreign_keys(true);
+    let pool = SqlitePoolOptions::new().max_connections(1).connect_with(options).await.unwrap();
+    migrator_through(20).run(&pool).await.unwrap();
+    let high_water: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM story_instances WHERE knowledge_id_high_water != 0")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(high_water, 0);
+    let hint_column: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM pragma_table_info('knowledge_entries') WHERE name = 'retrieval_hint'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(hint_column, 1);
+    pool.close().await;
+    let _ = std::fs::remove_file(db);
+}
+
+#[tokio::test]
+async fn migration_0020_rejects_legacy_story_instance_rows() {
+    let db = temp_db_path("narrative_knowledge_context_guarded");
+    let options = SqliteConnectOptions::from_str(&db)
+        .unwrap()
+        .create_if_missing(true)
+        .foreign_keys(true);
+    let pool = SqlitePoolOptions::new().max_connections(1).connect_with(options).await.unwrap();
+    migrator_through(19).run(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO story_packs \
+         (pack_id, pack_key, version, digest, pack_json, manifest_json, world_book_json, story_profile_json, \
+          role_definitions_json, narrative_definition_json, topic_dictionary_json) \
+         VALUES ('pack-legacy','demo','1.0.0','digest-legacy','{}',X'','{}','{}','{}','{}','{}')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let error = sqlx::migrate!("./assets/persistence/mig").run(&pool).await.unwrap_err();
+    assert!(error.to_string().contains("narrative_knowledge_context_legacy_data_present"));
+    let retained: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM story_packs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(retained, 1);
+    pool.close().await;
+    let _ = std::fs::remove_file(db);
+}
+
+#[tokio::test]
 async fn migration_rejects_conflicting_role_openings() {
     let (pool, db) = opening_migration_pool("ambiguous_story_opening").await;
     insert_pack_with_start(

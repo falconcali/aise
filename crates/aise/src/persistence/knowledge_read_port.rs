@@ -4,15 +4,14 @@ use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId, RetrievalHint};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
-use crate::domain::turn::RetrievalAudience;
+use crate::domain::turn::KnowledgeDelivery;
 use crate::persistence::store::StoreError;
 use async_trait::async_trait;
 
 #[derive(Debug, Clone)]
 pub struct KnowledgeFilter {
-    pub audience: RetrievalAudience,
+    pub delivery: KnowledgeDelivery,
     pub knowledge_kinds: Vec<KnowledgeKind>,
-    pub authorized_memory_owners: Vec<RoleId>,
     pub max_item_bytes: usize,
 }
 
@@ -66,8 +65,7 @@ pub struct KnowledgeIndexQuery<'a> {
 #[derive(Debug, Clone)]
 pub struct KnowledgeIndexRecord {
     pub source_id: KnowledgeSourceId,
-    pub kind: KnowledgeKind,
-    pub retrieval_hint: Option<RetrievalHint>,
+    pub retrieval_hint: RetrievalHint,
 }
 
 #[async_trait]

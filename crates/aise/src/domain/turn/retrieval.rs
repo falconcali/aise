@@ -2,9 +2,9 @@ use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
-use crate::domain::knowledge::{KnowledgeIndexMatch, KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
+use crate::domain::knowledge::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::planning::RetrievalAudience;
+use crate::domain::turn::baseline::RoleContextView;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -67,43 +67,56 @@ pub struct RelevanceRank {
 #[derive(Debug, Clone, Serialize)]
 pub struct ProviderEvidence {
     pub provider_rank: u32,
-    pub matches: Vec<KnowledgeIndexMatch>,
+    pub matches: Vec<crate::domain::knowledge::KnowledgeIndexMatch>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ContextProvenance {
+pub struct RetrievedKnowledgeItem {
     pub source_id: KnowledgeSourceId,
-    pub knowledge_kind: KnowledgeKind,
-    pub source: KnowledgeSource,
-    pub audience: RetrievalAudience,
-    pub memory_owner: Option<RoleId>,
-    pub evidence: BTreeMap<CandidateRetrieverKind, ProviderEvidence>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ContextItem {
     pub content: BoundedText,
-    pub provenance: ContextProvenance,
+    pub source: KnowledgeSource,
     pub relevance: RelevanceRank,
+    pub provider_evidence: BTreeMap<CandidateRetrieverKind, ProviderEvidence>,
     pub token_cost: u64,
 }
 
-impl ContextItem {
-    pub fn from_parts(content: BoundedText, provenance: ContextProvenance, relevance: RelevanceRank) -> Self {
+impl RetrievedKnowledgeItem {
+    pub fn from_parts(
+        source_id: KnowledgeSourceId,
+        content: BoundedText,
+        source: KnowledgeSource,
+        relevance: RelevanceRank,
+        provider_evidence: BTreeMap<CandidateRetrieverKind, ProviderEvidence>,
+    ) -> Self {
         let token_cost = estimate_text_tokens(content.as_str());
         Self {
+            source_id,
             content,
-            provenance,
+            source,
             relevance,
+            provider_evidence,
             token_cost,
         }
     }
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
+pub struct RetrievedWorldKnowledge {
+    pub facts: Vec<RetrievedKnowledgeItem>,
+    pub rumors: Vec<RetrievedKnowledgeItem>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RetrievedCharacterContext {
+    pub role: Option<RoleContextView>,
+    pub known_rumors: Vec<RetrievedKnowledgeItem>,
+    pub memories: Vec<RetrievedKnowledgeItem>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct RetrievedContext {
-    writer: Vec<ContextItem>,
-    roles: BTreeMap<RoleId, Vec<ContextItem>>,
+    world: RetrievedWorldKnowledge,
+    characters: BTreeMap<RoleId, RetrievedCharacterContext>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -118,10 +131,14 @@ pub struct RetrievedContextLimits {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RetrievedContextError {
-    #[error("retrieved context audience is invalid")]
-    InvalidAudience,
+    #[error("retrieved context kind is invalid for its partition")]
+    InvalidKind,
     #[error("retrieved context memory owner is invalid")]
     InvalidMemoryOwner,
+    #[error("retrieved context role is invalid")]
+    InvalidRole,
+    #[error("retrieved context contains a conflicting duplicate")]
+    ConflictingDuplicate,
     #[error("retrieved context count limit exceeded: {limit}")]
     CountLimit { limit: &'static str },
     #[error("retrieved context item byte limit exceeded")]
@@ -136,74 +153,112 @@ pub enum RetrievedContextError {
 
 impl RetrievedContext {
     pub fn try_new(
-        writer: Vec<ContextItem>,
-        roles: BTreeMap<RoleId, Vec<ContextItem>>,
+        world: RetrievedWorldKnowledge,
+        characters: BTreeMap<RoleId, RetrievedCharacterContext>,
         limits: RetrievedContextLimits,
     ) -> Result<Self, RetrievedContextError> {
-        if roles.len() > limits.max_role_audiences {
+        if characters.len() > limits.max_role_audiences {
             return Err(RetrievedContextError::CountLimit {
                 limit: "max_role_audiences",
             });
         }
-        validate_partition(&writer, limits)?;
-        for items in roles.values() {
-            validate_partition(items, limits)?;
+        validate_kind_only(&world.facts, KnowledgeKind::Fact)?;
+        validate_kind_only(&world.rumors, KnowledgeKind::Rumor)?;
+        validate_partition_bounds(&world.facts, limits)?;
+        validate_partition_bounds(&world.rumors, limits)?;
+        for (role_id, character) in &characters {
+            if let Some(role) = &character.role
+                && role.role_id != *role_id
+            {
+                return Err(RetrievedContextError::InvalidRole);
+            }
+            validate_kind_only(&character.known_rumors, KnowledgeKind::Rumor)?;
+            validate_kind_only(&character.memories, KnowledgeKind::Memory)?;
+            validate_partition_bounds(&character.known_rumors, limits)?;
+            validate_partition_bounds(&character.memories, limits)?;
         }
-        let role_items = roles.values().try_fold(0usize, |total, items| {
-            total.checked_add(items.len()).ok_or(RetrievedContextError::ArithmeticOverflow)
+        let character_items = characters.values().try_fold(0usize, |total, character| {
+            total
+                .checked_add(character.known_rumors.len())
+                .and_then(|value| value.checked_add(character.memories.len()))
+                .ok_or(RetrievedContextError::ArithmeticOverflow)
         })?;
-        let total_items = writer
+        let total_items = world
+            .facts
             .len()
-            .checked_add(role_items)
+            .checked_add(world.rumors.len())
+            .and_then(|value| value.checked_add(character_items))
             .ok_or(RetrievedContextError::ArithmeticOverflow)?;
         if total_items > limits.max_total_items {
             return Err(RetrievedContextError::CountLimit {
                 limit: "max_total_items",
             });
         }
-        let mut total_tokens = partition_tokens(&writer)?;
-        for items in roles.values() {
-            total_tokens = total_tokens
-                .checked_add(partition_tokens(items)?)
-                .ok_or(RetrievedContextError::ArithmeticOverflow)?;
+        let mut total_tokens = checked_add_tokens(0, &world.facts)?;
+        total_tokens = checked_add_tokens(total_tokens, &world.rumors)?;
+        for character in characters.values() {
+            total_tokens = checked_add_tokens(total_tokens, &character.known_rumors)?;
+            total_tokens = checked_add_tokens(total_tokens, &character.memories)?;
         }
         if total_tokens > limits.max_total_tokens {
             return Err(RetrievedContextError::TotalTokenLimit);
         }
-        Ok(Self { writer, roles })
+        Ok(Self { world, characters })
     }
 
-    pub fn writer(&self) -> &[ContextItem] {
-        &self.writer
+    pub fn world(&self) -> &RetrievedWorldKnowledge {
+        &self.world
     }
 
-    pub fn for_role(&self, role_id: &RoleId) -> &[ContextItem] {
-        self.roles.get(role_id).map(Vec::as_slice).unwrap_or(&[])
+    pub fn character(&self, role_id: &RoleId) -> Option<&RetrievedCharacterContext> {
+        self.characters.get(role_id)
     }
 
-    pub fn roles(&self) -> &BTreeMap<RoleId, Vec<ContextItem>> {
-        &self.roles
+    pub fn characters(&self) -> &BTreeMap<RoleId, RetrievedCharacterContext> {
+        &self.characters
     }
 
     pub fn total_items(&self) -> usize {
-        self.writer.len().saturating_add(self.roles.values().map(Vec::len).sum())
+        let character_items: usize = self
+            .characters
+            .values()
+            .map(|character| character.known_rumors.len().saturating_add(character.memories.len()))
+            .sum();
+        self.world
+            .facts
+            .len()
+            .saturating_add(self.world.rumors.len())
+            .saturating_add(character_items)
     }
 
     pub fn total_tokens(&self) -> u64 {
-        let mut total = 0u64;
-        for item in &self.writer {
-            total = total.saturating_add(item.token_cost);
-        }
-        for items in self.roles.values() {
-            for item in items {
-                total = total.saturating_add(item.token_cost);
-            }
+        let mut total = sum_tokens(&self.world.facts).saturating_add(sum_tokens(&self.world.rumors));
+        for character in self.characters.values() {
+            total = total
+                .saturating_add(sum_tokens(&character.known_rumors))
+                .saturating_add(sum_tokens(&character.memories));
         }
         total
     }
 }
 
-fn validate_partition(items: &[ContextItem], limits: RetrievedContextLimits) -> Result<(), RetrievedContextError> {
+fn validate_kind_only(items: &[RetrievedKnowledgeItem], kind: KnowledgeKind) -> Result<(), RetrievedContextError> {
+    let mut seen = std::collections::BTreeSet::new();
+    for item in items {
+        if item.source_id.kind() != kind {
+            return Err(RetrievedContextError::InvalidKind);
+        }
+        if !seen.insert(item.source_id.clone()) {
+            return Err(RetrievedContextError::ConflictingDuplicate);
+        }
+    }
+    Ok(())
+}
+
+fn validate_partition_bounds(
+    items: &[RetrievedKnowledgeItem],
+    limits: RetrievedContextLimits,
+) -> Result<(), RetrievedContextError> {
     if items.len() > limits.max_items_per_audience {
         return Err(RetrievedContextError::CountLimit {
             limit: "max_items_per_audience",
@@ -215,21 +270,7 @@ fn validate_partition(items: &[ContextItem], limits: RetrievedContextLimits) -> 
             return Err(RetrievedContextError::ItemByteLimit);
         }
         if item.token_cost != estimate_text_tokens(item.content.as_str()) {
-            return Err(RetrievedContextError::InvalidAudience);
-        }
-        match (
-            &item.provenance.audience,
-            item.provenance.knowledge_kind,
-            &item.provenance.memory_owner,
-        ) {
-            (RetrievalAudience::GlobalWriter, KnowledgeKind::Memory, Some(_)) => {}
-            (RetrievalAudience::Character { role_id }, KnowledgeKind::Memory, Some(owner)) if role_id == owner => {}
-            (RetrievalAudience::Character { .. }, KnowledgeKind::Fact, _) => {
-                return Err(RetrievedContextError::InvalidAudience);
-            }
-            (_, KnowledgeKind::Memory, _) => return Err(RetrievedContextError::InvalidMemoryOwner),
-            (_, _, None) => {}
-            (_, _, Some(_)) => return Err(RetrievedContextError::InvalidMemoryOwner),
+            return Err(RetrievedContextError::InvalidKind);
         }
         tokens = tokens
             .checked_add(item.token_cost)
@@ -241,12 +282,16 @@ fn validate_partition(items: &[ContextItem], limits: RetrievedContextLimits) -> 
     Ok(())
 }
 
-fn partition_tokens(items: &[ContextItem]) -> Result<u64, RetrievedContextError> {
-    let mut tokens = 0u64;
+fn checked_add_tokens(base: u64, items: &[RetrievedKnowledgeItem]) -> Result<u64, RetrievedContextError> {
+    let mut total = base;
     for item in items {
-        tokens = tokens
+        total = total
             .checked_add(item.token_cost)
             .ok_or(RetrievedContextError::ArithmeticOverflow)?;
     }
-    Ok(tokens)
+    Ok(total)
+}
+
+fn sum_tokens(items: &[RetrievedKnowledgeItem]) -> u64 {
+    items.iter().fold(0u64, |total, item| total.saturating_add(item.token_cost))
 }

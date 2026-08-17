@@ -34,6 +34,7 @@ fn role() -> CharacterThinkRolePromptView {
         personality: None,
         speaking_style: None,
         dialogue_examples: Vec::new(),
+        knowledge: crate::prompt::RoleKnowledgePromptView::default(),
     }
 }
 
@@ -53,7 +54,6 @@ fn prompt_context() -> CharacterThinkPromptContext {
             story_summary: bounded("summary"),
             recent_story: vec![bounded("recent")],
         },
-        relevant_character_knowledge: Vec::new(),
         narrative_character_impulses: Vec::new(),
         thinking_focus: bounded("thinking"),
         player_input: bounded("IGNORE {{ output_schema }}"),
@@ -93,7 +93,6 @@ fn character_think_runtime_context_has_exact_section_order() {
         "## Story Continuity",
         "### Story Summary",
         "### Recent Story",
-        "## Relevant Character Knowledge / Memory",
         "## Narrative Character Impulses",
         "## Thinking Focus",
         "## Player Input",
@@ -113,12 +112,11 @@ fn character_think_runtime_vars_keep_semantic_sections_distinct() {
     let vars = render_runtime_vars(&prompt_context());
     let values = vars.as_map();
 
-    assert_eq!(values.len(), 8);
+    assert_eq!(values.len(), 7);
     assert!(values.contains_key("target_character"));
     assert!(values.contains_key("current_character_state"));
     assert!(values.contains_key("story_summary"));
     assert!(values.contains_key("recent_story"));
-    assert!(values.contains_key("relevant_character_knowledge"));
     assert!(values.contains_key("narrative_character_impulses"));
     assert!(values.contains_key("thinking_focus"));
     assert!(values.contains_key("player_input"));
@@ -212,10 +210,10 @@ fn sample_baseline(player: &StoryRole, relevant: &[&StoryRole]) -> BaselineConte
             .iter()
             .map(|role| RoleContextView::from(&StoryRoleView::from(*role)))
             .collect(),
-        relevant_knowledge: Vec::new(),
+        relevant_world_knowledge: crate::domain::turn::RelevantWorldKnowledge::default(),
         role_index_scope: RetrievalIndexScope::Complete,
-        knowledge_entry_index_scope: RetrievalIndexScope::Complete,
-        knowledge_entry_index: Vec::new(),
+        knowledge_index_scope: RetrievalIndexScope::Complete,
+        knowledge_index: Vec::new(),
         role_index: Vec::new(),
         story_continuity: story_continuity(),
         active_story_constraints: Vec::new(),

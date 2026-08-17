@@ -6,9 +6,9 @@ pub mod writer_planner_prompt;
 
 pub use error::PlanningError;
 pub use planner_output::{PlannerContextGap, PlannerOutput};
-pub use retrieval_plan_builder::RetrievalPlanBuilder;
+pub use retrieval_plan_builder::{RetrievalPlanBuilder, merge_narrative_think_requests};
 pub use writer_planner::WriterPlanner;
 pub use writer_planner_prompt::{
-    WriterPlannerPromptContext, WriterPlannerPromptContextProjector, WriterPlannerPromptProjection,
-    writer_planner_output_schema,
+    IndexedRetrievalTarget, WriterPlannerProjectionError, WriterPlannerPromptContext,
+    WriterPlannerPromptContextProjector, WriterPlannerPromptProjection, writer_planner_output_schema,
 };

@@ -3,12 +3,11 @@ use crate::domain::asset::character_card::DialogueExample;
 use crate::domain::asset::ids::LocationKey;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::RoleId;
-use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::narrative_graph::effect::ImpulseUrgency;
 use crate::domain::story_instance::role::RoleController;
 use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::{CharacterThinkRequest, RetrievalAudience};
-use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
+use crate::domain::turn::CharacterThinkRequest;
+use crate::prompt::{RoleKnowledgePromptView, RuntimePromptVars, TrustedPromptVars, render_role_knowledge};
 use crate::turn::turn_context::TurnExecutionContext;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -22,7 +21,6 @@ pub struct CharacterThinkPromptContext {
     pub target_role: CharacterThinkRolePromptView,
     pub current_role_state: CharacterThinkStatePromptView,
     pub story_continuity: CharacterThinkStoryContinuityPromptView,
-    pub relevant_character_knowledge: Vec<CharacterThinkKnowledgePromptView>,
     pub narrative_character_impulses: Vec<CharacterThinkImpulsePromptView>,
     pub thinking_focus: BoundedText,
     pub player_input: BoundedText,
@@ -43,6 +41,7 @@ pub struct CharacterThinkRolePromptView {
     pub personality: Option<BoundedText>,
     pub speaking_style: Option<BoundedText>,
     pub dialogue_examples: Vec<DialogueExample>,
+    pub knowledge: RoleKnowledgePromptView,
 }
 
 #[derive(Debug, Clone)]
@@ -56,18 +55,6 @@ pub struct CharacterThinkStatePromptView {
 pub struct CharacterStateAttributePromptView {
     pub name: BoundedText,
     pub value: ScalarValue,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CharacterThinkKnowledgeKind {
-    Rumor,
-    Memory,
-}
-
-#[derive(Debug, Clone)]
-pub struct CharacterThinkKnowledgePromptView {
-    pub kind: CharacterThinkKnowledgeKind,
-    pub content: BoundedText,
 }
 
 #[derive(Debug, Clone)]
@@ -92,8 +79,6 @@ pub enum CharacterThinkProjectionError {
     UnknownRole { role_id: RoleId },
     #[error("character think role is player-controlled: {role_id}")]
     PlayerControlledRole { role_id: RoleId },
-    #[error("character think private knowledge is unauthorized for role: {role_id}")]
-    UnauthorizedKnowledge { role_id: RoleId },
     #[error("character think required prompt data exceeds budget")]
     RequiredPromptDataExceedsBudget,
     #[error("character think prompt field is invalid")]
@@ -152,7 +137,7 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
             self.character_config.max_input_tokens.saturating_mul(4) as usize,
         )
         .map_err(|_| CharacterThinkProjectionError::InvalidPromptField)?;
-        let relevant_character_knowledge = project_knowledge(ctx, &request.role_id)?;
+        let knowledge = project_knowledge(ctx, &request.role_id);
         let narrative_character_impulses = ctx
             .narrative_projection()
             .map(|projection| projection.plan.character_impulses.as_slice())
@@ -177,6 +162,7 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
                 &role.effective_profile.dialogue_examples,
                 &self.context_config,
             ),
+            knowledge,
         };
         let current_role_state = CharacterThinkStatePromptView {
             location: role.state.location.clone(),
@@ -211,7 +197,6 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
             target_role: target_role.clone(),
             current_role_state,
             story_continuity,
-            relevant_character_knowledge,
             narrative_character_impulses,
             thinking_focus: request.reason.clone(),
             player_input,
@@ -252,40 +237,14 @@ pub fn character_decision_output_schema(config: &CharacterThinkConfig) -> Value 
     })
 }
 
-fn project_knowledge(
-    ctx: &TurnExecutionContext,
-    role_id: &RoleId,
-) -> Result<Vec<CharacterThinkKnowledgePromptView>, CharacterThinkProjectionError> {
-    ctx.retrieved()
-        .for_role(role_id)
-        .iter()
-        .map(|item| {
-            if item.provenance.audience
-                != (RetrievalAudience::Character {
-                    role_id: role_id.clone(),
-                })
-            {
-                return Err(CharacterThinkProjectionError::UnauthorizedKnowledge {
-                    role_id: role_id.clone(),
-                });
-            }
-            let kind = match item.provenance.knowledge_kind {
-                KnowledgeKind::Rumor if item.provenance.memory_owner.is_none() => CharacterThinkKnowledgeKind::Rumor,
-                KnowledgeKind::Memory if item.provenance.memory_owner.as_ref() == Some(role_id) => {
-                    CharacterThinkKnowledgeKind::Memory
-                }
-                _ => {
-                    return Err(CharacterThinkProjectionError::UnauthorizedKnowledge {
-                        role_id: role_id.clone(),
-                    });
-                }
-            };
-            Ok(CharacterThinkKnowledgePromptView {
-                kind,
-                content: item.content.clone(),
-            })
-        })
-        .collect()
+fn project_knowledge(ctx: &TurnExecutionContext, role_id: &RoleId) -> RoleKnowledgePromptView {
+    match ctx.retrieved().character(role_id) {
+        Some(character) => RoleKnowledgePromptView {
+            known_rumors: character.known_rumors.iter().map(|item| item.content.clone()).collect(),
+            memories: character.memories.iter().map(|item| item.content.clone()).collect(),
+        },
+        None => RoleKnowledgePromptView::default(),
+    }
 }
 
 fn render_runtime_vars(context: &CharacterThinkPromptContext) -> RuntimePromptVars {
@@ -305,10 +264,6 @@ fn render_runtime_vars(context: &CharacterThinkPromptContext) -> RuntimePromptVa
         (
             "recent_story".into(),
             Value::String(render_recent_story(&context.story_continuity.recent_story)),
-        ),
-        (
-            "relevant_character_knowledge".into(),
-            Value::String(render_knowledge(&context.relevant_character_knowledge)),
         ),
         (
             "narrative_character_impulses".into(),
@@ -345,6 +300,9 @@ fn render_target_role(value: &CharacterThinkRolePromptView) -> String {
                 .join("\n")
         ));
     }
+    if !value.knowledge.known_rumors.is_empty() || !value.knowledge.memories.is_empty() {
+        lines.push(render_role_knowledge(&value.knowledge));
+    }
     lines.join("\n")
 }
 
@@ -373,23 +331,6 @@ fn render_role_state(value: &CharacterThinkStatePromptView) -> String {
 
 fn render_recent_story(values: &[BoundedText]) -> String {
     values.iter().map(|value| value.as_str()).collect::<Vec<_>>().join("\n\n")
-}
-
-fn render_knowledge(values: &[CharacterThinkKnowledgePromptView]) -> String {
-    if values.is_empty() {
-        return String::new();
-    }
-    values
-        .iter()
-        .map(|value| {
-            let kind = match value.kind {
-                CharacterThinkKnowledgeKind::Rumor => "rumor",
-                CharacterThinkKnowledgeKind::Memory => "memory",
-            };
-            format!("- kind: {kind}\n  content: {}", quoted(value.content.as_str()))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn render_impulses(values: &[CharacterThinkImpulsePromptView]) -> String {

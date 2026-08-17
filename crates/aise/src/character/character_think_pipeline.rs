@@ -83,7 +83,8 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                 turn_id = %ctx.turn_id(),
                 target_role_id = %request.role_id,
                 recent_story_segments = projection.context.story_continuity.recent_story.len(),
-                character_knowledge_count = projection.context.relevant_character_knowledge.len(),
+                known_rumor_count = projection.context.target_role.knowledge.known_rumors.len(),
+                memory_count = projection.context.target_role.knowledge.memories.len(),
                 character_impulse_count = projection.context.narrative_character_impulses.len(),
                 dialogue_example_count,
                 dialogue_example_tokens,
@@ -163,7 +164,6 @@ fn map_projection_error(error: CharacterThinkProjectionError) -> TurnExecutionEr
         CharacterThinkProjectionError::MissingStageState => "missing_stage_state",
         CharacterThinkProjectionError::UnknownRole { .. } => "unknown_role",
         CharacterThinkProjectionError::PlayerControlledRole { .. } => "player_controlled_role",
-        CharacterThinkProjectionError::UnauthorizedKnowledge { .. } => "unauthorized_knowledge",
         CharacterThinkProjectionError::RequiredPromptDataExceedsBudget => "required_prompt_data_exceeds_budget",
         CharacterThinkProjectionError::InvalidPromptField => "invalid_prompt_field",
     };

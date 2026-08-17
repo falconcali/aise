@@ -4,11 +4,14 @@ use crate::domain::asset::constraint::StoryConstraintRequirement;
 use crate::domain::asset::ids::{AttributeKey, LocationKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::RoleId;
-use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::{BaselineContext, RetrievalAudience, RoleContextView, StoryGeneratorOutput};
-use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
+use crate::domain::turn::{BaselineContext, RetrievedCharacterContext, RoleContextView, StoryGeneratorOutput};
+use crate::prompt::{
+    NarrativeDirectionPromptView, RoleKnowledgePromptView, RuntimePromptVars, TrustedPromptVars,
+    WorldKnowledgePromptView, merge_world_knowledge, project_narrative_direction, render_narrative_direction,
+    render_relevant_knowledge, render_role_knowledge,
+};
 use crate::turn::turn_context::TurnExecutionContext;
 use serde::Serialize;
 use serde_json::Value;
@@ -25,9 +28,9 @@ pub struct StoryGeneratorPromptContext {
     pub story_continuity: StoryContinuityPromptView,
     pub player_role: StoryGeneratorRolePromptView,
     pub ai_roles: Vec<StoryGeneratorRolePromptView>,
-    pub relevant_writer_knowledge: Vec<StoryGeneratorKnowledgePromptView>,
+    pub relevant_knowledge: WorldKnowledgePromptView,
     pub story_goal: BoundedText,
-    pub narrative_direction: StoryGeneratorNarrativeDirectionPromptView,
+    pub narrative_direction: NarrativeDirectionPromptView,
     pub active_story_constraints: Vec<ActiveStoryConstraintPromptView>,
     pub character_decisions: Vec<StoryGeneratorCharacterDecisionPromptView>,
     pub player_input: BoundedText,
@@ -65,6 +68,7 @@ pub struct StoryGeneratorRolePromptView {
     pub dialogue_examples: Vec<DialogueExample>,
     pub background: Option<BoundedText>,
     pub state: StoryGeneratorRoleStatePromptView,
+    pub knowledge: RoleKnowledgePromptView,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -72,28 +76,6 @@ pub struct StoryGeneratorRoleStatePromptView {
     pub location: LocationKey,
     pub goals: Vec<BoundedText>,
     pub attributes: BTreeMap<AttributeKey, ScalarValue>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct StoryGeneratorKnowledgePromptView {
-    pub entry_id: KnowledgeSourceId,
-    pub kind: KnowledgeKind,
-    pub scope: KnowledgeScopePromptView,
-    pub content: BoundedText,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum KnowledgeScopePromptView {
-    ObjectiveWorld,
-    PublicClaim,
-    CharacterMemory { owner: RoleId },
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct StoryGeneratorNarrativeDirectionPromptView {
-    pub active_goals: Vec<BoundedText>,
-    pub event_intents: Vec<BoundedText>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -170,7 +152,11 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
         let plan = ctx.plan().ok_or(StoryGeneratorProjectionError::MissingWriterPlan)?;
         let player_input = BoundedText::try_new(ctx.player_input().to_owned(), "player_input", 4096)
             .map_err(|_| StoryGeneratorProjectionError::InvalidPlayerInput)?;
-        let player_role = project_role(&baseline.player_role, &self.config)?;
+        let player_role = project_role(
+            &baseline.player_role,
+            &self.config,
+            ctx.retrieved().character(&baseline.player_role.role_id),
+        )?;
         let ai_roles = project_ai_roles(ctx, baseline, &self.config)?;
         let character_decisions = project_decisions(ctx, baseline, &ai_roles)?;
         let story_profile = StoryProfilePromptView {
@@ -190,22 +176,14 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
                 .map(|segment| segment.text.clone())
                 .collect(),
         };
-        let relevant_writer_knowledge = project_writer_knowledge(ctx)?;
-        let narrative_projection = ctx.narrative_projection();
-        let narrative_direction = StoryGeneratorNarrativeDirectionPromptView {
-            active_goals: narrative_projection
-                .map(|projection| projection.plan.active_directions.as_slice())
-                .unwrap_or(&[])
-                .iter()
-                .map(|direction| direction.dramatic_focus.clone())
-                .collect(),
-            event_intents: narrative_projection
-                .map(|projection| projection.plan.world_event_intents.as_slice())
-                .unwrap_or(&[])
-                .iter()
-                .map(|intent| intent.description.clone())
-                .collect(),
-        };
+        let relevant_knowledge = merge_world_knowledge(&baseline.relevant_world_knowledge, ctx.retrieved().world())
+            .map_err(|_| StoryGeneratorProjectionError::Invariant {
+                code: "relevant_knowledge_merge_conflict",
+            })?;
+        let narrative_direction = ctx
+            .narrative_projection()
+            .map(|projection| project_narrative_direction(&projection.plan))
+            .unwrap_or_default();
         let active_story_constraints = project_constraints(baseline);
         let mut context = StoryGeneratorPromptContext {
             story_profile,
@@ -215,7 +193,7 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
             story_continuity,
             player_role,
             ai_roles,
-            relevant_writer_knowledge,
+            relevant_knowledge,
             story_goal: plan.story_goal.summary.clone(),
             narrative_direction,
             active_story_constraints,
@@ -259,14 +237,28 @@ fn project_ai_roles(
     role_ids
         .into_iter()
         .filter_map(|role_id| snapshot.role(&role_id).map(RoleContextView::from))
-        .map(|role| project_role(&role, config))
+        .map(|role| project_role(&role, config, ctx.retrieved().character(&role.role_id)))
         .collect()
 }
 
 fn project_role(
     role: &RoleContextView,
     config: &ContextPreparationConfig,
+    retrieved: Option<&RetrievedCharacterContext>,
 ) -> Result<StoryGeneratorRolePromptView, StoryGeneratorProjectionError> {
+    if let Some(retrieved_role) = retrieved.and_then(|character| character.role.as_ref())
+        && (retrieved_role.role_label != role.role_label || retrieved_role.profile.name != role.profile.name)
+    {
+        return Err(StoryGeneratorProjectionError::Invariant {
+            code: "character_role_view_conflict",
+        });
+    }
+    let knowledge = retrieved
+        .map(|character| RoleKnowledgePromptView {
+            known_rumors: character.known_rumors.iter().map(|item| item.content.clone()).collect(),
+            memories: character.memories.iter().map(|item| item.content.clone()).collect(),
+        })
+        .unwrap_or_default();
     Ok(StoryGeneratorRolePromptView {
         role_id: role.role_id.clone(),
         name: role.profile.name.clone(),
@@ -281,48 +273,8 @@ fn project_role(
             goals: role.state.goals.clone(),
             attributes: role.state.attributes.clone(),
         },
+        knowledge,
     })
-}
-
-fn project_writer_knowledge(
-    ctx: &TurnExecutionContext,
-) -> Result<Vec<StoryGeneratorKnowledgePromptView>, StoryGeneratorProjectionError> {
-    ctx.retrieved()
-        .writer()
-        .iter()
-        .map(|item| {
-            if item.provenance.audience != RetrievalAudience::GlobalWriter {
-                return Err(StoryGeneratorProjectionError::Invariant {
-                    code: "writer_knowledge_audience_invalid",
-                });
-            }
-            let scope = match item.provenance.knowledge_kind {
-                KnowledgeKind::Fact if item.provenance.memory_owner.is_none() => {
-                    KnowledgeScopePromptView::ObjectiveWorld
-                }
-                KnowledgeKind::Rumor if item.provenance.memory_owner.is_none() => KnowledgeScopePromptView::PublicClaim,
-                KnowledgeKind::Memory => item
-                    .provenance
-                    .memory_owner
-                    .clone()
-                    .map(|owner| KnowledgeScopePromptView::CharacterMemory { owner })
-                    .ok_or(StoryGeneratorProjectionError::Invariant {
-                        code: "writer_memory_owner_missing",
-                    })?,
-                _ => {
-                    return Err(StoryGeneratorProjectionError::Invariant {
-                        code: "writer_knowledge_scope_invalid",
-                    });
-                }
-            };
-            Ok(StoryGeneratorKnowledgePromptView {
-                entry_id: item.provenance.source_id.clone(),
-                kind: item.provenance.knowledge_kind,
-                scope,
-                content: item.content.clone(),
-            })
-        })
-        .collect()
 }
 
 fn project_constraints(baseline: &BaselineContext) -> Vec<ActiveStoryConstraintPromptView> {
@@ -431,8 +383,8 @@ pub(crate) fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> Runt
             Value::String(render_narrative_direction(&context.narrative_direction)),
         ),
         (
-            "relevant_writer_knowledge".into(),
-            Value::String(render_knowledge(&context.relevant_writer_knowledge)),
+            "relevant_knowledge".into(),
+            Value::String(render_relevant_knowledge(&context.relevant_knowledge)),
         ),
         (
             "character_decisions".into(),
@@ -577,6 +529,9 @@ fn render_role(value: &StoryGeneratorRolePromptView, prefix: Option<&str>) -> St
     if !value.state.attributes.is_empty() {
         lines.push(format!("{rest}attributes: {}", render_attributes(&value.state.attributes)));
     }
+    if !value.knowledge.known_rumors.is_empty() || !value.knowledge.memories.is_empty() {
+        lines.push(render_role_knowledge(&value.knowledge));
+    }
     lines.join("\n")
 }
 
@@ -606,46 +561,6 @@ fn render_constraints(values: &[ActiveStoryConstraintPromptView]) -> String {
                 "- constraint_id: {}\n  kind: {kind}\n  statement: {}",
                 quoted(&value.constraint_id),
                 quoted(value.statement.as_str())
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn render_narrative_direction(value: &StoryGeneratorNarrativeDirectionPromptView) -> String {
-    let mut parts = Vec::new();
-    if !value.active_goals.is_empty() {
-        parts.push(format!("active_goals: {}", quoted_list(&value.active_goals)));
-    }
-    if !value.event_intents.is_empty() {
-        parts.push(format!("event_intents: {}", quoted_list(&value.event_intents)));
-    }
-    parts.join("\n")
-}
-
-fn render_knowledge(values: &[StoryGeneratorKnowledgePromptView]) -> String {
-    if values.is_empty() {
-        return String::new();
-    }
-    values
-        .iter()
-        .map(|value| {
-            let kind = match value.kind {
-                KnowledgeKind::Fact => "fact",
-                KnowledgeKind::Rumor => "rumor",
-                KnowledgeKind::Memory => "memory",
-            };
-            let scope = match &value.scope {
-                KnowledgeScopePromptView::ObjectiveWorld => "objective_world".into(),
-                KnowledgeScopePromptView::PublicClaim => "public_claim".into(),
-                KnowledgeScopePromptView::CharacterMemory { owner } => {
-                    format!("character_memory:{}", quoted(owner.as_str()))
-                }
-            };
-            format!(
-                "- entry_id: {}\n  kind: {kind}\n  scope: {scope}\n  content: {}",
-                quoted(value.entry_id.as_str()),
-                quoted(value.content.as_str())
             )
         })
         .collect::<Vec<_>>()

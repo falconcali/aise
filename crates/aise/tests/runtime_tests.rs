@@ -3,8 +3,8 @@ use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::RoleId;
 use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::turn::{
-    CharacterThinkRequest, RetrievalAudience, RetrievalPlan, RetrievalRequest, RetrievalRequestOrigin, WriterPlan,
-    WriterStoryGoal,
+    CharacterThinkRequest, KnowledgeDelivery, KnowledgeRetrievalRequest, RetrievalPlan, RetrievalRequestOrigin,
+    WriterPlan, WriterStoryGoal,
 };
 use aise::turn::turn_budget::TurnBudget;
 
@@ -17,14 +17,13 @@ fn sample_plan(with_requests: bool) -> WriterPlan {
         character_think_requests: Vec::new(),
     };
     if with_requests {
-        plan.retrieval_plan.requests.push(RetrievalRequest {
-            audience: RetrievalAudience::GlobalWriter,
+        plan.retrieval_plan.knowledge_requests.push(KnowledgeRetrievalRequest {
+            delivery: KnowledgeDelivery::Writer,
             target_source_id: None,
             knowledge_kinds: vec![KnowledgeKind::Fact],
             entities: Vec::new(),
             topics: Vec::new(),
             query_text: None,
-            authorized_memory_owners: Vec::new(),
             reason: BoundedText::try_new("need", "reason", 64).unwrap(),
             origin: RetrievalRequestOrigin::Automatic,
             signal_priority: 0,
@@ -40,10 +39,10 @@ fn sample_plan(with_requests: bool) -> WriterPlan {
 #[test]
 fn retrieval_and_character_think_are_enabled_from_plan_collections() {
     let empty = sample_plan(false);
-    assert!(empty.retrieval_plan.requests.is_empty());
+    assert!(empty.retrieval_plan.knowledge_requests.is_empty());
     assert!(empty.character_think_requests.is_empty());
     let filled = sample_plan(true);
-    assert_eq!(filled.retrieval_plan.requests.len(), 1);
+    assert_eq!(filled.retrieval_plan.knowledge_requests.len(), 1);
     assert_eq!(filled.character_think_requests.len(), 1);
 }
 

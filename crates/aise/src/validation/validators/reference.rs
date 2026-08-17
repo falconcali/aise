@@ -126,16 +126,25 @@ fn deletable_source_id(target: &DeletableKnowledgeId) -> KnowledgeSourceId {
 pub fn modifiable_knowledge_index(ctx: &TurnExecutionContext) -> BTreeMap<KnowledgeSourceId, KnowledgeKind> {
     let mut index = BTreeMap::new();
     if let Some(baseline) = ctx.baseline() {
-        for entry in &baseline.relevant_knowledge {
-            index.insert(entry.entry_id.clone(), entry.kind);
+        for entry in &baseline.relevant_world_knowledge.facts {
+            index.insert(entry.source_id.clone(), KnowledgeKind::Fact);
+        }
+        for entry in &baseline.relevant_world_knowledge.rumors {
+            index.insert(entry.source_id.clone(), KnowledgeKind::Rumor);
         }
     }
-    for item in ctx.retrieved().writer() {
-        index.insert(item.provenance.source_id.clone(), item.provenance.knowledge_kind);
+    for item in &ctx.retrieved().world().facts {
+        index.insert(item.source_id.clone(), KnowledgeKind::Fact);
     }
-    for items in ctx.retrieved().roles().values() {
-        for item in items {
-            index.insert(item.provenance.source_id.clone(), item.provenance.knowledge_kind);
+    for item in &ctx.retrieved().world().rumors {
+        index.insert(item.source_id.clone(), KnowledgeKind::Rumor);
+    }
+    for character in ctx.retrieved().characters().values() {
+        for item in &character.known_rumors {
+            index.insert(item.source_id.clone(), KnowledgeKind::Rumor);
+        }
+        for item in &character.memories {
+            index.insert(item.source_id.clone(), KnowledgeKind::Memory);
         }
     }
     index
