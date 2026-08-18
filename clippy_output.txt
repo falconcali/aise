@@ -1,9 +1,0 @@
-﻿cargo :     Checking aise v0.1.0 (E:\Projects\aise\aise\crates\aise)
-所在位置 C:\Users\Administrator.DESKTOP-3I7DA00\AppData\Local\Temp\genie-ps-1786971503431-o1whv4.ps1:558 字符: 27
-+ ... \aise\aise; cargo clippy --workspace --all-targets --all-features --  ...
-+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (    Checking ai...se\crates\aise):String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
- 
-    Checking aise-server v0.1.0 (E:\Projects\aise\aise\crates\aise-server)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.06s
