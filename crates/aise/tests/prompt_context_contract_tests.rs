@@ -1,10 +1,12 @@
 use aise::domain::asset::character_card::CharacterProfile;
-use aise::domain::asset::ids::{LocationKey, PlayerId, Sha256Digest};
+use aise::domain::asset::entity::KnowledgeEntity;
+use aise::domain::asset::ids::{CanonicalEventKey, LocationKey, NarrativeNodeKey, PlayerId, Sha256Digest};
 use aise::domain::asset::story_pack::{StoryProfile, StoryStyle};
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::RoleId;
 use aise::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySummary};
-use aise::domain::narrative_graph::projector::NarrativePlan;
+use aise::domain::narrative_graph::effect::{NarrativeEffectId, WorldEventIntent};
+use aise::domain::narrative_graph::projector::{NarrativeDirection, NarrativePlan};
 use aise::domain::story_instance::role::{RoleController, StoryRoleState};
 use aise::domain::story_instance::state::InstanceSettings;
 use aise::domain::turn::StoryGeneratorOutput;
@@ -13,6 +15,7 @@ use aise::planning::WriterPlannerPromptContextProjector;
 use aise::prompt::profile::PromptProfile;
 use aise::prompt::{
     CatalogPromptSource, PromptCompositionInput, RuntimePromptVars, TrustedPromptSource, TrustedPromptVars,
+    project_narrative_direction, render_narrative_direction,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
@@ -298,4 +301,162 @@ fn story_continuity_is_not_recursively_rendered_or_promoted() {
         assert!(!composition.fti.as_str().contains(injected));
         assert!(!composition.fti.as_str().contains("danger"));
     }
+}
+
+fn sample_narrative_plan() -> NarrativePlan {
+    let mut plan = NarrativePlan::empty();
+    plan.active_directions.push(NarrativeDirection {
+        source_node: NarrativeNodeKey::try_new("node_gate").unwrap(),
+        dramatic_focus: bounded("Tension mounts near the gate."),
+    });
+    plan.world_event_intents.push(WorldEventIntent {
+        effect_id: NarrativeEffectId::try_new("narrative-effect:node_gate:activate:1:0").unwrap(),
+        source_node: NarrativeNodeKey::try_new("node_gate").unwrap(),
+        event_key: CanonicalEventKey::try_new("gate_creaks").unwrap(),
+        category: bounded("ambience"),
+        participants: vec![KnowledgeEntity::Location(LocationKey::try_new("gate").unwrap())],
+        location: Some(LocationKey::try_new("gate").unwrap()),
+        description: bounded("The gate creaks in the wind."),
+    });
+    plan
+}
+
+#[test]
+fn shared_narrative_direction_projection_is_stage_consistent() {
+    let definition_site = include_str!("../src/prompt/narrative_direction.rs");
+    assert!(definition_site.contains("pub struct NarrativeDirectionPromptView"));
+    assert!(definition_site.contains("pub struct WorldEventIntentPromptView"));
+    assert!(definition_site.contains("pub fn project_narrative_direction"));
+    assert!(definition_site.contains("pub fn render_narrative_direction"));
+
+    let writer_planner = include_str!("../src/planning/writer_planner_prompt.rs");
+    let story_generator = include_str!("../src/story/story_generator_prompt.rs");
+    let story_repairer = include_str!("../src/story/story_repairer_prompt.rs");
+    let character_think = include_str!("../src/character/character_think_prompt.rs");
+
+    assert!(writer_planner.contains("project_narrative_direction"));
+    assert!(writer_planner.contains("render_narrative_direction"));
+    assert!(story_generator.contains("project_narrative_direction"));
+    assert!(story_generator.contains("render_narrative_direction"));
+    assert!(story_repairer.contains("StoryGeneratorPromptContext"));
+    assert!(story_repairer.contains("DefaultStoryGeneratorPromptContextProjector"));
+
+    for source in [writer_planner, story_generator, story_repairer, character_think] {
+        assert!(!source.contains("struct NarrativeDirectionPromptView"));
+        assert!(!source.contains("struct WorldEventIntentPromptView"));
+    }
+}
+
+#[test]
+fn writer_planner_and_generator_share_narrative_direction_body() {
+    let plan = sample_narrative_plan();
+    let expected = render_narrative_direction(&project_narrative_direction(&plan));
+    assert!(!expected.is_empty());
+    assert!(expected.contains("### Active Directions"));
+    assert!(expected.contains("### World Event Intents"));
+    assert!(!expected.contains("node_gate"));
+    assert!(!expected.contains("narrative-effect"));
+    assert!(!expected.contains("gate_creaks"));
+
+    let baseline = minimal_baseline("ok");
+    let writer_projection = WriterPlannerPromptContextProjector
+        .project(
+            &baseline,
+            &plan,
+            &bounded("go north"),
+            &aise::config::PlannerConfig::default(),
+            8192,
+        )
+        .expect("writer projection");
+    let writer_rendered = writer_projection
+        .rc_vars
+        .as_map()
+        .get("narrative_direction")
+        .and_then(Value::as_str)
+        .expect("narrative_direction rendered");
+    assert_eq!(writer_rendered, expected);
+
+    let story_generator = include_str!("../src/story/story_generator_prompt.rs");
+    assert!(story_generator.contains(
+        "let narrative_direction = ctx\n            .narrative_projection()\n            .map(|projection| project_narrative_direction(&projection.plan))"
+    ));
+    assert!(story_generator.contains("Value::String(render_narrative_direction(&context.narrative_direction))"));
+}
+
+#[test]
+fn world_event_intent_renders_full_semantics_without_bookkeeping() {
+    let plan = sample_narrative_plan();
+    let view = project_narrative_direction(&plan);
+    let rendered = render_narrative_direction(&view);
+    assert!(rendered.contains("category: \"ambience\""));
+    assert!(rendered.contains("participants: [\"location:gate\"]"));
+    assert!(rendered.contains("location: \"gate\""));
+    assert!(rendered.contains("description: \"The gate creaks in the wind.\""));
+    assert!(!rendered.contains("effect_id"));
+    assert!(!rendered.contains("source_node"));
+    assert!(!rendered.contains("event_key"));
+    assert!(!rendered.contains("node_gate"));
+    assert!(!rendered.contains("gate_creaks"));
+    assert!(!rendered.contains("narrative-effect"));
+}
+
+#[test]
+fn active_direction_hides_source_node() {
+    let plan = sample_narrative_plan();
+    let view = project_narrative_direction(&plan);
+    let rendered = render_narrative_direction(&view);
+    assert!(rendered.contains("### Active Directions"));
+    assert!(rendered.contains("Tension mounts near the gate."));
+    assert!(!rendered.contains("node_gate"));
+    assert!(!rendered.contains("source_node"));
+}
+
+#[test]
+fn writer_planner_prompt_sources_contain_no_legacy_narrative_fields() {
+    for source in [
+        include_str!("../src/planning/writer_planner_prompt.rs"),
+        include_str!("../src/story/story_generator_prompt.rs"),
+        include_str!("../src/story/story_repairer_prompt.rs"),
+    ] {
+        assert!(!source.contains("active_goals"));
+        assert!(!source.contains("world_event_intent_count"));
+        assert!(!source.contains("event_intents"));
+    }
+}
+
+#[test]
+fn runtime_context_projectors_preserve_slot_key_sets() {
+    let baseline = minimal_baseline("ok");
+    let plan = sample_narrative_plan();
+    let projection = WriterPlannerPromptContextProjector
+        .project(
+            &baseline,
+            &plan,
+            &bounded("go north"),
+            &aise::config::PlannerConfig::default(),
+            8192,
+        )
+        .expect("writer projection");
+
+    let expected: std::collections::BTreeSet<&str> = [
+        "story_profile",
+        "instance_settings",
+        "story_summary",
+        "recent_story",
+        "player_character",
+        "relevant_characters",
+        "relevant_knowledge",
+        "character_index",
+        "knowledge_index",
+        "narrative_direction",
+        "active_story_constraints",
+        "player_input",
+    ]
+    .into_iter()
+    .collect();
+    let actual: std::collections::BTreeSet<&str> = projection.rc_vars.as_map().keys().map(String::as_str).collect();
+    assert_eq!(
+        actual, expected,
+        "writer_planner RC slot keys must match assets/prompts/context-v2/slots.yaml exactly"
+    );
 }

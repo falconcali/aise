@@ -340,6 +340,31 @@ async fn knowledge_read_rejects_revision_or_digest_mismatch() {
 }
 
 #[tokio::test]
+async fn knowledge_index_rejects_memory() {
+    let (sqlite, snapshot, db) = seeded_store("index_memory").await;
+    let pool = sqlite.pool_for_tests();
+    sqlx::query(
+        "INSERT INTO knowledge_entries (story_id, source_id, knowledge_kind, memory_owner_role_id, retrieval_hint, content, salience, source_json, payload_json) \
+         VALUES (?, 'memory_0001', 'memory', 'protagonist', NULL, 'a private memory', 10, '{}', '{}')",
+    )
+    .bind(snapshot.story_id.to_string())
+    .execute(pool)
+    .await
+    .expect("insert memory row");
+
+    let error = sqlite
+        .list_index(KnowledgeIndexQuery {
+            snapshot: &snapshot,
+            knowledge_kinds: &[KnowledgeKind::Fact, KnowledgeKind::Rumor, KnowledgeKind::Memory],
+            limit: 16,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(error, aise::persistence::StoreError::Serialization { .. }));
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
 async fn sqlite_entity_and_topic_queries_use_indexes() {
     let (sqlite, _snapshot, db) = seeded_store("explain").await;
     let pool = sqlite.pool_for_tests();

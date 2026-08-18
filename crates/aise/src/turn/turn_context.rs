@@ -275,7 +275,7 @@ impl TurnExecutionContext {
             .map_err(|error| {
                 TurnExecutionError::new(
                     TurnFailureKind::InvariantViolation,
-                    "retrieved_context_limit",
+                    error.turn_code(),
                     Some(TurnStage::Context),
                     error.to_string(),
                 )

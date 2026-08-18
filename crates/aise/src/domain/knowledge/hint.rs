@@ -54,3 +54,7 @@ impl std::fmt::Display for RetrievalHint {
         f.write_str(self.0.as_str())
     }
 }
+
+#[cfg(test)]
+#[path = "tests/hint_tests.rs"]
+mod tests;

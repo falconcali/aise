@@ -214,6 +214,22 @@ fn writer_planner_indexed_targets_cover_role_and_knowledge_index_entries() {
 }
 
 #[test]
+fn empty_grouped_indexes_preserve_scope() {
+    let baseline = minimal_baseline();
+    assert_eq!(render_role_index(&baseline), "scope: complete");
+    assert_eq!(render_knowledge_index(&baseline), "scope: complete");
+    assert!(!render_role_index(&baseline).contains("### Retrievable Characters"));
+    assert!(!render_knowledge_index(&baseline).contains("### Retrievable Facts"));
+    assert!(!render_knowledge_index(&baseline).contains("### Retrievable Rumors"));
+
+    let mut prefiltered = baseline;
+    prefiltered.role_index_scope = RetrievalIndexScope::Prefiltered;
+    prefiltered.knowledge_index_scope = RetrievalIndexScope::Prefiltered;
+    assert_eq!(render_role_index(&prefiltered), "scope: prefiltered");
+    assert_eq!(render_knowledge_index(&prefiltered), "scope: prefiltered");
+}
+
+#[test]
 fn insert_target_accepts_repeated_identical_entry() {
     let mut targets = std::collections::BTreeMap::new();
     let role_id = RoleId::try_new("npc-guard").unwrap();

@@ -151,6 +151,22 @@ pub enum RetrievedContextError {
     ArithmeticOverflow,
 }
 
+impl RetrievedContextError {
+    pub fn turn_code(&self) -> &'static str {
+        match self {
+            RetrievedContextError::InvalidKind
+            | RetrievedContextError::InvalidMemoryOwner
+            | RetrievedContextError::InvalidRole
+            | RetrievedContextError::ConflictingDuplicate => "retrieval_partition_invalid",
+            RetrievedContextError::CountLimit { .. }
+            | RetrievedContextError::ItemByteLimit
+            | RetrievedContextError::AudienceTokenLimit
+            | RetrievedContextError::TotalTokenLimit
+            | RetrievedContextError::ArithmeticOverflow => "retrieval_context_limit",
+        }
+    }
+}
+
 impl RetrievedContext {
     pub fn try_new(
         world: RetrievedWorldKnowledge,
@@ -295,3 +311,7 @@ fn checked_add_tokens(base: u64, items: &[RetrievedKnowledgeItem]) -> Result<u64
 fn sum_tokens(items: &[RetrievedKnowledgeItem]) -> u64 {
     items.iter().fold(0u64, |total, item| total.saturating_add(item.token_cost))
 }
+
+#[cfg(test)]
+#[path = "tests/retrieval_tests.rs"]
+mod tests;

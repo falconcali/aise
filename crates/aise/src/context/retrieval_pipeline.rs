@@ -5,7 +5,8 @@ use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use crate::domain::turn::{
     CandidateMatch, CandidateRetrieverKind, KnowledgeDelivery, MatchLevel, RelevanceRank, RetrievedCharacterContext,
-    RetrievedContext, RetrievedContextLimits, RetrievedKnowledgeItem, RetrievedWorldKnowledge, RoleContextView,
+    RetrievedContext, RetrievedContextError, RetrievedContextLimits, RetrievedKnowledgeItem, RetrievedWorldKnowledge,
+    RoleContextView,
 };
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
@@ -125,14 +126,7 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
         for (role_id, role_view) in role_views {
             characters.entry(role_id).or_default().role = Some(role_view);
         }
-        let context = RetrievedContext::try_new(world, characters, limits).map_err(|error| {
-            TurnExecutionError::new(
-                TurnFailureKind::InvariantViolation,
-                "retrieval_context_limit",
-                Some(TurnStage::ContextRetrieval),
-                error.to_string(),
-            )
-        })?;
+        let context = RetrievedContext::try_new(world, characters, limits).map_err(map_retrieved_context_error)?;
         let payload = serde_json::json!({
             "story_id": ctx.story_id(),
             "turn_id": ctx.turn_id(),
@@ -212,6 +206,12 @@ fn partition_and_rank(
     let mut characters: BTreeMap<RoleId, Vec<RetrievedKnowledgeItem>> = BTreeMap::new();
     for candidate in candidates {
         let delivery = candidate.delivery.clone();
+        if let KnowledgeDelivery::Character { role_id } = &delivery
+            && candidate.record.kind == KnowledgeKind::Memory
+            && candidate.record.memory_owner.as_ref() != Some(role_id)
+        {
+            return Err(map_retrieved_context_error(RetrievedContextError::InvalidMemoryOwner));
+        }
         let item = candidate_to_item(candidate)?;
         match delivery {
             KnowledgeDelivery::Writer => world.push(item),
@@ -404,4 +404,13 @@ fn map_context_error(error: ContextError) -> TurnExecutionError {
         _ => Some(TurnStage::ContextRetrieval),
     };
     TurnExecutionError::new(TurnFailureKind::InvariantViolation, error.turn_code(), stage, error.to_string())
+}
+
+fn map_retrieved_context_error(error: RetrievedContextError) -> TurnExecutionError {
+    TurnExecutionError::new(
+        TurnFailureKind::InvariantViolation,
+        error.turn_code(),
+        Some(TurnStage::ContextRetrieval),
+        error.to_string(),
+    )
 }

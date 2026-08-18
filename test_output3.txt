@@ -1,0 +1,733 @@
+﻿cargo :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+所在位置 C:\Users\Administrator.DESKTOP-3I7DA00\AppData\Local\Temp\genie-ps-1786974143246-6fysqa.ps1:558 字符: 27
++ cd e:\Projects\aise\aise; cargo test --workspace 2>&1 | Out-File -Fil ...
++                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `t...get(s) in 0.31s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+     Running unittests src\lib.rs (target\debug\deps\aise-ac4004ccf642cf9c.exe)
+
+running 352 tests
+test character::character_think_pipeline::tests::character_decision_output_parses_explicit_null_utterance_as_none ... ok
+test character::character_think_pipeline::tests::character_decision_output_parses_required_decision_with_omitted_suggestion ... ok
+test character::character_think_pipeline::tests::character_decision_output_rejects_model_returned_character_id ... ok
+test character::character_think_pipeline::tests::character_decision_output_rejects_each_removed_field ... ok
+test character::character_think_pipeline::tests::character_decision_output_rejects_missing_or_null_decision ... ok
+test character::character_think_pipeline::tests::character_decision_output_parses_present_utterance_as_some ... ok
+test character::character_think_pipeline::tests::character_decision_output_rejects_unknown_field ... ok
+test character::character_think_pipeline::tests::enforce_total_output_budget_accepts_combined_bytes_within_limit ... ok
+test character::character_think_pipeline::tests::enforce_total_output_budget_rejects_combined_bytes_over_limit ... ok
+test character::character_think_pipeline::tests::normalize_optional_output_enforces_per_field_byte_limit ... ok
+test character::character_think_pipeline::tests::normalize_optional_output_maps_absent_to_none ... ok
+test character::character_think_pipeline::tests::normalize_optional_output_rejects_whitespace_only_present_utterance ... ok
+test character::character_think_pipeline::tests::normalize_required_output_enforces_per_field_byte_limit ... ok
+test character::character_think_pipeline::tests::normalize_required_output_trims_surrounding_whitespace ... ok
+test character::character_think_prompt::tests::character_decision_output_schema_is_closed ... ok
+test character::character_think_pipeline::tests::normalize_required_output_rejects_whitespace_only_decision ... ok
+test character::character_think_prompt::tests::character_think_csi_and_fti_have_exact_rule_counts ... ok
+test character::character_think_prompt::tests::character_think_runtime_context_has_exact_section_order ... ok
+test character::character_think_prompt::tests::character_think_renders_story_continuity_as_prose ... ok
+test character::character_think_prompt::tests::character_think_runtime_vars_keep_semantic_sections_distinct ... ok
+test config::llm::tests::content_recording_permitted_only_in_development ... ok
+test config::llm::tests::full_content_policy_requires_development_environment ... ok
+test config::llm::tests::metadata_only_policy_validates_in_any_environment ... ok
+test config::llm::tests::redacted_content_policy_requires_development_environment ... ok
+test context::baseline_ctx_builder::tests::role_context_projection_uses_one_story_role_view ... ok
+test context::tests::retrieval_pipeline_requires_entity_and_topic_retrievers ... ok
+test domain::ids::tests::character_id_accepts_canonical_lowercase_hyphenated_uuid ... ok
+test domain::ids::tests::character_id_and_role_id_ordering_is_deterministic ... ok
+test domain::ids::tests::character_id_and_role_id_with_duplicate_display_names_remain_distinct ... ok
+test domain::ids::tests::character_id_deserialize_rejects_invalid_value ... ok
+test context::baseline_ctx_builder::tests::provided_world_knowledge_is_not_indexed ... ok
+test domain::ids::tests::character_id_normalizes_uppercase_uuid ... ok
+test domain::ids::tests::character_id_new_uuid_is_non_nil_and_round_trips ... ok
+test domain::ids::tests::character_id_rejects_malformed_uuid ... ok
+test domain::ids::tests::character_id_rejects_nil_uuid ... ok
+test domain::ids::tests::character_id_serializes_as_canonical_string ... ok
+test domain::ids::tests::knowledge_id_deserialize_rejects_invalid_grammar ... ok
+test domain::ids::tests::knowledge_id_rejects_sequence_above_sqlite_range ... ok
+test domain::ids::tests::knowledge_id_serializes_as_canonical_string_and_round_trips ... ok
+test domain::ids::tests::knowledge_ids_reject_alternate_spellings ... ok
+test domain::ids::tests::knowledge_ids_use_canonical_zero_padded_grammar ... ok
+test domain::ids::tests::role_id_accepts_dots_underscores_and_hyphens ... ok
+test domain::ids::tests::role_id_accepts_exact_max_bytes ... ok
+test character::character_think_prompt::tests::character_think_rejects_unknown_role ... ok
+test character::character_think_prompt::tests::character_think_allows_existing_ai_role_without_presence_state ... ok
+test character::character_think_prompt::tests::runtime_context_projectors_preserve_slot_key_sets ... ok
+test domain::ids::tests::role_id_cannot_collide_with_knowledge_id ... ok
+test character::character_think_prompt::tests::character_think_rejects_player_role ... ok
+test domain::ids::tests::role_id_rejects_control_character ... ok
+test domain::ids::tests::role_id_rejects_empty ... ok
+test character::character_think_prompt::tests::character_think_nests_authorized_knowledge_under_target_role ... ok
+test domain::ids::tests::role_id_rejects_leading_separator ... ok
+test character::character_think_prompt::tests::character_impulse_is_target_scoped ... ok
+test domain::ids::tests::role_id_rejects_over_max_bytes ... ok
+test domain::ids::tests::role_id_rejects_repeated_separator ... ok
+test domain::ids::tests::role_id_rejects_trailing_separator ... ok
+test domain::ids::tests::role_id_rejects_uppercase ... ok
+test domain::ids::tests::role_id_rejects_whitespace ... ok
+test domain::ids::tests::role_id_serializes_and_round_trips_through_json ... ok
+test domain::knowledge::hint::tests::retrieval_hint_domain_bound_is_uniform ... ok
+test domain::knowledge::query::tests::allocate_knowledge_ids_switches_to_unpadded_form_after_nine_thousand_nine_hundred_ninety_nine ... ok
+test domain::knowledge::query::tests::knowledge_id_allocation_is_retry_stable ... ok
+test domain::knowledge::query::tests::knowledge_id_sequence_never_reuses_deleted_value ... ok
+test domain::knowledge::query::tests::runtime_knowledge_ids_use_story_local_sequence ... ok
+test domain::knowledge::query::tests::seed_knowledge_ids_are_short_and_stable ... ok
+test domain::narrative::tests::continuity_rejects_overlap_gap_duplicate_and_disorder ... ok
+test domain::narrative::tests::continuity_summary_and_recent_are_adjacent ... ok
+test domain::narrative::tests::continuity_without_summary_starts_at_one ... ok
+test domain::narrative::tests::generated_segment_makes_history_summarizable ... ok
+test domain::narrative::tests::opening_only_history_is_not_summarizable ... ok
+test domain::narrative::tests::story_sequence_rejects_zero_and_overflow ... ok
+test domain::narrative_graph::condition::tests::all_short_circuits_on_unsatisfied_before_unknown ... ok
+test domain::narrative_graph::condition::tests::any_is_satisfied_if_one_branch_satisfied_even_with_unknown_sibling ... ok
+test domain::narrative_graph::condition::tests::condition_depth_limit_is_enforced ... ok
+test domain::narrative_graph::condition::tests::node_state_condition_reads_runtime_state ... ok
+test domain::narrative_graph::condition::tests::not_inverts_satisfied_and_unsatisfied_but_not_unknown ... ok
+test domain::narrative_graph::condition::tests::semantic_condition_defaults_to_unknown_when_missing ... ok
+test domain::narrative_graph::condition::tests::story_started_is_always_satisfied ... ok
+test domain::narrative_graph::condition::tests::turn_reaches_compares_current_turn ... ok
+test domain::narrative_graph::projector::tests::active_nodes_and_directions_are_collected_from_state ... ok
+test domain::narrative::tests::continuity_budget_never_silently_drops_segments ... ok
+test domain::narrative_graph::projector::tests::expired_pending_effect_is_marked_not_applicable ... ok
+test domain::narrative_graph::projector::tests::semantic_leaves_are_deduplicated_across_frontier_conditions ... ok
+test domain::narrative_graph::resolver::tests::active_node_completes_when_condition_satisfied ... ok
+test domain::narrative_graph::resolver::tests::entry_node_activates_when_deterministic_condition_is_satisfied ... ok
+test domain::narrative_graph::resolver::tests::graph_revision_mismatch_is_rejected ... ok
+test domain::narrative_graph::state::tests::initial_state_has_no_active_nodes_or_pending_effects ... ok
+test domain::narrative_graph::state::tests::node_state_defaults_to_inactive_when_absent ... ok
+test domain::narrative_graph::state::tests::node_state_reflects_explicit_entry ... ok
+test domain::story_instance::role::tests::is_player_controlled_reflects_controller ... ok
+test domain::story_instance::role::tests::story_role_view_from_preserves_fields_and_derives_source_character_id ... ok
+test domain::turn::retrieval::tests::retrieved_context_error_limit_variants_map_to_context_limit_code ... ok
+test domain::turn::retrieval::tests::retrieval_partition_invalid_rejects_conflicting_duplicate_ids ... ok
+test domain::turn::retrieval::tests::retrieval_partition_invalid_rejects_fact_returned_for_character_delivery ... ok
+test domain::turn::retrieval::tests::retrieval_partition_invalid_rejects_memory_in_known_rumors_bucket ... ok
+test domain::turn::retrieval::tests::retrieval_partition_invalid_rejects_memory_returned_for_writer_delivery ... ok
+test domain::turn::retrieval::tests::retrieval_partition_invalid_rejects_role_view_id_mismatch ... ok
+test domain::turn::extraction::tests::extractor_rejects_removed_current_scene_field ... ok
+test domain::turn::extraction::tests::envelope_schema_declares_state_and_condition_judgments ... ok
+test domain::turn::retrieval::tests::retrieved_context_accepts_correctly_partitioned_content ... ok
+test domain::turn::extraction::tests::extractor_schema_has_no_current_scene ... ok
+test domain::turn::extraction::tests::state_schema_declares_all_top_level_fields ... ok
+test domain::turn::retrieval::tests::retrieved_context_error_partition_variants_map_to_partition_invalid_code ... ok
+test domain::turn::story_generation::tests::json_schema_reports_story_text_max_length ... ok
+test domain::turn::story_generation::tests::output_round_trips_through_json ... ok
+test planning::retrieval_plan_builder::tests::arbitrary_location_is_not_known_without_catalog_or_signal ... ok
+test llm::openai_compat::tests::endpoint_keeps_existing_chat_completions_path ... ok
+test llm::openai_compat::tests::stream_options_are_serialized_only_for_streaming_requests ... ok
+test llm::openai_compat::tests::endpoint_appends_to_v1_base ... ok
+test llm::openai_compat::tests::endpoint_appends_chat_completions_to_plain_base ... ok
+test domain::turn::story_generation::tests::output_rejects_unknown_fields ... ok
+test llm::openai_compat::tests::thinking_toggle_omitted_when_not_configured ... ok
+test llm::openai_compat::tests::thinking_toggle_serializes_when_configured ... ok
+test planning::retrieval_plan_builder::tests::baseline_signal_entity_is_known_without_knowledge_catalog_entry ... ok
+test planning::retrieval_plan_builder::tests::indexed_character_target_loads_role_context_bundle ... ok
+test planning::retrieval_plan_builder::tests::character_think_automatically_retrieves_role_cognition ... ok
+test planning::retrieval_plan_builder::tests::indexed_target_audience_matrix_is_enforced ... ok
+test planning::retrieval_plan_builder::tests::merge_appends_impulse_targets_not_already_requested_sorted_by_role_id ... ok
+test planning::retrieval_plan_builder::tests::merge_collapses_multiple_impulses_for_one_role_into_one_request ... ok
+test planning::retrieval_plan_builder::tests::merge_uses_goal_when_impulse_reason_is_absent ... ok
+test planning::retrieval_plan_builder::tests::merge_rejects_impulse_targeting_the_player_role ... ok
+test planning::retrieval_plan_builder::tests::merge_rejects_impulse_targeting_an_unknown_role ... ok
+test planning::retrieval_plan_builder::tests::narrative_impulse_merges_character_think_request_once ... ok
+test planning::retrieval_plan_builder::tests::merge_does_not_duplicate_a_role_already_requested_by_planner ... ok
+test planning::retrieval_plan_builder::tests::merge_rechecks_max_character_think_requests_after_merging_impulses ... ok
+test planning::writer_planner::tests::planner_output_reads_goal_gaps_and_character_requests ... ok
+test planning::writer_planner::tests::planner_output_rejects_legacy_character_identity_fields ... ok
+test planning::writer_planner::tests::planner_output_rejects_provider_and_budget_fields ... ok
+test planning::writer_planner::tests::planner_output_rejects_unknown_fields ... ok
+test planning::writer_planner::tests::planner_output_requires_non_null_arrays ... ok
+test planning::retrieval_plan_builder::tests::role_cognition_request_deduplicates_by_role ... ok
+test planning::writer_planner::tests::planner_output_requires_tagged_delivery_shape ... ok
+test planning::writer_planner::tests::writer_story_goal_roundtrips ... ok
+test planning::writer_planner::tests::writer_planner_schema_requires_contract_fields_and_selector_exclusivity ... ok
+test planning::writer_planner_prompt::tests::empty_grouped_indexes_preserve_scope ... ok
+test llm::openai_compat::tests::stream_parses_finish_reason_and_usage ... ok
+test llm::openai_compat::tests::oversized_provider_error_body_is_not_retained ... ok
+test planning::writer_planner_prompt::tests::insert_target_accepts_repeated_identical_entry ... ok
+test planning::writer_planner_prompt::tests::insert_target_rejects_collision_across_target_domains ... ok
+test planning::writer_planner_prompt::tests::writer_planner_assets_preserve_required_rule_counts ... ok
+test planning::writer_planner_prompt::tests::writer_planner_indexed_targets_cover_role_and_knowledge_index_entries ... ok
+test planning::writer_planner_prompt::tests::writer_role_collection_uses_required_indentation ... ok
+test planning::writer_planner_prompt::tests::writer_planner_prompt_uses_relevant_characters_without_presence ... ok
+test planning::writer_planner_prompt::tests::writer_role_rendering_elides_empty_goals_and_attributes ... ok
+test planning::writer_planner_prompt::tests::writer_role_rendering_has_exact_profile_and_state_fields ... ok
+test planning::writer_planner_prompt::tests::writer_role_rendering_omits_absent_and_duplicate_fields ... ok
+test planning::writer_planner_prompt::tests::writer_planner_renders_story_continuity_as_prose ... ok
+test prompt::asset::tests::hash_changes_when_schema_or_contract_changes ... ok
+test prompt::asset::tests::hash_changes_with_content ... ok
+test prompt::asset::tests::hash_is_stable ... ok
+test prompt::asset::tests::hash_normalizes_trailing_whitespace ... ok
+test prompt::asset::tests::yaml_deserialization_applies_defaults ... ok
+test prompt::asset::tests::yaml_rejects_unknown_field ... ok
+test prompt::catalog::tests::render_slot_fails_when_required_var_is_missing ... ok
+test prompt::catalog::tests::render_slot_fails_when_asset_is_missing ... ok
+test prompt::catalog::tests::render_slot_fails_when_slot_kind_does_not_accept_asset_kind ... ok
+test prompt::catalog::tests::render_text_on_messages_slot_returns_kind_mismatch ... ok
+test prompt::catalog::tests::render_slot_fails_when_output_contract_is_violated ... ok
+test prompt::catalog::tests::render_slot_messages_returns_structured_messages ... ok
+test prompt::catalog::tests::render_slot_applies_text_policies_and_records_metadata ... ok
+test prompt::catalog::tests::render_text_with_metadata_normalizes_text_and_preserves_metadata ... ok
+test prompt::catalog::tests::render_slot_text_validates_and_returns_metadata ... ok
+test prompt::catalog::tests::resolve_missing_slot_returns_slot_not_found ... ok
+test prompt::catalog::tests::resolve_uses_manifest_hash_in_lineage ... ok
+test llm::openai_compat::tests::provider_classifies_429_4xx_and_5xx ... ok
+test prompt::composition::tests::compose_rejects_unregistered_profile_before_rendering ... ok
+test prompt::composition::tests::compose_rejects_message_bundle_layer ... ok
+test prompt::knowledge_view::tests::empty_relevant_knowledge_renders_no_sentinel_or_empty_group ... ok
+test prompt::composition::tests::compose_renders_three_layers_with_separate_metadata ... ok
+test prompt::knowledge_view::tests::merge_world_knowledge_does_not_merge_distinct_ids_with_same_text ... ok
+test prompt::knowledge_view::tests::merge_world_knowledge_dedupes_by_id_with_baseline_precedence ... ok
+test prompt::composition::tests::runtime_instruction_text_cannot_modify_trusted_layers_or_slot_metadata ... ok
+test prompt::knowledge_view::tests::merge_world_knowledge_preserves_baseline_then_retrieved_order ... ok
+test prompt::knowledge_view::tests::merge_world_knowledge_rejects_same_id_conflicting_content ... ok
+test prompt::knowledge_view::tests::relevant_knowledge_renders_grouped_content_only ... ok
+test prompt::knowledge_view::tests::world_knowledge_merge_uses_id_not_text ... ok
+test llm::openai_compat::tests::stream_rejects_line_buffer_content_and_reasoning_overflow ... ok
+test prompt::loader::tests::load_catalog_fails_with_missing_index ... ok
+test prompt::loader::tests::load_catalog_fails_when_pack_kind_mismatches_slot ... ok
+test prompt::loader::tests::load_catalog_computes_missing_hash_from_section_body ... ok
+test prompt::loader::tests::load_catalog_fails_when_manifest_section_is_missing ... ok
+test prompt::loader::tests::load_catalog_fails_on_duplicate_asset_section ... ok
+test prompt::loader::tests::load_catalog_fails_when_file_contains_unregistered_asset ... ok
+test prompt::loader::tests::manifests_by_source_path_groups_entries ... ok
+test prompt::loader::tests::validate_section_slot_compatibility_rejects_different_allowed_kinds ... ok
+test prompt::loader::tests::validate_section_slot_compatibility_rejects_different_var_requirements ... ok
+test prompt::loader::tests::validate_section_slot_compatibility_rejects_unknown_slot ... ok
+test prompt::loader::tests::load_catalog_end_to_end ... ok
+test prompt::loader::tests::load_catalog_fails_with_hash_mismatch ... ok
+test prompt::model::tests::asset_status_serde_roundtrip ... ok
+test prompt::loader::tests::load_catalog_rejects_non_active_asset_status ... ok
+test prompt::model::tests::prompt_kind_display_uses_snake_case ... ok
+test prompt::loader::tests::load_catalog_fails_when_pack_references_unknown_asset ... ok
+test prompt::model::tests::prompt_kind_serde_roundtrip ... ok
+test prompt::model::tests::rendered_prompt_messages_accessors_match_variant ... ok
+test prompt::model::tests::rendered_prompt_text_accessors_match_variant ... ok
+test prompt::loader::tests::load_catalog_fails_when_pack_slot_is_not_declared_in_section ... ok
+test prompt::loader::tests::load_catalog_rejects_unknown_pack_fields ... ok
+test prompt::loader::tests::load_catalog_fails_when_required_slot_is_uncovered ... ok
+test prompt::loader::tests::load_catalog_rejects_unknown_index_fields ... ok
+test prompt::model::tests::slot_id_and_asset_ref_roundtrip_as_strings ... ok
+test prompt::narrative_direction::tests::project_narrative_direction_maps_active_directions_and_world_event_intents ... ok
+test prompt::loader::tests::load_catalog_fails_when_default_pack_is_missing ... ok
+test prompt::narrative_direction::tests::render_narrative_direction_omits_location_line_when_absent ... ok
+test prompt::narrative_direction::tests::render_narrative_direction_joins_both_sections_with_blank_line ... ok
+test prompt::narrative_direction::tests::render_narrative_direction_renders_active_directions_only ... ok
+test prompt::loader::tests::load_catalog_rejects_unknown_policy_fields ... ok
+test prompt::narrative_direction::tests::render_narrative_direction_renders_world_event_intents_with_participants_and_location ... ok
+test prompt::narrative_direction::tests::render_narrative_direction_returns_empty_string_when_view_is_empty ... ok
+test prompt::loader::tests::load_catalog_fails_with_duplicate_pack_names ... ok
+test prompt::pack::tests::chain_at_depth_limit_still_resolves ... ok
+test prompt::pack::tests::chain_beyond_depth_limit_fails ... ok
+test prompt::pack::tests::child_pack_overrides_parent_slots ... ok
+test prompt::pack::tests::inheritance_cycle_fails ... ok
+test prompt::pack::tests::missing_parent_pack_fails ... ok
+test prompt::pack::tests::single_pack_resolves ... ok
+test prompt::policy::tests::name_returns_variant_name_field ... ok
+test prompt::policy::tests::post_validator_does_not_modify_text ... ok
+test prompt::policy::tests::preamble_append_adds_content_after_text ... ok
+test prompt::policy::tests::preamble_prepend_adds_content_before_text ... ok
+test prompt::policy::tests::runtime_guard_does_not_modify_text ... ok
+test prompt::profile::tests::assets_for_rejects_unregistered_profile ... ok
+test prompt::profile::tests::register_rejects_duplicate_profile ... ok
+test prompt::profile::tests::register_rejects_slot_reused_across_layers ... ok
+test prompt::profile::tests::register_stores_three_distinct_slots ... ok
+test prompt::renderer::tests::invalid_message_json_returns_render_error ... ok
+test prompt::renderer::tests::conditional_rendering ... ok
+test prompt::renderer::tests::missing_template_returns_render_error ... ok
+test prompt::renderer::tests::render_normalizes_crlf_line_endings ... ok
+test prompt::renderer::tests::render_prompt_few_shot_kind_parses_json_messages ... ok
+test prompt::renderer::tests::minijinja_filters_work ... ok
+test prompt::renderer::tests::render_prompt_fragment_kind_returns_text ... ok
+test prompt::renderer::tests::render_prompt_messages_kind_parses_json_messages ... ok
+test prompt::renderer::tests::render_prompt_text_kind_returns_text ... ok
+test prompt::renderer_helpers::tests::render_required_slot_fails_without_catalog ... ok
+test prompt::renderer::tests::simple_variable_substitution ... ok
+test prompt::renderer_helpers::tests::render_required_slot_returns_text ... ok
+test prompt::renderer_helpers::tests::render_required_slot_with_options_wraps_error_context ... ok
+test prompt::renderer_helpers::tests::try_render_slot_returns_none_without_catalog ... ok
+test prompt::renderer_helpers::tests::try_render_slot_returns_none_on_render_error ... ok
+test prompt::resolver::tests::parse_asset_ref_accepts_bare_asset_id ... ok
+test prompt::renderer_helpers::tests::try_render_slot_returns_rendered_text ... ok
+test prompt::resolver::tests::parse_asset_ref_rejects_empty_ref ... ok
+test prompt::renderer_helpers::tests::try_render_slot_with_options_respects_pack_override ... ok
+test prompt::resolver::tests::parse_asset_ref_rejects_revision_suffix ... ok
+test prompt::resolver::tests::resolve_selection_errors_when_pack_is_missing ... ok
+test prompt::resolver::tests::resolve_selection_errors_when_slot_is_missing ... ok
+test prompt::resolver::tests::resolve_selection_returns_selected_pack_and_asset ... ok
+test prompt::resolver::tests::select_pack_falls_back_to_default ... ok
+test prompt::resolver::tests::select_pack_prefers_explicit_override ... ok
+test prompt::section_extractor::tests::content_outside_section_fails ... ok
+test prompt::loader::tests::load_catalog_rejects_unsupported_policy_types ... ok
+test prompt::section_extractor::tests::duplicate_asset_ids_fail ... ok
+test prompt::section_extractor::tests::empty_asset_id_fails ... ok
+test prompt::section_extractor::tests::empty_slot_id_fails ... ok
+test prompt::section_extractor::tests::empty_slot_ids_fail ... ok
+test prompt::section_extractor::tests::extracts_multiple_sections_from_shared_file ... ok
+test prompt::section_extractor::tests::invalid_asset_metadata_json_fails ... ok
+test prompt::section_extractor::tests::nested_sections_fail ... ok
+test prompt::section_extractor::tests::preserves_internal_body_bytes_while_trimming_structural_padding ... ok
+test prompt::section_extractor::tests::template_without_sections_fails ... ok
+test prompt::section_extractor::tests::unclosed_section_fails ... ok
+test prompt::section_extractor::tests::unexpected_endasset_fails ... ok
+test prompt::section_extractor::tests::unknown_asset_metadata_field_fails ... ok
+test prompt::slot::tests::accepts_kind_checks_membership ... ok
+test prompt::loader::tests::load_catalog_supports_pack_inheritance ... ok
+test prompt::slot::tests::parse_slots_yaml_applies_defaults ... ok
+test prompt::slot::tests::parse_slots_yaml_basic ... ok
+test prompt::slot::tests::parse_slots_yaml_reads_vars_and_output_contract ... ok
+test prompt::slot::tests::parse_slots_yaml_rejects_duplicate_slot_ids ... ok
+test prompt::slot::tests::parse_slots_yaml_rejects_unknown_fields ... ok
+test prompt::slot::tests::parse_slots_yaml_rejects_unsupported_options ... ok
+test prompt::validator::tests::any_type_accepts_non_null_values ... ok
+test prompt::validator::tests::array_and_object_types_validate ... ok
+test prompt::validator::tests::extra_vars_are_ignored ... ok
+test prompt::validator::tests::missing_required_var_fails ... ok
+test prompt::validator::tests::null_required_var_fails ... ok
+test prompt::validator::tests::optional_var_can_be_absent_or_null ... ok
+test prompt::validator::tests::output_contract_max_length_fails ... ok
+test prompt::validator::tests::output_contract_min_length_fails ... ok
+test prompt::validator::tests::output_contract_must_contain_fails ... ok
+test prompt::validator::tests::output_contract_must_not_contain_fails ... ok
+test prompt::validator::tests::permissive_output_contract_passes ... ok
+test prompt::validator::tests::valid_vars_pass ... ok
+test prompt::validator::tests::wrong_type_fails ... ok
+test story::character_card_service::tests::semantic_version_parses_expected_shape ... ok
+test story::story_generator_prompt::tests::decision_rendering_contains_only_target_name_decision_and_optional_utterance ... ok
+test story::story_generator_prompt::tests::empty_optional_story_generator_sections_render_no_sentinel ... ok
+test story::story_generator_prompt::tests::full_role_rendering_uses_stage_visibility_contract ... ok
+test story::story_generator_prompt::tests::generator_attaches_character_context_by_role_id ... ok
+test story::story_generator_prompt::tests::generator_preserves_baseline_relevant_knowledge ... ok
+test story::story_generator_prompt::tests::player_role_rendering_omits_redundant_presence_and_controller ... ok
+test story::story_generator_prompt::tests::global_budget_prunes_dialogue_examples_by_descending_role_id ... ok
+test story::story_generator_prompt::tests::role_rendering_elides_empty_goals_and_attributes_but_keeps_location ... ok
+test story::story_generator_prompt::tests::required_data_overflow_removes_all_examples_before_error ... ok
+test story::story_generator_prompt::tests::runtime_projection_contains_only_allowlisted_semantic_sections ... ok
+test story::story_generator_prompt::tests::runtime_context_projectors_preserve_slot_key_sets ... ok
+test story::story_generator_prompt::tests::story_generator_assets_have_required_rule_counts ... ok
+test story::story_generator_prompt::tests::story_generator_renders_story_continuity_as_prose ... ok
+test story::story_generator_prompt::tests::story_generator_runtime_context_has_exact_section_order ... ok
+test story::story_generator_prompt::tests::story_generator_schema_is_closed_and_complete ... ok
+test story::story_generator_prompt::tests::story_profile_omits_empty_optional_lists ... ok
+test story::story_generator_prompt::tests::story_generator_unions_relevant_and_requested_ai_roles ... ok
+test story::story_repairer_prompt::tests::patch_shaped_output_does_not_decode_as_story_generator_output ... ok
+test story::story_repairer_prompt::tests::story_repairer_assets_have_required_rule_counts ... ok
+test prompt::trusted_prompt_source::tests::character_think_runtime_context_uses_canonical_section_order ... ok
+test story::story_repairer_prompt::tests::story_repairer_runtime_context_has_exact_section_order ... ok
+test story::story_repairer_prompt::tests::story_repairer_reuses_story_continuity_prose ... ok
+test story::story_repairer_prompt::tests::validation_issues_render_as_ordered_untrusted_diagnostics ... ok
+test prompt::trusted_prompt_source::tests::packaged_character_think_composes_exact_three_layers ... ok
+test prompt::trusted_prompt_source::tests::writer_planner_runtime_context_uses_canonical_section_order ... ok
+test story::story_state_extractor_prompt::tests::empty_validation_issues_render_no_sentinel ... ok
+test story::story_state_extractor_prompt::tests::extractor_role_rendering_contains_state_identity_only ... ok
+test story::story_state_extractor_prompt::tests::knowledge_id_visibility_is_purpose_bound ... ok
+test story::story_state_extractor_prompt::tests::story_state_extractor_assets_have_required_rule_counts ... ok
+test prompt::trusted_prompt_source::tests::packaged_story_repairer_composes_exact_three_layers ... ok
+test story::story_state_extractor_prompt::tests::extractor_groups_modifiable_targets_and_nests_memories ... ok
+test story::story_state_extractor_prompt::tests::story_state_extractor_runtime_context_has_exact_section_order ... ok
+test story::story_state_extractor_prompt::tests::validation_issues_render_as_ordered_untrusted_diagnostics ... ok
+test prompt::trusted_prompt_source::tests::packaged_writer_planner_composes_exact_three_layers ... ok
+test turn::turn_context::tests::aggregate_byte_limit_fails_with_expected_code ... ok
+test turn::turn_context::tests::count_limit_fails_with_expected_code ... ok
+test turn::turn_context::tests::count_mismatch_fails_with_expected_code ... ok
+test turn::turn_context::tests::duplicate_target_fails_with_expected_code ... ok
+test turn::turn_context::tests::exact_request_and_decision_count_succeeds ... ok
+test turn::turn_context::tests::failed_assignment_leaves_previous_collection_unchanged ... ok
+test turn::turn_context::tests::old_content_config_key_is_not_accepted_as_alias ... ok
+test turn::turn_context::tests::order_mismatch_fails_with_expected_code ... ok
+test turn::turn_context::tests::renamed_configuration_values_flow_into_turn_budget ... ok
+test turn::turn_context::tests::player_character_target_fails_before_assignment ... ok
+test turn::turn_validation::tests::pass_cannot_contain_issues ... ok
+test turn::turn_validation::tests::validated_change_set_has_no_scene_contract ... ok
+test turn::turn_context::tests::skip_is_valid_only_for_empty_request_list ... ok
+test validation::validators::changed_only::tests::changed_only_validator_is_default_constructible ... ok
+test validation::validators::domain_invariant::tests::domain_invariant_validator_is_default_constructible ... ok
+test validation::validators::extraction_schema::tests::extraction_schema_validator_is_default_constructible ... ok
+test validation::validators::extraction_schema::tests::target_key_distinguishes_rumor_and_memory ... ok
+test validation::validators::reference::tests::has_duplicates_detects_repeats ... ok
+test validation::validators::reference::tests::reference_validator_is_default_constructible ... ok
+test validation::validators::reference::tests::location_key_resolves_against_role_state_or_catalog ... ok
+test validation::validators::story_bounds::tests::story_bounds_validator_is_default_constructible ... ok
+test validation::validators::story_bounds::tests::story_within_output_budget_produces_no_issue ... ok
+test validation::validators::story_state_consistency::tests::story_state_consistency_validator_is_default_constructible ... ok
+test story::character_card_service::tests::exact_lookup_requires_matching_digest ... ok
+test story::character_card_service::tests::invalid_profile_is_rejected ... ok
+test story::character_card_service::tests::idempotent_import_returns_same_identity_without_duplicate_row ... ok
+test story::character_card_service::tests::injection_like_profile_data_is_rejected ... ok
+test story::character_card_service::tests::deterministic_list_order_by_name_then_id_then_version ... ok
+test story::character_card_service::tests::multiple_versions_under_one_character_id_are_independent ... ok
+test story::character_card_service::tests::invalid_json_is_rejected ... ok
+test story::character_card_service::tests::version_conflict_returns_character_version_digest_conflict ... ok
+test story::character_card_service::tests::fresh_import_returns_stored_identity ... ok
+
+test result: ok. 352 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+
+     Running tests\asset_import_tests.rs (target\debug\deps\asset_import_tests-f055ee2d2204f8b1.exe)
+
+running 36 tests
+test rejects_crossed_v5_spec_and_version ... ok
+test demo_pack_passes_validation ... ok
+test accepts_pack_with_zero_character_cards_and_no_default_cast ... ok
+test rejects_empty_profile_name ... ok
+test accepts_profile_name_at_exact_limit ... ok
+test accepts_profile_with_absent_optional_fields ... ok
+test rejects_empty_optional_profile_field ... ok
+test rejects_empty_role_background ... ok
+test rejects_graph_cycle ... ok
+test rejects_legacy_role_openings ... ok
+test rejects_pack_container_without_manifest ... ok
+test rejects_forbidden_runtime_fields ... ok
+test rejects_missing_default_profile ... ok
+test rejects_missing_manifest_in_pack_container ... ok
+test rejects_dialogue_example_count_overflow ... ok
+test accepts_pack_container_with_manifest ... ok
+test rejects_removed_story_premise ... ok
+test rejects_missing_story_opening ... ok
+test rejects_story_pack_v4 ... ok
+test rejects_profile_name_over_limit ... ok
+test rejects_salience_out_of_range ... ok
+test story_pack_v5_discriminator_roundtrip ... ok
+test rejects_unknown_narrative_role_reference ... ok
+test rejects_unknown_spec ... ok
+test rejects_unknown_playable_role ... ok
+test rejects_unsupported_spec_version ... ok
+test rejects_unknown_profile_field ... ok
+test rejects_unknown_relationship_target_role ... ok
+test rejects_role_background_over_limit ... ok
+test rejects_unreachable_graph_node ... ok
+test rejects_traversal_archive_paths ... ok
+test valid_pack_passes_validation ... ok
+test full_import_rejects_v3_character_assets_field ... ok
+test full_import_rejects_v3_default_cast_field ... ok
+test story_pack_v5_import_export_roundtrip ... ok
+test full_import_of_zero_character_card_pack_succeeds_and_round_trips ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+
+     Running tests\character_role_profile_migration_tests.rs (target\debug\deps\character_role_profile_migration_tests-
+8fae21d580dd42ee.exe)
+
+running 2 tests
+test migration_fails_on_populated_version_15_database_and_leaves_rows_unchanged ... ok
+test migration_from_empty_schema_at_version_15_reaches_final_version ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+     Running tests\config_tests.rs (target\debug\deps\config_tests-e8232ec612746b1f.exe)
+
+running 6 tests
+test context_dialogue_example_limits_must_be_positive ... ok
+test context_dialogue_example_limits_have_bounded_defaults ... ok
+test context_dialogue_example_legacy_keys_are_rejected ... ok
+test default_turn_budget_leaves_room_for_thinking ... ok
+test llm_thinking_parses_from_config ... ok
+test turn_max_tokens_alias_maps_to_max_output_tokens ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\context_preparation_retrieval_tests.rs (target\debug\deps\context_preparation_retrieval_tests-c62b1d
+b1936aa2e2.exe)
+
+running 8 tests
+test automatic_requests_run_when_planner_gaps_are_empty ... ok
+test context_and_llm_accounting_share_one_token_estimator ... ok
+test planner_cannot_replace_narrative_plan_or_constraints ... ok
+test planner_output_rejects_provider_and_budget_fields ... ok
+test topic_dictionary_rejects_normalized_alias_collisions ... ok
+test retrieval_plan_merge_is_deterministic ... ok
+test topic_matcher_handles_ascii_boundaries_and_chinese_aliases ... ok
+test retrieval_and_character_think_are_enabled_from_plan_collections ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\context_retrieval_migration_tests.rs (target\debug\deps\context_retrieval_migration_tests-6db4c1df2a
+b55f19.exe)
+
+running 8 tests
+test migration_rejects_conflicting_role_openings ... ok
+test migration_rejects_ambiguous_summary_boundary ... ok
+test migration_rejects_unrecoverable_committed_knowledge ... ok
+test migration_converts_identical_role_openings_to_story_opening ... ok
+test migration_reconstructs_seed_knowledge_from_version_ten ... ok
+test migration_reconstructs_seed_knowledge_from_version_eight ... ok
+test migration_0020_rejects_legacy_story_instance_rows ... ok
+test migration_0020_initializes_high_water_and_hint_columns_on_empty_store ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s
+
+     Running tests\core_turn_context_tests.rs (target\debug\deps\core_turn_context_tests-0252adb01be4bdd5.exe)
+
+running 4 tests
+test context_and_llm_accounting_share_one_token_estimator ... ok
+test retrieved_context_rejects_audience_overflow ... ok
+test fact_retrieval_never_creates_character_context ... ok
+test turn_budget_from_config_accepts_retrieval_config ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\current_scene_removal_migration_tests.rs (target\debug\deps\current_scene_removal_migration_tests-00
+c96119c6990c94.exe)
+
+running 2 tests
+test persistence_migration_drops_current_scene ... ok
+test persistence_migration_drops_current_scene_on_upgrade ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+     Running tests\dependency_direction_tests.rs (target\debug\deps\dependency_direction_tests-341f2d1d602f7340.exe)
+
+running 7 tests
+test public_error_types_are_self_contained_and_static ... ok
+test no_create_story_in_turn_execution_path ... ok
+test no_legacy_patterns_in_server_src ... ok
+test no_legacy_summary_delta_patterns ... ok
+test adapter_transport_errors_stay_private ... ok
+test core_has_no_outer_transitive_dependency ... ok
+test no_backwards_dependencies_or_dead_paths ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests\domain_core_dependency_tests.rs (target\debug\deps\domain_core_dependency_tests-d74dfe27e84bb422.exe
+)
+
+running 9 tests
+test active_story_constraint_uses_shared_constraint_id ... ok
+test constraint_id_rejects_empty_and_blank ... ok
+test domain_ids_preserve_string_serde_shape ... ok
+test story_id_rejects_empty_and_blank ... ok
+test story_revision_preserves_integer_serde_shape ... ok
+test trace_id_rejects_empty_and_blank_with_trace_error ... ok
+test turn_id_rejects_empty_and_blank ... ok
+test turn_identity_constructor_is_infallible ... ok
+test turn_request_errors_are_request_scoped ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\engine_flow_tests.rs (target\debug\deps\engine_flow_tests-e846ff24e1a741c9.exe)
+
+running 1 test
+test create_story_instance_flow_materializes_snapshot ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests\knowledge_read_port_tests.rs (target\debug\deps\knowledge_read_port_tests-4e95660f49e293d1.exe)
+
+running 7 tests
+test sqlite_entity_query_accepts_multiple_selectors ... ok
+test knowledge_index_targets_support_exact_lookup ... ok
+test knowledge_read_rejects_revision_or_digest_mismatch ... ok
+test character_fact_request_is_rejected_before_store_lookup ... ok
+test zero_result_request_never_falls_back_to_full_scan ... ok
+test sqlite_entity_and_topic_queries_use_indexes ... ok
+test knowledge_index_rejects_memory ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+
+     Running tests\llm_gateway_tests.rs (target\debug\deps\llm_gateway_tests-65bed87a982c2b05.exe)
+
+running 1 test
+test turn_budget_from_config_matches_retrieval_limits ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\narrative_graph_tests.rs (target\debug\deps\narrative_graph_tests-ec79609b21710d86.exe)
+
+running 2 tests
+test narrative_projector_produces_an_empty_plan_for_an_empty_graph ... ok
+test narrative_projector_includes_entry_node_activation_frontier ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\persistence_tests.rs (target\debug\deps\persistence_tests-6aa31f7f801184db.exe)
+
+running 4 tests
+test snapshot_is_revision_consistent ... ok
+test turn_commit_assigns_next_story_sequence ... ok
+test commit_turn_does_not_write_current_scene ... ok
+test recent_segments_are_returned_in_sequence_order ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+     Running tests\prompt_context_contract_tests.rs (target\debug\deps\prompt_context_contract_tests-ba3aed01c4922aec.e
+xe)
+
+running 11 tests
+test active_direction_hides_source_node ... ok
+test shared_narrative_direction_projection_is_stage_consistent ... ok
+test world_event_intent_renders_full_semantics_without_bookkeeping ... ok
+test runtime_context_projectors_preserve_slot_key_sets ... ok
+test writer_planner_and_generator_share_narrative_direction_body ... ok
+test writer_planner_prompt_sources_contain_no_legacy_narrative_fields ... ok
+test story_generator_composes_csi_runtime_context_and_fti ... ok
+test asset_and_player_content_never_enters_system_prompt ... ok
+test writer_planner_projects_three_layer_prompt_context ... ok
+test story_continuity_is_not_recursively_rendered_or_promoted ... ok
+test story_continuity_template_omits_empty_sections ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\runtime_tests.rs (target\debug\deps\runtime_tests-1a0a72f6c0f90841.exe)
+
+running 2 tests
+test retrieval_and_character_think_are_enabled_from_plan_collections ... ok
+test turn_budget_from_config_uses_retrieval_totals ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\story_context_simplification_migration_tests.rs (target\debug\deps\story_context_simplification_migr
+ation_tests-e94479f69c4f1a42.exe)
+
+running 3 tests
+test story_context_simplification_migration_guard ... ok
+test story_context_simplification_applies_on_fresh_database ... ok
+test story_context_simplification_applies_on_empty_upgraded_database ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
+
+     Running tests\story_continuity_tests.rs (target\debug\deps\story_continuity_tests-d8baf1471c732daa.exe)
+
+running 5 tests
+test continuity_budget_never_silently_drops_segments ... ok
+test continuity_without_summary_starts_at_one ... ok
+test continuity_summary_and_recent_are_adjacent ... ok
+test continuity_rejects_overlap_gap_duplicate_and_disorder ... ok
+test story_sequence_rejects_zero_and_overflow ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\story_coordinator_tests.rs (target\debug\deps\story_coordinator_tests-674b0aac53ff528c.exe)
+
+running 1 test
+test story_coordinator_serializes_same_story ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\story_instance_tests.rs (target\debug\deps\story_instance_tests-f3ef41237eb90fa5.exe)
+
+running 3 tests
+test duplicate_role_labels_do_not_merge_distinct_role_ids ... ok
+test story_role_view_from_preserves_story_fields ... ok
+test story_role_is_player_controlled_only_for_player_controller ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\story_pack_runtime_tests.rs (target\debug\deps\story_pack_runtime_tests-528f1860df2ca2a5.exe)
+
+running 10 tests
+test instance_create_with_selected_character_card_uses_card_profile ... ok
+test reject_instance_for_missing_pack ... ok
+test reject_duplicate_key_version_with_different_digest ... ok
+test pack_delete_missing_returns_false ... ok
+test reject_instance_for_non_playable_role ... ok
+test instance_meta_exposes_roles ... ok
+test instance_snapshot_loads_with_roles ... ok
+test pack_import_then_instance_create_roundtrip ... ok
+test pack_list_and_delete_roundtrip ... ok
+test import_is_idempotent_by_digest ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+
+     Running tests\turn_trace_tests.rs (target\debug\deps\turn_trace_tests-18d7b5d3e91013c2.exe)
+
+running 6 tests
+test truncates_long_text ... ok
+test caps_span_count_and_counts_dropped ... ok
+test record_span_attaches_to_current_parent ... ok
+test sink_receives_every_span_in_order ... ok
+test new_trace_id_is_time_prefixed ... ok
+test records_nested_span_tree ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\validation_commit_tests.rs (target\debug\deps\validation_commit_tests-7efea42b12dd1e7b.exe)
+
+running 1 test
+test state_change_and_validation_decision_contracts ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\aise_server-4caa00ba5bfb3cc8.exe)
+
+running 10 tests
+test config::tests::api_key_env_prefix_missing_returns_none ... ok
+test config::tests::api_key_ignores_empty_environment_value ... ok
+test config::tests::api_key_falls_back_to_literal_when_environment_unset ... ok
+test config::tests::api_key_resolves_env_prefix ... ok
+test config::tests::api_key_resolves_named_environment_variable ... ok
+test config::tests::env_override_applies_on_load ... ok
+test config::tests::invalid_env_override_fails_load ... ok
+test config::tests::thinking_env_override_parses_modes ... ok
+test config::tests::zero_max_sessions_fails_validate ... ok
+test config::tests::invalid_toml_fails_load ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target\debug\deps\aise_server-3d1bce76c392205f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\character_card_api_tests.rs (target\debug\deps\character_card_api_tests-dcbdfcab03ca14b3.exe)
+
+running 4 tests
+test character_card_info_view_exposes_identity_and_digest_fields ... ok
+test character_card_info_view_omits_creator_as_null_when_absent ... ok
+test invalid_validation_response_exposes_code_path_and_message ... ok
+test valid_validation_response_serializes_with_empty_issues ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\sse_tests.rs (target\debug\deps\sse_tests-e2076bb522c867a3.exe)
+
+running 1 test
+test story_instance_snapshot_is_available_for_sse_recovery_path ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests\story_api_tests.rs (target\debug\deps\story_api_tests-0e34a9abaafdd534.exe)
+
+running 4 tests
+test legacy_story_create_path_is_retired_in_favor_of_instances ... ok
+test story_api_omits_removed_context_fields ... ok
+test story_api_omits_current_scene ... ok
+test story_instance_response_exposes_opening_as_first_story_segment ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\trace_sink_tests.rs (target\debug\deps\trace_sink_tests-33606ba35f128b8b.exe)
+
+running 5 tests
+test trace_writer_applies_bounded_backpressure ... ok
+test content_trace_redacts_before_truncation ... ok
+test shutdown_drains_trace_writer_within_grace ... ok
+test writes_spans_as_jsonl_and_trace_as_json ... ok
+test trace_writer_rotates_and_enforces_retention ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests\turn_task_manager_tests.rs (target\debug\deps\turn_task_manager_tests-899d872d5e56944f.exe)
+
+running 6 tests
+test zero_admission_limit_is_rejected ... ok
+test service_shutdown_reaches_running_turn_cancellation ... ok
+test shutdown_rejects_new_tasks_and_cancels_waiting ... ok
+test shutdown_cancels_waiters_and_waits_for_owned_turns ... ok
+test task_admission_rejects_over_capacity_without_unbounded_wait ... ok
+test shutdown_aborts_only_after_grace_and_joins_all_tasks ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+   Doc-tests aise
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests aise_server
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

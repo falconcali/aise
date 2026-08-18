@@ -422,6 +422,16 @@ fn build_context(
     think_targets: Vec<&str>,
     impulse_targets: Vec<&str>,
 ) -> TurnExecutionContext {
+    build_context_with_retrieval(all_roles, baseline, think_targets, impulse_targets, None)
+}
+
+fn build_context_with_retrieval(
+    all_roles: &[&StoryRole],
+    baseline: BaselineContext,
+    think_targets: Vec<&str>,
+    impulse_targets: Vec<&str>,
+    retrieved: Option<crate::domain::turn::RetrievedContext>,
+) -> TurnExecutionContext {
     let budget = TurnBudget::from_config(
         &TurnConfig::default(),
         &TurnContentLimitsConfig::default(),
@@ -470,6 +480,23 @@ fn build_context(
             .collect(),
     };
     ctx.set_writer_plan(plan).unwrap();
+    if !ctx.plan().unwrap().character_think_requests.is_empty() {
+        let decisions = ctx
+            .plan()
+            .unwrap()
+            .character_think_requests
+            .iter()
+            .map(|request| crate::domain::turn::CharacterDecision {
+                role_id: request.role_id.clone(),
+                decision: bounded("decision"),
+                suggested_utterance: None,
+            })
+            .collect();
+        ctx.set_character_decisions(decisions).unwrap();
+    }
+    if let Some(retrieved) = retrieved {
+        ctx.set_retrieved_context(retrieved).unwrap();
+    }
     ctx
 }
 
@@ -494,4 +521,174 @@ fn story_generator_unions_relevant_and_requested_ai_roles() {
     let ids: Vec<String> = ai_roles.iter().map(|role| role.role_id.as_str().to_owned()).collect();
     assert_eq!(ids, vec!["npc-alpha", "npc-bravo", "npc-charlie"]);
     assert!(!ids.contains(&"protagonist".to_owned()));
+}
+
+#[test]
+fn runtime_context_projectors_preserve_slot_key_sets() {
+    let player = story_role("protagonist", RoleController::Player(PlayerId::try_new("player-1").unwrap()));
+    let all_roles = [&player];
+    let baseline = sample_baseline(&player, &[]);
+    let ctx = build_context(&all_roles, baseline, Vec::new(), Vec::new());
+
+    let projector = DefaultStoryGeneratorPromptContextProjector::new(ContextPreparationConfig::default());
+    let projection = projector.project(&ctx).expect("generator projection");
+
+    let expected: std::collections::BTreeSet<&str> = [
+        "story_profile",
+        "instance_settings",
+        "story_summary",
+        "recent_story",
+        "player_character",
+        "ai_characters",
+        "active_story_constraints",
+        "story_goal",
+        "narrative_direction",
+        "relevant_knowledge",
+        "character_decisions",
+        "player_input",
+    ]
+    .into_iter()
+    .collect();
+    let actual: std::collections::BTreeSet<&str> = projection.rc_vars.as_map().keys().map(String::as_str).collect();
+    assert_eq!(
+        actual, expected,
+        "story_generator RC slot keys must match assets/prompts/context-v2/slots.yaml exactly"
+    );
+}
+
+fn knowledge_item(
+    source_id: crate::domain::knowledge::KnowledgeSourceId,
+    body: &str,
+) -> crate::domain::turn::RetrievedKnowledgeItem {
+    crate::domain::turn::RetrievedKnowledgeItem::from_parts(
+        source_id,
+        bounded(body),
+        crate::domain::knowledge::KnowledgeSource::Seed {
+            pack_id: crate::domain::asset::ids::PackId::try_new("pack-1").unwrap(),
+            pack_digest: digest(),
+        },
+        crate::domain::turn::RelevanceRank {
+            match_level: crate::domain::turn::MatchLevel::Entity,
+            signal_priority: 0,
+            salience: 1,
+        },
+        BTreeMap::new(),
+    )
+}
+
+fn retrieval_limits() -> crate::domain::turn::RetrievedContextLimits {
+    crate::domain::turn::RetrievedContextLimits {
+        max_role_audiences: 8,
+        max_items_per_audience: 8,
+        max_tokens_per_audience: 10_000,
+        max_total_items: 32,
+        max_total_tokens: 10_000,
+        max_item_bytes: 4096,
+    }
+}
+
+#[test]
+fn generator_preserves_baseline_relevant_knowledge() {
+    let player = story_role("protagonist", RoleController::Player(PlayerId::try_new("player-1").unwrap()));
+    let all_roles = [&player];
+    let mut baseline = sample_baseline(&player, &[]);
+    baseline.relevant_world_knowledge = crate::domain::turn::RelevantWorldKnowledge {
+        facts: vec![crate::domain::turn::RelevantWorldKnowledgeItem {
+            source_id: crate::domain::knowledge::KnowledgeSourceId::Fact(
+                crate::domain::ids::FactId::try_new("fact_0001").unwrap(),
+            ),
+            content: bounded("the tower fell a year ago"),
+            source_priority: 0,
+            salience: 1,
+        }],
+        rumors: Vec::new(),
+    };
+    let ctx = build_context(&all_roles, baseline, Vec::new(), Vec::new());
+
+    let projector = DefaultStoryGeneratorPromptContextProjector::new(ContextPreparationConfig::default());
+    let projection = projector.project(&ctx).expect("generator projection");
+
+    assert_eq!(projection.context.relevant_knowledge.facts.len(), 1);
+    assert_eq!(
+        projection.context.relevant_knowledge.facts[0].as_str(),
+        "the tower fell a year ago"
+    );
+    let rendered = projection
+        .rc_vars
+        .as_map()
+        .get("relevant_knowledge")
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_owned();
+    assert!(rendered.contains("the tower fell a year ago"));
+}
+
+#[test]
+fn generator_attaches_character_context_by_role_id() {
+    let player = story_role("protagonist", RoleController::Player(PlayerId::try_new("player-1").unwrap()));
+    let npc_alpha = story_role("npc-alpha", RoleController::Ai);
+    let npc_bravo = story_role("npc-bravo", RoleController::Ai);
+    let all_roles = [&player, &npc_alpha, &npc_bravo];
+    let baseline = sample_baseline(&player, &[&npc_alpha, &npc_bravo]);
+    let mut characters = BTreeMap::new();
+    characters.insert(
+        RoleId::try_new("npc-alpha").unwrap(),
+        crate::domain::turn::RetrievedCharacterContext {
+            role: None,
+            known_rumors: vec![knowledge_item(
+                crate::domain::knowledge::KnowledgeSourceId::Rumor(
+                    crate::domain::ids::RumorId::try_new("rumor_0001").unwrap(),
+                ),
+                "alpha heard a rumor",
+            )],
+            memories: Vec::new(),
+        },
+    );
+    characters.insert(
+        RoleId::try_new("npc-bravo").unwrap(),
+        crate::domain::turn::RetrievedCharacterContext {
+            role: None,
+            known_rumors: vec![knowledge_item(
+                crate::domain::knowledge::KnowledgeSourceId::Rumor(
+                    crate::domain::ids::RumorId::try_new("rumor_0002").unwrap(),
+                ),
+                "bravo heard a different rumor",
+            )],
+            memories: Vec::new(),
+        },
+    );
+    let retrieved = crate::domain::turn::RetrievedContext::try_new(
+        crate::domain::turn::RetrievedWorldKnowledge::default(),
+        characters,
+        retrieval_limits(),
+    )
+    .unwrap();
+    let ctx = build_context_with_retrieval(
+        &all_roles,
+        baseline,
+        vec!["npc-alpha", "npc-bravo"],
+        Vec::new(),
+        Some(retrieved),
+    );
+
+    let projector = DefaultStoryGeneratorPromptContextProjector::new(ContextPreparationConfig::default());
+    let projection = projector.project(&ctx).expect("generator projection");
+
+    let alpha = projection
+        .context
+        .ai_roles
+        .iter()
+        .find(|role| role.role_id.as_str() == "npc-alpha")
+        .expect("alpha role present");
+    let bravo = projection
+        .context
+        .ai_roles
+        .iter()
+        .find(|role| role.role_id.as_str() == "npc-bravo")
+        .expect("bravo role present");
+
+    assert_eq!(alpha.knowledge.known_rumors.len(), 1);
+    assert_eq!(alpha.knowledge.known_rumors[0].as_str(), "alpha heard a rumor");
+    assert_eq!(bravo.knowledge.known_rumors.len(), 1);
+    assert_eq!(bravo.knowledge.known_rumors[0].as_str(), "bravo heard a different rumor");
 }

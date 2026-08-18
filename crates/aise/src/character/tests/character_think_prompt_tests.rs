@@ -266,6 +266,14 @@ fn sample_snapshot(roles: &[&StoryRole]) -> StoryReadSnapshot {
 }
 
 fn build_context(all_roles: &[&StoryRole], baseline: BaselineContext) -> TurnExecutionContext {
+    build_context_with_impulses(all_roles, baseline, Vec::new())
+}
+
+fn build_context_with_impulses(
+    all_roles: &[&StoryRole],
+    baseline: BaselineContext,
+    character_impulses: Vec<crate::domain::narrative_graph::effect::CharacterImpulse>,
+) -> TurnExecutionContext {
     let budget = TurnBudget::from_config(
         &TurnConfig::default(),
         &TurnContentLimitsConfig::default(),
@@ -286,6 +294,16 @@ fn build_context(all_roles: &[&StoryRole], baseline: BaselineContext) -> TurnExe
     let mut ctx = TurnExecutionContext::new(identity, request, budget, control, trace).unwrap();
     ctx.complete_initialization().unwrap();
     ctx.set_prepared_context(sample_snapshot(all_roles), baseline).unwrap();
+    if !character_impulses.is_empty() {
+        let mut plan = crate::domain::narrative_graph::projector::NarrativePlan::empty();
+        plan.character_impulses = character_impulses;
+        ctx.set_narrative_projection(crate::domain::narrative_graph::projector::NarrativeProjection {
+            plan,
+            condition_queries: Vec::new(),
+            expected_graph_revision: 0,
+        })
+        .unwrap();
+    }
     let plan = WriterPlan {
         story_goal: WriterStoryGoal {
             summary: bounded("goal"),
@@ -358,4 +376,235 @@ fn character_think_rejects_player_role() {
         result,
         Err(CharacterThinkProjectionError::PlayerControlledRole { .. })
     ));
+}
+
+fn character_impulse(target_id: &str, goal: &str) -> crate::domain::narrative_graph::effect::CharacterImpulse {
+    crate::domain::narrative_graph::effect::CharacterImpulse {
+        source_node: crate::domain::asset::ids::NarrativeNodeKey::try_new("node.impulse").unwrap(),
+        target_role_id: RoleId::try_new(target_id).unwrap(),
+        goal: bounded(goal),
+        reason: None,
+        emotion: None,
+        urgency: crate::domain::narrative_graph::effect::ImpulseUrgency::Medium,
+        expires_after_turn: None,
+    }
+}
+
+#[test]
+fn character_impulse_is_target_scoped() {
+    let player = story_role("protagonist", RoleController::Player(PlayerId::try_new("player-1").unwrap()));
+    let npc_a = story_role("npc-a", RoleController::Ai);
+    let npc_b = story_role("npc-b", RoleController::Ai);
+    let all_roles = [&player, &npc_a, &npc_b];
+    let baseline = sample_baseline(&player, &[]);
+    let ctx = build_context_with_impulses(
+        &all_roles,
+        baseline,
+        vec![
+            character_impulse("npc-a", "npc-a private goal"),
+            character_impulse("npc-b", "npc-b private goal"),
+        ],
+    );
+    let projector = DefaultCharacterThinkPromptContextProjector::new(
+        crate::config::CharacterThinkConfig::default(),
+        ContextPreparationConfig::default(),
+    );
+    let request = CharacterThinkRequest {
+        role_id: npc_a.role_id.clone(),
+        reason: bounded("assess the intruder"),
+    };
+
+    let projection = projector.project(&ctx, &request).expect("target role must be projectable");
+
+    assert_eq!(projection.context.narrative_character_impulses.len(), 1);
+    assert_eq!(
+        projection.context.narrative_character_impulses[0].goal.as_str(),
+        "npc-a private goal"
+    );
+
+    let rendered = projection
+        .rc_vars
+        .as_map()
+        .get("narrative_character_impulses")
+        .and_then(Value::as_str)
+        .expect("narrative_character_impulses rendered");
+    assert!(rendered.contains("npc-a private goal"));
+    assert!(!rendered.contains("npc-b private goal"));
+}
+
+#[test]
+fn runtime_context_projectors_preserve_slot_key_sets() {
+    let player = story_role("protagonist", RoleController::Player(PlayerId::try_new("player-1").unwrap()));
+    let npc_a = story_role("npc-a", RoleController::Ai);
+    let all_roles = [&player, &npc_a];
+    let baseline = sample_baseline(&player, &[]);
+    let ctx = build_context(&all_roles, baseline);
+    let projector = DefaultCharacterThinkPromptContextProjector::new(
+        crate::config::CharacterThinkConfig::default(),
+        ContextPreparationConfig::default(),
+    );
+    let request = CharacterThinkRequest {
+        role_id: npc_a.role_id.clone(),
+        reason: bounded("assess the intruder"),
+    };
+
+    let projection = projector.project(&ctx, &request).expect("target role must be projectable");
+
+    let expected: std::collections::BTreeSet<&str> = [
+        "target_character",
+        "current_character_state",
+        "story_summary",
+        "recent_story",
+        "narrative_character_impulses",
+        "thinking_focus",
+        "player_input",
+    ]
+    .into_iter()
+    .collect();
+    let actual: std::collections::BTreeSet<&str> = projection.rc_vars.as_map().keys().map(String::as_str).collect();
+    assert_eq!(
+        actual, expected,
+        "character_think RC slot keys must match assets/prompts/context-v2/slots.yaml exactly"
+    );
+}
+
+fn retrieved_knowledge_item(
+    source_id: crate::domain::knowledge::KnowledgeSourceId,
+    body: &str,
+) -> crate::domain::turn::RetrievedKnowledgeItem {
+    crate::domain::turn::RetrievedKnowledgeItem::from_parts(
+        source_id,
+        bounded(body),
+        crate::domain::knowledge::KnowledgeSource::Seed {
+            pack_id: PackId::try_new("pack-1").unwrap(),
+            pack_digest: digest(),
+        },
+        crate::domain::turn::RelevanceRank {
+            match_level: crate::domain::turn::MatchLevel::Entity,
+            signal_priority: 0,
+            salience: 1,
+        },
+        BTreeMap::new(),
+    )
+}
+
+fn retrieval_limits() -> crate::domain::turn::RetrievedContextLimits {
+    crate::domain::turn::RetrievedContextLimits {
+        max_role_audiences: 8,
+        max_items_per_audience: 8,
+        max_tokens_per_audience: 10_000,
+        max_total_items: 32,
+        max_total_tokens: 10_000,
+        max_item_bytes: 4096,
+    }
+}
+
+fn build_context_with_retrieval(
+    all_roles: &[&StoryRole],
+    baseline: BaselineContext,
+    think_targets: Vec<&str>,
+    retrieved: crate::domain::turn::RetrievedContext,
+) -> TurnExecutionContext {
+    let budget = TurnBudget::from_config(
+        &TurnConfig::default(),
+        &TurnContentLimitsConfig::default(),
+        &RetrievalConfig::default(),
+        &StateExtractorConfig::default(),
+        &NarrativeConfig::default(),
+    )
+    .unwrap();
+    let identity = TurnIdentity::new(
+        StoryId::try_new("story-1").unwrap(),
+        TurnId::try_new("turn-1").unwrap(),
+        IdempotencyKey::try_new("idem-1").unwrap(),
+        0,
+    );
+    let request = TurnRequest::try_new("go north".to_owned()).unwrap();
+    let control = TurnControl::new(Instant::now() + Duration::from_secs(30), TurnCancellation::new());
+    let trace = TraceRecorder::with_limits(budget.max_trace_spans());
+    let mut ctx = TurnExecutionContext::new(identity, request, budget, control, trace).unwrap();
+    ctx.complete_initialization().unwrap();
+    ctx.set_prepared_context(sample_snapshot(all_roles), baseline).unwrap();
+    let plan = WriterPlan {
+        story_goal: WriterStoryGoal {
+            summary: bounded("goal"),
+        },
+        retrieval_plan: RetrievalPlan::default(),
+        character_think_requests: think_targets
+            .into_iter()
+            .map(|id| CharacterThinkRequest {
+                role_id: RoleId::try_new(id).unwrap(),
+                reason: bounded("think"),
+            })
+            .collect(),
+    };
+    ctx.set_writer_plan(plan).unwrap();
+    ctx.set_retrieved_context(retrieved).unwrap();
+    ctx
+}
+
+#[test]
+fn character_think_nests_authorized_knowledge_under_target_role() {
+    let player = story_role("protagonist", RoleController::Player(PlayerId::try_new("player-1").unwrap()));
+    let npc = story_role("npc-a", RoleController::Ai);
+    let all_roles = [&player, &npc];
+    let baseline = sample_baseline(&player, &[]);
+    let mut characters = BTreeMap::new();
+    characters.insert(
+        npc.role_id.clone(),
+        crate::domain::turn::RetrievedCharacterContext {
+            role: None,
+            known_rumors: vec![retrieved_knowledge_item(
+                crate::domain::knowledge::KnowledgeSourceId::Rumor(
+                    crate::domain::ids::RumorId::try_new("rumor_0001").unwrap(),
+                ),
+                "npc-a heard a rumor",
+            )],
+            memories: vec![retrieved_knowledge_item(
+                crate::domain::knowledge::KnowledgeSourceId::Memory(
+                    crate::domain::ids::MemoryId::try_new("memory_0001").unwrap(),
+                ),
+                "npc-a remembers an old promise",
+            )],
+        },
+    );
+    let retrieved = crate::domain::turn::RetrievedContext::try_new(
+        crate::domain::turn::RetrievedWorldKnowledge::default(),
+        characters,
+        retrieval_limits(),
+    )
+    .unwrap();
+    let ctx = build_context_with_retrieval(&all_roles, baseline, vec!["npc-a"], retrieved);
+    let projector = DefaultCharacterThinkPromptContextProjector::new(
+        crate::config::CharacterThinkConfig::default(),
+        ContextPreparationConfig::default(),
+    );
+    let request = CharacterThinkRequest {
+        role_id: npc.role_id.clone(),
+        reason: bounded("assess the intruder"),
+    };
+
+    let projection = projector.project(&ctx, &request).expect("target role must be projectable");
+
+    assert_eq!(projection.context.target_role.knowledge.known_rumors.len(), 1);
+    assert_eq!(
+        projection.context.target_role.knowledge.known_rumors[0].as_str(),
+        "npc-a heard a rumor"
+    );
+    assert_eq!(projection.context.target_role.knowledge.memories.len(), 1);
+    assert_eq!(
+        projection.context.target_role.knowledge.memories[0].as_str(),
+        "npc-a remembers an old promise"
+    );
+
+    let values = projection.rc_vars.as_map();
+    assert!(!values.contains_key("knowledge"));
+    assert!(!values.contains_key("role_knowledge"));
+    let rendered = values
+        .get("target_character")
+        .and_then(Value::as_str)
+        .expect("target_character rendered");
+    assert!(rendered.starts_with("role_id: \"npc-a\""));
+    assert!(rendered.contains("npc-a heard a rumor"));
+    assert!(rendered.contains("npc-a remembers an old promise"));
 }

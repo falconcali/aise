@@ -115,3 +115,73 @@ fn merge_world_knowledge_does_not_merge_distinct_ids_with_same_text() {
     let view = merge_world_knowledge(&baseline, &retrieved).unwrap();
     assert_eq!(view.facts.len(), 2);
 }
+
+#[test]
+fn world_knowledge_merge_uses_id_not_text() {
+    let baseline = RelevantWorldKnowledge {
+        facts: vec![
+            RelevantWorldKnowledgeItem {
+                source_id: fact_id("fact_0001"),
+                content: text("shared text"),
+                source_priority: 0,
+                salience: 1,
+            },
+            RelevantWorldKnowledgeItem {
+                source_id: fact_id("fact_0002"),
+                content: text("shared text"),
+                source_priority: 0,
+                salience: 1,
+            },
+        ],
+        rumors: Vec::new(),
+    };
+    let retrieved = RetrievedWorldKnowledge {
+        facts: vec![
+            retrieved_item(fact_id("fact_0001"), "shared text"),
+            retrieved_item(fact_id("fact_0003"), "shared text"),
+        ],
+        rumors: Vec::new(),
+    };
+
+    let view = merge_world_knowledge(&baseline, &retrieved).unwrap();
+
+    assert_eq!(
+        view.facts.len(),
+        3,
+        "same id collapses, distinct ids with same text stay separate"
+    );
+    assert_eq!(view.facts.iter().filter(|content| content.as_str() == "shared text").count(), 3);
+}
+
+#[test]
+fn relevant_knowledge_renders_grouped_content_only() {
+    let view = WorldKnowledgePromptView {
+        facts: vec![text("fact one"), text("fact two")],
+        rumors: vec![text("rumor one")],
+    };
+    let rendered = render_relevant_knowledge(&view);
+
+    assert!(rendered.starts_with("### Facts"));
+    assert!(rendered.contains("### Rumors"));
+    assert!(rendered.contains("\"fact one\""));
+    assert!(rendered.contains("\"fact two\""));
+    assert!(rendered.contains("\"rumor one\""));
+    assert!(rendered.find("### Facts").unwrap() < rendered.find("### Rumors").unwrap());
+    assert!(!rendered.contains("fact_"));
+    assert!(!rendered.contains("rumor_"));
+    assert!(!rendered.contains("source_id"));
+    assert!(!rendered.contains("salience"));
+    assert!(!rendered.contains("priority"));
+}
+
+#[test]
+fn empty_relevant_knowledge_renders_no_sentinel_or_empty_group() {
+    let rendered = render_relevant_knowledge(&WorldKnowledgePromptView::default());
+    assert_eq!(rendered, "");
+
+    let facts_only = render_relevant_knowledge(&WorldKnowledgePromptView {
+        facts: vec![text("fact one")],
+        rumors: Vec::new(),
+    });
+    assert!(!facts_only.contains("### Rumors"));
+}

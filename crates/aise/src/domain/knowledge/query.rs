@@ -129,3 +129,7 @@ pub fn allocate_knowledge_ids(
         new_high_water: KnowledgeIdHighWater::new(next),
     })
 }
+
+#[cfg(test)]
+#[path = "tests/query_tests.rs"]
+mod tests;
