@@ -136,13 +136,14 @@ max_item_bytes = 4096
 [aise.state_extractor]
 max_context_tokens = 4096
 max_output_tokens = 2048
+max_new_roles_per_turn = 4
 max_role_states = 16
 max_relationship_states = 64
-max_knowledge_changes = 64
+max_knowledge_items = 32
 max_goals_per_role = 16
 max_attributes_per_role = 64
-max_entities_per_knowledge = 16
-max_topics_per_knowledge = 16
+max_role_profile_bytes = 512
+max_cast_policy_violations = 8
 max_knowledge_context_items = 128
 max_knowledge_context_tokens = 2048
 
