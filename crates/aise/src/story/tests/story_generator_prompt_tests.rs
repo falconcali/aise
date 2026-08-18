@@ -216,17 +216,6 @@ fn story_generator_renders_story_continuity_as_prose() {
 }
 
 #[test]
-fn story_generator_schema_is_closed_and_complete() {
-    let schema = StoryGeneratorOutput::json_schema(8192);
-    let required = schema["required"].as_array().unwrap();
-
-    assert_eq!(schema["additionalProperties"], false);
-    assert_eq!(required.len(), 1);
-    assert_eq!(schema["properties"]["story_text"]["minLength"], 1);
-    assert_eq!(schema["properties"]["story_text"]["maxLength"], 8192);
-}
-
-#[test]
 fn full_role_rendering_uses_stage_visibility_contract() {
     let mut value = role("guard");
     value.dialogue_examples = vec![dialogue_example("challenged", "State your business.")];
@@ -414,6 +403,7 @@ fn sample_snapshot(roles: &[&StoryRole]) -> StoryReadSnapshot {
             base_revision: StoryRevision::new(0),
             knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater::zero(),
         },
+        role_id_high_water: crate::domain::ids::RoleIdHighWater::zero(),
     })
     .unwrap()
 }

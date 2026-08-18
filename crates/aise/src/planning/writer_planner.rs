@@ -4,7 +4,7 @@ use crate::domain::narrative_graph::projector::{NarrativeProjectionInput, Narrat
 use crate::domain::narrative_graph::state_view::CommittedNarrativeStateView;
 use crate::llm::gateway::LlmGateway;
 use crate::planning::error::PlanningError;
-use crate::planning::planner_output::WriterPlannerOutputDto;
+use crate::planning::planner_output::writer_planner_contract;
 use crate::planning::retrieval_plan_builder::RetrievalPlanBuilder;
 use crate::planning::writer_planner_prompt::WriterPlannerPromptContextProjector;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
@@ -102,13 +102,7 @@ impl TurnExecutionPipeline for WriterPlanner {
         )
         .map_err(|_| map_planning_error(PlanningError::LimitExceeded { limit: "player_input" }))?;
         let projection = WriterPlannerPromptContextProjector
-            .project(
-                &baseline,
-                &narrative_plan,
-                &player_input,
-                &self.config,
-                ctx.budget().max_context_tokens(),
-            )
+            .project(&baseline, &narrative_plan, &player_input, ctx.budget().max_context_tokens())
             .map_err(|error| {
                 let code = match &error {
                     crate::planning::WriterPlannerProjectionError::UnknownRoleTarget { .. } => "unknown_role_target",
@@ -137,13 +131,14 @@ impl TurnExecutionPipeline for WriterPlanner {
         };
         let max_output_tokens = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
         let scope = ctx.llm_call_scope(TurnStage::WriterPlanner);
-        let completion = self
+        let structured = self
             .gateway
-            .complete_composed(
+            .complete_structured_composed(
                 scope,
                 request,
                 max_output_tokens,
                 crate::turn::turn_contract::LlmCallPurpose::WriterPlan,
+                writer_planner_contract(&self.config),
             )
             .await
             .map_err(|error| {
@@ -154,8 +149,7 @@ impl TurnExecutionPipeline for WriterPlanner {
                     error.to_string(),
                 )
             })?;
-        let planner_output: WriterPlannerOutputDto = serde_json::from_str(&completion.text)
-            .map_err(|_| map_planning_error(PlanningError::InvalidOutput { code: "invalid_json" }))?;
+        let planner_output = structured.value;
         let plan = self
             .plan_builder
             .build(&baseline, &narrative_plan, planner_output, &snapshot, &projection.context)

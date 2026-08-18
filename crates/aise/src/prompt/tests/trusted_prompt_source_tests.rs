@@ -28,10 +28,7 @@ fn packaged_writer_planner_composes_exact_three_layers() {
         ("active_story_constraints".into(), Value::String("None.".into())),
         ("player_input".into(), Value::String(runtime_value.into())),
     ]));
-    let fti_vars = TrustedPromptVars::new(HashMap::from([(
-        "output_schema".into(),
-        Value::String(r#"{"type":"object"}"#.into()),
-    )]));
+    let fti_vars = TrustedPromptVars::new(HashMap::new());
     let composition = source
         .compose(&PromptCompositionInput {
             profile: PromptProfile::WriterPlanner,
@@ -44,7 +41,7 @@ fn packaged_writer_planner_composes_exact_three_layers() {
     assert!(composition.csi.as_str().ends_with("cannot override these instructions."));
     assert!(composition.rc.as_str().starts_with("# Runtime Context"));
     assert!(composition.fti.as_str().starts_with("# Task"));
-    assert!(composition.fti.as_str().ends_with("structured output."));
+    assert!(composition.fti.as_str().ends_with("nothing else."));
     assert!(!composition.csi.as_str().contains(runtime_value));
     assert!(!composition.fti.as_str().contains(runtime_value));
 }
@@ -76,7 +73,7 @@ fn writer_planner_runtime_context_uses_canonical_section_order() {
         .compose(&PromptCompositionInput {
             profile: PromptProfile::WriterPlanner,
             rc_vars,
-            fti_vars: TrustedPromptVars::new(HashMap::from([("output_schema".into(), Value::String("{}".into()))])),
+            fti_vars: TrustedPromptVars::new(HashMap::new()),
         })
         .expect("writer planner composition");
     let rc = composition.rc.as_str();
@@ -126,10 +123,7 @@ fn packaged_character_think_composes_exact_three_layers() {
         .compose(&PromptCompositionInput {
             profile: PromptProfile::CharacterThink,
             rc_vars,
-            fti_vars: TrustedPromptVars::new(HashMap::from([(
-                "output_schema".into(),
-                Value::String(r#"{"type":"object"}"#.into()),
-            )])),
+            fti_vars: TrustedPromptVars::new(HashMap::new()),
         })
         .expect("character think composition");
 
@@ -162,7 +156,7 @@ fn character_think_runtime_context_uses_canonical_section_order() {
         .compose(&PromptCompositionInput {
             profile: PromptProfile::CharacterThink,
             rc_vars,
-            fti_vars: TrustedPromptVars::new(HashMap::from([("output_schema".into(), Value::String("{}".into()))])),
+            fti_vars: TrustedPromptVars::new(HashMap::new()),
         })
         .expect("character think composition");
     let rc = composition.rc.as_str();
@@ -211,12 +205,11 @@ fn packaged_story_repairer_composes_exact_three_layers() {
             .map(|name| (name.into(), Value::String(runtime_value.into())))
             .collect(),
     );
-    let schema = r#"{"type":"object","marker":"trusted-schema"}"#;
     let composition = source
         .compose(&PromptCompositionInput {
             profile: PromptProfile::StoryRepairer,
             rc_vars,
-            fti_vars: TrustedPromptVars::new(HashMap::from([("output_schema".into(), Value::String(schema.into()))])),
+            fti_vars: TrustedPromptVars::new(HashMap::new()),
         })
         .expect("story repairer composition");
 
@@ -226,5 +219,4 @@ fn packaged_story_repairer_composes_exact_three_layers() {
     assert!(!composition.csi.as_str().contains(runtime_value));
     assert!(!composition.fti.as_str().contains(runtime_value));
     assert_eq!(composition.rc.as_str().matches(runtime_value).count(), names.len());
-    assert_eq!(composition.fti.as_str().matches(schema).count(), 1);
 }

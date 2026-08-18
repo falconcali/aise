@@ -5,15 +5,56 @@ use crate::config::{CharacterThinkConfig, ContextPreparationConfig};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::CharacterDecision;
-use crate::domain::turn::character::CharacterDecisionOutput;
 use crate::llm::gateway::LlmGateway;
+use crate::llm::output_contract::{LlmOutputContract, LlmOutputViolation};
 use crate::prompt::{PromptCompositionInput, PromptProfile};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use async_trait::async_trait;
+use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Instant;
+
+const CHARACTER_DECISION_CONTRACT_NAME: &str = "character_decision.v1";
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CharacterDecisionDto {
+    decision: String,
+    suggested_utterance: String,
+}
+
+fn character_decision_contract(config: &CharacterThinkConfig) -> LlmOutputContract<CharacterDecisionDto> {
+    let max_field_bytes = config.max_field_bytes;
+    let schema = serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["decision", "suggested_utterance"],
+        "properties": {
+            "decision": {"type": "string", "minLength": 1, "maxLength": max_field_bytes},
+            "suggested_utterance": {"type": "string", "maxLength": max_field_bytes}
+        }
+    });
+    let compact_prompt_shape = format!(
+        "Return exactly one JSON object: {{\"decision\": string (required, non-empty, <= {max_field_bytes} bytes), \"suggested_utterance\": string (use \"\" when absent, <= {max_field_bytes} bytes)}}. No other fields, no prose outside the object."
+    );
+    LlmOutputContract {
+        name: CHARACTER_DECISION_CONTRACT_NAME,
+        schema: Arc::new(schema),
+        compact_prompt_shape: Arc::from(compact_prompt_shape.as_str()),
+        validate: Arc::new(|dto: &CharacterDecisionDto| {
+            if dto.decision.trim().is_empty() {
+                Err(LlmOutputViolation::new(
+                    CHARACTER_DECISION_CONTRACT_NAME,
+                    "decision must be trim-non-empty",
+                ))
+            } else {
+                Ok(())
+            }
+        }),
+    }
+}
 
 pub struct CharacterThinkPipeline {
     gateway: Arc<LlmGateway>,
@@ -104,13 +145,14 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                 .remaining_output_tokens()
                 .min(u64::from(self.config.max_output_tokens)) as u32;
             let scope = ctx.llm_call_scope(TurnStage::CharacterThink);
-            let completion = self
+            let structured = self
                 .gateway
-                .complete_composed(
+                .complete_structured_composed(
                     scope,
                     model_request,
                     max_output_tokens,
                     crate::turn::turn_contract::LlmCallPurpose::CharacterThink,
+                    character_decision_contract(&self.config),
                 )
                 .await
                 .map_err(|error| {
@@ -121,14 +163,10 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                         error.to_string(),
                     )
                 })?;
-            let output: CharacterDecisionOutput = serde_json::from_str(&completion.text)
-                .map_err(|_| model_output_invalid("character decision output is not valid JSON"))?;
-            let decision_text = normalize_required_output(output.decision, "decision", self.config.max_field_bytes)?;
-            let suggested_utterance = normalize_optional_output(
-                output.suggested_utterance,
-                "suggested_utterance",
-                self.config.max_field_bytes,
-            )?;
+            let dto = structured.value;
+            let decision_text = normalize_required_output(dto.decision, "decision", self.config.max_field_bytes)?;
+            let suggested_utterance =
+                normalize_optional_output(dto.suggested_utterance, "suggested_utterance", self.config.max_field_bytes)?;
             let total_bytes = enforce_total_output_budget(
                 &decision_text,
                 suggested_utterance.as_ref(),
@@ -185,11 +223,11 @@ fn model_output_invalid(message: impl Into<String>) -> TurnExecutionError {
 }
 
 fn normalize_required_output(
-    value: BoundedText,
+    value: String,
     field: &'static str,
     maximum_bytes: usize,
 ) -> Result<BoundedText, TurnExecutionError> {
-    let normalized = value.as_str().trim();
+    let normalized = value.trim();
     if normalized.is_empty() {
         return Err(model_output_invalid("character decision contains an empty required field"));
     }
@@ -198,16 +236,13 @@ fn normalize_required_output(
 }
 
 fn normalize_optional_output(
-    value: Option<BoundedText>,
+    value: String,
     field: &'static str,
     maximum_bytes: usize,
 ) -> Result<Option<BoundedText>, TurnExecutionError> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
-    let normalized = value.as_str().trim();
+    let normalized = value.trim();
     if normalized.is_empty() {
-        return Err(model_output_invalid("character decision contains an empty optional field"));
+        return Ok(None);
     }
     BoundedText::try_new(normalized.to_owned(), field, maximum_bytes)
         .map(Some)

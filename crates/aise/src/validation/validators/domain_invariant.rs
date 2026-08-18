@@ -1,56 +1,60 @@
-use crate::domain::knowledge::KnowledgeKind;
-use crate::domain::turn::{DeletableKnowledgeId, ProposedKnowledgeMutation, ProposedKnowledgeValue};
+use crate::domain::ids::{RoleId, allocate_dynamic_role_candidates};
+use crate::domain::story_instance::state::CastPolicy;
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::TurnExecutionError;
 use crate::turn::turn_validation::{
     ValidationIssue, ValidationIssueClass, ValidationIssueCode, ValidationLocation, ValidationRemedy,
 };
 use crate::validation::validators::DeterministicValidator;
-use crate::validation::validators::reference::modifiable_knowledge_index;
 
 #[derive(Default)]
 pub struct DomainInvariantValidator;
 
 impl DeterministicValidator for DomainInvariantValidator {
     fn validate(&self, ctx: &TurnExecutionContext) -> Result<Vec<ValidationIssue>, TurnExecutionError> {
-        let Some(extraction) = ctx.extraction() else {
+        let (Some(extraction), Some(snapshot)) = (ctx.extraction(), ctx.snapshot()) else {
             return Ok(Vec::new());
         };
+        let dto = extraction;
         let mut issues = Vec::new();
 
-        let modifiable = modifiable_knowledge_index(ctx);
-        for (index, mutation) in extraction.knowledge_changes.iter().enumerate() {
-            match mutation {
-                ProposedKnowledgeMutation::Add { .. } => {}
-                ProposedKnowledgeMutation::Update { target, value } => {
-                    let value_kind = match value {
-                        ProposedKnowledgeValue::Fact { .. } => KnowledgeKind::Fact,
-                        ProposedKnowledgeValue::Rumor { .. } => KnowledgeKind::Rumor,
-                        ProposedKnowledgeValue::Memory { .. } => KnowledgeKind::Memory,
-                    };
-                    if value_kind == KnowledgeKind::Fact
-                        && !matches!(target, crate::domain::knowledge::KnowledgeSourceId::Fact(_))
-                    {
-                        issues.push(issue("knowledge_changes", index, "update target/value kind mismatch"));
+        if !dto.cast_policy_violations.is_empty() {
+            issues.push(cast_policy_issue(
+                "cast_policy_violations",
+                "extractor reported a material cast policy violation that requires narrative repair",
+            ));
+        }
+        let cast_policy = snapshot.instance_settings().cast_policy;
+        if cast_policy != CastPolicy::Open && !dto.new_roles.is_empty() {
+            issues.push(cast_policy_issue(
+                "new_roles",
+                "new roles are not permitted under the configured cast policy",
+            ));
+        }
+
+        if !dto.new_roles.is_empty() {
+            match allocate_dynamic_role_candidates(snapshot.role_id_high_water(), dto.new_roles.len()) {
+                Ok(pool) => {
+                    for (index, role) in dto.new_roles.iter().enumerate() {
+                        let matches_candidate = RoleId::try_new(role.role_id.clone())
+                            .ok()
+                            .and_then(|role_id| pool.position_of(&role_id))
+                            == Some(index);
+                        if !matches_candidate {
+                            issues.push(new_role_issue(
+                                index,
+                                "role_id must be the next unused dynamic candidate in rendered order",
+                            ));
+                        }
                     }
                 }
-                ProposedKnowledgeMutation::Delete { target } => {
-                    let kind = match target {
-                        DeletableKnowledgeId::Rumor(_) => KnowledgeKind::Rumor,
-                        DeletableKnowledgeId::Memory(_) => KnowledgeKind::Memory,
-                    };
-                    let source_id = match target {
-                        DeletableKnowledgeId::Rumor(id) => {
-                            crate::domain::knowledge::KnowledgeSourceId::Rumor(id.clone())
-                        }
-                        DeletableKnowledgeId::Memory(id) => {
-                            crate::domain::knowledge::KnowledgeSourceId::Memory(id.clone())
-                        }
-                    };
-                    if modifiable.get(&source_id).is_some_and(|existing| *existing != kind) {
-                        issues.push(issue("knowledge_changes", index, "delete target kind mismatch"));
-                    }
-                }
+                Err(_) => issues.push(new_role_issue(0, "dynamic role id allocation overflowed")),
+            }
+        }
+
+        for (index, relationship) in dto.relationship_states.iter().enumerate() {
+            if i16::try_from(relationship.trust).is_err() {
+                issues.push(trust_issue(index));
             }
         }
 
@@ -58,14 +62,40 @@ impl DeterministicValidator for DomainInvariantValidator {
     }
 }
 
-fn issue(path: &str, index: usize, message: &str) -> ValidationIssue {
+fn cast_policy_issue(path: &str, message: &str) -> ValidationIssue {
     ValidationIssue {
-        code: ValidationIssueCode::DomainInvariantViolated,
+        code: ValidationIssueCode::CastPolicyViolation,
+        class: ValidationIssueClass::Story,
+        remedy: ValidationRemedy::RepairStory,
+        message: message.to_owned(),
+        location: Some(ValidationLocation {
+            path: path.to_owned(),
+            item_index: None,
+        }),
+    }
+}
+
+fn new_role_issue(index: usize, message: &str) -> ValidationIssue {
+    ValidationIssue {
+        code: ValidationIssueCode::NewRoleInvalid,
         class: ValidationIssueClass::Extraction,
         remedy: ValidationRemedy::ReextractState,
         message: message.to_owned(),
         location: Some(ValidationLocation {
-            path: format!("{path}[{index}]"),
+            path: format!("new_roles[{index}]"),
+            item_index: u32::try_from(index).ok(),
+        }),
+    }
+}
+
+fn trust_issue(index: usize) -> ValidationIssue {
+    ValidationIssue {
+        code: ValidationIssueCode::DomainInvariantViolated,
+        class: ValidationIssueClass::Extraction,
+        remedy: ValidationRemedy::ReextractState,
+        message: "relationship trust is outside the domain's accepted range".to_owned(),
+        location: Some(ValidationLocation {
+            path: format!("relationship_states[{index}]"),
             item_index: u32::try_from(index).ok(),
         }),
     }

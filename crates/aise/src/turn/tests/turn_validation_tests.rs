@@ -18,19 +18,24 @@ fn narrative_resolution() -> ValidatedNarrativeResolution {
     }
 }
 
-#[test]
-fn pass_cannot_contain_issues() {
-    let change_set = ValidatedChangeSet::new(ValidatedChangeSetParts {
-        story_text: BoundedText::try_new("story text", "story_text", 100).expect("bounded text"),
+fn parts(story_text: &str) -> ValidatedChangeSetParts {
+    ValidatedChangeSetParts {
+        story_text: BoundedText::try_new(story_text, "story_text", 100).expect("bounded text"),
+        new_roles: Vec::new(),
         role_changes: Vec::new(),
-        relationship_changes: Vec::new(),
+        relationship_operations: Vec::new(),
         knowledge_mutations: Vec::new(),
         knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater::zero(),
+        next_role_id_high_water: crate::domain::ids::RoleIdHighWater::zero(),
         narrative_events: Vec::new(),
         narrative_resolution: narrative_resolution(),
         constraint_change: StateChange::Unchanged,
-    })
-    .expect("valid change set");
+    }
+}
+
+#[test]
+fn pass_cannot_contain_issues() {
+    let change_set = ValidatedChangeSet::new(parts("story text")).expect("valid change set");
     let result = ValidationResult::pass(change_set);
     assert_eq!(result.decision(), ValidationDecision::Pass);
     assert!(result.issues().is_empty(), "Pass must expose an empty issue slice");
@@ -39,16 +44,6 @@ fn pass_cannot_contain_issues() {
 
 #[test]
 fn validated_change_set_has_no_scene_contract() {
-    let change_set = ValidatedChangeSet::new(ValidatedChangeSetParts {
-        story_text: BoundedText::try_new("story text", "story_text", 100).expect("bounded text"),
-        role_changes: Vec::new(),
-        relationship_changes: Vec::new(),
-        knowledge_mutations: Vec::new(),
-        knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater::zero(),
-        narrative_events: Vec::new(),
-        narrative_resolution: narrative_resolution(),
-        constraint_change: StateChange::Unchanged,
-    })
-    .expect("valid change set");
+    let change_set = ValidatedChangeSet::new(parts("story text")).expect("valid change set");
     assert_eq!(change_set.narrative_events().len(), 0);
 }

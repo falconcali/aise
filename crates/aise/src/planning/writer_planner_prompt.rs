@@ -1,4 +1,3 @@
-use crate::config::PlannerConfig;
 use crate::domain::asset::constraint::StoryConstraintRequirement;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::RoleId;
@@ -12,7 +11,7 @@ use crate::prompt::{
     render_narrative_direction, render_relevant_knowledge, render_story_profile_view,
     world_knowledge_view_from_baseline,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
 pub const WRITER_PLANNER_CSI_SLOT: &str = "context.writer_planner.csi";
@@ -60,7 +59,6 @@ impl WriterPlannerPromptContextProjector {
         baseline: &BaselineContext,
         narrative_plan: &NarrativePlan,
         player_input: &BoundedText,
-        config: &PlannerConfig,
         max_input_tokens: u64,
     ) -> Result<WriterPlannerPromptProjection, WriterPlannerProjectionError> {
         let mut indexed_targets = BTreeMap::new();
@@ -130,10 +128,7 @@ impl WriterPlannerPromptContextProjector {
             ("active_story_constraints".into(), Value::String(render_constraints(baseline))),
             ("player_input".into(), Value::String(render_data(player_input.as_str()))),
         ]);
-        let fti_vars = HashMap::from([(
-            "output_schema".into(),
-            Value::String(writer_planner_output_schema(config).to_string()),
-        )]);
+        let fti_vars: HashMap<String, Value> = HashMap::new();
         let input_tokens = rc_vars
             .values()
             .filter_map(Value::as_str)
@@ -166,58 +161,6 @@ fn insert_target(
             Ok(())
         }
     }
-}
-
-pub fn writer_planner_output_schema(config: &PlannerConfig) -> Value {
-    json!({
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["story_goal", "writer_context_gaps", "character_context_gaps", "character_think_requests"],
-        "properties": {
-            "story_goal": {"type": "string", "minLength": 1, "maxLength": config.max_goal_bytes},
-            "writer_context_gaps": {
-                "type": "array",
-                "maxItems": config.max_context_gaps,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["target_id", "reason"],
-                    "properties": {
-                        "target_id": {"type": "string", "minLength": 1, "maxLength": 256},
-                        "reason": {"type": "string", "minLength": 1, "maxLength": config.max_reason_bytes}
-                    }
-                }
-            },
-            "character_context_gaps": {
-                "type": "array",
-                "maxItems": config.max_context_gaps,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["role_id", "target_id", "reason"],
-                    "properties": {
-                        "role_id": {"type": "string", "minLength": 1},
-                        "target_id": {"type": "string", "minLength": 1, "maxLength": 256},
-                        "reason": {"type": "string", "minLength": 1, "maxLength": config.max_reason_bytes}
-                    }
-                }
-            },
-            "character_think_requests": {
-                "type": "array",
-                "maxItems": config.max_character_think_requests,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["role_id", "reason"],
-                    "properties": {
-                        "role_id": {"type": "string", "minLength": 1},
-                        "reason": {"type": "string", "minLength": 1, "maxLength": config.max_reason_bytes}
-                    }
-                }
-            }
-        }
-    })
 }
 
 fn render_instance_settings(policy: CastPolicy) -> String {

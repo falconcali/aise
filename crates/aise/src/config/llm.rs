@@ -1,5 +1,6 @@
 use super::error::ConfigError;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -16,6 +17,119 @@ pub enum TraceContentPolicy {
 pub enum ThinkingMode {
     Enabled,
     Disabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StructuredOutputMode {
+    NativeJsonSchema,
+    ForcedStrictTool,
+    JsonObject,
+    PromptFallback,
+}
+
+impl StructuredOutputMode {
+    pub const PREFERENCE_ORDER: [StructuredOutputMode; 4] = [
+        StructuredOutputMode::NativeJsonSchema,
+        StructuredOutputMode::ForcedStrictTool,
+        StructuredOutputMode::JsonObject,
+        StructuredOutputMode::PromptFallback,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NativeJsonSchema => "native_json_schema",
+            Self::ForcedStrictTool => "forced_strict_tool",
+            Self::JsonObject => "json_object",
+            Self::PromptFallback => "prompt_fallback",
+        }
+    }
+
+    pub fn injects_prompt_contract(self) -> bool {
+        matches!(self, Self::JsonObject | Self::PromptFallback)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelStructuredOutputCapabilities {
+    pub provider: String,
+    pub model: String,
+    pub supported_modes: Vec<StructuredOutputMode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuredOutputConfig {
+    #[serde(default = "default_structured_output_modes")]
+    pub default_modes: Vec<StructuredOutputMode>,
+    #[serde(default)]
+    pub model_capabilities: Vec<ModelStructuredOutputCapabilities>,
+}
+
+fn default_structured_output_modes() -> Vec<StructuredOutputMode> {
+    vec![StructuredOutputMode::PromptFallback]
+}
+
+impl Default for StructuredOutputConfig {
+    fn default() -> Self {
+        Self {
+            default_modes: default_structured_output_modes(),
+            model_capabilities: Vec::new(),
+        }
+    }
+}
+
+impl StructuredOutputConfig {
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.default_modes.is_empty() {
+            return Err(ConfigError::Invalid(
+                "llm.structured_output.default_modes must not be empty".into(),
+            ));
+        }
+        if has_duplicate_modes(&self.default_modes) {
+            return Err(ConfigError::Invalid(
+                "llm.structured_output.default_modes contains a duplicate mode".into(),
+            ));
+        }
+        let mut seen_overrides = BTreeSet::new();
+        for entry in &self.model_capabilities {
+            if entry.provider.trim().is_empty() || entry.model.trim().is_empty() {
+                return Err(ConfigError::Invalid(
+                    "llm.structured_output.model_capabilities entry has an empty provider or model".into(),
+                ));
+            }
+            if entry.supported_modes.is_empty() {
+                return Err(ConfigError::Invalid(
+                    "llm.structured_output.model_capabilities entry has an empty supported_modes list".into(),
+                ));
+            }
+            if has_duplicate_modes(&entry.supported_modes) {
+                return Err(ConfigError::Invalid(
+                    "llm.structured_output.model_capabilities entry has a duplicate supported mode".into(),
+                ));
+            }
+            if !seen_overrides.insert((entry.provider.clone(), entry.model.clone())) {
+                return Err(ConfigError::Invalid(
+                    "llm.structured_output.model_capabilities has a duplicate (provider, model) entry".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn configured_modes(&self, provider: &str, model: &str) -> &[StructuredOutputMode] {
+        self.model_capabilities
+            .iter()
+            .find(|entry| entry.provider == provider && entry.model == model)
+            .map(|entry| entry.supported_modes.as_slice())
+            .unwrap_or(self.default_modes.as_slice())
+    }
+}
+
+fn has_duplicate_modes(modes: &[StructuredOutputMode]) -> bool {
+    let mut seen = BTreeSet::new();
+    !modes.iter().all(|mode| seen.insert(*mode))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +164,8 @@ pub struct LlmConfig {
     pub price_output_per_1k_tokens: Option<i64>,
     #[serde(default)]
     pub protocol: LlmProtocolLimitsConfig,
+    #[serde(default)]
+    pub structured_output: StructuredOutputConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,6 +237,7 @@ impl Default for LlmConfig {
             price_cached_input_per_1k_tokens: None,
             price_output_per_1k_tokens: None,
             protocol: LlmProtocolLimitsConfig::default(),
+            structured_output: StructuredOutputConfig::default(),
         }
     }
 }
@@ -143,6 +260,7 @@ impl LlmConfig {
             return Err(ConfigError::Invalid("llm.provider_timeout_ms must be positive".into()));
         }
         self.protocol.validate()?;
+        self.structured_output.validate()?;
         if matches!(
             self.trace_content,
             TraceContentPolicy::RedactedContent | TraceContentPolicy::FullContent

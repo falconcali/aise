@@ -1,4 +1,5 @@
 use crate::config::ContextPreparationConfig;
+use crate::domain::asset::validation::BoundedText;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::StoryGeneratorOutput;
 use crate::llm::gateway::LlmGateway;
@@ -142,7 +143,7 @@ impl TurnExecutionPipeline for StoryGenerator {
         );
         let completion = self
             .gateway
-            .complete_composed(scope, request, max_output_tokens, LlmCallPurpose::StoryGeneration)
+            .complete_text_composed(scope, request, max_output_tokens, LlmCallPurpose::StoryGeneration)
             .instrument(span)
             .await
             .map_err(|error| {
@@ -153,19 +154,31 @@ impl TurnExecutionPipeline for StoryGenerator {
                     error.to_string(),
                 )
             })?;
-        let story: StoryGeneratorOutput = serde_json::from_str(&completion.text).map_err(|error| {
-            tracing::warn!(
-                prompt_profile = "story_generator",
-                error = %error,
-                "story generator output decode failed"
-            );
-            TurnExecutionError::new(
+        let trimmed = completion.text.trim();
+        if trimmed.is_empty() {
+            tracing::warn!(prompt_profile = "story_generator", "story generator output is trim-empty");
+            return Err(TurnExecutionError::new(
                 TurnFailureKind::Llm,
                 "model_output_invalid",
                 Some(TurnStage::StoryGenerator),
-                format!("story generator output is invalid: {error}"),
-            )
-        })?;
+                "story generator output is empty".to_owned(),
+            ));
+        }
+        let story_text = BoundedText::try_new(trimmed.to_owned(), "story_text", ctx.budget().max_story_text_bytes())
+            .map_err(|error| {
+                tracing::warn!(
+                    prompt_profile = "story_generator",
+                    error = %error,
+                    "story generator output exceeds max_story_text_bytes"
+                );
+                TurnExecutionError::new(
+                    TurnFailureKind::Llm,
+                    "model_output_invalid",
+                    Some(TurnStage::StoryGenerator),
+                    format!("story generator output is invalid: {error}"),
+                )
+            })?;
+        let story = StoryGeneratorOutput { story_text };
         tracing::info!(
             prompt_profile = "story_generator",
             output_bytes = completion.text.len(),

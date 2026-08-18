@@ -9,10 +9,3 @@ pub struct CharacterDecision {
     pub decision: BoundedText,
     pub suggested_utterance: Option<BoundedText>,
 }
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct CharacterDecisionOutput {
-    pub decision: BoundedText,
-    pub suggested_utterance: Option<BoundedText>,
-}

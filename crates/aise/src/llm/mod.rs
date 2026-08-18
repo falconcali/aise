@@ -4,13 +4,22 @@ pub mod gateway;
 pub mod limiter;
 pub mod message;
 pub mod openai_compat;
+pub mod output_contract;
 pub mod provider;
 
+pub use crate::config::StructuredOutputMode;
 pub use crate::domain::text::estimate_text_tokens;
 pub use accounting::{FinishReason, LlmCharge, LlmCompletion, LlmTokenUsage, TokenAccountant, UsageAccuracy};
 pub use error::LlmError;
 pub use gateway::LlmGateway;
 pub use limiter::LlmLimiter;
-pub use message::{ChatMessage, CompletionRequest, CompletionSpec, EmbeddingOutput, EmbeddingRequest, Role};
+pub use message::{
+    ChatMessage, CompletionOutputSpec, CompletionRequest, CompletionSpec, EmbeddingOutput, EmbeddingRequest, Role,
+};
 pub use openai_compat::OpenAiCompatProvider;
+pub use output_contract::{
+    CompletionOutputRequest, LlmOutputContract, LlmOutputViolation, ModelStructuredOutputCapabilities,
+    ProviderTransportCapabilities, ResolvedStructuredOutputRequest, StructuredLlmCompletion, StructuredOutputConfig,
+    canonical_schema_hash, resolve_structured_output_mode,
+};
 pub use provider::{DeltaSink, LlmProvider};

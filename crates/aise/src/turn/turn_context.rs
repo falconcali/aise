@@ -2,7 +2,7 @@ use crate::domain::ids::{StoryId, TurnKey, TurnNumber};
 use crate::domain::narrative_graph::projector::NarrativeProjection;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{BaselineContext, CharacterDecision, RetrievedContext, RetrievedContextLimits, WriterPlan};
-use crate::domain::turn::{StoryGeneratorOutput, StoryStateExtractionEnvelope, StoryStateExtractorOutput};
+use crate::domain::turn::{StoryGeneratorOutput, StoryStateExtractionDto, StoryStateExtractionEnvelope};
 use crate::turn::turn_budget::{CorrectionKind, TurnBudget};
 use crate::turn::turn_contract::{
     CommittedTurnResult, LlmBudgetReservation, LlmCallUsage, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
@@ -166,7 +166,7 @@ impl TurnExecutionContext {
         self.story_version
     }
 
-    pub fn extraction(&self) -> Option<&StoryStateExtractorOutput> {
+    pub fn extraction(&self) -> Option<&StoryStateExtractionDto> {
         self.extraction.as_ref().map(|bound| &bound.envelope.state)
     }
 

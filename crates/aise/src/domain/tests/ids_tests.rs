@@ -1,4 +1,7 @@
-use super::{CharacterId, FactId, MemoryId, RoleId, RumorId};
+use super::{
+    CharacterId, DynamicRoleCandidatePool, FactId, MemoryId, RoleId, RoleIdAllocationError, RoleIdHighWater, RumorId,
+    allocate_dynamic_role_candidates,
+};
 use crate::domain::error::{DomainInputError, KnowledgeIdError};
 
 #[test]
@@ -194,4 +197,63 @@ fn knowledge_id_deserialize_rejects_invalid_grammar() {
 fn knowledge_id_rejects_sequence_above_sqlite_range() {
     let error = FactId::try_new(format!("fact_{}", i64::MAX as u64 + 1)).expect_err("overflow must be rejected");
     assert_eq!(error, KnowledgeIdError::SequenceOverflow);
+}
+
+#[test]
+fn dynamic_role_id_shape_matches_the_canonical_grammar() {
+    for value in ["role_0001", "role_0002", "role_10000"] {
+        assert!(
+            RoleId::is_reserved_dynamic_shape(value),
+            "{value} should match the dynamic shape"
+        );
+    }
+    for value in ["role_1", "role_00001", "role_", "protagonist", "npc_merchant"] {
+        assert!(
+            !RoleId::is_reserved_dynamic_shape(value),
+            "{value} should not match the dynamic shape"
+        );
+    }
+}
+
+#[test]
+fn role_id_accepts_dynamic_shaped_values_for_allocator_use() {
+    RoleId::try_new("role_0001").expect("dynamic-shaped role id must remain constructible for the allocator");
+}
+
+#[test]
+fn allocate_dynamic_role_candidates_renders_sequential_prefix_from_zero() {
+    let pool = allocate_dynamic_role_candidates(RoleIdHighWater::zero(), 3).expect("allocation succeeds");
+    let rendered: Vec<&str> = pool.candidates.iter().map(RoleId::as_str).collect();
+    assert_eq!(rendered, vec!["role_0001", "role_0002", "role_0003"]);
+    assert_eq!(pool.base_high_water, RoleIdHighWater::zero());
+}
+
+#[test]
+fn allocate_dynamic_role_candidates_continues_from_a_non_zero_base() {
+    let pool = allocate_dynamic_role_candidates(RoleIdHighWater::new(5), 2).expect("allocation succeeds");
+    let rendered: Vec<&str> = pool.candidates.iter().map(RoleId::as_str).collect();
+    assert_eq!(rendered, vec!["role_0006", "role_0007"]);
+}
+
+#[test]
+fn allocate_dynamic_role_candidates_rejects_overflow() {
+    let error =
+        allocate_dynamic_role_candidates(RoleIdHighWater::new(u64::MAX), 1).expect_err("overflow must be rejected");
+    assert_eq!(error, RoleIdAllocationError::AllocationOverflow);
+}
+
+#[test]
+fn dynamic_role_candidate_pool_reports_position_of_a_candidate() {
+    let pool = allocate_dynamic_role_candidates(RoleIdHighWater::zero(), 2).unwrap();
+    let first = RoleId::try_new("role_0001").unwrap();
+    let unknown = RoleId::try_new("role_0099").unwrap();
+    assert_eq!(pool.position_of(&first), Some(0));
+    assert_eq!(pool.position_of(&unknown), None);
+    assert!(!pool.is_empty());
+}
+
+#[test]
+fn empty_dynamic_role_candidate_pool_reports_empty() {
+    let pool: DynamicRoleCandidatePool = allocate_dynamic_role_candidates(RoleIdHighWater::zero(), 0).unwrap();
+    assert!(pool.is_empty());
 }

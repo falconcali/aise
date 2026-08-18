@@ -128,16 +128,6 @@ impl AiseConfig {
                 "state_extractor context and output tokens must be <= turn.max_total_tokens".into(),
             ));
         }
-        if self.state_extractor.max_entities_per_knowledge > self.assets.max_entities_per_entry {
-            return Err(ConfigError::Invalid(
-                "state_extractor.max_entities_per_knowledge must be <= assets.max_entities_per_entry".into(),
-            ));
-        }
-        if self.state_extractor.max_topics_per_knowledge > self.assets.max_topics_per_entry {
-            return Err(ConfigError::Invalid(
-                "state_extractor.max_topics_per_knowledge must be <= assets.max_topics_per_entry".into(),
-            ));
-        }
         let role_aggregate_bound = self
             .assets
             .max_profile_total_bytes

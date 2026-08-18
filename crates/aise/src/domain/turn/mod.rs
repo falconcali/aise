@@ -12,10 +12,11 @@ pub use baseline::{
 };
 pub use character::CharacterDecision;
 pub use extraction::{
-    DeletableKnowledgeId, ExtractedRoleState, NarrativeConditionJudgmentOutput, NarrativeConditionResult,
-    NarrativeConditionStatus, ProposedKnowledgeMutation, ProposedKnowledgeValue, StoryCandidateVersion,
-    StoryStateExtractionEnvelope, StoryStateExtractionEnvelopeOutput, StoryStateExtractionLimits,
-    StoryStateExtractorOutput,
+    DEFAULT_RUNTIME_KNOWLEDGE_SALIENCE, DeletableKnowledgeId, ExtractionEnrichmentError, FactDraftDto, FactUpdateDto,
+    KnowledgeEnrichmentContext, MemoryDraftDto, MemoryUpdateDto, NarrativeConditionJudgmentDto,
+    NarrativeConditionResult, NarrativeConditionStatus, NewRoleDto, RelationshipStateDto, RoleStateDto, RumorDraftDto,
+    RumorUpdateDto, StoryCandidateVersion, StoryStateExtractionDto, StoryStateExtractionEnvelope,
+    StoryStateExtractionLimits, enrich_extracted_knowledge,
 };
 pub use planning::{
     CharacterRetrievalRequest, CharacterThinkRequest, KnowledgeDelivery, KnowledgeRetrievalRequest, RetrievalPlan,

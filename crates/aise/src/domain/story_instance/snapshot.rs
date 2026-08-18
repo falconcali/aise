@@ -4,7 +4,7 @@ use crate::domain::asset::ids::{FactKey, Sha256Digest, TopicKey};
 use crate::domain::asset::story_pack::StoryProfile;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::asset::world_book::TopicDefinition;
-use crate::domain::ids::{RoleId, StoryId, StoryRevision};
+use crate::domain::ids::{RoleId, RoleIdHighWater, StoryId, StoryRevision};
 use crate::domain::knowledge::KnowledgeIdHighWater;
 use crate::domain::narrative::StoryContinuity;
 use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
@@ -47,6 +47,7 @@ pub struct StoryReadSnapshot {
     entity_catalog: Vec<KnowledgeEntity>,
     topic_dictionary: BTreeMap<TopicKey, TopicDefinition>,
     knowledge_snapshot: KnowledgeSnapshotRef,
+    role_id_high_water: RoleIdHighWater,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +68,7 @@ pub struct StoryReadSnapshotParts {
     pub entity_catalog: Vec<KnowledgeEntity>,
     pub topic_dictionary: BTreeMap<TopicKey, TopicDefinition>,
     pub knowledge_snapshot: KnowledgeSnapshotRef,
+    pub role_id_high_water: RoleIdHighWater,
 }
 
 impl StoryReadSnapshot {
@@ -88,6 +90,7 @@ impl StoryReadSnapshot {
             entity_catalog,
             topic_dictionary,
             knowledge_snapshot,
+            role_id_high_water,
         } = parts;
         if knowledge_snapshot.story_id != story_id {
             return Err(StorySnapshotError::Inconsistent {
@@ -175,6 +178,7 @@ impl StoryReadSnapshot {
             entity_catalog,
             topic_dictionary,
             knowledge_snapshot,
+            role_id_high_water,
         })
     }
 
@@ -258,6 +262,10 @@ impl StoryReadSnapshot {
 
     pub fn knowledge_id_high_water(&self) -> KnowledgeIdHighWater {
         self.knowledge_snapshot.knowledge_id_high_water
+    }
+
+    pub fn role_id_high_water(&self) -> RoleIdHighWater {
+        self.role_id_high_water
     }
 
     pub fn graph_revision(&self) -> u64 {

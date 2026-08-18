@@ -21,7 +21,10 @@ pub use content::TurnContentLimitsConfig;
 pub use context::ContextPreparationConfig;
 pub use coordinator::CoordinatorConfig;
 pub use error::ConfigError;
-pub use llm::{LlmConfig, LlmProtocolLimitsConfig, ThinkingMode, TraceContentPolicy};
+pub use llm::{
+    LlmConfig, LlmProtocolLimitsConfig, ModelStructuredOutputCapabilities, StructuredOutputConfig,
+    StructuredOutputMode, ThinkingMode, TraceContentPolicy,
+};
 pub use narrative::NarrativeConfig;
 pub use planner::PlannerConfig;
 pub use prompt::{PromptCatalogSourceConfig, PromptModuleConfig};

@@ -1,13 +1,6 @@
 use super::*;
 
 #[test]
-fn json_schema_reports_story_text_max_length() {
-    let schema = StoryGeneratorOutput::json_schema(4096);
-    let max_length = schema["properties"]["story_text"]["maxLength"].as_u64().unwrap();
-    assert_eq!(max_length, 4096);
-}
-
-#[test]
 fn output_rejects_unknown_fields() {
     let raw = serde_json::json!({"story_text": "hello", "extra": true});
     let result: Result<StoryGeneratorOutput, _> = serde_json::from_value(raw);

@@ -163,7 +163,7 @@ fn writer_planner_prompt_uses_relevant_characters_without_presence() {
     };
     let player_input = bounded("go north");
     let projection = projector
-        .project(&baseline, &narrative_plan, &player_input, &PlannerConfig::default(), 100_000)
+        .project(&baseline, &narrative_plan, &player_input, 100_000)
         .expect("writer planner projection");
 
     let vars = projection.rc_vars.as_map();
@@ -199,7 +199,7 @@ fn writer_planner_indexed_targets_cover_role_and_knowledge_index_entries() {
     };
     let player_input = bounded("go north");
     let projection = projector
-        .project(&baseline, &narrative_plan, &player_input, &PlannerConfig::default(), 100_000)
+        .project(&baseline, &narrative_plan, &player_input, 100_000)
         .expect("writer planner projection");
 
     assert!(matches!(
@@ -299,7 +299,7 @@ fn writer_planner_renders_story_continuity_as_prose() {
     };
     let player_input = bounded("go north");
     let projection = projector
-        .project(&baseline, &narrative_plan, &player_input, &PlannerConfig::default(), 100_000)
+        .project(&baseline, &narrative_plan, &player_input, 100_000)
         .expect("writer planner projection");
     let vars = projection.rc_vars.as_map();
     assert_eq!(vars["story_summary"].as_str().unwrap(), "summary-one");

@@ -1,8 +1,7 @@
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
 use crate::domain::turn::{CharacterThinkRequest, KnowledgeDelivery, WriterStoryGoal};
-use crate::planning::planner_output::WriterPlannerOutputDto;
-use crate::planning::writer_planner_prompt::writer_planner_output_schema;
+use crate::planning::planner_output::{WriterPlannerOutputDto, writer_planner_output_schema};
 
 #[test]
 fn writer_planner_output_reads_goal_gaps_and_character_requests() {

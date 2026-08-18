@@ -81,6 +81,15 @@ fn is_canonical_knowledge_id_shape(value: &str) -> bool {
         .any(|prefix| value.strip_prefix(prefix).and_then(parse_knowledge_sequence).is_some())
 }
 
+pub const DYNAMIC_ROLE_ID_PREFIX: &str = "role_";
+
+fn is_canonical_dynamic_role_id_shape(value: &str) -> bool {
+    value
+        .strip_prefix(DYNAMIC_ROLE_ID_PREFIX)
+        .and_then(parse_knowledge_sequence)
+        .is_some()
+}
+
 macro_rules! knowledge_id_type {
     ($name:ident, $prefix:literal) => {
         #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -211,6 +220,10 @@ impl RoleId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    pub fn is_reserved_dynamic_shape(value: &str) -> bool {
+        is_canonical_dynamic_role_id_shape(value)
     }
 }
 
@@ -430,6 +443,70 @@ impl fmt::Display for StoryRevision {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
+pub struct RoleIdHighWater(u64);
+
+impl RoleIdHighWater {
+    pub const fn zero() -> Self {
+        Self(0)
+    }
+
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub fn get(&self) -> u64 {
+        self.0
+    }
+}
+
+impl fmt::Display for RoleIdHighWater {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum RoleIdAllocationError {
+    #[error("dynamic role id allocation overflow")]
+    AllocationOverflow,
+}
+
+#[derive(Debug, Clone)]
+pub struct DynamicRoleCandidatePool {
+    pub candidates: Vec<RoleId>,
+    pub base_high_water: RoleIdHighWater,
+}
+
+impl DynamicRoleCandidatePool {
+    pub fn is_empty(&self) -> bool {
+        self.candidates.is_empty()
+    }
+
+    pub fn position_of(&self, role_id: &RoleId) -> Option<usize> {
+        self.candidates.iter().position(|candidate| candidate == role_id)
+    }
+}
+
+pub fn allocate_dynamic_role_candidates(
+    base: RoleIdHighWater,
+    maximum: usize,
+) -> Result<DynamicRoleCandidatePool, RoleIdAllocationError> {
+    let mut next = base.get();
+    let mut candidates = Vec::with_capacity(maximum);
+    for _ in 0..maximum {
+        next = next.checked_add(1).ok_or(RoleIdAllocationError::AllocationOverflow)?;
+        let sequence = NonZeroU64::new(next).expect("checked_add(1) from a non-negative base is non-zero");
+        let formatted = format!("{DYNAMIC_ROLE_ID_PREFIX}{}", format_knowledge_sequence(sequence));
+        let role_id = RoleId::try_new(formatted).expect("dynamic role id grammar is valid by construction");
+        candidates.push(role_id);
+    }
+    Ok(DynamicRoleCandidatePool {
+        candidates,
+        base_high_water: base,
+    })
 }
 
 #[cfg(test)]

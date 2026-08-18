@@ -3,15 +3,23 @@ use crate::domain::text::estimate_text_tokens;
 use crate::llm::accounting::{FinishReason, LlmCompletion, TokenAccountant};
 use crate::llm::error::LlmError;
 use crate::llm::limiter::LlmLimiter;
-use crate::llm::message::{ChatMessage, CompletionRequest, CompletionSpec, EmbeddingOutput, EmbeddingRequest, Role};
+use crate::llm::message::{
+    ChatMessage, CompletionOutputSpec, CompletionRequest, CompletionSpec, EmbeddingOutput, EmbeddingRequest, Role,
+};
+use crate::llm::output_contract::{
+    CompletionOutputRequest, LlmOutputContract, ResolvedStructuredOutputRequest, StructuredLlmCompletion,
+    canonical_schema_hash, resolve_structured_output_mode,
+};
 use crate::llm::provider::{DeltaSink, LlmProvider};
-use crate::prompt::{PromptCompositionInput, TrustedPromptSource};
+use crate::prompt::{PromptComposition, PromptCompositionInput, TrustedPromptSource};
 use crate::turn::turn_context::TurnLlmCallScope;
 use crate::turn::turn_contract::{LlmBudgetReservation, LlmCallPurpose, LlmCallStatus, LlmCallUsage, UsageAccuracy};
 use crate::turn::turn_error::TurnExecutionError;
 use crate::turn::turn_trace::{
-    LlmCallContent, LlmCallData, MAX_LLM_CONTENT_CHARS, MAX_LLM_RESPONSE_CHARS, MessageData, SpanPayload, truncate,
+    LlmCallContent, LlmCallData, MAX_LLM_CONTENT_CHARS, MAX_LLM_RESPONSE_CHARS, MessageData, SpanPayload,
+    StructuredCallData, truncate,
 };
+use serde::de::DeserializeOwned;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::Instrument;
@@ -22,6 +30,33 @@ pub struct LlmGateway {
     limiter: LlmLimiter,
     config: LlmConfig,
     accountant: TokenAccountant,
+}
+
+#[derive(Debug, Clone)]
+struct StructuredCallMeta {
+    contract_name: String,
+    schema_hash: String,
+    mode: String,
+    schema_bytes: usize,
+    prompt_contract_bytes: usize,
+}
+
+enum StructuredCheckOutcome {
+    Decoded,
+    DecodeFailed,
+    ValidationFailed,
+}
+
+type StructuredCheck = Box<dyn FnOnce(&str) -> StructuredCheckOutcome + Send>;
+
+struct EarlyCallPayloadArgs<'a> {
+    request: &'a CompletionRequest,
+    stream: bool,
+    status: LlmCallStatus,
+    error_kind: Option<&'static str>,
+    estimated_input: u64,
+    queue_wait_ms: u64,
+    structured_meta: Option<&'a StructuredCallMeta>,
 }
 
 impl LlmGateway {
@@ -49,15 +84,114 @@ impl LlmGateway {
         })
     }
 
-    pub async fn complete_composed(
+    pub async fn complete_text_composed(
         &self,
         mut scope: TurnLlmCallScope<'_>,
         input: PromptCompositionInput,
         max_output_tokens: u32,
         purpose: LlmCallPurpose,
     ) -> Result<LlmCompletion, LlmError> {
+        let composition = self.render_composition(&input)?;
+        let spec = CompletionSpec {
+            messages: composition_messages(&composition),
+            max_output_tokens,
+            purpose,
+            output: CompletionOutputSpec::Text,
+        };
+        let estimated_input = TokenAccountant::estimate_input_tokens(&spec.messages);
+        let reservation = scope
+            .reserve_llm(estimated_input, u64::from(spec.max_output_tokens))
+            .map_err(|error| LlmError::TokenBudgetExceeded(error.to_string()))?;
+        self.complete(scope, spec, reservation).await
+    }
+
+    pub async fn complete_structured_composed<T>(
+        &self,
+        mut scope: TurnLlmCallScope<'_>,
+        input: PromptCompositionInput,
+        max_output_tokens: u32,
+        purpose: LlmCallPurpose,
+        contract: LlmOutputContract<T>,
+    ) -> Result<StructuredLlmCompletion<T>, LlmError>
+    where
+        T: DeserializeOwned + Send + 'static,
+    {
+        let configured_modes = self
+            .config
+            .structured_output
+            .configured_modes(self.provider.provider_name(), &self.config.model);
+        let mode = resolve_structured_output_mode(configured_modes, &self.provider.transport_capabilities()).map_err(
+            |_| LlmError::Protocol {
+                kind: crate::llm::error::LlmProtocolErrorKind::StructuredOutputUnsupported,
+            },
+        )?;
+
+        let composition = self.render_composition(&input)?;
+        let mut messages = composition_messages(&composition);
+        let prompt_contract_bytes = if mode.injects_prompt_contract() {
+            let content = contract.compact_prompt_shape.as_ref().to_owned();
+            let bytes = content.len();
+            messages.push(ChatMessage {
+                role: Role::System,
+                content,
+            });
+            bytes
+        } else {
+            0
+        };
+
+        let schema_hash = canonical_schema_hash(&contract.schema);
+        let schema_bytes = serde_json::to_string(contract.schema.as_ref()).map(|s| s.len()).unwrap_or(0);
+        let meta = StructuredCallMeta {
+            contract_name: contract.name.to_owned(),
+            schema_hash: schema_hash.to_string(),
+            mode: mode.as_str().to_owned(),
+            schema_bytes,
+            prompt_contract_bytes,
+        };
+        let resolved = ResolvedStructuredOutputRequest {
+            contract_name: contract.name,
+            schema: contract.schema.clone(),
+            schema_hash,
+            mode,
+        };
+        let validate = contract.validate.clone();
+        let check: StructuredCheck = Box::new(move |text: &str| match serde_json::from_str::<T>(text) {
+            Err(_) => StructuredCheckOutcome::DecodeFailed,
+            Ok(value) => match validate(&value) {
+                Ok(()) => StructuredCheckOutcome::Decoded,
+                Err(_) => StructuredCheckOutcome::ValidationFailed,
+            },
+        });
+
+        let request = CompletionRequest {
+            model: self.config.model.clone(),
+            messages,
+            max_tokens: max_output_tokens,
+            temperature: self.config.temperature,
+            purpose,
+            output: CompletionOutputRequest::Structured(resolved),
+        };
+        let estimated_input = TokenAccountant::estimate_input_tokens(&request.messages);
+        let reservation = scope
+            .reserve_llm(estimated_input, u64::from(max_output_tokens))
+            .map_err(|error| LlmError::TokenBudgetExceeded(error.to_string()))?;
+
+        let completion = self
+            .run_call(&mut scope, request, false, None, reservation, Some((meta, check)))
+            .await?;
+        let value = serde_json::from_str::<T>(&completion.text).map_err(|_| LlmError::Protocol {
+            kind: crate::llm::error::LlmProtocolErrorKind::InvalidStructuredOutput,
+        })?;
+        (contract.validate)(&value).map_err(|_| LlmError::Protocol {
+            kind: crate::llm::error::LlmProtocolErrorKind::InvalidStructuredOutput,
+        })?;
+        Ok(StructuredLlmCompletion { value, completion })
+    }
+
+    fn render_composition(&self, input: &PromptCompositionInput) -> Result<PromptComposition, LlmError> {
         let render_started = Instant::now();
-        let composition = self.prompt_source.compose(&input).map_err(|_| LlmError::Protocol {
+        let composition = self.prompt_source.compose(input).map_err(|_| LlmError::Protocol {
             kind: crate::llm::error::LlmProtocolErrorKind::Unsupported,
         })?;
         let render_ms = render_started.elapsed().as_millis() as u64;
@@ -73,29 +207,7 @@ impl LlmGateway {
             render_ms,
             "prompt composition rendered"
         );
-        let spec = CompletionSpec {
-            messages: vec![
-                ChatMessage {
-                    role: Role::System,
-                    content: composition.csi.as_str().to_owned(),
-                },
-                ChatMessage {
-                    role: Role::User,
-                    content: composition.rc.as_str().to_owned(),
-                },
-                ChatMessage {
-                    role: Role::System,
-                    content: composition.fti.as_str().to_owned(),
-                },
-            ],
-            max_output_tokens,
-            purpose,
-        };
-        let estimated_input = TokenAccountant::estimate_input_tokens(&spec.messages);
-        let reservation = scope
-            .reserve_llm(estimated_input, u64::from(spec.max_output_tokens))
-            .map_err(|error| LlmError::TokenBudgetExceeded(error.to_string()))?;
-        self.complete(scope, spec, reservation).await
+        Ok(composition)
     }
 
     pub async fn complete(
@@ -104,29 +216,49 @@ impl LlmGateway {
         spec: CompletionSpec,
         reservation: LlmBudgetReservation,
     ) -> Result<LlmCompletion, LlmError> {
+        let output = match spec.output {
+            CompletionOutputSpec::Text => CompletionOutputRequest::Text,
+            CompletionOutputSpec::Structured => {
+                scope.release_llm(reservation);
+                return Err(LlmError::Protocol {
+                    kind: crate::llm::error::LlmProtocolErrorKind::Unsupported,
+                });
+            }
+        };
         let request = CompletionRequest {
             model: self.config.model.clone(),
             messages: spec.messages,
             max_tokens: spec.max_output_tokens,
             temperature: self.config.temperature,
             purpose: spec.purpose,
+            output,
         };
         self.execute_call(&mut scope, request, false, None, reservation).await
     }
 
     pub async fn complete_stream(
         &self,
-        scope: TurnLlmCallScope<'_>,
+        mut scope: TurnLlmCallScope<'_>,
         spec: CompletionSpec,
         reservation: LlmBudgetReservation,
         sink: DeltaSink,
     ) -> Result<LlmCompletion, LlmError> {
+        let output = match spec.output {
+            CompletionOutputSpec::Text => CompletionOutputRequest::Text,
+            CompletionOutputSpec::Structured => {
+                scope.release_llm(reservation);
+                return Err(LlmError::Protocol {
+                    kind: crate::llm::error::LlmProtocolErrorKind::Unsupported,
+                });
+            }
+        };
         let request = CompletionRequest {
             model: self.config.model.clone(),
             messages: spec.messages,
             max_tokens: spec.max_output_tokens,
             temperature: self.config.temperature,
             purpose: spec.purpose,
+            output,
         };
         self.execute_call_owned(scope, request, true, Some(sink), reservation).await
     }
@@ -273,6 +405,7 @@ impl LlmGateway {
             status: status.as_str().to_owned(),
             error_kind,
             content: None,
+            structured_output: None,
         }));
         scope.end_llm_span(span, &payload);
         drop(permit);
@@ -298,7 +431,7 @@ impl LlmGateway {
                 kind: crate::llm::error::LlmProtocolErrorKind::InvalidSseLine,
             });
         }
-        self.run_call(scope, request, stream, sink, reservation).await
+        self.run_call(scope, request, stream, sink, reservation, None).await
     }
 
     async fn execute_call_owned(
@@ -309,7 +442,7 @@ impl LlmGateway {
         sink: Option<DeltaSink>,
         reservation: LlmBudgetReservation,
     ) -> Result<LlmCompletion, LlmError> {
-        self.run_call(&mut scope, request, stream, sink, reservation).await
+        self.run_call(&mut scope, request, stream, sink, reservation, None).await
     }
 
     async fn run_call(
@@ -319,32 +452,39 @@ impl LlmGateway {
         stream: bool,
         sink: Option<DeltaSink>,
         reservation: LlmBudgetReservation,
+        structured: Option<(StructuredCallMeta, StructuredCheck)>,
     ) -> Result<LlmCompletion, LlmError> {
+        let (structured_meta, structured_check) = match structured {
+            Some((meta, check)) => (Some(meta), Some(check)),
+            None => (None, None),
+        };
         let span = scope.begin_llm_span();
         let call_started = Instant::now();
 
         if scope.cancellation().is_cancelled() {
-            let payload = self.early_call_payload(
-                &request,
+            let payload = self.early_call_payload(EarlyCallPayloadArgs {
+                request: &request,
                 stream,
-                LlmCallStatus::Cancelled,
-                Some(LlmError::Cancelled.kind()),
-                0,
-                0,
-            );
+                status: LlmCallStatus::Cancelled,
+                error_kind: Some(LlmError::Cancelled.kind()),
+                estimated_input: 0,
+                queue_wait_ms: 0,
+                structured_meta: structured_meta.as_ref(),
+            });
             scope.end_llm_span(span, &payload);
             scope.release_llm(reservation);
             return Err(LlmError::Cancelled);
         }
         if call_started >= scope.deadline() {
-            let payload = self.early_call_payload(
-                &request,
+            let payload = self.early_call_payload(EarlyCallPayloadArgs {
+                request: &request,
                 stream,
-                LlmCallStatus::TurnDeadlineExceeded,
-                Some(LlmError::TurnDeadlineExceeded.kind()),
-                0,
-                0,
-            );
+                status: LlmCallStatus::TurnDeadlineExceeded,
+                error_kind: Some(LlmError::TurnDeadlineExceeded.kind()),
+                estimated_input: 0,
+                queue_wait_ms: 0,
+                structured_meta: structured_meta.as_ref(),
+            });
             scope.end_llm_span(span, &payload);
             scope.release_llm(reservation);
             return Err(LlmError::TurnDeadlineExceeded);
@@ -357,8 +497,15 @@ impl LlmGateway {
             .acquire_quota(estimated_input, max_output, scope.deadline(), scope.cancellation())
             .await
         {
-            let payload =
-                self.early_call_payload(&request, stream, llm_status_from_error(&error), Some(error.kind()), 0, 0);
+            let payload = self.early_call_payload(EarlyCallPayloadArgs {
+                request: &request,
+                stream,
+                status: llm_status_from_error(&error),
+                error_kind: Some(error.kind()),
+                estimated_input: 0,
+                queue_wait_ms: 0,
+                structured_meta: structured_meta.as_ref(),
+            });
             scope.end_llm_span(span, &payload);
             scope.release_llm(reservation);
             return Err(error);
@@ -377,14 +524,15 @@ impl LlmGateway {
                     error = %error,
                     "llm call left the queue without reaching the provider"
                 );
-                let payload = self.early_call_payload(
-                    &request,
+                let payload = self.early_call_payload(EarlyCallPayloadArgs {
+                    request: &request,
                     stream,
-                    llm_status_from_error(&error),
-                    Some(error.kind()),
-                    0,
-                    call_started.elapsed().as_millis() as u64,
-                );
+                    status: llm_status_from_error(&error),
+                    error_kind: Some(error.kind()),
+                    estimated_input: 0,
+                    queue_wait_ms: call_started.elapsed().as_millis() as u64,
+                    structured_meta: structured_meta.as_ref(),
+                });
                 scope.end_llm_span(span, &payload);
                 scope.release_llm(reservation);
                 return Err(error);
@@ -449,7 +597,7 @@ impl LlmGateway {
         let total_latency_ms = call_started.elapsed().as_millis() as u64;
         let provider_latency_ms = total_latency_ms.saturating_sub(queue_wait_ms);
 
-        let (completion, provider_error) = match provider_outcome {
+        let (mut completion, mut provider_error) = match provider_outcome {
             Ok(mut completion) => {
                 if completion.usage.is_none() {
                     completion.usage = Some(estimated_usage(&completion.text, estimated_input));
@@ -480,6 +628,36 @@ impl LlmGateway {
                 (None, Some(error))
             }
         };
+
+        let mut decode_status: Option<&'static str> = None;
+        let mut validation_status: Option<&'static str> = None;
+        if let (Some(check), Some(seen)) = (structured_check, completion.as_ref()) {
+            match check(&seen.text) {
+                StructuredCheckOutcome::Decoded => {
+                    decode_status = Some("ok");
+                    validation_status = Some("ok");
+                }
+                StructuredCheckOutcome::DecodeFailed => {
+                    decode_status = Some("invalid_json");
+                    validation_status = Some("skipped");
+                    completion = None;
+                    provider_error = Some(LlmError::Protocol {
+                        kind: crate::llm::error::LlmProtocolErrorKind::InvalidStructuredOutput,
+                    });
+                }
+                StructuredCheckOutcome::ValidationFailed => {
+                    decode_status = Some("ok");
+                    validation_status = Some("violated");
+                    completion = None;
+                    provider_error = Some(LlmError::Protocol {
+                        kind: crate::llm::error::LlmProtocolErrorKind::InvalidStructuredOutput,
+                    });
+                }
+            }
+        } else if structured_meta.is_some() {
+            decode_status = Some("not_attempted");
+            validation_status = Some("not_attempted");
+        }
 
         let usage = completion
             .as_ref()
@@ -532,6 +710,15 @@ impl LlmGateway {
                 response: completion.as_ref().map(|c| c.text.clone()).unwrap_or_default(),
             }),
         };
+        let structured_output = structured_meta.map(|meta| StructuredCallData {
+            output_contract: meta.contract_name,
+            schema_hash: meta.schema_hash,
+            structured_output_mode: meta.mode,
+            schema_bytes: meta.schema_bytes,
+            prompt_contract_bytes: meta.prompt_contract_bytes,
+            decode_status: decode_status.unwrap_or("not_attempted").to_owned(),
+            validation_status: validation_status.unwrap_or("not_attempted").to_owned(),
+        });
         let payload = SpanPayload::LlmCall(Box::new(LlmCallData {
             provider: self.provider.provider_name().to_owned(),
             model: request.model.clone(),
@@ -551,6 +738,7 @@ impl LlmGateway {
             status: status.as_str().to_owned(),
             error_kind,
             content,
+            structured_output,
         }));
         scope.end_llm_span(span, &payload);
         drop(permit);
@@ -563,15 +751,25 @@ impl LlmGateway {
         }
     }
 
-    fn early_call_payload(
-        &self,
-        request: &CompletionRequest,
-        stream: bool,
-        status: LlmCallStatus,
-        error_kind: Option<&'static str>,
-        estimated_input: u64,
-        queue_wait_ms: u64,
-    ) -> SpanPayload {
+    fn early_call_payload(&self, args: EarlyCallPayloadArgs<'_>) -> SpanPayload {
+        let EarlyCallPayloadArgs {
+            request,
+            stream,
+            status,
+            error_kind,
+            estimated_input,
+            queue_wait_ms,
+            structured_meta,
+        } = args;
+        let structured_output = structured_meta.map(|meta| StructuredCallData {
+            output_contract: meta.contract_name.clone(),
+            schema_hash: meta.schema_hash.clone(),
+            structured_output_mode: meta.mode.clone(),
+            schema_bytes: meta.schema_bytes,
+            prompt_contract_bytes: meta.prompt_contract_bytes,
+            decode_status: "not_attempted".to_owned(),
+            validation_status: "not_attempted".to_owned(),
+        });
         SpanPayload::LlmCall(Box::new(LlmCallData {
             provider: self.provider.provider_name().to_owned(),
             model: self.config.model.clone(),
@@ -591,6 +789,7 @@ impl LlmGateway {
             status: status.as_str().to_owned(),
             error_kind: error_kind.map(str::to_owned),
             content: None,
+            structured_output,
         }))
     }
 
@@ -619,6 +818,23 @@ impl LlmGateway {
             finish_reason,
         }
     }
+}
+
+fn composition_messages(composition: &PromptComposition) -> Vec<ChatMessage> {
+    vec![
+        ChatMessage {
+            role: Role::System,
+            content: composition.csi.as_str().to_owned(),
+        },
+        ChatMessage {
+            role: Role::User,
+            content: composition.rc.as_str().to_owned(),
+        },
+        ChatMessage {
+            role: Role::System,
+            content: composition.fti.as_str().to_owned(),
+        },
+    ]
 }
 
 fn estimated_usage(text: &str, estimated_input: u64) -> crate::llm::accounting::LlmTokenUsage {

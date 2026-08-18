@@ -1,9 +1,9 @@
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::RoleId;
+use crate::domain::ids::{RoleId, RoleIdHighWater};
 use crate::domain::knowledge::{KnowledgeEntry, KnowledgeIdHighWater, KnowledgeSourceId};
 use crate::domain::narrative::StoryEvent;
 use crate::domain::story_instance::constraint::ActiveStoryConstraint;
-use crate::domain::story_instance::role::StoryRoleState;
+use crate::domain::story_instance::role::{StoryRole, StoryRoleState};
 use crate::domain::story_instance::state::{RelationshipKey, RelationshipState};
 use crate::domain::turn::{DeletableKnowledgeId, ValidatedNarrativeResolution};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
@@ -29,6 +29,8 @@ pub enum ValidationIssueCode {
     StaleStateExtraction,
     StoryStateInconsistent,
     NarrativeInconsistent,
+    CastPolicyViolation,
+    NewRoleInvalid,
 }
 
 impl ValidationIssueCode {
@@ -50,6 +52,8 @@ impl ValidationIssueCode {
             ValidationIssueCode::StaleStateExtraction => "stale_state_extraction",
             ValidationIssueCode::StoryStateInconsistent => "story_state_inconsistent",
             ValidationIssueCode::NarrativeInconsistent => "narrative_inconsistent",
+            ValidationIssueCode::CastPolicyViolation => "cast_policy_violation",
+            ValidationIssueCode::NewRoleInvalid => "new_role_invalid",
         }
     }
 }
@@ -304,6 +308,21 @@ pub struct RelationshipStateChange {
 }
 
 #[derive(Debug, Clone)]
+pub enum ValidatedRelationshipOperation {
+    Add(RelationshipState),
+    Update(RelationshipStateChange),
+}
+
+impl ValidatedRelationshipOperation {
+    pub fn new_state(&self) -> &RelationshipState {
+        match self {
+            ValidatedRelationshipOperation::Add(state) => state,
+            ValidatedRelationshipOperation::Update(change) => &change.new_state,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum ValidatedKnowledgeOperation {
     Add(KnowledgeEntry),
     Update {
@@ -324,10 +343,12 @@ pub struct ValidatedKnowledgeMutation {
 #[derive(Debug, Clone)]
 pub struct ValidatedChangeSet {
     story_text: BoundedText,
+    new_roles: Vec<StoryRole>,
     role_changes: Vec<RoleStateChange>,
-    relationship_changes: Vec<RelationshipStateChange>,
+    relationship_operations: Vec<ValidatedRelationshipOperation>,
     knowledge_mutations: Vec<ValidatedKnowledgeMutation>,
     knowledge_id_high_water: KnowledgeIdHighWater,
+    next_role_id_high_water: RoleIdHighWater,
     narrative_events: Vec<StoryEvent>,
     narrative_resolution: ValidatedNarrativeResolution,
     constraint_change: StateChange<Vec<ActiveStoryConstraint>>,
@@ -345,10 +366,12 @@ impl ValidatedChangeSet {
         }
         Ok(Self {
             story_text: parts.story_text,
+            new_roles: parts.new_roles,
             role_changes: parts.role_changes,
-            relationship_changes: parts.relationship_changes,
+            relationship_operations: parts.relationship_operations,
             knowledge_mutations: parts.knowledge_mutations,
             knowledge_id_high_water: parts.knowledge_id_high_water,
+            next_role_id_high_water: parts.next_role_id_high_water,
             narrative_events: parts.narrative_events,
             narrative_resolution: parts.narrative_resolution,
             constraint_change: parts.constraint_change,
@@ -359,12 +382,16 @@ impl ValidatedChangeSet {
         self.story_text.as_str()
     }
 
+    pub fn new_roles(&self) -> &[StoryRole] {
+        &self.new_roles
+    }
+
     pub fn role_changes(&self) -> &[RoleStateChange] {
         &self.role_changes
     }
 
-    pub fn relationship_changes(&self) -> &[RelationshipStateChange] {
-        &self.relationship_changes
+    pub fn relationship_operations(&self) -> &[ValidatedRelationshipOperation] {
+        &self.relationship_operations
     }
 
     pub fn knowledge_mutations(&self) -> &[ValidatedKnowledgeMutation] {
@@ -373,6 +400,10 @@ impl ValidatedChangeSet {
 
     pub fn knowledge_id_high_water(&self) -> KnowledgeIdHighWater {
         self.knowledge_id_high_water
+    }
+
+    pub fn next_role_id_high_water(&self) -> RoleIdHighWater {
+        self.next_role_id_high_water
     }
 
     pub fn narrative_events(&self) -> &[StoryEvent] {
@@ -394,10 +425,12 @@ impl ValidatedChangeSet {
 
 pub struct ValidatedChangeSetParts {
     pub story_text: BoundedText,
+    pub new_roles: Vec<StoryRole>,
     pub role_changes: Vec<RoleStateChange>,
-    pub relationship_changes: Vec<RelationshipStateChange>,
+    pub relationship_operations: Vec<ValidatedRelationshipOperation>,
     pub knowledge_mutations: Vec<ValidatedKnowledgeMutation>,
     pub knowledge_id_high_water: KnowledgeIdHighWater,
+    pub next_role_id_high_water: RoleIdHighWater,
     pub narrative_events: Vec<StoryEvent>,
     pub narrative_resolution: ValidatedNarrativeResolution,
     pub constraint_change: StateChange<Vec<ActiveStoryConstraint>>,

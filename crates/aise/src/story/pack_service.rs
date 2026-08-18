@@ -484,6 +484,13 @@ impl NativeAssetImporter {
                     "role id does not match the required syntax",
                 ));
             }
+            if RoleId::is_reserved_dynamic_shape(role_key) {
+                report.push(AssetValidationIssue::new(
+                    AssetValidationCode::InvalidKey,
+                    role_path.clone(),
+                    "role id matches the reserved dynamic role grammar",
+                ));
+            }
             role_ids.insert(role_key.clone());
             let profile_path = format!("{role_path}/default_profile");
             match role_value.get("default_profile") {

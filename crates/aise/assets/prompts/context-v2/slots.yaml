@@ -23,8 +23,6 @@ slots:
   - slot_id: context.story_repairer.fti
     allowed_kinds: [text]
     required: false
-    vars:
-      - { name: output_schema, var_type: string, required: true }
   - slot_id: context.writer_planner.csi
     allowed_kinds: [text]
     required: false
@@ -47,8 +45,6 @@ slots:
   - slot_id: context.writer_planner.fti
     allowed_kinds: [text]
     required: false
-    vars:
-      - { name: output_schema, var_type: string, required: true }
   - slot_id: context.character_think.csi
     allowed_kinds: [text]
     required: false
@@ -66,8 +62,6 @@ slots:
   - slot_id: context.character_think.fti
     allowed_kinds: [text]
     required: false
-    vars:
-      - { name: output_schema, var_type: string, required: true }
   - slot_id: context.story_generator.csi
     allowed_kinds: [text]
     required: false
@@ -90,8 +84,6 @@ slots:
   - slot_id: context.story_generator.fti
     allowed_kinds: [text]
     required: false
-    vars:
-      - { name: output_schema, var_type: string, required: true }
   - slot_id: context.story_state_extractor.csi
     allowed_kinds: [text]
     required: false
@@ -106,8 +98,9 @@ slots:
       - { name: condition_queries, var_type: string, required: true }
       - { name: previous_extraction, var_type: string, required: true }
       - { name: validation_issues, var_type: string, required: true }
+      - { name: cast_policy, var_type: string, required: true }
+      - { name: available_locations, var_type: string, required: true }
+      - { name: new_role_candidates, var_type: string, required: true }
   - slot_id: context.story_state_extractor.fti
     allowed_kinds: [text]
     required: false
-    vars:
-      - { name: output_schema, var_type: string, required: true }

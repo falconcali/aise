@@ -101,16 +101,9 @@ fn sample_snapshot(roles: &[StoryRole], entity_catalog: Vec<KnowledgeEntity>) ->
             base_revision: StoryRevision::new(0),
             knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater::zero(),
         },
+        role_id_high_water: crate::domain::ids::RoleIdHighWater::zero(),
     })
     .unwrap()
-}
-
-#[test]
-fn has_duplicates_detects_repeats() {
-    let values = vec![LocationKey::from("a"), LocationKey::from("b"), LocationKey::from("a")];
-    assert!(has_duplicates(&values));
-    let unique = vec![LocationKey::from("a"), LocationKey::from("b")];
-    assert!(!has_duplicates(&unique));
 }
 
 #[test]
@@ -124,9 +117,9 @@ fn location_key_resolves_against_role_state_or_catalog() {
         sample_role("npc", RoleController::Ai, "village"),
     ];
     let snapshot = sample_snapshot(&roles, vec![KnowledgeEntity::Location(LocationKey::from("cave"))]);
-    assert!(location_key_resolves(&LocationKey::from("village"), &snapshot));
-    assert!(location_key_resolves(&LocationKey::from("cave"), &snapshot));
-    assert!(!location_key_resolves(&LocationKey::from("unknown"), &snapshot));
+    assert!(location_key_resolves_str("village", &snapshot));
+    assert!(location_key_resolves_str("cave", &snapshot));
+    assert!(!location_key_resolves_str("unknown", &snapshot));
 }
 
 #[test]

@@ -32,12 +32,12 @@ fn story_state_extractor_assets_have_required_rule_counts() {
     let csi = include_str!("../../../assets/prompts/context-v2/csi/story-state-extractor.md.j2");
     let fti = include_str!("../../../assets/prompts/context-v2/fti/story-state-extractor.md.j2");
 
-    assert_eq!(section_item_count(csi, "## MUST", "## NEVER"), 8);
+    assert_eq!(section_item_count(csi, "## MUST", "## NEVER"), 10);
     assert_eq!(section_item_count(csi, "## NEVER", "# Runtime Data Boundary"), 5);
     assert!(!csi.contains("## SHOULD"));
-    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 6);
+    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 7);
     assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
-    assert_eq!(fti.matches("{{ output_schema }}").count(), 1);
+    assert!(!fti.contains("{{ output_schema }}"));
 }
 
 #[test]
@@ -46,6 +46,9 @@ fn story_state_extractor_runtime_context_has_exact_section_order() {
     let headings = [
         "## Story Text",
         "## Pre-turn Roles",
+        "## Cast Policy",
+        "## Available Locations",
+        "## New Role Candidates",
         "## Pre-turn Relationships",
         "## Modifiable Knowledge",
         "## Narrative Condition Queries",
@@ -210,6 +213,7 @@ fn sample_snapshot(all_roles: &[&StoryRole]) -> StoryReadSnapshot {
             base_revision: StoryRevision::new(0),
             knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater::zero(),
         },
+        role_id_high_water: crate::domain::ids::RoleIdHighWater::zero(),
     })
     .unwrap()
 }

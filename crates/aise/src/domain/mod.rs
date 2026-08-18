@@ -10,8 +10,9 @@ pub mod text;
 pub mod turn;
 pub use error::DomainInputError;
 pub use ids::{
-    CharacterId, ConstraintId, EventId, FactId, MemoryId, RoleId, RumorId, StoryId, StoryRevision, TurnKey, TurnNumber,
-    TurnNumberError,
+    CharacterId, ConstraintId, DynamicRoleCandidatePool, EventId, FactId, MemoryId, RoleId, RoleIdAllocationError,
+    RoleIdHighWater, RumorId, StoryId, StoryRevision, TurnKey, TurnNumber, TurnNumberError,
+    allocate_dynamic_role_candidates,
 };
 pub use narrative::{
     EventKind, StoryContinuity, StoryEvent, StorySegment, StorySegmentOrigin, StorySummary, StoryTurn,
@@ -21,6 +22,6 @@ pub use story_instance::snapshot::StoryReadSnapshot;
 pub use story_sequence::{StoryContinuityError, StorySequence};
 pub use turn::{
     BaselineContext, CharacterDecision, CharacterThinkRequest, NarrativeGraphStateIndex, RetrievalPlan,
-    RetrievedContext, RoleContextView, SnapshotLimits, StoryGeneratorOutput, StoryStateExtractorOutput, WriterPlan,
+    RetrievedContext, RoleContextView, SnapshotLimits, StoryGeneratorOutput, StoryStateExtractionDto, WriterPlan,
     WriterStoryGoal,
 };

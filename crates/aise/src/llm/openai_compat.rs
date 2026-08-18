@@ -1,7 +1,10 @@
-use crate::config::{LlmConfig, LlmProtocolLimitsConfig, ThinkingMode};
+use crate::config::{LlmConfig, LlmProtocolLimitsConfig, StructuredOutputMode, ThinkingMode};
 use crate::llm::accounting::{FinishReason, LlmCompletion, LlmTokenUsage, UsageAccuracy};
 use crate::llm::error::{LlmProtocolErrorKind, LlmProviderError, LlmResponseLimit, LlmTransportErrorKind};
 use crate::llm::message::{ChatMessage, CompletionRequest, EmbeddingOutput, EmbeddingRequest};
+use crate::llm::output_contract::{
+    CompletionOutputRequest, ProviderTransportCapabilities, ResolvedStructuredOutputRequest,
+};
 use crate::llm::provider::{DeltaSink, LlmProvider};
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -49,6 +52,7 @@ impl OpenAiCompatProvider {
     }
 
     fn completion_body<'a>(&'a self, req: &'a CompletionRequest, stream: bool) -> ChatCompletionRequest<'a> {
+        let (response_format, tools, tool_choice) = structured_transport_fields(&req.output);
         ChatCompletionRequest {
             model: &req.model,
             messages: &req.messages,
@@ -57,7 +61,63 @@ impl OpenAiCompatProvider {
             stream,
             stream_options: stream.then_some(StreamOptions { include_usage: true }),
             thinking: self.thinking_toggle(),
+            response_format,
+            tools,
+            tool_choice,
         }
+    }
+}
+
+fn structured_transport_fields(
+    output: &CompletionOutputRequest,
+) -> (Option<ResponseFormat<'_>>, Option<Vec<ToolDef<'_>>>, Option<ToolChoice<'_>>) {
+    let CompletionOutputRequest::Structured(resolved) = output else {
+        return (None, None, None);
+    };
+    match resolved.mode {
+        StructuredOutputMode::NativeJsonSchema => (
+            Some(ResponseFormat::JsonSchema {
+                json_schema: JsonSchemaSpec {
+                    name: resolved.contract_name,
+                    strict: true,
+                    schema: resolved.schema.as_ref(),
+                },
+            }),
+            None,
+            None,
+        ),
+        StructuredOutputMode::ForcedStrictTool => (
+            None,
+            Some(vec![ToolDef {
+                kind: "function",
+                function: ToolFunctionDef {
+                    name: resolved.contract_name,
+                    strict: true,
+                    parameters: resolved.schema.as_ref(),
+                },
+            }]),
+            Some(ToolChoice {
+                kind: "function",
+                function: ToolChoiceFunction {
+                    name: resolved.contract_name,
+                },
+            }),
+        ),
+        StructuredOutputMode::JsonObject => (Some(ResponseFormat::JsonObject {}), None, None),
+        StructuredOutputMode::PromptFallback => (None, None, None),
+    }
+}
+
+fn extract_strict_tool_arguments(
+    message: &ResponseMessage,
+    resolved: &ResolvedStructuredOutputRequest,
+) -> Result<String, LlmProviderError> {
+    if !message.content.trim().is_empty() {
+        return Err(protocol_error(LlmProtocolErrorKind::InvalidStructuredOutput));
+    }
+    match message.tool_calls.as_deref() {
+        Some([call]) if call.function.name == resolved.contract_name => Ok(call.function.arguments.clone()),
+        _ => Err(protocol_error(LlmProtocolErrorKind::InvalidStructuredOutput)),
     }
 }
 
@@ -65,6 +125,48 @@ impl OpenAiCompatProvider {
 struct ThinkingToggle<'a> {
     #[serde(rename = "type")]
     kind: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type")]
+enum ResponseFormat<'a> {
+    #[serde(rename = "json_schema")]
+    JsonSchema { json_schema: JsonSchemaSpec<'a> },
+    #[serde(rename = "json_object")]
+    JsonObject {},
+}
+
+#[derive(Serialize)]
+struct JsonSchemaSpec<'a> {
+    name: &'a str,
+    strict: bool,
+    schema: &'a serde_json::Value,
+}
+
+#[derive(Serialize)]
+struct ToolDef<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: ToolFunctionDef<'a>,
+}
+
+#[derive(Serialize)]
+struct ToolFunctionDef<'a> {
+    name: &'a str,
+    strict: bool,
+    parameters: &'a serde_json::Value,
+}
+
+#[derive(Serialize)]
+struct ToolChoice<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: ToolChoiceFunction<'a>,
+}
+
+#[derive(Serialize)]
+struct ToolChoiceFunction<'a> {
+    name: &'a str,
 }
 
 #[derive(Serialize)]
@@ -78,6 +180,12 @@ struct ChatCompletionRequest<'a> {
     stream_options: Option<StreamOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     thinking: Option<ThinkingToggle<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<ResponseFormat<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<ToolDef<'a>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<ToolChoice<'a>>,
 }
 
 #[derive(Serialize)]
@@ -103,6 +211,19 @@ struct ResponseMessage {
     content: String,
     #[serde(default)]
     reasoning_content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<ToolCallResponse>>,
+}
+
+#[derive(Deserialize)]
+struct ToolCallResponse {
+    function: ToolCallFunctionResponse,
+}
+
+#[derive(Deserialize)]
+struct ToolCallFunctionResponse {
+    name: String,
+    arguments: String,
 }
 
 #[derive(Deserialize)]
@@ -145,6 +266,19 @@ impl LlmProvider for OpenAiCompatProvider {
         "openai_compat"
     }
 
+    fn transport_capabilities(&self) -> ProviderTransportCapabilities {
+        ProviderTransportCapabilities {
+            encodable_modes: [
+                StructuredOutputMode::NativeJsonSchema,
+                StructuredOutputMode::ForcedStrictTool,
+                StructuredOutputMode::JsonObject,
+                StructuredOutputMode::PromptFallback,
+            ]
+            .into_iter()
+            .collect(),
+        }
+    }
+
     async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmProviderError> {
         let body = self.completion_body(req, false);
         let mut request = self.client.post(self.endpoint()).json(&body);
@@ -175,6 +309,14 @@ impl LlmProvider for OpenAiCompatProvider {
             .ok_or_else(|| protocol_error(LlmProtocolErrorKind::EmptyChoices))?;
         let finish_reason = choice.finish_reason.as_deref().map(parse_finish_reason).transpose()?;
         let message = choice.message;
+        let text = match &req.output {
+            CompletionOutputRequest::Structured(resolved)
+                if resolved.mode == StructuredOutputMode::ForcedStrictTool =>
+            {
+                extract_strict_tool_arguments(&message, resolved)?
+            }
+            _ => message.content,
+        };
         let usage = resp.usage.map(|u| LlmTokenUsage {
             input_tokens: u.prompt_tokens,
             cached_input_tokens: u.prompt_tokens_details.and_then(|d| d.cached_tokens),
@@ -186,7 +328,7 @@ impl LlmProvider for OpenAiCompatProvider {
             accuracy: UsageAccuracy::Exact,
         });
         Ok(LlmCompletion {
-            text: message.content,
+            text,
             finish_reason,
             reasoning_content: message.reasoning_content,
             usage,

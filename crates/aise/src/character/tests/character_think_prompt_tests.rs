@@ -125,13 +125,6 @@ fn character_think_runtime_vars_keep_semantic_sections_distinct() {
 }
 
 #[test]
-fn character_decision_output_schema_is_closed() {
-    let schema = character_decision_output_schema(&crate::config::CharacterThinkConfig::default());
-    assert_eq!(schema["additionalProperties"], false);
-    assert_eq!(schema["required"].as_array().unwrap().len(), 1);
-}
-
-#[test]
 fn character_think_renders_story_continuity_as_prose() {
     let mut context = prompt_context();
     context.story_continuity = CharacterThinkStoryContinuityPromptView {
@@ -261,6 +254,7 @@ fn sample_snapshot(roles: &[&StoryRole]) -> StoryReadSnapshot {
             base_revision: StoryRevision::new(0),
             knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater::zero(),
         },
+        role_id_high_water: crate::domain::ids::RoleIdHighWater::zero(),
     })
     .unwrap()
 }

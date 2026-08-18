@@ -1,7 +1,11 @@
 use super::*;
+use crate::config::StructuredOutputMode;
 use crate::llm::accounting::FinishReason;
 use crate::llm::error::{LlmProviderError, LlmResponseLimit, LlmTransportErrorKind};
 use crate::llm::message::{ChatMessage, CompletionRequest, Role};
+use crate::llm::output_contract::{
+    CompletionOutputRequest, ProviderTransportCapabilities, ResolvedStructuredOutputRequest,
+};
 use crate::llm::provider::DeltaSink;
 use crate::turn::turn_contract::LlmCallPurpose;
 use std::sync::{Arc, Mutex};
@@ -39,6 +43,25 @@ fn request() -> CompletionRequest {
         max_tokens: 64,
         temperature: 0.0,
         purpose: LlmCallPurpose::StoryGeneration,
+        output: CompletionOutputRequest::Text,
+    }
+}
+
+fn structured_request(mode: StructuredOutputMode) -> CompletionRequest {
+    let schema = Arc::new(serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["decision"],
+        "properties": {"decision": {"type": "string"}}
+    }));
+    CompletionRequest {
+        output: CompletionOutputRequest::Structured(ResolvedStructuredOutputRequest {
+            contract_name: "test_contract",
+            schema_hash: crate::domain::asset::ids::Sha256Digest::from_bytes([0u8; 32]),
+            schema,
+            mode,
+        }),
+        ..request()
     }
 }
 
@@ -296,6 +319,156 @@ async fn oversized_provider_error_body_is_not_retained() {
             status: 400,
             code: None,
             message: None,
+        }
+    ));
+}
+
+#[test]
+fn transport_capabilities_report_all_four_modes() {
+    let provider = provider_with("https://api.deepseek.com");
+    let capabilities: ProviderTransportCapabilities = provider.transport_capabilities();
+    for mode in [
+        StructuredOutputMode::NativeJsonSchema,
+        StructuredOutputMode::ForcedStrictTool,
+        StructuredOutputMode::JsonObject,
+        StructuredOutputMode::PromptFallback,
+    ] {
+        assert!(capabilities.encodable_modes.contains(&mode), "missing mode {mode:?}");
+    }
+}
+
+#[test]
+fn native_json_schema_mode_sets_response_format() {
+    let provider = provider_with("https://api.deepseek.com");
+    let request = structured_request(StructuredOutputMode::NativeJsonSchema);
+    let body = serde_json::to_value(provider.completion_body(&request, false)).expect("serialize");
+    assert_eq!(body["response_format"]["type"], "json_schema");
+    assert_eq!(body["response_format"]["json_schema"]["name"], "test_contract");
+    assert_eq!(body["response_format"]["json_schema"]["strict"], true);
+    assert!(body.get("tools").is_none());
+}
+
+#[test]
+fn forced_strict_tool_mode_sets_tools_and_tool_choice() {
+    let provider = provider_with("https://api.deepseek.com");
+    let request = structured_request(StructuredOutputMode::ForcedStrictTool);
+    let body = serde_json::to_value(provider.completion_body(&request, false)).expect("serialize");
+    assert_eq!(body["tools"][0]["type"], "function");
+    assert_eq!(body["tools"][0]["function"]["name"], "test_contract");
+    assert_eq!(body["tool_choice"]["function"]["name"], "test_contract");
+    assert!(body.get("response_format").is_none());
+}
+
+#[test]
+fn json_object_mode_sets_response_format_without_schema() {
+    let provider = provider_with("https://api.deepseek.com");
+    let request = structured_request(StructuredOutputMode::JsonObject);
+    let body = serde_json::to_value(provider.completion_body(&request, false)).expect("serialize");
+    assert_eq!(body["response_format"]["type"], "json_object");
+    assert!(body["response_format"].get("json_schema").is_none());
+}
+
+#[test]
+fn prompt_fallback_mode_adds_no_transport_field() {
+    let provider = provider_with("https://api.deepseek.com");
+    let request = structured_request(StructuredOutputMode::PromptFallback);
+    let body = serde_json::to_value(provider.completion_body(&request, false)).expect("serialize");
+    assert!(body.get("response_format").is_none());
+    assert!(body.get("tools").is_none());
+}
+
+#[tokio::test]
+async fn forced_strict_tool_response_extracts_the_single_matching_call() {
+    let body = serde_json::json!({
+        "choices": [{
+            "message": {
+                "content": "",
+                "tool_calls": [{"function": {"name": "test_contract", "arguments": "{\"decision\":\"wait\"}"}}]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    })
+    .to_string();
+    let base_url = serve(200, &[], &body).await;
+    let provider = provider_with(&base_url);
+    let completion = provider
+        .complete(&structured_request(StructuredOutputMode::ForcedStrictTool))
+        .await
+        .expect("tool call extracted");
+    assert_eq!(completion.text, "{\"decision\":\"wait\"}");
+}
+
+#[tokio::test]
+async fn forced_strict_tool_response_rejects_competing_prose() {
+    let body = serde_json::json!({
+        "choices": [{
+            "message": {
+                "content": "not empty",
+                "tool_calls": [{"function": {"name": "test_contract", "arguments": "{}"}}]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    })
+    .to_string();
+    let base_url = serve(200, &[], &body).await;
+    let provider = provider_with(&base_url);
+    let error = provider
+        .complete(&structured_request(StructuredOutputMode::ForcedStrictTool))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        LlmProviderError::Protocol {
+            kind: crate::llm::error::LlmProtocolErrorKind::InvalidStructuredOutput
+        }
+    ));
+}
+
+#[tokio::test]
+async fn forced_strict_tool_response_rejects_zero_calls() {
+    let body = serde_json::json!({
+        "choices": [{
+            "message": {"content": ""},
+            "finish_reason": "stop"
+        }]
+    })
+    .to_string();
+    let base_url = serve(200, &[], &body).await;
+    let provider = provider_with(&base_url);
+    let error = provider
+        .complete(&structured_request(StructuredOutputMode::ForcedStrictTool))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        LlmProviderError::Protocol {
+            kind: crate::llm::error::LlmProtocolErrorKind::InvalidStructuredOutput
+        }
+    ));
+}
+
+#[tokio::test]
+async fn forced_strict_tool_response_rejects_wrong_function_name() {
+    let body = serde_json::json!({
+        "choices": [{
+            "message": {
+                "content": "",
+                "tool_calls": [{"function": {"name": "other_contract", "arguments": "{}"}}]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    })
+    .to_string();
+    let base_url = serve(200, &[], &body).await;
+    let provider = provider_with(&base_url);
+    let error = provider
+        .complete(&structured_request(StructuredOutputMode::ForcedStrictTool))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        LlmProviderError::Protocol {
+            kind: crate::llm::error::LlmProtocolErrorKind::InvalidStructuredOutput
         }
     ));
 }

@@ -131,12 +131,25 @@ pub struct LlmCallData {
     pub error_kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<LlmCallContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structured_output: Option<StructuredCallData>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmCallContent {
     pub messages: Vec<MessageData>,
     pub response: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StructuredCallData {
+    pub output_contract: String,
+    pub schema_hash: String,
+    pub structured_output_mode: String,
+    pub schema_bytes: usize,
+    pub prompt_contract_bytes: usize,
+    pub decode_status: String,
+    pub validation_status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

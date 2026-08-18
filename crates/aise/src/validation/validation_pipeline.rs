@@ -1,23 +1,19 @@
-use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{StoryId, TurnNumber};
-use crate::domain::knowledge::fact::WorldFact;
-use crate::domain::knowledge::memory::MemoryEntry;
-use crate::domain::knowledge::query::{KnowledgeSource, allocate_knowledge_ids};
-use crate::domain::knowledge::rumor::SharedRumor;
-use crate::domain::knowledge::{KnowledgeEntry, KnowledgeSourceId};
+use crate::domain::ids::{EventId, RoleIdHighWater, StoryId, TurnNumber};
 use crate::domain::narrative::{EventKind, StoryEvent};
 use crate::domain::narrative_graph::resolver::{NarrativeResolutionInput, NarrativeResolver};
-use crate::domain::story_instance::role::StoryRoleState;
+use crate::domain::story_instance::role::{StoryRole, StoryRoleState};
 use crate::domain::story_instance::state::{RelationshipKey, RelationshipState};
-use crate::domain::turn::{ProposedKnowledgeMutation, ProposedKnowledgeValue, ValidatedNarrativeResolution};
+use crate::domain::turn::{
+    ExtractionEnrichmentError, KnowledgeEnrichmentContext, ValidatedNarrativeResolution, enrich_extracted_knowledge,
+};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::TurnExecutionError;
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::turn::turn_trace::{SpanPayload, ValidationData};
 use crate::turn::turn_validation::{
-    RelationshipStateChange, RoleStateChange, StateChange, ValidatedChangeSet, ValidatedChangeSetParts,
-    ValidatedKnowledgeMutation, ValidatedKnowledgeOperation, ValidationIssue, ValidationResult,
+    RoleStateChange, StateChange, ValidatedChangeSet, ValidatedChangeSetParts, ValidatedRelationshipOperation,
+    ValidationIssue, ValidationResult,
 };
 use crate::validation::narrative_candidate_state::CandidateNarrativeStateView;
 use crate::validation::validators::DeterministicValidator;
@@ -106,91 +102,115 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
     let story_id = ctx.story_id().clone();
     let turn_number = ctx.turn_number();
     let current_turn = snapshot.base_revision().get().saturating_add(1);
+    let dto = extraction;
 
     let story_text = bounded(story.story_text.as_str(), "story_text", ctx.budget().max_story_text_bytes())?;
 
-    let role_changes = extraction
-        .role_states
+    let new_roles = dto
+        .new_roles
         .iter()
-        .map(|state| {
-            let current = snapshot
-                .role(&state.role_id)
-                .ok_or_else(|| invariant("role_change_reference", "role_id is not a known role"))?;
-            let goals = state
+        .map(|role| {
+            let role_id = crate::domain::ids::RoleId::try_new(role.role_id.clone())
+                .map_err(|_| invariant("new_role_id_invalid", "new role id does not resolve"))?;
+            let location = crate::domain::asset::ids::LocationKey::try_new(role.location.clone())
+                .map_err(|_| invariant("new_role_location_invalid", "new role location does not resolve"))?;
+            let goals = role
                 .goals
                 .iter()
-                .map(|goal| bounded(goal.as_str(), "role_goal", ctx.budget().max_item_bytes()))
+                .map(|goal| bounded(goal, "role_goal", ctx.budget().max_item_bytes()))
                 .collect::<Result<Vec<_>, _>>()?;
-            let new_state = StoryRoleState {
-                location: state.location.clone(),
-                goals,
-                attributes: state.attributes.clone(),
-            };
-            let mut updated = current.clone();
-            updated.state = new_state.clone();
-            let role_bytes = serde_json::to_vec(&updated)
-                .map_err(|_| invariant("role_serialization_failed", "role state could not be serialized"))?
-                .len();
-            if role_bytes > ctx.budget().max_role_bytes() {
-                return Err(invariant("role_bytes_exceeded", "role state exceeds max_role_bytes"));
-            }
-            Ok(RoleStateChange {
-                role_id: state.role_id.clone(),
-                new_state,
+            let profile_bytes = ctx.budget().state_extraction_limits().max_role_profile_bytes;
+            Ok(StoryRole {
+                role_id,
+                controller: crate::domain::story_instance::role::RoleController::Ai,
+                role_label: bounded(&role.role_label, "role_label", profile_bytes)?,
+                narrative_function: bounded(&role.narrative_function, "narrative_function", profile_bytes)?,
+                background: optional_bounded(&role.background, "background", profile_bytes)?,
+                effective_profile: crate::domain::asset::character_card::CharacterProfile {
+                    name: bounded(&role.name, "name", profile_bytes)?,
+                    appearance: optional_bounded(&role.appearance, "appearance", profile_bytes)?,
+                    personality: optional_bounded(&role.personality, "personality", profile_bytes)?,
+                    speaking_style: optional_bounded(&role.speaking_style, "speaking_style", profile_bytes)?,
+                    dialogue_examples: Vec::new(),
+                },
+                source_character: None,
+                state: StoryRoleState {
+                    location,
+                    goals,
+                    attributes: role.attributes.clone().into_iter().map(|(k, v)| (k.into(), v)).collect(),
+                },
             })
         })
         .collect::<Result<Vec<_>, TurnExecutionError>>()?;
 
-    let relationship_changes = extraction
+    let role_changes = dto
+        .role_states
+        .iter()
+        .map(|state| {
+            let role_id = crate::domain::ids::RoleId::try_new(state.role_id.clone())
+                .map_err(|_| invariant("role_change_reference", "role_id is not a known role"))?;
+            let location = crate::domain::asset::ids::LocationKey::try_new(state.location.clone())
+                .map_err(|_| invariant("role_change_location_invalid", "role location does not resolve"))?;
+            let goals = state
+                .goals
+                .iter()
+                .map(|goal| bounded(goal, "role_goal", ctx.budget().max_item_bytes()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let new_state = StoryRoleState {
+                location,
+                goals,
+                attributes: state.attributes.clone().into_iter().map(|(k, v)| (k.into(), v)).collect(),
+            };
+            Ok(RoleStateChange { role_id, new_state })
+        })
+        .collect::<Result<Vec<_>, TurnExecutionError>>()?;
+
+    let relationship_operations = dto
         .relationship_states
         .iter()
         .map(|relationship| {
+            let source_role_id = crate::domain::ids::RoleId::try_new(relationship.source_role_id.clone())
+                .map_err(|_| invariant("relationship_reference_invalid", "source_role_id does not resolve"))?;
+            let target_role_id = crate::domain::ids::RoleId::try_new(relationship.target_role_id.clone())
+                .map_err(|_| invariant("relationship_reference_invalid", "target_role_id does not resolve"))?;
+            let kind = crate::domain::asset::ids::RelationshipKind::try_new(relationship.kind.clone())
+                .map_err(|_| invariant("relationship_kind_invalid", "relationship kind does not resolve"))?;
+            let trust = i16::try_from(relationship.trust)
+                .map_err(|_| invariant("relationship_trust_out_of_range", "relationship trust is out of range"))?;
             let key = RelationshipKey {
-                source_role_id: relationship.source_role_id.clone(),
-                target_role_id: relationship.target_role_id.clone(),
-                kind: relationship.kind.clone(),
+                source_role_id: source_role_id.clone(),
+                target_role_id: target_role_id.clone(),
+                kind: kind.clone(),
             };
-            RelationshipStateChange {
-                key,
-                new_state: RelationshipState {
-                    source_role_id: relationship.source_role_id.clone(),
-                    target_role_id: relationship.target_role_id.clone(),
-                    kind: relationship.kind.clone(),
-                    trust: relationship.trust,
-                },
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let knowledge_add_kinds = extraction
-        .knowledge_changes
-        .iter()
-        .filter_map(|mutation| match mutation {
-            ProposedKnowledgeMutation::Add { value } => Some(value.kind()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let allocation = allocate_knowledge_ids(snapshot.knowledge_id_high_water(), &knowledge_add_kinds)
-        .map_err(|_| invariant("knowledge_id_allocation_overflow", "knowledge id allocation overflowed"))?;
-    let mut assigned_ids = allocation.assigned.into_iter();
-    let knowledge_mutations = extraction
-        .knowledge_changes
-        .iter()
-        .enumerate()
-        .map(|(index, mutation)| {
-            let ordinal = u32::try_from(index)
-                .map_err(|_| invariant("knowledge_count_overflow", "knowledge change count exceeds u32"))?;
-            let operation = make_knowledge_operation(
-                mutation,
-                &mut assigned_ids,
-                turn_number,
-                ctx.budget().max_knowledge_change_bytes(),
-                ctx.identity().started_at_ms(),
-            )?;
-            Ok(ValidatedKnowledgeMutation { ordinal, operation })
+            let new_state = RelationshipState {
+                source_role_id,
+                target_role_id,
+                kind,
+                trust,
+            };
+            let existing = snapshot.relationships().iter().any(|state| state.key() == key);
+            Ok(if existing {
+                ValidatedRelationshipOperation::Update(crate::turn::turn_validation::RelationshipStateChange {
+                    key,
+                    new_state,
+                })
+            } else {
+                ValidatedRelationshipOperation::Add(new_state)
+            })
         })
         .collect::<Result<Vec<_>, TurnExecutionError>>()?;
-    let knowledge_id_high_water = allocation.new_high_water;
+
+    let enrichment_context = KnowledgeEnrichmentContext {
+        retrieved: ctx.retrieved(),
+        turn_number,
+        created_at_ms: ctx.identity().started_at_ms(),
+        max_content_bytes: ctx.budget().max_knowledge_change_bytes(),
+    };
+    let (knowledge_mutations, knowledge_id_high_water) =
+        enrich_extracted_knowledge(dto, snapshot, &new_roles, &enrichment_context)
+            .map_err(enrichment_error_to_turn_error)?;
+    let next_role_id_high_water =
+        RoleIdHighWater::new(snapshot.role_id_high_water().get().saturating_add(new_roles.len() as u64));
 
     let mut narrative_events = Vec::new();
     for intent in &projection.plan.world_event_intents {
@@ -210,7 +230,8 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
         )?);
     }
 
-    let candidate_view = CandidateNarrativeStateView::new(snapshot, &role_changes, &relationship_changes);
+    let candidate_view =
+        CandidateNarrativeStateView::new(snapshot, &new_roles, &role_changes, &relationship_operations);
     let resolver = NarrativeResolver::new(ctx.budget().narrative_limits());
     let resolution = resolver
         .resolve(NarrativeResolutionInput {
@@ -298,14 +319,20 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
 
     ValidatedChangeSet::new(ValidatedChangeSetParts {
         story_text,
+        new_roles,
         role_changes,
-        relationship_changes,
+        relationship_operations,
         knowledge_mutations,
         knowledge_id_high_water,
+        next_role_id_high_water,
         narrative_events,
         narrative_resolution,
         constraint_change,
     })
+}
+
+fn enrichment_error_to_turn_error(error: ExtractionEnrichmentError) -> TurnExecutionError {
+    invariant("knowledge_enrichment_failed", error.to_string())
 }
 
 fn make_event(
@@ -316,7 +343,7 @@ fn make_event(
     payload: serde_json::Value,
 ) -> Result<StoryEvent, TurnExecutionError> {
     Ok(StoryEvent {
-        id: crate::domain::ids::EventId::from(format!("{story_id}:turn:{turn_number}:event:{index}")),
+        id: EventId::from(format!("{story_id}:turn:{turn_number}:event:{index}")),
         turn_number,
         seq: u32::try_from(index).map_err(|_| invariant("event_count_overflow", "event count exceeds u32"))?,
         kind,
@@ -324,125 +351,16 @@ fn make_event(
     })
 }
 
-fn make_knowledge_operation(
-    mutation: &ProposedKnowledgeMutation,
-    assigned_ids: &mut impl Iterator<Item = KnowledgeSourceId>,
-    turn_number: TurnNumber,
-    max_bytes: usize,
-    created_at_ms: i64,
-) -> Result<ValidatedKnowledgeOperation, TurnExecutionError> {
-    match mutation {
-        ProposedKnowledgeMutation::Add { value } => {
-            let source_id = assigned_ids
-                .next()
-                .ok_or_else(|| invariant("knowledge_id_allocation_missing", "knowledge id allocation ran out"))?;
-            let entry = make_knowledge_entry(value, source_id, turn_number, max_bytes, created_at_ms)?;
-            Ok(ValidatedKnowledgeOperation::Add(entry))
-        }
-        ProposedKnowledgeMutation::Update { target, value } => {
-            let entry = make_knowledge_entry(value, target.clone(), turn_number, max_bytes, created_at_ms)?;
-            Ok(ValidatedKnowledgeOperation::Update {
-                target: target.clone(),
-                value: entry,
-            })
-        }
-        ProposedKnowledgeMutation::Delete { target } => {
-            Ok(ValidatedKnowledgeOperation::Delete { target: target.clone() })
-        }
+fn optional_bounded(
+    value: &str,
+    field: &'static str,
+    maximum: usize,
+) -> Result<Option<BoundedText>, TurnExecutionError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
     }
-}
-
-fn make_knowledge_entry(
-    value: &ProposedKnowledgeValue,
-    source_id: KnowledgeSourceId,
-    turn_number: TurnNumber,
-    max_bytes: usize,
-    created_at_ms: i64,
-) -> Result<KnowledgeEntry, TurnExecutionError> {
-    let source = KnowledgeSource::CommittedTurn { turn_number };
-    match (value, source_id) {
-        (
-            ProposedKnowledgeValue::Fact {
-                content,
-                proposition,
-                retrieval_hint,
-                entities,
-                topics,
-                salience,
-            },
-            KnowledgeSourceId::Fact(id),
-        ) => Ok(KnowledgeEntry::Fact(WorldFact {
-            id,
-            key: None,
-            text: bounded(content.as_str(), "fact_content", max_bytes)?,
-            proposition: proposition.clone(),
-            retrieval_hint: retrieval_hint.clone(),
-            entities: canonical(entities.clone()),
-            topics: canonical(topics.clone()),
-            salience: *salience,
-            source,
-        })),
-        (
-            ProposedKnowledgeValue::Rumor {
-                content,
-                claim,
-                retrieval_hint,
-                entities,
-                topics,
-                salience,
-                source_role_id,
-                truth_value,
-            },
-            KnowledgeSourceId::Rumor(id),
-        ) => Ok(KnowledgeEntry::Rumor(SharedRumor {
-            id,
-            key: None,
-            content: bounded(content.as_str(), "rumor_content", max_bytes)?,
-            claim: claim.clone(),
-            retrieval_hint: retrieval_hint.clone(),
-            entities: canonical(entities.clone()),
-            topics: canonical(topics.clone()),
-            salience: *salience,
-            source_role_id: source_role_id.clone(),
-            truth_value: truth_value.clone(),
-            source,
-        })),
-        (
-            ProposedKnowledgeValue::Memory {
-                owner,
-                memory_kind,
-                content,
-                entities,
-                topics,
-                salience,
-            },
-            KnowledgeSourceId::Memory(id),
-        ) => {
-            let mut entities = entities.clone();
-            entities.push(KnowledgeEntity::Role(owner.clone()));
-            Ok(KnowledgeEntry::Memory(MemoryEntry {
-                id,
-                owner: owner.clone(),
-                kind: memory_kind.clone(),
-                content: bounded(content.as_str(), "memory_content", max_bytes)?,
-                entities: canonical(entities),
-                topics: canonical(topics.clone()),
-                salience: *salience,
-                source,
-                created_at_ms,
-            }))
-        }
-        _ => Err(invariant(
-            "knowledge_kind_mismatch",
-            "knowledge target and value kind do not match",
-        )),
-    }
-}
-
-fn canonical<T: Ord>(mut values: Vec<T>) -> Vec<T> {
-    values.sort();
-    values.dedup();
-    values
+    bounded(trimmed, field, maximum).map(Some)
 }
 
 fn bounded(value: &str, field: &'static str, maximum: usize) -> Result<BoundedText, TurnExecutionError> {

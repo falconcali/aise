@@ -10,7 +10,7 @@ use crate::domain::narrative_graph::definition::{
 use crate::domain::narrative_graph::resolver::{NarrativeResolutionInput, NarrativeResolver};
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::narrative_graph::state_view::{NarrativeStateView, NarrativeStateViewError};
-use crate::domain::turn::{StoryCandidateVersion, StoryStateExtractionEnvelope, StoryStateExtractorOutput};
+use crate::domain::turn::{StoryCandidateVersion, StoryStateExtractionDto, StoryStateExtractionEnvelope};
 use std::collections::BTreeMap;
 
 struct StubStateView;
@@ -64,10 +64,20 @@ fn empty_extraction(expected_graph_revision: u64) -> StoryStateExtractionEnvelop
             repair_attempt: 0,
         },
         expected_graph_revision,
-        state: StoryStateExtractorOutput {
+        state: StoryStateExtractionDto {
+            new_roles: Vec::new(),
             role_states: Vec::new(),
             relationship_states: Vec::new(),
-            knowledge_changes: Vec::new(),
+            add_facts: Vec::new(),
+            update_facts: Vec::new(),
+            add_rumors: Vec::new(),
+            update_rumors: Vec::new(),
+            delete_rumor_ids: Vec::new(),
+            add_memories: Vec::new(),
+            update_memories: Vec::new(),
+            delete_memory_ids: Vec::new(),
+            narrative_condition_judgments: Vec::new(),
+            cast_policy_violations: Vec::new(),
         },
         narrative_condition_results: Vec::new(),
     }

@@ -1,4 +1,5 @@
 use crate::config::ContextPreparationConfig;
+use crate::domain::asset::validation::BoundedText;
 use crate::domain::turn::StoryGeneratorOutput;
 use crate::llm::gateway::LlmGateway;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
@@ -70,7 +71,7 @@ impl TurnExecutionPipeline for StoryRepairer {
         );
         let completion = self
             .gateway
-            .complete_composed(scope, request, max_output_tokens, LlmCallPurpose::StoryRepair)
+            .complete_text_composed(scope, request, max_output_tokens, LlmCallPurpose::StoryRepair)
             .instrument(span)
             .await
             .map_err(|error| {
@@ -81,20 +82,36 @@ impl TurnExecutionPipeline for StoryRepairer {
                     error.to_string(),
                 )
             })?;
-        let story: StoryGeneratorOutput = serde_json::from_str(&completion.text).map_err(|error| {
+        let trimmed = completion.text.trim();
+        if trimmed.is_empty() {
             tracing::warn!(
                 prompt_profile = "story_repairer",
                 story_version,
-                error = %error,
-                "story repairer output decode failed"
+                "story repairer output is trim-empty"
             );
-            TurnExecutionError::new(
+            return Err(TurnExecutionError::new(
                 TurnFailureKind::Llm,
                 "model_output_invalid",
                 Some(TurnStage::StoryRepairer),
-                format!("story repair output is invalid: {error}"),
-            )
-        })?;
+                "story repair output is empty".to_owned(),
+            ));
+        }
+        let story_text = BoundedText::try_new(trimmed.to_owned(), "story_text", ctx.budget().max_story_text_bytes())
+            .map_err(|error| {
+                tracing::warn!(
+                    prompt_profile = "story_repairer",
+                    story_version,
+                    error = %error,
+                    "story repairer output exceeds max_story_text_bytes"
+                );
+                TurnExecutionError::new(
+                    TurnFailureKind::Llm,
+                    "model_output_invalid",
+                    Some(TurnStage::StoryRepairer),
+                    format!("story repair output is invalid: {error}"),
+                )
+            })?;
+        let story = StoryGeneratorOutput { story_text };
         tracing::info!(
             prompt_profile = "story_repairer",
             story_version,

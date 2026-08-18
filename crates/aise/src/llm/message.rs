@@ -1,3 +1,4 @@
+use crate::llm::output_contract::CompletionOutputRequest;
 use crate::turn::turn_contract::{LlmCharge, LlmTokenUsage};
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +16,12 @@ pub enum Role {
     Assistant,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionOutputSpec {
+    Text,
+    Structured,
+}
+
 #[derive(Debug, Clone)]
 pub struct CompletionRequest {
     pub model: String,
@@ -22,6 +29,7 @@ pub struct CompletionRequest {
     pub max_tokens: u32,
     pub temperature: f32,
     pub purpose: crate::turn::turn_contract::LlmCallPurpose,
+    pub output: CompletionOutputRequest,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +37,7 @@ pub struct CompletionSpec {
     pub messages: Vec<ChatMessage>,
     pub max_output_tokens: u32,
     pub purpose: crate::turn::turn_contract::LlmCallPurpose,
+    pub output: CompletionOutputSpec,
 }
 
 #[derive(Debug, Clone)]

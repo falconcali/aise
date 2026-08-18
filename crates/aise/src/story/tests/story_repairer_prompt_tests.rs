@@ -16,7 +16,7 @@ use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::turn::StoryGeneratorOutput;
 use crate::domain::turn::{
     BaselineContext, NarrativeGraphStateIndex, RetrievalPlan, RetrievalSignals, RoleContextView, StoryCandidateVersion,
-    StoryStateExtractionEnvelope, StoryStateExtractorOutput, WriterPlan, WriterStoryGoal,
+    StoryStateExtractionDto, StoryStateExtractionEnvelope, WriterPlan, WriterStoryGoal,
 };
 use crate::turn::turn_budget::TurnBudget;
 use crate::turn::turn_contract::{IdempotencyKey, TurnCancellation, TurnControl, TurnIdentity, TurnRequest};
@@ -153,6 +153,7 @@ fn sample_snapshot(player: &StoryRole, continuity: StoryContinuity) -> StoryRead
             base_revision: StoryRevision::new(0),
             knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater::zero(),
         },
+        role_id_high_water: crate::domain::ids::RoleIdHighWater::zero(),
     })
     .unwrap()
 }
@@ -168,7 +169,7 @@ fn story_repairer_assets_have_required_rule_counts() {
     assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 5);
     assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
     assert!(!fti.contains("## SHOULD"));
-    assert_eq!(fti.matches("{{ output_schema }}").count(), 1);
+    assert!(!fti.contains("{{ output_schema }}"));
 }
 
 #[test]
@@ -280,10 +281,20 @@ fn story_repairer_reuses_story_continuity_prose() {
             repair_attempt: 0,
         },
         expected_graph_revision: 0,
-        state: StoryStateExtractorOutput {
+        state: StoryStateExtractionDto {
+            new_roles: Vec::new(),
             role_states: Vec::new(),
             relationship_states: Vec::new(),
-            knowledge_changes: Vec::new(),
+            add_facts: Vec::new(),
+            update_facts: Vec::new(),
+            add_rumors: Vec::new(),
+            update_rumors: Vec::new(),
+            delete_rumor_ids: Vec::new(),
+            add_memories: Vec::new(),
+            update_memories: Vec::new(),
+            delete_memory_ids: Vec::new(),
+            narrative_condition_judgments: Vec::new(),
+            cast_policy_violations: Vec::new(),
         },
         narrative_condition_results: Vec::new(),
     })

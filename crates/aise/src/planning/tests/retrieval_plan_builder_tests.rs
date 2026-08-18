@@ -204,13 +204,14 @@ fn sample_snapshot(player_id: &str, ai_ids: &[&str]) -> StoryReadSnapshot {
             base_revision: StoryRevision::new(0),
             knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater::zero(),
         },
+        role_id_high_water: crate::domain::ids::RoleIdHighWater::zero(),
     })
     .unwrap()
 }
 
 fn writer_prompt_context(baseline: &BaselineContext, plan: &NarrativePlan) -> WriterPlannerPromptContext {
     WriterPlannerPromptContextProjector
-        .project(baseline, plan, &text("go north"), &PlannerConfig::default(), 1_000_000)
+        .project(baseline, plan, &text("go north"), 1_000_000)
         .expect("writer planner projection")
         .context
 }

@@ -9,7 +9,7 @@ use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::CharacterThinkRequest;
 use crate::prompt::{RoleKnowledgePromptView, RuntimePromptVars, TrustedPromptVars, render_role_knowledge};
 use crate::turn::turn_context::TurnExecutionContext;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::HashMap;
 
 pub const CHARACTER_THINK_CSI_SLOT: &str = "context.character_think.csi";
@@ -212,29 +212,13 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
         if runtime_tokens(&rc_vars) > self.character_config.max_input_tokens {
             return Err(CharacterThinkProjectionError::RequiredPromptDataExceedsBudget);
         }
-        let fti_vars = TrustedPromptVars::new(HashMap::from([(
-            "output_schema".into(),
-            Value::String(character_decision_output_schema(&self.character_config).to_string()),
-        )]));
+        let fti_vars = TrustedPromptVars::new(HashMap::new());
         Ok(CharacterThinkPromptProjection {
             context,
             rc_vars,
             fti_vars,
         })
     }
-}
-
-pub fn character_decision_output_schema(config: &CharacterThinkConfig) -> Value {
-    json!({
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["decision"],
-        "properties": {
-            "decision": {"type": "string", "minLength": 1, "maxLength": config.max_field_bytes},
-            "suggested_utterance": {"type": ["string", "null"], "minLength": 1, "maxLength": config.max_field_bytes}
-        }
-    })
 }
 
 fn project_knowledge(ctx: &TurnExecutionContext, role_id: &RoleId) -> RoleKnowledgePromptView {

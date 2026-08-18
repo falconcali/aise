@@ -167,10 +167,12 @@ fn commit_spec(
         expected_graph_revision,
         changes: ValidatedChangeSet::new(ValidatedChangeSetParts {
             story_text: aise::domain::asset::validation::BoundedText::try_new(story_text, "story_text", 1024).unwrap(),
+            new_roles: Vec::new(),
             role_changes: Vec::new(),
-            relationship_changes: Vec::new(),
+            relationship_operations: Vec::new(),
             knowledge_mutations: Vec::new(),
             knowledge_id_high_water: aise::domain::knowledge::KnowledgeIdHighWater::zero(),
+            next_role_id_high_water: aise::domain::ids::RoleIdHighWater::zero(),
             narrative_events: Vec::new(),
             narrative_resolution: ValidatedNarrativeResolution {
                 candidate_version: StoryCandidateVersion {

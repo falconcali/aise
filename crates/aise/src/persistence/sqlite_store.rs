@@ -340,6 +340,14 @@ impl Store for SqliteStore {
             serde_json::from_str(&roles_json).map_err(|_| StoreError::Serialization {
                 kind: crate::persistence::store::StoreSerializationErrorKind::InvalidRoleState,
             })?;
+        for role in commit.changes.new_roles() {
+            if roles.contains_key(&role.role_id) {
+                return Err(StoreError::ConstraintViolation {
+                    constraint: "new_role_id_collision".to_owned(),
+                });
+            }
+            roles.insert(role.role_id.clone(), role.clone());
+        }
         for change in commit.changes.role_changes() {
             let Some(role) = roles.get_mut(&change.role_id) else {
                 return Err(StoreError::ConstraintViolation {
@@ -354,13 +362,25 @@ impl Store for SqliteStore {
             })?;
         let mut relationships_by_key: std::collections::BTreeMap<RelationshipKey, RelationshipState> =
             relationships.into_iter().map(|value| (value.key(), value)).collect();
-        for change in commit.changes.relationship_changes() {
-            if !relationships_by_key.contains_key(&change.key) || change.key != change.new_state.key() {
-                return Err(StoreError::ConstraintViolation {
-                    constraint: "relationship_change_reference".to_owned(),
-                });
+        for operation in commit.changes.relationship_operations() {
+            match operation {
+                crate::turn::turn_validation::ValidatedRelationshipOperation::Add(state) => {
+                    if relationships_by_key.contains_key(&state.key()) {
+                        return Err(StoreError::ConstraintViolation {
+                            constraint: "relationship_add_collision".to_owned(),
+                        });
+                    }
+                    relationships_by_key.insert(state.key(), state.clone());
+                }
+                crate::turn::turn_validation::ValidatedRelationshipOperation::Update(change) => {
+                    if !relationships_by_key.contains_key(&change.key) || change.key != change.new_state.key() {
+                        return Err(StoreError::ConstraintViolation {
+                            constraint: "relationship_change_reference".to_owned(),
+                        });
+                    }
+                    relationships_by_key.insert(change.key.clone(), change.new_state.clone());
+                }
             }
-            relationships_by_key.insert(change.key.clone(), change.new_state.clone());
         }
         let mut narrative_state: NarrativeRuntimeState =
             serde_json::from_str(&narrative_state_json).map_err(|_| StoreError::Serialization {
@@ -428,6 +448,7 @@ impl Store for SqliteStore {
             relationships_by_key.into_values().collect(),
             &narrative_state,
             commit.changes.knowledge_id_high_water(),
+            commit.changes.next_role_id_high_water(),
         )
         .await?;
 
@@ -575,6 +596,7 @@ async fn persist_instance_state(
     relationships: Vec<RelationshipState>,
     narrative_state: &NarrativeRuntimeState,
     knowledge_id_high_water: crate::domain::knowledge::KnowledgeIdHighWater,
+    role_id_high_water: crate::domain::ids::RoleIdHighWater,
 ) -> Result<(), StoreError> {
     let roles_json = serde_json::to_string(roles).map_err(|_| StoreError::Serialization {
         kind: crate::persistence::store::StoreSerializationErrorKind::InvalidRoleState,
@@ -587,12 +609,13 @@ async fn persist_instance_state(
     })?;
     sqlx::query(
         "UPDATE story_instances SET roles_json = ?, relationships_json = ?, \
-         narrative_state_json = ?, knowledge_id_high_water = ? WHERE story_id = ?",
+         narrative_state_json = ?, knowledge_id_high_water = ?, role_id_high_water = ? WHERE story_id = ?",
     )
     .bind(&roles_json)
     .bind(&relationships_json)
     .bind(&narrative_state_json)
     .bind(knowledge_id_high_water.get() as i64)
+    .bind(role_id_high_water.get() as i64)
     .bind(commit.story_id.as_str())
     .execute(&mut **tx)
     .await

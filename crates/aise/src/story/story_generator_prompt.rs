@@ -6,7 +6,7 @@ use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::RoleId;
 use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::{BaselineContext, RetrievedCharacterContext, RoleContextView, StoryGeneratorOutput};
+use crate::domain::turn::{BaselineContext, RetrievedCharacterContext, RoleContextView};
 use crate::prompt::{
     NarrativeDirectionPromptView, RoleKnowledgePromptView, RuntimePromptVars, StoryProfilePromptView,
     TrustedPromptVars, WorldKnowledgePromptView, merge_world_knowledge, project_narrative_direction,
@@ -184,11 +184,7 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
             player_input,
         };
         let rc_vars = prune_dialogue_examples_to_budget(&mut context, ctx.budget().max_context_tokens(), 0)?;
-        let output_schema = StoryGeneratorOutput::json_schema(ctx.budget().max_story_text_bytes());
-        let fti_vars = TrustedPromptVars::new(HashMap::from([(
-            "output_schema".into(),
-            Value::String(output_schema.to_string()),
-        )]));
+        let fti_vars = TrustedPromptVars::new(HashMap::new());
         Ok(StoryGeneratorPromptProjection {
             context,
             rc_vars,

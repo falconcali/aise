@@ -1,7 +1,9 @@
+use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{AttributeKey, LocationKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
-use crate::domain::ids::{MemoryId, RoleId};
+use crate::domain::ids::{MemoryId, RoleId, allocate_dynamic_role_candidates};
 use crate::domain::knowledge::KnowledgeSourceId;
+use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
 use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
 use crate::turn::turn_context::TurnExecutionContext;
@@ -9,7 +11,7 @@ use crate::turn::turn_contract::TurnPhase;
 use crate::turn::turn_validation::{ValidationDecision, ValidationIssueCode, ValidationLocation};
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub const STORY_STATE_EXTRACTOR_CSI_SLOT: &str = "context.story_state_extractor.csi";
 pub const STORY_STATE_EXTRACTOR_RC_SLOT: &str = "context.story_state_extractor.rc";
@@ -24,6 +26,9 @@ pub struct StoryStateExtractorPromptContext {
     pub condition_queries: Vec<StoryStateExtractorConditionQueryPromptView>,
     pub previous_extraction: Option<BoundedText>,
     pub validation_issues: Vec<StoryStateExtractorValidationIssuePromptView>,
+    pub cast_policy: CastPolicy,
+    pub available_locations: Vec<LocationKey>,
+    pub new_role_candidates: Vec<RoleId>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -219,6 +224,19 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
             (None, Vec::new())
         };
 
+        let cast_policy = snapshot.instance_settings().cast_policy;
+        let available_locations = available_location_keys(snapshot);
+        let new_role_candidates = if cast_policy == CastPolicy::Open {
+            allocate_dynamic_role_candidates(
+                snapshot.role_id_high_water(),
+                ctx.budget().state_extraction_limits().max_new_roles,
+            )
+            .map(|pool| pool.candidates)
+            .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
         let context = StoryStateExtractorPromptContext {
             story_text,
             roles,
@@ -227,6 +245,9 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
             condition_queries,
             previous_extraction,
             validation_issues,
+            cast_policy,
+            available_locations,
+            new_role_candidates,
         };
         let rc_vars = render_runtime_vars(&context);
         let input_tokens = rc_vars
@@ -238,24 +259,28 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
         if input_tokens > ctx.budget().state_extractor_max_context_tokens() {
             return Err(StoryStateExtractorProjectionError::RequiredPromptDataExceedsBudget);
         }
-        let output_schema = crate::domain::turn::StoryStateExtractionEnvelopeOutput::json_schema(
-            crate::domain::turn::StoryStateExtractionLimits {
-                max_condition_queries: ctx.budget().max_condition_queries(),
-                max_condition_evidence_bytes: ctx.budget().max_condition_evidence_bytes(),
-                max_condition_reason_bytes: ctx.budget().max_condition_reason_bytes(),
-                ..ctx.budget().state_extraction_limits()
-            },
-        );
-        let fti_vars = TrustedPromptVars::new(HashMap::from([(
-            "output_schema".into(),
-            Value::String(output_schema.to_string()),
-        )]));
+        let fti_vars = TrustedPromptVars::new(HashMap::new());
         Ok(StoryStateExtractorPromptProjection {
             context,
             rc_vars,
             fti_vars,
         })
     }
+}
+
+fn available_location_keys(snapshot: &crate::domain::story_instance::snapshot::StoryReadSnapshot) -> Vec<LocationKey> {
+    let mut keys: BTreeSet<LocationKey> = snapshot
+        .entity_catalog()
+        .iter()
+        .filter_map(|entity| match entity {
+            KnowledgeEntity::Location(key) => Some(key.clone()),
+            _ => None,
+        })
+        .collect();
+    for role in snapshot.roles().values() {
+        keys.insert(role.state.location.clone());
+    }
+    keys.into_iter().collect()
 }
 
 fn modifiable_knowledge_view(ctx: &TurnExecutionContext) -> ModifiableWorldKnowledgePromptView {
@@ -394,7 +419,41 @@ fn render_runtime_vars(context: &StoryStateExtractorPromptContext) -> RuntimePro
             "validation_issues".into(),
             Value::String(render_validation_issues(&context.validation_issues)),
         ),
+        (
+            "cast_policy".into(),
+            Value::String(cast_policy_label(context.cast_policy).to_owned()),
+        ),
+        (
+            "available_locations".into(),
+            Value::String(render_location_keys(&context.available_locations)),
+        ),
+        (
+            "new_role_candidates".into(),
+            Value::String(render_role_ids(&context.new_role_candidates)),
+        ),
     ]))
+}
+
+fn cast_policy_label(policy: CastPolicy) -> &'static str {
+    match policy {
+        CastPolicy::Open => "open",
+        CastPolicy::IncidentalOnly => "incidental_only",
+        CastPolicy::Closed => "closed",
+    }
+}
+
+fn render_location_keys(values: &[LocationKey]) -> String {
+    format!(
+        "[{}]",
+        values.iter().map(|value| quoted(value.as_str())).collect::<Vec<_>>().join(", ")
+    )
+}
+
+fn render_role_ids(values: &[RoleId]) -> String {
+    format!(
+        "[{}]",
+        values.iter().map(|value| quoted(value.as_str())).collect::<Vec<_>>().join(", ")
+    )
 }
 
 fn render_roles(values: &[StoryStateExtractorRolePromptView]) -> String {

@@ -5,24 +5,21 @@ Extract the structured state established by the Story Text now and return the co
 
 ## MUST
 
+- Emit `new_roles` only when Cast Policy is `open` and only using the next unused candidates from New Role Candidates in rendered order; otherwise leave `new_roles` empty.
 - Emit `role_states` only for Roles whose location, goals, or attributes actually changed; each entry must carry the complete final values and exact known `role_id`.
 - Emit `relationship_states` only for relationships whose trust or kind actually changed; each entry must carry the complete final values.
-- Emit `knowledge_changes` only for Knowledge the Story Text actually establishes; `update` and `delete` targets must come from Modifiable Knowledge, and Facts can only be added or updated.
+- Emit `add_facts`, `add_rumors`, and `add_memories` only for Knowledge the Story Text actually establishes; emit `update_facts`, `update_rumors`, and `update_memories`, or `delete_rumor_ids` and `delete_memory_ids`, only for targets listed in Modifiable Knowledge.
 - For every entry in Narrative Condition Queries, return exactly one `narrative_condition_judgments` entry with a matching `condition_key`, `status`, `evidence`, and `reason`; use `unknown` when the Story Text does not settle it.
 - If Validation Issues are present, resolve every one of them relative to the Previous Extraction; do not return output identical to the Previous Extraction.
-- Return exactly one value matching the schema below.
+- Return exactly one value matching the declared output contract.
 
 ## NEVER
 
 - Invent Role, relationship, or Knowledge state the Story Text does not establish.
-- Emit an unchanged Role or relationship entry, or mutate Knowledge outside Modifiable Knowledge.
+- Emit an unchanged Role or relationship entry, a `new_roles` entry outside Cast Policy `open`, or mutate Knowledge outside Modifiable Knowledge.
 - Return prose, explanation, planning notes, or any text outside the structured output.
 
 # Output
 
-Return exactly one value matching this schema:
-
-{{ output_schema }}
-
-Return no text outside the structured output.
+Return exactly one JSON object matching the declared output contract and nothing else.
 {# @endasset #}

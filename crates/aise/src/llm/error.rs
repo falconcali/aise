@@ -17,6 +17,8 @@ pub enum LlmProtocolErrorKind {
     StreamTooLarge,
     UsageMissing,
     Unsupported,
+    StructuredOutputUnsupported,
+    InvalidStructuredOutput,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

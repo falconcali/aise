@@ -18,7 +18,7 @@ use crate::persistence::store::StoreError;
 use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 
-type StoryInstanceRow = (i64, String, String, String, String, String, String, String, String, i64);
+type StoryInstanceRow = (i64, String, String, String, String, String, String, String, String, i64, i64);
 type StoryPackRow = (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>, String);
 type InstanceProjectionLengths = (String, i64, i64, i64, i64, i64, i64, i64);
 type PackProjectionLengths = (i64, i64, i64, Option<i64>);
@@ -136,7 +136,7 @@ pub(crate) async fn load_story_snapshot(
         "SELECT s.revision, i.pack_id, i.settings_json, i.roles_json, \
                 i.relationships_json, i.narrative_state_json, \
                 i.fact_values_json, s.story_summary, s.active_constraints, \
-                i.knowledge_id_high_water \
+                i.knowledge_id_high_water, i.role_id_high_water \
          FROM stories s \
          INNER JOIN story_instances i ON i.story_id = s.id \
          WHERE s.id = ?",
@@ -156,6 +156,7 @@ pub(crate) async fn load_story_snapshot(
         story_summary_json,
         active_constraints_json,
         knowledge_id_high_water,
+        role_id_high_water,
     )) = row
     else {
         tx.rollback().await.map_err(SqliteStoreError::from)?;
@@ -395,6 +396,7 @@ pub(crate) async fn load_story_snapshot(
         entity_catalog,
         topic_dictionary,
         knowledge_snapshot,
+        role_id_high_water: crate::domain::ids::RoleIdHighWater::new(role_id_high_water.max(0) as u64),
     })
     .map_err(|_| StoreError::ConstraintViolation {
         constraint: "story_snapshot".into(),

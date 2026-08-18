@@ -1,6 +1,7 @@
 use crate::llm::accounting::LlmCompletion;
 use crate::llm::error::LlmProviderError;
 use crate::llm::message::{CompletionRequest, EmbeddingOutput, EmbeddingRequest};
+use crate::llm::output_contract::ProviderTransportCapabilities;
 use async_trait::async_trait;
 
 pub type DeltaSink = Box<dyn FnMut(String) + Send>;
@@ -8,6 +9,8 @@ pub type DeltaSink = Box<dyn FnMut(String) + Send>;
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     fn provider_name(&self) -> &'static str;
+
+    fn transport_capabilities(&self) -> ProviderTransportCapabilities;
 
     async fn complete(&self, req: &CompletionRequest) -> Result<LlmCompletion, LlmProviderError>;
 
