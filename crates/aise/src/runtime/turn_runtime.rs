@@ -53,7 +53,7 @@ impl TurnRuntime {
                     .map(|result| result.issues().iter().map(|issue| issue.code).collect::<Vec<_>>())
                     .unwrap_or_default();
                 let _ = sink.emit(TurnEvent::ValidationCompleted {
-                    turn_id: ctx.turn_id().clone(),
+                    turn_number: Some(ctx.turn_number()),
                     attempt: ctx.budget().correction_rounds().saturating_add(1),
                     decision,
                     issue_codes,
@@ -106,7 +106,7 @@ impl TurnRuntime {
             return Err(TurnExecutionError::deadline_exceeded(Some(stage)));
         }
         let _ = sink.emit(TurnEvent::StageStarted {
-            turn_id: ctx.turn_id().clone(),
+            turn_number: Some(ctx.turn_number()),
             stage,
         });
         let pending = ctx.trace().begin_span("aise.pipeline", stage.as_str());

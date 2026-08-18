@@ -94,7 +94,8 @@ pub fn validate_topic_dictionary(dictionary: &BTreeMap<TopicKey, TopicDefinition
 pub struct FactSeed {
     pub proposition: Option<Proposition>,
     pub content: BoundedText,
-    pub retrieval_hint: RetrievalHint,
+    #[serde(default)]
+    pub retrieval_hint: Option<RetrievalHint>,
     #[serde(default)]
     pub entities: Vec<KnowledgeEntity>,
     #[serde(default)]
@@ -107,7 +108,8 @@ pub struct FactSeed {
 pub struct RumorSeed {
     pub claim: Option<Proposition>,
     pub content: BoundedText,
-    pub retrieval_hint: RetrievalHint,
+    #[serde(default)]
+    pub retrieval_hint: Option<RetrievalHint>,
     #[serde(default)]
     pub entities: Vec<KnowledgeEntity>,
     #[serde(default)]

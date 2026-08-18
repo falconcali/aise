@@ -80,7 +80,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                 .sum::<usize>();
             tracing::info!(
                 story_id = %ctx.story_id(),
-                turn_id = %ctx.turn_id(),
+                turn_number = %ctx.turn_number(),
                 target_role_id = %request.role_id,
                 recent_story_segments = projection.context.story_continuity.recent_story.len(),
                 known_rumor_count = projection.context.target_role.knowledge.known_rumors.len(),
@@ -136,7 +136,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
             )?;
             tracing::info!(
                 story_id = %ctx.story_id(),
-                turn_id = %ctx.turn_id(),
+                turn_number = %ctx.turn_number(),
                 target_role_id = %request.role_id,
                 decision_bytes = decision_text.as_str().len(),
                 suggested_utterance_present = suggested_utterance.is_some(),

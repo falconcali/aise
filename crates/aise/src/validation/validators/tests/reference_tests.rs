@@ -57,6 +57,7 @@ fn sample_snapshot(roles: &[StoryRole], entity_catalog: Vec<KnowledgeEntity>) ->
             version: SemanticVersion::try_new("0.1.0").unwrap(),
             digest: digest(),
         },
+        story_title: bounded("Untitled Story"),
         story_profile: StoryProfile {
             language: bounded("zh-CN"),
             genre: Vec::new(),

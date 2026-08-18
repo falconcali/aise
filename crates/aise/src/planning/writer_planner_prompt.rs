@@ -8,8 +8,9 @@ use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::{BaselineContext, RoleContextView};
 use crate::prompt::{
-    RuntimePromptVars, TrustedPromptVars, project_narrative_direction, render_narrative_direction,
-    render_relevant_knowledge, world_knowledge_view_from_baseline,
+    RuntimePromptVars, StoryProfilePromptView, TrustedPromptVars, project_narrative_direction,
+    render_narrative_direction, render_relevant_knowledge, render_story_profile_view,
+    world_knowledge_view_from_baseline,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
@@ -90,7 +91,13 @@ impl WriterPlannerPromptContextProjector {
         let continuity = &baseline.story_continuity;
         let narrative_direction = project_narrative_direction(narrative_plan);
         let rc_vars = HashMap::from([
-            ("story_profile".into(), Value::String(render_story_profile(baseline))),
+            (
+                "story_profile".into(),
+                Value::String(render_story_profile_view(&StoryProfilePromptView::new(
+                    &baseline.story_title,
+                    &baseline.story_profile,
+                ))),
+            ),
             (
                 "instance_settings".into(),
                 Value::String(render_instance_settings(baseline.instance_settings.cast_policy)),
@@ -166,54 +173,34 @@ pub fn writer_planner_output_schema(config: &PlannerConfig) -> Value {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "additionalProperties": false,
-        "required": ["story_goal", "context_gaps", "character_think_requests"],
+        "required": ["story_goal", "writer_context_gaps", "character_context_gaps", "character_think_requests"],
         "properties": {
             "story_goal": {"type": "string", "minLength": 1, "maxLength": config.max_goal_bytes},
-            "context_gaps": {
+            "writer_context_gaps": {
                 "type": "array",
                 "maxItems": config.max_context_gaps,
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["delivery", "target_id", "query_text", "reason"],
+                    "required": ["target_id", "reason"],
                     "properties": {
-                        "delivery": {
-                            "oneOf": [
-                                {
-                                    "type": "object",
-                                    "additionalProperties": false,
-                                    "required": ["kind"],
-                                    "properties": {"kind": {"const": "writer"}}
-                                },
-                                {
-                                    "type": "object",
-                                    "additionalProperties": false,
-                                    "required": ["kind", "role_id"],
-                                    "properties": {
-                                        "kind": {"const": "character"},
-                                        "role_id": {"type": "string", "minLength": 1}
-                                    }
-                                }
-                            ]
-                        },
-                        "target_id": {"type": ["string", "null"], "maxLength": 256},
-                        "query_text": {"type": ["string", "null"], "maxLength": config.max_query_bytes},
+                        "target_id": {"type": "string", "minLength": 1, "maxLength": 256},
                         "reason": {"type": "string", "minLength": 1, "maxLength": config.max_reason_bytes}
-                    },
-                    "oneOf": [
-                        {
-                            "properties": {
-                                "target_id": {"type": "string", "minLength": 1},
-                                "query_text": {"type": "null"}
-                            }
-                        },
-                        {
-                            "properties": {
-                                "target_id": {"type": "null"},
-                                "query_text": {"type": "string", "minLength": 1}
-                            }
-                        }
-                    ]
+                    }
+                }
+            },
+            "character_context_gaps": {
+                "type": "array",
+                "maxItems": config.max_context_gaps,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["role_id", "target_id", "reason"],
+                    "properties": {
+                        "role_id": {"type": "string", "minLength": 1},
+                        "target_id": {"type": "string", "minLength": 1, "maxLength": 256},
+                        "reason": {"type": "string", "minLength": 1, "maxLength": config.max_reason_bytes}
+                    }
                 }
             },
             "character_think_requests": {
@@ -231,23 +218,6 @@ pub fn writer_planner_output_schema(config: &PlannerConfig) -> Value {
             }
         }
     })
-}
-
-fn render_story_profile(baseline: &BaselineContext) -> String {
-    let profile = &baseline.story_profile;
-    let mut lines = vec![field("language", profile.language.as_str())];
-    if !profile.genre.is_empty() {
-        lines.push(list_field("genre", &profile.genre));
-    }
-    if !profile.themes.is_empty() {
-        lines.push(list_field("themes", &profile.themes));
-    }
-    if !profile.style.tone.is_empty() {
-        lines.push(list_field("tone", &profile.style.tone));
-    }
-    lines.push(field("point_of_view", profile.style.point_of_view.as_str()));
-    lines.push(field("tense", profile.style.tense.as_str()));
-    lines.join("\n")
 }
 
 fn render_instance_settings(policy: CastPolicy) -> String {
@@ -302,12 +272,8 @@ fn render_role(role: &RoleContextView, collection: bool) -> String {
 }
 
 fn render_role_index(baseline: &BaselineContext) -> String {
-    let scope = match baseline.role_index_scope {
-        crate::domain::turn::RetrievalIndexScope::Complete => "complete",
-        crate::domain::turn::RetrievalIndexScope::Prefiltered => "prefiltered",
-    };
     if baseline.role_index.is_empty() {
-        return format!("scope: {scope}");
+        return String::new();
     }
     let entries = baseline
         .role_index
@@ -320,16 +286,12 @@ fn render_role_index(baseline: &BaselineContext) -> String {
             )
         })
         .collect::<Vec<_>>();
-    format!("scope: {scope}\n\n### Retrievable Characters\n\n{}", entries.join("\n"))
+    format!("### Retrievable Characters\n\n{}", entries.join("\n"))
 }
 
 fn render_knowledge_index(baseline: &BaselineContext) -> String {
-    let scope = match baseline.knowledge_index_scope {
-        crate::domain::turn::RetrievalIndexScope::Complete => "complete",
-        crate::domain::turn::RetrievalIndexScope::Prefiltered => "prefiltered",
-    };
     if baseline.knowledge_index.is_empty() {
-        return format!("scope: {scope}");
+        return String::new();
     }
     let mut facts = Vec::new();
     let mut rumors = Vec::new();
@@ -345,7 +307,7 @@ fn render_knowledge_index(baseline: &BaselineContext) -> String {
             crate::domain::knowledge::KnowledgeKind::Memory => {}
         }
     }
-    let mut sections = vec![format!("scope: {scope}")];
+    let mut sections = Vec::new();
     if !facts.is_empty() {
         sections.push(format!("### Retrievable Facts\n\n{}", facts.join("\n")));
     }
@@ -388,14 +350,6 @@ fn render_story_summary(value: &str) -> String {
 
 fn render_data(value: &str) -> String {
     quoted(value)
-}
-
-fn field(name: &str, value: &str) -> String {
-    format!("{name}: {}", quoted(value))
-}
-
-fn list_field(name: &str, values: &[BoundedText]) -> String {
-    format!("{name}: {}", quoted_list(values))
 }
 
 fn quoted_list(values: &[BoundedText]) -> String {

@@ -8,7 +8,7 @@ use crate::domain::narrative::StoryContinuityLimits;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{
     BaselineContext, KnowledgeDelivery, KnowledgeIndexEntry, NarrativeGraphStateIndex, RelevantWorldKnowledge,
-    RelevantWorldKnowledgeItem, RetrievalIndexScope, RetrievalSignals, RoleContextView, RoleIndexEntry, SnapshotLimits,
+    RelevantWorldKnowledgeItem, RetrievalSignals, RoleContextView, RoleIndexEntry, SnapshotLimits,
 };
 use crate::persistence::knowledge_read_port::{
     EntityKnowledgeQuery, KnowledgeFilter, KnowledgeIndexQuery, KnowledgeLookupHit, KnowledgeReadPort,
@@ -114,7 +114,7 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
         let payload = match &baseline_result {
             Ok(baseline) => serde_json::json!({
                 "story_id": story_id,
-                "turn_id": ctx.turn_id(),
+                "turn_number": ctx.turn_number().get(),
                 "base_revision": snapshot.base_revision().get(),
                 "relevant_role_count": baseline.relevant_roles.len(),
                 "constraint_count": baseline.active_story_constraints.len(),
@@ -125,7 +125,7 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
             }),
             Err(error) => serde_json::json!({
                 "story_id": story_id,
-                "turn_id": ctx.turn_id(),
+                "turn_number": ctx.turn_number().get(),
                 "base_revision": snapshot.base_revision().get(),
                 "relevant_role_count": 0,
                 "constraint_count": 0,
@@ -171,25 +171,25 @@ async fn build_baseline(
         });
     }
     role_index.sort_by(|left, right| left.role_id.cmp(&right.role_id));
-    let role_index_scope = if role_index.len() > context_config.max_role_index {
-        role_index.truncate(context_config.max_role_index);
-        RetrievalIndexScope::Prefiltered
-    } else {
-        RetrievalIndexScope::Complete
-    };
+    if role_index.len() > context_config.max_role_index {
+        return Err(ContextError::IndexLimitExceeded {
+            index: "role_index",
+            actual: role_index.len(),
+            maximum: context_config.max_role_index,
+        });
+    }
     let relevant_world_knowledge =
         load_relevant_knowledge(snapshot, &retrieval_signals, retrieval_config, knowledge).await?;
-    let (knowledge_index_scope, knowledge_index) =
+    let knowledge_index =
         load_knowledge_index(snapshot, &relevant_world_knowledge, retrieval_config, knowledge).await?;
     Ok(BaselineContext {
+        story_title: snapshot.story_title().clone(),
         story_profile: snapshot.story_profile().clone(),
         instance_settings: snapshot.instance_settings().clone(),
         player_role,
         relevant_roles,
         relevant_world_knowledge,
-        role_index_scope,
         role_index,
-        knowledge_index_scope,
         knowledge_index,
         story_continuity: snapshot.story_continuity().clone(),
         active_story_constraints: snapshot.active_constraints().to_vec(),
@@ -282,7 +282,7 @@ async fn load_knowledge_index(
     relevant: &RelevantWorldKnowledge,
     config: &RetrievalConfig,
     knowledge: &Arc<dyn KnowledgeReadPort>,
-) -> Result<(RetrievalIndexScope, Vec<KnowledgeIndexEntry>), ContextError> {
+) -> Result<Vec<KnowledgeIndexEntry>, ContextError> {
     let requested = config.max_candidates_total.saturating_add(1);
     let records = knowledge
         .list_index(KnowledgeIndexQuery {
@@ -291,11 +291,13 @@ async fn load_knowledge_index(
             limit: requested,
         })
         .await?;
-    let scope = if records.len() > config.max_candidates_total {
-        RetrievalIndexScope::Prefiltered
-    } else {
-        RetrievalIndexScope::Complete
-    };
+    if records.len() > config.max_candidates_total {
+        return Err(ContextError::IndexLimitExceeded {
+            index: "knowledge_index",
+            actual: records.len(),
+            maximum: config.max_candidates_total,
+        });
+    }
     let provided = relevant
         .facts
         .iter()
@@ -303,7 +305,7 @@ async fn load_knowledge_index(
         .map(|entry| &entry.source_id)
         .collect::<BTreeSet<_>>();
     let mut entries = Vec::new();
-    for record in records.into_iter().take(config.max_candidates_total) {
+    for record in records {
         if provided.contains(&record.source_id) {
             continue;
         }
@@ -312,7 +314,7 @@ async fn load_knowledge_index(
             retrieval_hint: record.retrieval_hint,
         });
     }
-    Ok((scope, entries))
+    Ok(entries)
 }
 
 fn normalize_relevant_knowledge(

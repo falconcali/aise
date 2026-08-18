@@ -4,7 +4,7 @@ use crate::domain::asset::character_card::CharacterProfile;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
 use crate::domain::asset::ids::{LocationKey, PackId, PlayerId, SemanticVersion, Sha256Digest, StoryPackKey};
 use crate::domain::asset::story_pack::{StoryProfile, StoryStyle};
-use crate::domain::ids::{RoleId, StoryId, StoryRevision, TurnId};
+use crate::domain::ids::{RoleId, StoryId, StoryRevision, TurnKey, TurnNumber};
 use crate::domain::narrative::{
     StoryContinuity, StoryContinuityLimits, StorySegment, StorySegmentOrigin, StorySummary,
 };
@@ -15,8 +15,8 @@ use crate::domain::story_instance::snapshot::{KnowledgeSnapshotRef, StoryReadSna
 use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::turn::StoryGeneratorOutput;
 use crate::domain::turn::{
-    BaselineContext, NarrativeGraphStateIndex, RetrievalIndexScope, RetrievalPlan, RetrievalSignals, RoleContextView,
-    StoryCandidateVersion, StoryStateExtractionEnvelope, StoryStateExtractorOutput, WriterPlan, WriterStoryGoal,
+    BaselineContext, NarrativeGraphStateIndex, RetrievalPlan, RetrievalSignals, RoleContextView, StoryCandidateVersion,
+    StoryStateExtractionEnvelope, StoryStateExtractorOutput, WriterPlan, WriterStoryGoal,
 };
 use crate::turn::turn_budget::TurnBudget;
 use crate::turn::turn_contract::{IdempotencyKey, TurnCancellation, TurnControl, TurnIdentity, TurnRequest};
@@ -97,13 +97,12 @@ fn player_role() -> StoryRole {
 
 fn sample_baseline(player: &StoryRole, continuity: StoryContinuity) -> BaselineContext {
     BaselineContext {
+        story_title: bounded("Untitled Story"),
         story_profile: story_profile(),
         instance_settings: InstanceSettings::default(),
         player_role: RoleContextView::from(&crate::domain::story_instance::role::StoryRoleView::from(player)),
         relevant_roles: Vec::new(),
         relevant_world_knowledge: crate::domain::turn::RelevantWorldKnowledge::default(),
-        role_index_scope: RetrievalIndexScope::Complete,
-        knowledge_index_scope: RetrievalIndexScope::Complete,
         knowledge_index: Vec::new(),
         role_index: Vec::new(),
         story_continuity: continuity,
@@ -132,6 +131,7 @@ fn sample_snapshot(player: &StoryRole, continuity: StoryContinuity) -> StoryRead
             version: SemanticVersion::try_new("0.1.0").unwrap(),
             digest: digest(),
         },
+        story_title: bounded("Untitled Story"),
         story_profile: story_profile(),
         instance_settings: InstanceSettings::default(),
         roles,
@@ -247,8 +247,7 @@ fn story_repairer_reuses_story_continuity_prose() {
     )
     .unwrap();
     let identity = TurnIdentity::new(
-        StoryId::try_new("story-1").unwrap(),
-        TurnId::try_new("turn-1").unwrap(),
+        TurnKey::new(StoryId::try_new("story-1").unwrap(), TurnNumber::try_new(1).unwrap()),
         IdempotencyKey::try_new("idem-1").unwrap(),
         0,
     );

@@ -56,21 +56,24 @@ impl SseSink {
             TurnEvent::Committed { result, replayed } => (
                 "committed",
                 serde_json::json!({
-                    "turn_id": result.turn_id.as_str(),
+                    "turn_number": result.turn_number.get(),
                     "story_revision": result.story_revision.get(),
                     "story_text": result.story_text,
                     "replayed": replayed,
                 }),
             ),
-            TurnEvent::Failed { turn_id, code } => {
-                ("failed", serde_json::json!({ "turn_id": turn_id.as_str(), "code": code }))
-            }
-            TurnEvent::Cancelled { turn_id, code } => {
-                ("cancelled", serde_json::json!({ "turn_id": turn_id.as_str(), "code": code }))
-            }
-            TurnEvent::Conflict { turn_id, code } => {
-                ("conflict", serde_json::json!({ "turn_id": turn_id.as_str(), "code": code }))
-            }
+            TurnEvent::Failed { turn_number, code } => (
+                "failed",
+                serde_json::json!({ "turn_number": turn_number.map(|number| number.get()), "code": code }),
+            ),
+            TurnEvent::Cancelled { turn_number, code } => (
+                "cancelled",
+                serde_json::json!({ "turn_number": turn_number.map(|number| number.get()), "code": code }),
+            ),
+            TurnEvent::Conflict { turn_number, code } => (
+                "conflict",
+                serde_json::json!({ "turn_number": turn_number.map(|number| number.get()), "code": code }),
+            ),
             TurnEvent::TraceCompleted { trace, .. } => {
                 if !self.include_trace {
                     return None;

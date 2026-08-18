@@ -1,20 +1,32 @@
-use crate::domain::asset::validation::BoundedText;
-use crate::domain::turn::{CharacterThinkRequest, KnowledgeDelivery};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PlannerOutput {
-    pub story_goal: BoundedText,
-    pub context_gaps: Vec<PlannerContextGap>,
-    pub character_think_requests: Vec<CharacterThinkRequest>,
+pub struct WriterPlannerOutputDto {
+    pub story_goal: String,
+    pub writer_context_gaps: Vec<PlannerWriterContextGapDto>,
+    pub character_context_gaps: Vec<PlannerCharacterContextGapDto>,
+    pub character_think_requests: Vec<CharacterThinkRequestDto>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PlannerContextGap {
-    pub delivery: KnowledgeDelivery,
-    pub target_id: Option<String>,
-    pub query_text: Option<BoundedText>,
-    pub reason: BoundedText,
+pub struct PlannerWriterContextGapDto {
+    pub target_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlannerCharacterContextGapDto {
+    pub role_id: String,
+    pub target_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CharacterThinkRequestDto {
+    pub role_id: String,
+    pub reason: String,
 }

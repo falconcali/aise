@@ -1,7 +1,7 @@
 use aise::config::{AssetLimitsConfig, ContextPreparationConfig, NarrativeConfig, TurnContentLimitsConfig};
 use aise::domain::StorySequence;
 use aise::domain::asset::ids::PlayerId;
-use aise::domain::ids::{RoleId, StoryId, StoryRevision, TurnId};
+use aise::domain::ids::{RoleId, StoryId, StoryRevision, TurnNumber};
 use aise::domain::narrative::StoryTurn;
 use aise::domain::turn::{SnapshotLimits, StoryCandidateVersion, ValidatedNarrativeResolution};
 use aise::persistence::asset_store::AssetStore;
@@ -150,13 +150,14 @@ fn commit_spec(
     expected_graph_revision: u64,
     sequence: u64,
     key: &str,
-    turn_id: &str,
+    turn_number: u64,
 ) -> TurnCommitSpec {
-    let story_text = format!("story {turn_id}");
+    let turn_number = TurnNumber::try_new(turn_number).unwrap();
+    let story_text = format!("story {turn_number}");
     TurnCommitSpec {
         story_id: story_id.clone(),
         turn: StoryTurn {
-            id: TurnId::try_new(turn_id).unwrap(),
+            number: turn_number,
             sequence: StorySequence::try_new(sequence).unwrap(),
             player_input: "input".into(),
             story_text: story_text.clone(),
@@ -203,7 +204,7 @@ async fn snapshot_is_revision_consistent() {
             before.graph_revision(),
             1,
             "k1",
-            "t1",
+            1,
         ))
         .await
         .expect("commit");
@@ -223,11 +224,11 @@ async fn recent_segments_are_returned_in_sequence_order() {
         .expect("load")
         .graph_revision();
     store
-        .commit_turn(&commit_spec(&story_id, StoryRevision::new(0), graph_revision, 1, "k1", "t1"))
+        .commit_turn(&commit_spec(&story_id, StoryRevision::new(0), graph_revision, 1, "k1", 1))
         .await
         .expect("t1");
     store
-        .commit_turn(&commit_spec(&story_id, StoryRevision::new(1), graph_revision, 2, "k2", "t2"))
+        .commit_turn(&commit_spec(&story_id, StoryRevision::new(1), graph_revision, 2, "k2", 2))
         .await
         .expect("t2");
     let snapshot = store.load_story_snapshot(&story_id, limits()).await.expect("load");
@@ -250,11 +251,11 @@ async fn turn_commit_assigns_next_story_sequence() {
         .expect("load")
         .graph_revision();
     store
-        .commit_turn(&commit_spec(&story_id, StoryRevision::new(0), graph_revision, 1, "k1", "t1"))
+        .commit_turn(&commit_spec(&story_id, StoryRevision::new(0), graph_revision, 1, "k1", 1))
         .await
         .expect("t1");
     let second = store
-        .commit_turn(&commit_spec(&story_id, StoryRevision::new(1), graph_revision, 1, "k2", "t2"))
+        .commit_turn(&commit_spec(&story_id, StoryRevision::new(1), graph_revision, 1, "k2", 2))
         .await;
     assert!(second.is_ok(), "store assigns sequence independently of the proposal");
     let _ = std::fs::remove_file(&db);
@@ -269,7 +270,7 @@ async fn commit_turn_does_not_write_current_scene() {
         .expect("load")
         .graph_revision();
     store
-        .commit_turn(&commit_spec(&story_id, StoryRevision::new(0), graph_revision, 1, "k1", "t1"))
+        .commit_turn(&commit_spec(&story_id, StoryRevision::new(0), graph_revision, 1, "k1", 1))
         .await
         .expect("commit should succeed without any current_scene column");
 

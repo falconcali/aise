@@ -45,6 +45,7 @@ fn minimal_baseline(adversarial: &str) -> BaselineContext {
         controller: RoleController::Player(PlayerId::try_new("player-1").unwrap()),
     };
     BaselineContext {
+        story_title: bounded("Untitled Story"),
         story_profile: StoryProfile {
             language: bounded("zh-CN"),
             genre: Vec::new(),
@@ -59,8 +60,6 @@ fn minimal_baseline(adversarial: &str) -> BaselineContext {
         player_role,
         relevant_roles: Vec::new(),
         relevant_world_knowledge: aise::domain::turn::RelevantWorldKnowledge::default(),
-        role_index_scope: aise::domain::turn::RetrievalIndexScope::Complete,
-        knowledge_index_scope: aise::domain::turn::RetrievalIndexScope::Complete,
         knowledge_index: Vec::new(),
         role_index: Vec::new(),
         story_continuity: StoryContinuity::try_new(

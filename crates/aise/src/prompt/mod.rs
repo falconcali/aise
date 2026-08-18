@@ -15,6 +15,7 @@ mod renderer_helpers;
 mod resolver;
 mod section_extractor;
 mod slot;
+mod story_profile_view;
 pub mod trusted_prompt_source;
 mod validator;
 
@@ -47,5 +48,6 @@ pub use renderer_helpers::{
 };
 pub use resolver::{PromptRenderOptions, PromptResolver, ResolvedSlot};
 pub use slot::{OutputContract, SlotRegistry, SlotSpec, VarSpec, VarType, parse_slots_yaml};
+pub use story_profile_view::{StoryProfilePromptView, render_story_profile_view};
 pub use trusted_prompt_source::{CatalogPromptSource, TrustedPromptSource};
 pub use validator::{validate_input_vars, validate_output_contract};

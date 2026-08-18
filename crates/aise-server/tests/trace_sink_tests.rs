@@ -63,8 +63,8 @@ async fn writes_spans_as_jsonl_and_trace_as_json() {
 
     let trace = TurnTrace {
         trace_id: trace_id.clone(),
-        turn_id: "turn-1".to_owned(),
         story_id: "story-1".to_owned(),
+        turn_number: Some(aise::domain::TurnNumber::try_new(1).unwrap()),
         started_at_ms: 1,
         ended_at_ms: 2,
         duration_ms: 1,
@@ -93,7 +93,7 @@ async fn writes_spans_as_jsonl_and_trace_as_json() {
     let full = std::fs::read_to_string(dir.join(format!("{stem}.json"))).unwrap();
     let parsed: TurnTrace = serde_json::from_str(&full).unwrap();
     assert_eq!(parsed.trace_id, trace_id);
-    assert_eq!(parsed.turn_id, "turn-1");
+    assert_eq!(parsed.turn_number, Some(aise::domain::TurnNumber::try_new(1).unwrap()));
     assert_eq!(parsed.spans.len(), 2);
 }
 

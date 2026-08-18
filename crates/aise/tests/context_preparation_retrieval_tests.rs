@@ -10,7 +10,7 @@ use aise::domain::turn::{
     CandidateRetrieverKind, CharacterThinkRequest, KnowledgeDelivery, KnowledgeRetrievalRequest, RetrievalPlan,
     RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
 };
-use aise::planning::planner_output::PlannerOutput;
+use aise::planning::planner_output::WriterPlannerOutputDto;
 use aise::planning::retrieval_plan_builder::RetrievalPlanBuilder;
 use std::collections::BTreeMap;
 
@@ -61,26 +61,28 @@ fn topic_matcher_handles_ascii_boundaries_and_chinese_aliases() {
 #[test]
 fn planner_output_rejects_provider_and_budget_fields() {
     for payload in [
-        r#"{"story_goal":{"summary":"x"},"provider":"entity"}"#,
-        r#"{"story_goal":{"summary":"x"},"budget":10}"#,
-        r#"{"story_goal":{"summary":"x"},"top_k":3}"#,
-        r#"{"story_goal":{"summary":"x"},"retriever":"bm25"}"#,
-        r#"{"story_goal":{"summary":"x"},"narrative_plan":{}}"#,
-        r#"{"story_goal":{"summary":"x"},"active_constraints":[]}"#,
+        r#"{"story_goal":"x","provider":"entity"}"#,
+        r#"{"story_goal":"x","budget":10}"#,
+        r#"{"story_goal":"x","top_k":3}"#,
+        r#"{"story_goal":"x","retriever":"bm25"}"#,
+        r#"{"story_goal":"x","narrative_plan":{}}"#,
+        r#"{"story_goal":"x","active_constraints":[]}"#,
     ] {
-        assert!(serde_json::from_str::<PlannerOutput>(payload).is_err(), "must reject {payload}");
+        assert!(
+            serde_json::from_str::<WriterPlannerOutputDto>(payload).is_err(),
+            "must reject {payload}"
+        );
     }
 }
 
 #[test]
 fn planner_cannot_replace_narrative_plan_or_constraints() {
-    assert!(serde_json::from_str::<PlannerOutput>(
-        r#"{"story_goal":{"summary":"x"},"narrative_plan":{"active_nodes":[]}}"#,
-    )
-    .is_err());
     assert!(
-        serde_json::from_str::<PlannerOutput>(r#"{"story_goal":{"summary":"x"},"active_story_constraints":[]}"#,)
+        serde_json::from_str::<WriterPlannerOutputDto>(r#"{"story_goal":"x","narrative_plan":{"active_nodes":[]}}"#,)
             .is_err()
+    );
+    assert!(
+        serde_json::from_str::<WriterPlannerOutputDto>(r#"{"story_goal":"x","active_story_constraints":[]}"#,).is_err()
     );
 }
 
@@ -98,7 +100,6 @@ fn automatic_requests_run_when_planner_gaps_are_empty() {
                 knowledge_kinds: vec![KnowledgeKind::Fact],
                 entities: Vec::new(),
                 topics: vec![TopicKey::from("gate")],
-                query_text: None,
                 reason: BoundedText::try_new("automatic", "reason", 64).unwrap(),
                 origin: RetrievalRequestOrigin::Automatic,
                 signal_priority: 0,
@@ -120,7 +121,6 @@ fn retrieval_plan_merge_is_deterministic() {
             knowledge_kinds: vec![KnowledgeKind::Fact],
             entities: Vec::new(),
             topics: vec![TopicKey::from("b")],
-            query_text: None,
             reason: BoundedText::try_new("b", "reason", 64).unwrap(),
             origin: RetrievalRequestOrigin::Automatic,
             signal_priority: 1,
@@ -131,7 +131,6 @@ fn retrieval_plan_merge_is_deterministic() {
             knowledge_kinds: vec![KnowledgeKind::Fact],
             entities: Vec::new(),
             topics: vec![TopicKey::from("a")],
-            query_text: None,
             reason: BoundedText::try_new("a", "reason", 64).unwrap(),
             origin: RetrievalRequestOrigin::Automatic,
             signal_priority: 0,
@@ -183,7 +182,6 @@ fn retrieval_and_character_think_are_enabled_from_plan_collections() {
                 knowledge_kinds: vec![KnowledgeKind::Rumor],
                 entities: Vec::new(),
                 topics: Vec::new(),
-                query_text: Some(BoundedText::try_new("q", "q", 64).unwrap()),
                 reason: BoundedText::try_new("gap", "reason", 64).unwrap(),
                 origin: RetrievalRequestOrigin::Planner,
                 signal_priority: 4,

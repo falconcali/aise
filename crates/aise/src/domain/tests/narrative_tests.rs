@@ -1,6 +1,6 @@
 use super::*;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::TurnId;
+use crate::domain::ids::TurnNumber;
 
 fn limits() -> StoryContinuityLimits {
     StoryContinuityLimits {
@@ -15,7 +15,7 @@ fn segment(sequence: u64, text: &str) -> StorySegment {
     StorySegment {
         sequence: StorySequence::try_new(sequence).expect("sequence"),
         origin: StorySegmentOrigin::Turn {
-            turn_id: TurnId::try_new(format!("turn-{sequence}")).expect("turn_id"),
+            turn_number: TurnNumber::try_new(sequence).expect("turn_number"),
         },
         text: BoundedText::try_new(text.to_string(), "segment", 256).expect("text"),
     }

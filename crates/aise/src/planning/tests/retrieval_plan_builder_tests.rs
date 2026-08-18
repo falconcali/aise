@@ -14,8 +14,10 @@ use crate::domain::story_instance::role::{RoleController, StoryRoleState, StoryR
 use crate::domain::story_instance::snapshot::{KnowledgeSnapshotRef, StoryReadSnapshotParts};
 use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::turn::{
-    NarrativeGraphStateIndex, RelevantWorldKnowledge, RetrievalIndexScope, RetrievalSignalOrigin, RetrievalSignals,
-    RoleContextView, RoleIndexEntry,
+    NarrativeGraphStateIndex, RelevantWorldKnowledge, RetrievalSignals, RoleContextView, RoleIndexEntry,
+};
+use crate::planning::planner_output::{
+    CharacterThinkRequestDto, PlannerCharacterContextGapDto, PlannerWriterContextGapDto, WriterPlannerOutputDto,
 };
 use crate::planning::writer_planner_prompt::WriterPlannerPromptContextProjector;
 
@@ -51,6 +53,7 @@ fn role_view(id: &str, controller: RoleController) -> RoleContextView {
 
 fn baseline_with_roles(player_id: &str, indexed_ai_ids: &[&str]) -> BaselineContext {
     BaselineContext {
+        story_title: text("Untitled Story"),
         story_profile: StoryProfile {
             language: text("zh-CN"),
             genre: Vec::new(),
@@ -65,7 +68,6 @@ fn baseline_with_roles(player_id: &str, indexed_ai_ids: &[&str]) -> BaselineCont
         player_role: role_view(player_id, RoleController::Player(PlayerId::try_new("player-1").unwrap())),
         relevant_roles: Vec::new(),
         relevant_world_knowledge: RelevantWorldKnowledge::default(),
-        role_index_scope: RetrievalIndexScope::Complete,
         role_index: indexed_ai_ids
             .iter()
             .map(|id| RoleIndexEntry {
@@ -73,7 +75,6 @@ fn baseline_with_roles(player_id: &str, indexed_ai_ids: &[&str]) -> BaselineCont
                 retrieval_hint: text("hint"),
             })
             .collect(),
-        knowledge_index_scope: RetrievalIndexScope::Complete,
         knowledge_index: Vec::new(),
         story_continuity: StoryContinuity::try_new(
             StorySummary {
@@ -159,6 +160,7 @@ fn sample_snapshot(player_id: &str, ai_ids: &[&str]) -> StoryReadSnapshot {
             version: SemanticVersion::try_new("0.1.0").unwrap(),
             digest: digest(),
         },
+        story_title: text("Untitled Story"),
         story_profile: StoryProfile {
             language: text("zh-CN"),
             genre: Vec::new(),
@@ -213,48 +215,43 @@ fn writer_prompt_context(baseline: &BaselineContext, plan: &NarrativePlan) -> Wr
         .context
 }
 
-fn context_gap(delivery: KnowledgeDelivery, target_id: &str, reason: &str) -> PlannerContextGap {
-    crate::planning::planner_output::PlannerContextGap {
-        delivery,
-        target_id: Some(target_id.to_owned()),
-        query_text: None,
-        reason: text(reason),
+fn writer_gap(target_id: &str, reason: &str) -> PlannerWriterContextGapDto {
+    PlannerWriterContextGapDto {
+        target_id: target_id.to_owned(),
+        reason: reason.to_owned(),
     }
 }
 
-fn planner_output(
+fn character_gap(role_id: &str, target_id: &str, reason: &str) -> PlannerCharacterContextGapDto {
+    PlannerCharacterContextGapDto {
+        role_id: role_id.to_owned(),
+        target_id: target_id.to_owned(),
+        reason: reason.to_owned(),
+    }
+}
+
+fn writer_planner_output(
     story_goal: &str,
-    context_gaps: Vec<PlannerContextGap>,
+    writer_context_gaps: Vec<PlannerWriterContextGapDto>,
+    character_context_gaps: Vec<PlannerCharacterContextGapDto>,
     character_think_requests: Vec<CharacterThinkRequest>,
-) -> PlannerOutput {
-    crate::planning::planner_output::PlannerOutput {
-        story_goal: text(story_goal),
-        context_gaps,
-        character_think_requests,
+) -> WriterPlannerOutputDto {
+    WriterPlannerOutputDto {
+        story_goal: story_goal.to_owned(),
+        writer_context_gaps,
+        character_context_gaps,
+        character_think_requests: character_think_requests
+            .into_iter()
+            .map(|request| CharacterThinkRequestDto {
+                role_id: request.role_id.as_str().to_owned(),
+                reason: request.reason.as_str().to_owned(),
+            })
+            .collect(),
     }
 }
 
 fn builder() -> RetrievalPlanBuilder {
     RetrievalPlanBuilder::new(RetrievalConfig::default(), PlannerConfig::default())
-}
-
-#[test]
-fn baseline_signal_entity_is_known_without_knowledge_catalog_entry() {
-    let entity = KnowledgeEntity::Location(LocationKey::from("lodge_hall"));
-    let signals = vec![EntitySignal {
-        entity: entity.clone(),
-        origin: RetrievalSignalOrigin::RoleState,
-        priority: 1,
-    }];
-
-    assert!(entity_is_known(&entity, &[], &signals));
-}
-
-#[test]
-fn arbitrary_location_is_not_known_without_catalog_or_signal() {
-    let entity = KnowledgeEntity::Location(LocationKey::from("invented_location"));
-
-    assert!(!entity_is_known(&entity, &[], &[]));
 }
 
 #[test]
@@ -389,11 +386,7 @@ fn indexed_character_target_loads_role_context_bundle() {
     let snapshot = sample_snapshot("protagonist", &["npc-a"]);
     let plan = NarrativePlan::empty();
     let writer_context = writer_prompt_context(&baseline, &plan);
-    let output = planner_output(
-        "goal",
-        vec![context_gap(KnowledgeDelivery::Writer, "npc-a", "recall the guard")],
-        Vec::new(),
-    );
+    let output = writer_planner_output("goal", vec![writer_gap("npc-a", "recall the guard")], Vec::new(), Vec::new());
 
     let writer_plan = builder().build(&baseline, &plan, output, &snapshot, &writer_context).unwrap();
 
@@ -414,7 +407,12 @@ fn character_think_automatically_retrieves_role_cognition() {
     let snapshot = sample_snapshot("protagonist", &["npc-a"]);
     let plan = NarrativePlan::empty();
     let writer_context = writer_prompt_context(&baseline, &plan);
-    let output = planner_output("goal", Vec::new(), vec![think_request("npc-a", "assess the visitor")]);
+    let output = writer_planner_output(
+        "goal",
+        Vec::new(),
+        Vec::new(),
+        vec![think_request("npc-a", "assess the visitor")],
+    );
 
     let writer_plan = builder().build(&baseline, &plan, output, &snapshot, &writer_context).unwrap();
 
@@ -444,9 +442,10 @@ fn role_cognition_request_deduplicates_by_role() {
     let snapshot = sample_snapshot("protagonist", &["npc-a"]);
     let plan = NarrativePlan::empty();
     let writer_context = writer_prompt_context(&baseline, &plan);
-    let output = planner_output(
+    let output = writer_planner_output(
         "goal",
-        vec![context_gap(KnowledgeDelivery::Writer, "npc-a", "planner target reason")],
+        vec![writer_gap("npc-a", "planner target reason")],
+        Vec::new(),
         vec![think_request("npc-a", "think reason")],
     );
 
@@ -472,15 +471,10 @@ fn indexed_target_audience_matrix_is_enforced() {
     let plan = NarrativePlan::empty();
     let writer_context = writer_prompt_context(&baseline, &plan);
 
-    let role_to_character = planner_output(
+    let role_to_character = writer_planner_output(
         "goal",
-        vec![context_gap(
-            KnowledgeDelivery::Character {
-                role_id: RoleId::try_new("npc-a").unwrap(),
-            },
-            "npc-a",
-            "role target for character audience",
-        )],
+        Vec::new(),
+        vec![character_gap("npc-a", "npc-a", "role target for character audience")],
         vec![think_request("npc-a", "think reason")],
     );
     let error = builder()
@@ -496,12 +490,11 @@ fn indexed_target_audience_matrix_is_enforced() {
         retrieval_hint: crate::domain::knowledge::RetrievalHint::try_new("hint".to_owned()).unwrap(),
     }];
     let writer_context_with_fact = writer_prompt_context(&baseline_with_fact, &plan);
-    let fact_to_character = planner_output(
+    let fact_to_character = writer_planner_output(
         "goal",
-        vec![context_gap(
-            KnowledgeDelivery::Character {
-                role_id: RoleId::try_new("npc-a").unwrap(),
-            },
+        Vec::new(),
+        vec![character_gap(
+            "npc-a",
             "fact_0001",
             "fact target for character audience",
         )],
@@ -526,12 +519,11 @@ fn indexed_target_audience_matrix_is_enforced() {
         retrieval_hint: crate::domain::knowledge::RetrievalHint::try_new("hint".to_owned()).unwrap(),
     }];
     let writer_context_with_rumor = writer_prompt_context(&baseline_with_rumor, &plan);
-    let rumor_without_think = planner_output(
+    let rumor_without_think = writer_planner_output(
         "goal",
-        vec![context_gap(
-            KnowledgeDelivery::Character {
-                role_id: RoleId::try_new("npc-a").unwrap(),
-            },
+        Vec::new(),
+        vec![character_gap(
+            "npc-a",
             "rumor_0001",
             "rumor target without a think request",
         )],

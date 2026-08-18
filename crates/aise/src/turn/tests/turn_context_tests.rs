@@ -4,7 +4,7 @@ use crate::domain::asset::character_card::CharacterProfile;
 use crate::domain::asset::ids::{LocationKey, PackId, PlayerId, SemanticVersion, Sha256Digest, StoryPackKey};
 use crate::domain::asset::story_pack::{StoryProfile, StoryStyle};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{RoleId, StoryRevision};
+use crate::domain::ids::{RoleId, StoryRevision, TurnKey, TurnNumber};
 use crate::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySummary};
 use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
@@ -12,8 +12,7 @@ use crate::domain::story_instance::role::{RoleController, StoryRole, StoryRoleSt
 use crate::domain::story_instance::snapshot::{KnowledgeSnapshotRef, StoryReadSnapshotParts};
 use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::turn::{
-    CharacterThinkRequest, NarrativeGraphStateIndex, RetrievalIndexScope, RetrievalPlan, RetrievalSignals,
-    RoleContextView, WriterStoryGoal,
+    CharacterThinkRequest, NarrativeGraphStateIndex, RetrievalPlan, RetrievalSignals, RoleContextView, WriterStoryGoal,
 };
 use crate::turn::turn_contract::{IdempotencyKey, TurnCancellation};
 use std::collections::BTreeMap;
@@ -82,13 +81,12 @@ fn player_role() -> StoryRole {
 
 fn sample_baseline(player: &StoryRole) -> BaselineContext {
     BaselineContext {
+        story_title: bounded("Untitled Story"),
         story_profile: story_profile(),
         instance_settings: InstanceSettings::default(),
         player_role: RoleContextView::from(&crate::domain::story_instance::role::StoryRoleView::from(player)),
         relevant_roles: Vec::new(),
         relevant_world_knowledge: crate::domain::turn::RelevantWorldKnowledge::default(),
-        role_index_scope: RetrievalIndexScope::Complete,
-        knowledge_index_scope: RetrievalIndexScope::Complete,
         knowledge_index: Vec::new(),
         role_index: Vec::new(),
         story_continuity: story_continuity(),
@@ -117,6 +115,7 @@ fn sample_snapshot(player: &StoryRole) -> StoryReadSnapshot {
             version: SemanticVersion::try_new("0.1.0").unwrap(),
             digest: digest(),
         },
+        story_title: bounded("Untitled Story"),
         story_profile: story_profile(),
         instance_settings: InstanceSettings::default(),
         roles,
@@ -171,8 +170,7 @@ fn build_ready_context(
     )
     .unwrap();
     let identity = TurnIdentity::new(
-        StoryId::try_new("story-1").unwrap(),
-        TurnId::try_new("turn-1").unwrap(),
+        TurnKey::new(StoryId::try_new("story-1").unwrap(), TurnNumber::try_new(1).unwrap()),
         IdempotencyKey::try_new("idem-1").unwrap(),
         0,
     );

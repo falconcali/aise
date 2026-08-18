@@ -98,7 +98,7 @@ pub struct TurnCommitSpec {
 pub struct OutboxRecord {
     pub id: String,
     pub story_id: crate::domain::ids::StoryId,
-    pub turn_id: crate::domain::ids::TurnId,
+    pub turn_number: crate::domain::ids::TurnNumber,
     pub event_type: String,
     pub payload: serde_json::Value,
     pub created_at: i64,

@@ -2,7 +2,7 @@ use super::*;
 use crate::domain::asset::character_card::CharacterProfile;
 use crate::domain::asset::ids::{LocationKey, PlayerId};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{FactId, MemoryId, RoleId, RumorId, TurnId};
+use crate::domain::ids::{FactId, MemoryId, RoleId, RumorId, TurnNumber};
 use crate::domain::knowledge::{KnowledgeSource, KnowledgeSourceId};
 use crate::domain::story_instance::role::{RoleController, StoryRoleState};
 use std::collections::BTreeMap;
@@ -27,7 +27,7 @@ fn item(id: KnowledgeSourceId, body: &str) -> RetrievedKnowledgeItem {
         id,
         text(body),
         KnowledgeSource::CommittedTurn {
-            turn_id: TurnId::try_new("turn-1").unwrap(),
+            turn_number: TurnNumber::try_new(1).unwrap(),
         },
         RelevanceRank {
             match_level: MatchLevel::Entity,

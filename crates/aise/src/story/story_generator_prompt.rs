@@ -8,9 +8,9 @@ use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::{BaselineContext, RetrievedCharacterContext, RoleContextView, StoryGeneratorOutput};
 use crate::prompt::{
-    NarrativeDirectionPromptView, RoleKnowledgePromptView, RuntimePromptVars, TrustedPromptVars,
-    WorldKnowledgePromptView, merge_world_knowledge, project_narrative_direction, render_narrative_direction,
-    render_relevant_knowledge, render_role_knowledge,
+    NarrativeDirectionPromptView, RoleKnowledgePromptView, RuntimePromptVars, StoryProfilePromptView,
+    TrustedPromptVars, WorldKnowledgePromptView, merge_world_knowledge, project_narrative_direction,
+    render_narrative_direction, render_relevant_knowledge, render_role_knowledge, render_story_profile_view,
 };
 use crate::turn::turn_context::TurnExecutionContext;
 use serde::Serialize;
@@ -34,16 +34,6 @@ pub struct StoryGeneratorPromptContext {
     pub active_story_constraints: Vec<ActiveStoryConstraintPromptView>,
     pub character_decisions: Vec<StoryGeneratorCharacterDecisionPromptView>,
     pub player_input: BoundedText,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct StoryProfilePromptView {
-    pub language: BoundedText,
-    pub genre: Vec<BoundedText>,
-    pub themes: Vec<BoundedText>,
-    pub tone: Vec<BoundedText>,
-    pub point_of_view: BoundedText,
-    pub tense: BoundedText,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -159,14 +149,7 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
         )?;
         let ai_roles = project_ai_roles(ctx, baseline, &self.config)?;
         let character_decisions = project_decisions(ctx, baseline, &ai_roles)?;
-        let story_profile = StoryProfilePromptView {
-            language: baseline.story_profile.language.clone(),
-            genre: baseline.story_profile.genre.clone(),
-            themes: baseline.story_profile.themes.clone(),
-            tone: baseline.story_profile.style.tone.clone(),
-            point_of_view: baseline.story_profile.style.point_of_view.clone(),
-            tense: baseline.story_profile.style.tense.clone(),
-        };
+        let story_profile = StoryProfilePromptView::new(&baseline.story_title, &baseline.story_profile);
         let story_continuity = StoryContinuityPromptView {
             story_summary: baseline.story_continuity.summary().text.clone(),
             recent_story: baseline
@@ -354,7 +337,7 @@ pub(crate) fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> Runt
     RuntimePromptVars::new(HashMap::from([
         (
             "story_profile".into(),
-            Value::String(render_story_profile(&context.story_profile)),
+            Value::String(render_story_profile_view(&context.story_profile)),
         ),
         (
             "instance_settings".into(),
@@ -450,22 +433,6 @@ fn runtime_tokens(vars: &RuntimePromptVars) -> u64 {
         .filter_map(Value::as_str)
         .map(estimate_text_tokens)
         .fold(0u64, u64::saturating_add)
-}
-
-fn render_story_profile(value: &StoryProfilePromptView) -> String {
-    let mut lines = vec![format!("language: {}", quoted(value.language.as_str()))];
-    if !value.genre.is_empty() {
-        lines.push(format!("genre: {}", quoted_list(&value.genre)));
-    }
-    if !value.themes.is_empty() {
-        lines.push(format!("themes: {}", quoted_list(&value.themes)));
-    }
-    if !value.tone.is_empty() {
-        lines.push(format!("tone: {}", quoted_list(&value.tone)));
-    }
-    lines.push(format!("point_of_view: {}", quoted(value.point_of_view.as_str())));
-    lines.push(format!("tense: {}", quoted(value.tense.as_str())));
-    lines.join("\n")
 }
 
 fn render_instance_settings(value: &StoryGeneratorInstanceSettingsPromptView) -> String {

@@ -1,5 +1,5 @@
 use crate::config::AiseConfig;
-use crate::domain::ids::TurnId;
+use crate::domain::ids::{TurnKey, TurnNumber};
 use crate::persistence::store::{Store, StoredTurnOutcome};
 use crate::runtime::story_turn_coordinator::StoryTurnCoordinator;
 use crate::runtime::turn_runtime::TurnRuntime;
@@ -12,20 +12,8 @@ use crate::turn::turn_trace::{MAX_LLM_CONTENT_CHARS, SpanPayload, TraceRecorder,
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub trait IdGenerator: Send + Sync {
-    fn new_turn_id(&self) -> TurnId;
-}
-
 pub trait Clock: Send + Sync {
     fn now_millis(&self) -> i64;
-}
-
-pub struct UuidIdGenerator;
-
-impl IdGenerator for UuidIdGenerator {
-    fn new_turn_id(&self) -> TurnId {
-        TurnId::new_uuid()
-    }
 }
 
 pub struct SystemClock;
@@ -52,7 +40,6 @@ pub struct AiseEngine {
     store: Arc<dyn Store>,
     coordinator: Arc<StoryTurnCoordinator>,
     config: AiseConfig,
-    id_generator: Arc<dyn IdGenerator>,
     clock: Arc<dyn Clock>,
     trace_sink: Option<Arc<dyn TraceSpanSink>>,
 }
@@ -63,7 +50,6 @@ impl AiseEngine {
         store: Arc<dyn Store>,
         coordinator: Arc<StoryTurnCoordinator>,
         config: AiseConfig,
-        id_generator: Arc<dyn IdGenerator>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
@@ -71,7 +57,6 @@ impl AiseEngine {
             store,
             coordinator,
             config,
-            id_generator,
             clock,
             trace_sink: None,
         }
@@ -129,22 +114,21 @@ impl AiseEngine {
             Err(error) => return self.finalize(None, Err(error), sink, None).await,
         };
 
-        let story_exists = match self.store.get_story(&story_id).await {
-            Ok(Some(_)) => true,
-            Ok(None) => false,
+        let story_info = match self.store.get_story(&story_id).await {
+            Ok(Some(info)) => info,
+            Ok(None) => {
+                let failure = TurnExecutionError::new(
+                    TurnFailureKind::StoryNotFound,
+                    "story_not_found",
+                    None,
+                    format!("story {} not found", story_id.as_str()),
+                );
+                return self.finalize(None, Err(failure), sink, permit).await;
+            }
             Err(error) => {
                 return self.finalize(None, Err(TurnExecutionError::from(error)), sink, permit).await;
             }
         };
-        if !story_exists {
-            let failure = TurnExecutionError::new(
-                TurnFailureKind::StoryNotFound,
-                "story_not_found",
-                None,
-                format!("story {} not found", story_id.as_str()),
-            );
-            return self.finalize(None, Err(failure), sink, permit).await;
-        }
 
         let replay = match self.store.find_committed_turn(&story_id, &idempotency_key).await {
             Ok(outcome) => outcome,
@@ -161,6 +145,24 @@ impl AiseEngine {
             return self.finalize(None, Err(failure), sink, permit).await;
         }
 
+        let candidate_turn_number = match story_info
+            .last_committed_turn_number
+            .checked_add(1)
+            .ok_or(crate::domain::ids::TurnNumberError::Overflow)
+            .and_then(TurnNumber::try_new)
+        {
+            Ok(turn_number) => turn_number,
+            Err(error) => {
+                let failure = TurnExecutionError::new(
+                    TurnFailureKind::InvariantViolation,
+                    "turn_number_allocation_failed",
+                    None,
+                    error.to_string(),
+                );
+                return self.finalize(None, Err(failure), sink, permit).await;
+            }
+        };
+
         let budget = match TurnBudget::from_config(
             &self.config.turn,
             &self.config.content,
@@ -172,8 +174,11 @@ impl AiseEngine {
             Err(error) => return self.finalize(None, Err(error), sink, permit).await,
         };
         let created_at = self.clock.now_millis();
-        let identity =
-            TurnIdentity::new(story_id.clone(), self.id_generator.new_turn_id(), idempotency_key, created_at);
+        let identity = TurnIdentity::new(
+            TurnKey::new(story_id.clone(), candidate_turn_number),
+            idempotency_key,
+            created_at,
+        );
         let control = TurnControl::new(deadline, cancellation);
         let mut recorder = TraceRecorder::with_limits(budget.max_trace_spans());
         if let Some(sink) = &self.trace_sink {
@@ -187,7 +192,7 @@ impl AiseEngine {
         let root = ctx.trace().begin_span("aise.turn", "aise.turn");
         let runtime_outcome = self.runtime.run(&mut ctx, sink).await;
 
-        let turn_id = ctx.turn_id().clone();
+        let turn_number = ctx.turn_number();
         let story_id_owned = ctx.story_id().clone();
         let player_input = truncate(ctx.player_input(), MAX_LLM_CONTENT_CHARS);
         let (status, error) = match &runtime_outcome {
@@ -198,7 +203,7 @@ impl AiseEngine {
             root,
             &SpanPayload::Turn(TurnData {
                 story_id: story_id_owned.to_string(),
-                turn_id: turn_id.to_string(),
+                turn_number: Some(turn_number),
                 player_input,
                 status: status.to_owned(),
                 error,
@@ -228,13 +233,13 @@ impl AiseEngine {
         _permit: Option<crate::runtime::story_turn_coordinator::StoryPermit>,
     ) -> TurnRunOutcome {
         let trace = ctx.as_mut().map(|context| {
-            let turn_id = context.turn_id().clone();
+            let turn_number = context.turn_number();
             let story_id = context.story_id().clone();
-            let trace = context.trace().build(&story_id, &turn_id);
+            let trace = context.trace().build(&story_id, Some(turn_number));
             if let Some(sink) = &self.trace_sink {
                 sink.write_trace(&trace);
             }
-            (turn_id, Some(trace))
+            trace
         });
 
         let outcome = match result {
@@ -268,8 +273,8 @@ impl AiseEngine {
                 TurnRunOutcome::Failed(failure)
             }
         };
-        if let Some((turn_id, Some(trace))) = trace {
-            let _ = sink.emit(TurnEvent::TraceCompleted { turn_id, trace });
+        if let Some(trace) = trace {
+            let _ = sink.emit(TurnEvent::TraceCompleted { trace });
         }
         outcome
     }
@@ -280,17 +285,18 @@ impl AiseEngine {
         failure: &TurnExecutionError,
         sink: &dyn TurnEventSink,
     ) {
+        let turn_number = ctx.map(|context| context.turn_number());
         let terminal_event = match failure.terminal_kind() {
             TurnTerminalKind::Failed => TurnEvent::Failed {
-                turn_id: ctx.map(|context| context.turn_id().clone()).unwrap_or_else(TurnId::new_uuid),
+                turn_number,
                 code: failure.code(),
             },
             TurnTerminalKind::Cancelled => TurnEvent::Cancelled {
-                turn_id: ctx.map(|context| context.turn_id().clone()).unwrap_or_else(TurnId::new_uuid),
+                turn_number,
                 code: failure.code(),
             },
             TurnTerminalKind::Conflict => TurnEvent::Conflict {
-                turn_id: ctx.map(|context| context.turn_id().clone()).unwrap_or_else(TurnId::new_uuid),
+                turn_number,
                 code: failure.code(),
             },
         };

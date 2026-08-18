@@ -1,5 +1,5 @@
 use crate::config::TraceContentPolicy;
-use crate::domain::ids::{StoryId, TurnId};
+use crate::domain::ids::{StoryId, TurnNumber};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -62,8 +62,8 @@ impl std::fmt::Display for TraceId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnTrace {
     pub trace_id: TraceId,
-    pub turn_id: String,
     pub story_id: String,
+    pub turn_number: Option<TurnNumber>,
     pub started_at_ms: u64,
     pub ended_at_ms: u64,
     pub duration_ms: u64,
@@ -97,7 +97,7 @@ pub enum SpanPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnData {
     pub story_id: String,
-    pub turn_id: String,
+    pub turn_number: Option<TurnNumber>,
     pub player_input: String,
     pub status: String,
     pub error: Option<String>,
@@ -162,7 +162,8 @@ pub struct ValidationData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistData {
-    pub turn_id: String,
+    pub story_id: String,
+    pub turn_number: TurnNumber,
     pub status: String,
     pub error: Option<String>,
     pub latency_ms: u64,
@@ -293,12 +294,12 @@ impl TraceRecorder {
         self.push_span(trace_span);
     }
 
-    pub fn build(&mut self, story_id: &StoryId, turn_id: &TurnId) -> TurnTrace {
+    pub fn build(&mut self, story_id: &StoryId, turn_number: Option<TurnNumber>) -> TurnTrace {
         let ended_at_ms = now_millis();
         TurnTrace {
             trace_id: self.trace_id.clone(),
-            turn_id: turn_id.to_string(),
             story_id: story_id.to_string(),
+            turn_number,
             started_at_ms: self.started_at_ms,
             ended_at_ms,
             duration_ms: ended_at_ms.saturating_sub(self.started_at_ms),

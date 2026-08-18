@@ -1,4 +1,4 @@
-use crate::domain::ids::{StoryId, StoryRevision, TurnId};
+use crate::domain::ids::{StoryId, StoryRevision, TurnKey, TurnNumber};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -78,28 +78,30 @@ impl RequestDigest {
 
 #[derive(Debug, Clone)]
 pub struct TurnIdentity {
-    story_id: StoryId,
-    turn_id: TurnId,
+    key: TurnKey,
     idempotency_key: IdempotencyKey,
     started_at_ms: i64,
 }
 
 impl TurnIdentity {
-    pub fn new(story_id: StoryId, turn_id: TurnId, idempotency_key: IdempotencyKey, started_at_ms: i64) -> Self {
+    pub fn new(key: TurnKey, idempotency_key: IdempotencyKey, started_at_ms: i64) -> Self {
         Self {
-            story_id,
-            turn_id,
+            key,
             idempotency_key,
             started_at_ms,
         }
     }
 
-    pub fn story_id(&self) -> &StoryId {
-        &self.story_id
+    pub fn key(&self) -> &TurnKey {
+        &self.key
     }
 
-    pub fn turn_id(&self) -> &TurnId {
-        &self.turn_id
+    pub fn story_id(&self) -> &StoryId {
+        self.key.story_id()
+    }
+
+    pub fn turn_number(&self) -> TurnNumber {
+        self.key.turn_number()
     }
 
     pub fn idempotency_key(&self) -> &IdempotencyKey {
@@ -442,8 +444,9 @@ impl LlmUsageLedger {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CommittedTurnResult {
-    pub turn_id: TurnId,
+    pub turn_number: TurnNumber,
     pub story_revision: StoryRevision,
     pub story_text: String,
     pub llm_usage: LlmUsageAggregate,

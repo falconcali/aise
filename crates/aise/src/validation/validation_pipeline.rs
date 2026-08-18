@@ -1,6 +1,6 @@
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::TurnId;
+use crate::domain::ids::{StoryId, TurnNumber};
 use crate::domain::knowledge::fact::WorldFact;
 use crate::domain::knowledge::memory::MemoryEntry;
 use crate::domain::knowledge::query::{KnowledgeSource, allocate_knowledge_ids};
@@ -103,7 +103,8 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
     let projection = ctx
         .narrative_projection()
         .ok_or_else(|| invariant("missing_narrative_projection", "no narrative projection available"))?;
-    let turn_id = ctx.turn_id().clone();
+    let story_id = ctx.story_id().clone();
+    let turn_number = ctx.turn_number();
     let current_turn = snapshot.base_revision().get().saturating_add(1);
 
     let story_text = bounded(story.story_text.as_str(), "story_text", ctx.budget().max_story_text_bytes())?;
@@ -182,7 +183,7 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
             let operation = make_knowledge_operation(
                 mutation,
                 &mut assigned_ids,
-                &turn_id,
+                turn_number,
                 ctx.budget().max_knowledge_change_bytes(),
                 ctx.identity().started_at_ms(),
             )?;
@@ -195,7 +196,8 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
     for intent in &projection.plan.world_event_intents {
         let index = narrative_events.len();
         narrative_events.push(make_event(
-            &turn_id,
+            &story_id,
+            turn_number,
             index,
             EventKind::WorldChange,
             serde_json::json!({
@@ -307,14 +309,15 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
 }
 
 fn make_event(
-    turn_id: &TurnId,
+    story_id: &StoryId,
+    turn_number: TurnNumber,
     index: usize,
     kind: EventKind,
     payload: serde_json::Value,
 ) -> Result<StoryEvent, TurnExecutionError> {
     Ok(StoryEvent {
-        id: crate::domain::ids::EventId::from(format!("{}:event:{index}", turn_id.as_str())),
-        turn_id: turn_id.clone(),
+        id: crate::domain::ids::EventId::from(format!("{story_id}:turn:{turn_number}:event:{index}")),
+        turn_number,
         seq: u32::try_from(index).map_err(|_| invariant("event_count_overflow", "event count exceeds u32"))?,
         kind,
         payload,
@@ -324,7 +327,7 @@ fn make_event(
 fn make_knowledge_operation(
     mutation: &ProposedKnowledgeMutation,
     assigned_ids: &mut impl Iterator<Item = KnowledgeSourceId>,
-    turn_id: &TurnId,
+    turn_number: TurnNumber,
     max_bytes: usize,
     created_at_ms: i64,
 ) -> Result<ValidatedKnowledgeOperation, TurnExecutionError> {
@@ -333,11 +336,11 @@ fn make_knowledge_operation(
             let source_id = assigned_ids
                 .next()
                 .ok_or_else(|| invariant("knowledge_id_allocation_missing", "knowledge id allocation ran out"))?;
-            let entry = make_knowledge_entry(value, source_id, turn_id, max_bytes, created_at_ms)?;
+            let entry = make_knowledge_entry(value, source_id, turn_number, max_bytes, created_at_ms)?;
             Ok(ValidatedKnowledgeOperation::Add(entry))
         }
         ProposedKnowledgeMutation::Update { target, value } => {
-            let entry = make_knowledge_entry(value, target.clone(), turn_id, max_bytes, created_at_ms)?;
+            let entry = make_knowledge_entry(value, target.clone(), turn_number, max_bytes, created_at_ms)?;
             Ok(ValidatedKnowledgeOperation::Update {
                 target: target.clone(),
                 value: entry,
@@ -352,13 +355,11 @@ fn make_knowledge_operation(
 fn make_knowledge_entry(
     value: &ProposedKnowledgeValue,
     source_id: KnowledgeSourceId,
-    turn_id: &TurnId,
+    turn_number: TurnNumber,
     max_bytes: usize,
     created_at_ms: i64,
 ) -> Result<KnowledgeEntry, TurnExecutionError> {
-    let source = KnowledgeSource::CommittedTurn {
-        turn_id: turn_id.clone(),
-    };
+    let source = KnowledgeSource::CommittedTurn { turn_number };
     match (value, source_id) {
         (
             ProposedKnowledgeValue::Fact {

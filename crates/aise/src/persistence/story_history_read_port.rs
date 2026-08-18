@@ -1,4 +1,4 @@
-use crate::domain::ids::{StoryId, TurnId};
+use crate::domain::ids::{StoryId, TurnNumber};
 use crate::domain::story_sequence::StorySequence;
 use crate::persistence::store::StoreError;
 use async_trait::async_trait;
@@ -12,7 +12,7 @@ pub struct StoryHistoryQuery {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct StoryTurnView {
-    pub turn_id: TurnId,
+    pub turn_number: TurnNumber,
     pub sequence: StorySequence,
     pub player_input: String,
     pub story_text: String,

@@ -4,7 +4,7 @@ use crate::domain::asset::ids::{FactKey, PackId, Sha256Digest, TopicKey};
 use crate::domain::asset::story_pack::StoryProfile;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::asset::world_book::TopicDefinition;
-use crate::domain::ids::{RoleId, StoryId, StoryRevision, TurnId};
+use crate::domain::ids::{RoleId, StoryId, StoryRevision, TurnNumber};
 use crate::domain::narrative::{StoryContinuity, StorySegment, StorySegmentOrigin, StorySummary};
 use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
@@ -19,9 +19,9 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 
 type StoryInstanceRow = (i64, String, String, String, String, String, String, String, String, i64);
-type StoryPackRow = (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>);
+type StoryPackRow = (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>, String);
 type InstanceProjectionLengths = (String, i64, i64, i64, i64, i64, i64, i64);
-type PackProjectionLengths = (i64, i64, i64);
+type PackProjectionLengths = (i64, i64, i64, Option<i64>);
 
 pub(crate) async fn load_story_snapshot(
     pool: &SqlitePool,
@@ -93,17 +93,22 @@ pub(crate) async fn load_story_snapshot(
         "active_constraints",
     )?;
     let pack_lengths: Option<PackProjectionLengths> = sqlx::query_as(
-        "SELECT length(story_profile_json), length(narrative_definition_json), length(topic_dictionary_json) \
+        "SELECT length(story_profile_json), length(narrative_definition_json), length(topic_dictionary_json), \
+                length(json_extract(pack_json, '$.meta.title')) \
          FROM story_packs WHERE pack_id = ?",
     )
     .bind(&projection_pack_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(SqliteStoreError::from)?;
-    let Some((profile_len, narrative_len, topics_len)) = pack_lengths else {
+    let Some((profile_len, narrative_len, topics_len, title_len)) = pack_lengths else {
         return Err(StoreError::NotFound);
     };
     ensure_projection_length(profile_len, limits.max_story_profile_bytes, "story_profile_json")?;
+    let title_len = title_len.ok_or(StoreError::Serialization {
+        kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+    })?;
+    ensure_projection_length(title_len, limits.max_story_profile_bytes, "story_title")?;
     ensure_projection_length(
         narrative_len,
         projection_limit(limits.max_narrative_nodes, limits.max_role_bytes, 1024)?,
@@ -157,7 +162,8 @@ pub(crate) async fn load_story_snapshot(
         return Err(StoreError::NotFound);
     };
     let pack_row: Option<StoryPackRow> = sqlx::query_as(
-        "SELECT pack_key, version, digest, story_profile_json, narrative_definition_json, topic_dictionary_json \
+        "SELECT pack_key, version, digest, story_profile_json, narrative_definition_json, topic_dictionary_json, \
+                json_extract(pack_json, '$.meta.title') \
          FROM story_packs WHERE pack_id = ?",
     )
     .bind(&pack_id)
@@ -171,11 +177,23 @@ pub(crate) async fn load_story_snapshot(
         story_profile_json,
         narrative_definition_json,
         topic_dictionary_json,
+        story_title_raw,
     )) = pack_row
     else {
         tx.rollback().await.map_err(SqliteStoreError::from)?;
         return Err(StoreError::NotFound);
     };
+    let story_title =
+        BoundedText::try_new(story_title_raw, "story_title", limits.max_story_profile_bytes).map_err(|_| {
+            StoreError::Serialization {
+                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+            }
+        })?;
+    if story_title.as_str().trim().is_empty() {
+        return Err(StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        });
+    }
     let story_profile: StoryProfile =
         serde_json::from_slice(&story_profile_json).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
@@ -253,8 +271,8 @@ pub(crate) async fn load_story_snapshot(
         .ok_or(StoreError::LimitExceeded {
             limit: "max_recent_segments",
         })?;
-    let segment_rows: Vec<(String, Option<String>, i64, String)> = sqlx::query_as(
-        "SELECT origin, turn_id, sequence, story_text FROM story_segments \
+    let segment_rows: Vec<(String, Option<i64>, i64, String)> = sqlx::query_as(
+        "SELECT origin, turn_number, sequence, story_text FROM story_segments \
          WHERE story_id = ? AND sequence > ? \
          ORDER BY sequence ASC LIMIT ?",
     )
@@ -274,11 +292,11 @@ pub(crate) async fn load_story_snapshot(
         });
     }
     let mut recent_segments = Vec::new();
-    for (origin, turn_id, sequence, story_text) in segment_rows {
-        let origin = match (origin.as_str(), turn_id) {
+    for (origin, turn_number, sequence, story_text) in segment_rows {
+        let origin = match (origin.as_str(), turn_number) {
             ("opening", None) => StorySegmentOrigin::Opening,
-            ("turn", Some(turn_id)) => StorySegmentOrigin::Turn {
-                turn_id: TurnId::try_new(turn_id).map_err(|_| StoreError::Serialization {
+            ("turn", Some(turn_number)) => StorySegmentOrigin::Turn {
+                turn_number: TurnNumber::try_new(turn_number as u64).map_err(|_| StoreError::Serialization {
                     kind: crate::persistence::store::StoreSerializationErrorKind::InvalidTurnResult,
                 })?,
             },
@@ -364,6 +382,7 @@ pub(crate) async fn load_story_snapshot(
         story_id: story_id.clone(),
         base_revision,
         pack: pack_ref,
+        story_title,
         story_profile,
         instance_settings,
         roles,

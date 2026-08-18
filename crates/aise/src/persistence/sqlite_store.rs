@@ -190,7 +190,7 @@ impl Store for SqliteStore {
             .await?;
         }
         sqlx::query(
-            "INSERT INTO story_segments (id, story_id, sequence, origin, turn_id, story_text, created_at) \
+            "INSERT INTO story_segments (id, story_id, sequence, origin, turn_number, story_text, created_at) \
              VALUES (?, ?, 1, 'opening', NULL, ?, ?)",
         )
         .bind(format!("{}:opening", spec.story_id.as_str()))
@@ -205,19 +205,22 @@ impl Store for SqliteStore {
             story_id: spec.story_id.clone(),
             created_at_ms: spec.created_at_ms,
             base_revision: StoryRevision::new(0),
+            last_committed_turn_number: 0,
         })
     }
 
     async fn get_story(&self, story_id: &StoryId) -> Result<Option<StoryInfo>, StoreError> {
-        let row: Option<(i64, i64)> = sqlx::query_as("SELECT revision, created_at FROM stories WHERE id = ?")
-            .bind(story_id.as_str())
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(SqliteStoreError::from)?;
-        Ok(row.map(|(revision, created_at)| StoryInfo {
+        let row: Option<(i64, i64, i64)> =
+            sqlx::query_as("SELECT revision, created_at, last_turn_number FROM stories WHERE id = ?")
+                .bind(story_id.as_str())
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(SqliteStoreError::from)?;
+        Ok(row.map(|(revision, created_at, last_turn_number)| StoryInfo {
             story_id: story_id.clone(),
             created_at_ms: created_at,
             base_revision: StoryRevision::new(revision as u64),
+            last_committed_turn_number: last_turn_number as u64,
         }))
     }
 
@@ -257,7 +260,7 @@ impl Store for SqliteStore {
         idempotency_key: &IdempotencyKey,
     ) -> Result<Option<StoredTurnOutcome>, StoreError> {
         let row: Option<(String, String)> = sqlx::query_as(
-            "SELECT request_digest, result_json FROM story_turns WHERE world_id = ? AND idempotency_key = ?",
+            "SELECT request_digest, result_json FROM story_turns WHERE story_id = ? AND idempotency_key = ?",
         )
         .bind(story_id.as_str())
         .bind(idempotency_key.as_str())
@@ -278,7 +281,7 @@ impl Store for SqliteStore {
     async fn commit_turn(&self, commit: &TurnCommitSpec) -> Result<CommittedTurnResult, StoreError> {
         let mut tx = self.pool.begin().await.map_err(SqliteStoreError::from)?;
         let existing: Option<(String, String)> = sqlx::query_as(
-            "SELECT request_digest, result_json FROM story_turns WHERE world_id = ? AND idempotency_key = ?",
+            "SELECT request_digest, result_json FROM story_turns WHERE story_id = ? AND idempotency_key = ?",
         )
         .bind(commit.story_id.as_str())
         .bind(commit.idempotency_key.as_str())
@@ -295,19 +298,30 @@ impl Store for SqliteStore {
             return Err(StoreError::IdempotencyConflict);
         }
 
-        let state: Option<(i64, String, String, String)> = sqlx::query_as(
-            "SELECT s.revision, i.roles_json, i.relationships_json, i.narrative_state_json \
+        let state: Option<(i64, i64, String, String, String)> = sqlx::query_as(
+            "SELECT s.revision, s.last_turn_number, i.roles_json, i.relationships_json, i.narrative_state_json \
              FROM stories s JOIN story_instances i ON i.story_id = s.id WHERE s.id = ?",
         )
         .bind(commit.story_id.as_str())
         .fetch_optional(&mut *tx)
         .await
         .map_err(SqliteStoreError::from)?;
-        let Some((stored_revision, roles_json, relationships_json, narrative_state_json)) = state else {
+        let Some((stored_revision, stored_last_turn_number, roles_json, relationships_json, narrative_state_json)) =
+            state
+        else {
             return Err(StoreError::NotFound);
         };
         let base = commit.base_revision.get();
         if stored_revision < 0 || stored_revision as u64 != base {
+            return Err(StoreError::RevisionConflict);
+        }
+        if stored_last_turn_number < 0 {
+            return Err(StoreError::RevisionConflict);
+        }
+        let expected_turn_number = (stored_last_turn_number as u64)
+            .checked_add(1)
+            .ok_or(StoreError::LimitExceeded { limit: "turn_number" })?;
+        if expected_turn_number != commit.turn.number.get() {
             return Err(StoreError::RevisionConflict);
         }
         let committed_revision = base.checked_add(1).ok_or(StoreError::LimitExceeded {
@@ -384,7 +398,7 @@ impl Store for SqliteStore {
             if to_state == crate::domain::narrative_graph::condition::NarrativeNodeState::Active {
                 narrative_state
                     .activation_turns
-                    .insert(transition.node_key.clone(), commit.turn.id.clone());
+                    .insert(transition.node_key.clone(), commit.turn.number);
             }
         }
         narrative_state.pending_effects = resolution
@@ -397,7 +411,7 @@ impl Store for SqliteStore {
         }
         let aggregate = aggregate_llm_usage(&commit.llm_calls)?;
         let result = CommittedTurnResult {
-            turn_id: commit.turn.id.clone(),
+            turn_number: commit.turn.number,
             story_revision: StoryRevision::new(committed_revision),
             story_text: commit.changes.story_text().to_owned(),
             llm_usage: aggregate,
@@ -418,12 +432,12 @@ impl Store for SqliteStore {
         .await?;
 
         sqlx::query(
-            "INSERT INTO story_turns (id, world_id, player_input, story_text, status, created_at, \
+            "INSERT INTO story_turns (story_id, turn_number, player_input, story_text, status, created_at, \
              idempotency_key, request_digest, base_revision, committed_revision, result_json, sequence) \
              VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(commit.turn.id.as_str())
         .bind(commit.story_id.as_str())
+        .bind(commit.turn.number.get() as i64)
         .bind(&commit.turn.player_input)
         .bind(commit.changes.story_text())
         .bind(commit.turn.created_at)
@@ -438,13 +452,13 @@ impl Store for SqliteStore {
         .map_err(SqliteStoreError::from)?;
 
         sqlx::query(
-            "INSERT INTO story_segments (id, story_id, sequence, origin, turn_id, story_text, created_at) \
+            "INSERT INTO story_segments (id, story_id, sequence, origin, turn_number, story_text, created_at) \
              VALUES (?, ?, ?, 'turn', ?, ?, ?)",
         )
-        .bind(format!("turn:{}", commit.turn.id.as_str()))
+        .bind(format!("{}:turn:{}", commit.story_id.as_str(), commit.turn.number))
         .bind(commit.story_id.as_str())
         .bind(sequence)
-        .bind(commit.turn.id.as_str())
+        .bind(commit.turn.number.get() as i64)
         .bind(commit.changes.story_text())
         .bind(commit.turn.created_at)
         .execute(&mut *tx)
@@ -452,7 +466,7 @@ impl Store for SqliteStore {
         .map_err(SqliteStoreError::from)?;
 
         for (seq, event) in commit.changes.narrative_events().iter().enumerate() {
-            if event.turn_id != commit.turn.id {
+            if event.turn_number != commit.turn.number {
                 return Err(StoreError::ConstraintViolation {
                     constraint: "event_turn_reference".to_owned(),
                 });
@@ -460,15 +474,18 @@ impl Store for SqliteStore {
             let payload = serde_json::to_string(&event.payload).map_err(|_| StoreError::Serialization {
                 kind: crate::persistence::store::StoreSerializationErrorKind::InvalidEventPayload,
             })?;
-            sqlx::query("INSERT INTO story_events (id, turn_id, seq, kind, payload) VALUES (?, ?, ?, ?, ?)")
-                .bind(event.id.as_str())
-                .bind(event.turn_id.as_str())
-                .bind(seq as i64)
-                .bind(event.kind.as_str())
-                .bind(&payload)
-                .execute(&mut *tx)
-                .await
-                .map_err(SqliteStoreError::from)?;
+            sqlx::query(
+                "INSERT INTO story_events (id, story_id, turn_number, seq, kind, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(event.id.as_str())
+            .bind(commit.story_id.as_str())
+            .bind(event.turn_number.get() as i64)
+            .bind(seq as i64)
+            .bind(event.kind.as_str())
+            .bind(&payload)
+            .execute(&mut *tx)
+            .await
+            .map_err(SqliteStoreError::from)?;
         }
 
         if let StateChange::Replace(constraints) = commit.changes.constraint_change() {
@@ -491,14 +508,18 @@ impl Store for SqliteStore {
             apply_knowledge_mutation(&mut tx, &commit.story_id, mutation).await?;
         }
 
-        let updated = sqlx::query("UPDATE stories SET revision = ? WHERE id = ? AND revision = ?")
-            .bind(committed_revision as i64)
-            .bind(commit.story_id.as_str())
-            .bind(base as i64)
-            .execute(&mut *tx)
-            .await
-            .map_err(SqliteStoreError::from)?
-            .rows_affected();
+        let updated = sqlx::query(
+            "UPDATE stories SET revision = ?, last_turn_number = ? WHERE id = ? AND revision = ? AND last_turn_number = ?",
+        )
+        .bind(committed_revision as i64)
+        .bind(commit.turn.number.get() as i64)
+        .bind(commit.story_id.as_str())
+        .bind(base as i64)
+        .bind(stored_last_turn_number)
+        .execute(&mut *tx)
+        .await
+        .map_err(SqliteStoreError::from)?
+        .rows_affected();
         if updated != 1 {
             return Err(StoreError::RevisionConflict);
         }
@@ -878,12 +899,12 @@ async fn write_outbox(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, record: &Out
         kind: crate::persistence::store::StoreSerializationErrorKind::InvalidEventPayload,
     })?;
     sqlx::query(
-        "INSERT INTO outbox (id, story_id, turn_id, event_type, payload, created_at, attempt_count, published_at, last_error) \
+        "INSERT INTO outbox (id, story_id, turn_number, event_type, payload, created_at, attempt_count, published_at, last_error) \
          VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL)",
     )
     .bind(&record.id)
     .bind(record.story_id.as_str())
-    .bind(record.turn_id.as_str())
+    .bind(record.turn_number.get() as i64)
     .bind(&record.event_type)
     .bind(&payload)
     .bind(record.created_at)

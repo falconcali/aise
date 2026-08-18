@@ -182,7 +182,7 @@ impl LlmGateway {
         let tracing_span = tracing::info_span!(
             "llm.embed",
             story_id = %scope.story_id(),
-            turn_id = %scope.turn_id(),
+            turn_number = %scope.turn_number(),
             stage = %scope.stage().as_str(),
             provider = %self.provider.provider_name(),
             model = %self.config.model,
@@ -217,7 +217,7 @@ impl LlmGateway {
             Err(error) => {
                 tracing::warn!(
                     story_id = %scope.story_id(),
-                    turn_id = %scope.turn_id(),
+                    turn_number = %scope.turn_number(),
                     stage = %scope.stage().as_str(),
                     error_kind = error.kind(),
                     error = %error,
@@ -369,7 +369,7 @@ impl LlmGateway {
             Err(error) => {
                 tracing::warn!(
                     story_id = %scope.story_id(),
-                    turn_id = %scope.turn_id(),
+                    turn_number = %scope.turn_number(),
                     stage = %scope.stage().as_str(),
                     purpose = request.purpose.as_str(),
                     queue_wait_ms = call_started.elapsed().as_millis(),
@@ -402,7 +402,7 @@ impl LlmGateway {
         let tracing_span = tracing::info_span!(
             "llm.call",
             story_id = %scope.story_id(),
-            turn_id = %scope.turn_id(),
+            turn_number = %scope.turn_number(),
             stage = %scope.stage().as_str(),
             purpose = request.purpose.as_str(),
             provider = %self.provider.provider_name(),
@@ -470,7 +470,7 @@ impl LlmGateway {
             Err(error) => {
                 tracing::warn!(
                     story_id = %scope.story_id(),
-                    turn_id = %scope.turn_id(),
+                    turn_number = %scope.turn_number(),
                     stage = %scope.stage().as_str(),
                     purpose = request.purpose.as_str(),
                     error_kind = error.kind(),

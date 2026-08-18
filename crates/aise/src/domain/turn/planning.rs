@@ -5,13 +5,6 @@ use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RetrievalIndexScope {
-    Complete,
-    Prefiltered,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum KnowledgeDelivery {
     Writer,
@@ -84,7 +77,6 @@ pub struct KnowledgeRetrievalRequest {
     pub knowledge_kinds: Vec<KnowledgeKind>,
     pub entities: Vec<KnowledgeEntity>,
     pub topics: Vec<TopicKey>,
-    pub query_text: Option<BoundedText>,
     pub reason: BoundedText,
     pub origin: RetrievalRequestOrigin,
     pub signal_priority: u8,

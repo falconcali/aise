@@ -67,6 +67,7 @@ fn sample_snapshot() -> StoryReadSnapshot {
             version: SemanticVersion::try_new("0.1.0").unwrap(),
             digest: digest(),
         },
+        story_title: bounded("Untitled Story"),
         story_profile: StoryProfile {
             language: bounded("zh-CN"),
             genre: Vec::new(),
@@ -163,9 +164,8 @@ async fn provided_world_knowledge_is_not_indexed() {
     });
     let config = RetrievalConfig::default();
 
-    let (scope, entries) = load_knowledge_index(&snapshot, &relevant, &config, &port).await.unwrap();
+    let entries = load_knowledge_index(&snapshot, &relevant, &config, &port).await.unwrap();
 
-    assert_eq!(scope, RetrievalIndexScope::Complete);
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].source_id, fact_id("fact_0002"));
 }

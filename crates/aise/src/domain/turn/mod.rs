@@ -18,8 +18,8 @@ pub use extraction::{
     StoryStateExtractorOutput,
 };
 pub use planning::{
-    CharacterRetrievalRequest, CharacterThinkRequest, KnowledgeDelivery, KnowledgeRetrievalRequest,
-    RetrievalIndexScope, RetrievalPlan, RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
+    CharacterRetrievalRequest, CharacterThinkRequest, KnowledgeDelivery, KnowledgeRetrievalRequest, RetrievalPlan,
+    RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
 };
 pub use proposal::ValidatedNarrativeResolution;
 pub use retrieval::{

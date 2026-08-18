@@ -1,7 +1,7 @@
 pub use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{PackId, Sha256Digest};
 use crate::domain::error::KnowledgeIdError;
-use crate::domain::ids::{FactId, MemoryId, RumorId, TurnId};
+use crate::domain::ids::{FactId, MemoryId, RumorId, TurnNumber};
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU64;
 
@@ -24,7 +24,7 @@ pub enum KnowledgeKind {
 #[serde(rename_all = "snake_case")]
 pub enum KnowledgeSource {
     Seed { pack_id: PackId, pack_digest: Sha256Digest },
-    CommittedTurn { turn_id: TurnId },
+    CommittedTurn { turn_number: TurnNumber },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

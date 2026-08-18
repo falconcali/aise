@@ -1,4 +1,4 @@
-use crate::domain::ids::{StoryId, TurnId};
+use crate::domain::ids::{StoryId, TurnNumber};
 use crate::domain::story_sequence::StorySequence;
 use crate::persistence::sqlite_error::SqliteStoreError;
 use crate::persistence::sqlite_store::SqliteStore;
@@ -92,10 +92,10 @@ async fn load(
         })
         .transpose()?;
     let after = query.after_sequence.map(|sequence| sequence.get()).unwrap_or(0);
-    let rows: Vec<(String, i64, String, String, i64, i64, i64)> = sqlx::query_as(
-        "SELECT id, sequence, player_input, story_text, created_at, \
+    let rows: Vec<(i64, i64, String, String, i64, i64, i64)> = sqlx::query_as(
+        "SELECT turn_number, sequence, player_input, story_text, created_at, \
                 length(CAST(player_input AS BLOB)), length(CAST(story_text AS BLOB)) \
-         FROM story_turns WHERE world_id = ?1 AND sequence > ?2 \
+         FROM story_turns WHERE story_id = ?1 AND sequence > ?2 \
          ORDER BY sequence ASC LIMIT ?3",
     )
     .bind(story_id.as_str())
@@ -108,7 +108,7 @@ async fn load(
     .map_err(SqliteStoreError::from)?;
     let has_more = rows.len() > query.limit;
     let mut turns = Vec::with_capacity(query.limit.min(rows.len()));
-    for (id, sequence, player_input, story_text, created_at, player_bytes, story_bytes) in
+    for (turn_number, sequence, player_input, story_text, created_at, player_bytes, story_bytes) in
         rows.into_iter().take(query.limit)
     {
         if usize::try_from(player_bytes).map_err(|_| invalid_turn())? > config.max_player_input_bytes {
@@ -122,7 +122,8 @@ async fn load(
             });
         }
         turns.push(StoryTurnView {
-            turn_id: TurnId::try_new(id).map_err(|_| invalid_turn())?,
+            turn_number: TurnNumber::try_new(u64::try_from(turn_number).map_err(|_| invalid_turn())?)
+                .map_err(|_| invalid_turn())?,
             sequence: StorySequence::try_new(u64::try_from(sequence).map_err(|_| invalid_turn())?)
                 .map_err(|_| invalid_turn())?,
             player_input,

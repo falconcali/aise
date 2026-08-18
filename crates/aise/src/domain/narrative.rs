@@ -1,5 +1,5 @@
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{EventId, TurnId};
+use crate::domain::ids::{EventId, TurnNumber};
 use serde::{Deserialize, Serialize};
 
 pub use crate::domain::story_sequence::{StoryContinuityError, StorySequence};
@@ -15,7 +15,7 @@ pub struct StorySegment {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StorySegmentOrigin {
     Opening,
-    Turn { turn_id: TurnId },
+    Turn { turn_number: TurnNumber },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,7 +170,7 @@ impl StoryContinuity {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoryTurn {
-    pub id: TurnId,
+    pub number: TurnNumber,
     pub sequence: StorySequence,
     pub player_input: String,
     pub story_text: String,
@@ -180,7 +180,7 @@ pub struct StoryTurn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoryEvent {
     pub id: EventId,
-    pub turn_id: TurnId,
+    pub turn_number: TurnNumber,
     pub seq: u32,
     pub kind: EventKind,
     pub payload: serde_json::Value,

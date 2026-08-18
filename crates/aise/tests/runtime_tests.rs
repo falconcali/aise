@@ -23,7 +23,6 @@ fn sample_plan(with_requests: bool) -> WriterPlan {
             knowledge_kinds: vec![KnowledgeKind::Fact],
             entities: Vec::new(),
             topics: Vec::new(),
-            query_text: None,
             reason: BoundedText::try_new("need", "reason", 64).unwrap(),
             origin: RetrievalRequestOrigin::Automatic,
             signal_priority: 0,

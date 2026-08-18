@@ -56,16 +56,16 @@ impl TurnExecutionPipeline for TurnCommitter {
             })?
             .clone();
         let story_text = change_set.story_text().to_owned();
-        let turn_id = ctx.turn_id().clone();
+        let turn_number = ctx.turn_number();
         let story_id = ctx.story_id().clone();
         let created_at = ctx.identity().started_at_ms();
         let llm_calls = ctx.llm_calls().to_vec();
         let mut outbox = Vec::new();
         for (seq, event) in change_set.narrative_events().iter().enumerate() {
             outbox.push(OutboxRecord {
-                id: format!("{turn_id}#outbox#{seq}"),
+                id: format!("{story_id}:turn:{turn_number}:outbox:{seq}"),
                 story_id: story_id.clone(),
-                turn_id: turn_id.clone(),
+                turn_number,
                 event_type: format!("story_event.{}", event.kind.as_str()),
                 payload: serde_json::to_value(event).map_err(|_| {
                     TurnExecutionError::new(
@@ -81,7 +81,7 @@ impl TurnExecutionPipeline for TurnCommitter {
         let commit = TurnCommitSpec {
             story_id: story_id.clone(),
             turn: StoryTurn {
-                id: turn_id.clone(),
+                number: turn_number,
                 sequence: snapshot.story_continuity().next_sequence().map_err(|_| {
                     TurnExecutionError::new(
                         crate::turn::turn_error::TurnFailureKind::InvariantViolation,
@@ -108,8 +108,8 @@ impl TurnExecutionPipeline for TurnCommitter {
         let latency_ms = started.elapsed().as_millis() as u64;
         let payload = match &outcome {
             Ok(result) => serde_json::json!({
-                "story_id": story_id,
-                "turn_id": turn_id,
+                "story_id": story_id.as_str(),
+                "turn_number": turn_number.get(),
                 "base_revision": snapshot.base_revision().get(),
                 "committed_revision": result.story_revision.get(),
                 "knowledge_mutation_count": change_set.knowledge_mutations().len(),
@@ -119,8 +119,8 @@ impl TurnExecutionPipeline for TurnCommitter {
                 "latency_ms": latency_ms,
             }),
             Err(error) => serde_json::json!({
-                "story_id": story_id,
-                "turn_id": turn_id,
+                "story_id": story_id.as_str(),
+                "turn_number": turn_number.get(),
                 "base_revision": snapshot.base_revision().get(),
                 "committed_revision": null,
                 "knowledge_mutation_count": change_set.knowledge_mutations().len(),

@@ -2,13 +2,13 @@ use super::*;
 use crate::domain::asset::character_card::CharacterProfile;
 use crate::domain::asset::ids::{LocationKey, Sha256Digest};
 use crate::domain::asset::story_pack::{StoryProfile, StoryStyle};
-use crate::domain::ids::TurnId;
+use crate::domain::ids::TurnNumber;
 use crate::domain::narrative::{
     StoryContinuity, StoryContinuityLimits, StorySegment, StorySegmentOrigin, StorySummary,
 };
 use crate::domain::story_instance::role::{RoleController, StoryRoleState};
 use crate::domain::story_instance::state::InstanceSettings;
-use crate::domain::turn::{NarrativeGraphStateIndex, RetrievalIndexScope, RetrievalSignals};
+use crate::domain::turn::{NarrativeGraphStateIndex, RetrievalSignals};
 
 fn bounded(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", 1024).unwrap()
@@ -105,6 +105,7 @@ fn digest() -> Sha256Digest {
 
 fn minimal_baseline() -> BaselineContext {
     BaselineContext {
+        story_title: bounded("Untitled Story"),
         story_profile: StoryProfile {
             language: bounded("zh-CN"),
             genre: Vec::new(),
@@ -123,8 +124,6 @@ fn minimal_baseline() -> BaselineContext {
         },
         relevant_roles: vec![role()],
         relevant_world_knowledge: crate::domain::turn::RelevantWorldKnowledge::default(),
-        role_index_scope: RetrievalIndexScope::Complete,
-        knowledge_index_scope: RetrievalIndexScope::Complete,
         knowledge_index: Vec::new(),
         role_index: Vec::new(),
         story_continuity: StoryContinuity::try_new(
@@ -214,19 +213,13 @@ fn writer_planner_indexed_targets_cover_role_and_knowledge_index_entries() {
 }
 
 #[test]
-fn empty_grouped_indexes_preserve_scope() {
+fn empty_grouped_indexes_render_as_empty_string() {
     let baseline = minimal_baseline();
-    assert_eq!(render_role_index(&baseline), "scope: complete");
-    assert_eq!(render_knowledge_index(&baseline), "scope: complete");
+    assert_eq!(render_role_index(&baseline), "");
+    assert_eq!(render_knowledge_index(&baseline), "");
     assert!(!render_role_index(&baseline).contains("### Retrievable Characters"));
     assert!(!render_knowledge_index(&baseline).contains("### Retrievable Facts"));
     assert!(!render_knowledge_index(&baseline).contains("### Retrievable Rumors"));
-
-    let mut prefiltered = baseline;
-    prefiltered.role_index_scope = RetrievalIndexScope::Prefiltered;
-    prefiltered.knowledge_index_scope = RetrievalIndexScope::Prefiltered;
-    assert_eq!(render_role_index(&prefiltered), "scope: prefiltered");
-    assert_eq!(render_knowledge_index(&prefiltered), "scope: prefiltered");
 }
 
 #[test]
@@ -283,7 +276,7 @@ fn writer_planner_renders_story_continuity_as_prose() {
             StorySegment {
                 sequence: crate::domain::StorySequence::try_new(3).unwrap(),
                 origin: StorySegmentOrigin::Turn {
-                    turn_id: TurnId::try_new("t1").unwrap(),
+                    turn_number: TurnNumber::try_new(1).unwrap(),
                 },
                 text: bounded("recent-two"),
             },

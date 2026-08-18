@@ -1,7 +1,6 @@
 use crate::config::{PlannerConfig, RetrievalConfig};
 use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::TopicKey;
-use crate::domain::asset::text_matcher::{TextMatcher, normalize_match_text, term_matches};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
@@ -10,38 +9,36 @@ use crate::domain::narrative_graph::projector::NarrativePlan;
 use crate::domain::story_instance::role::RoleController;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{
-    BaselineContext, CharacterRetrievalRequest, CharacterThinkRequest, EntitySignal, KnowledgeDelivery,
-    KnowledgeRetrievalRequest, RetrievalPlan, RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
+    BaselineContext, CharacterRetrievalRequest, CharacterThinkRequest, KnowledgeDelivery, KnowledgeRetrievalRequest,
+    RetrievalPlan, RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
 };
 use crate::planning::error::PlanningError;
-use crate::planning::planner_output::{PlannerContextGap, PlannerOutput};
+use crate::planning::planner_output::{
+    CharacterThinkRequestDto, PlannerCharacterContextGapDto, PlannerWriterContextGapDto, WriterPlannerOutputDto,
+};
 use crate::planning::writer_planner_prompt::{IndexedRetrievalTarget, WriterPlannerPromptContext};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub struct RetrievalPlanBuilder {
     retrieval: RetrievalConfig,
     planner: PlannerConfig,
-    topic_matcher: TextMatcher,
 }
 
 impl RetrievalPlanBuilder {
     pub fn new(retrieval: RetrievalConfig, planner: PlannerConfig) -> Self {
-        Self {
-            retrieval,
-            planner,
-            topic_matcher: TextMatcher,
-        }
+        Self { retrieval, planner }
     }
 
     pub fn build(
         &self,
         baseline: &BaselineContext,
         narrative_plan: &NarrativePlan,
-        planner_output: PlannerOutput,
+        planner_output: WriterPlannerOutputDto,
         snapshot: &StoryReadSnapshot,
         prompt_context: &WriterPlannerPromptContext,
     ) -> Result<WriterPlan, PlanningError> {
-        if planner_output.context_gaps.len() > self.planner.max_context_gaps {
+        let total_gaps = planner_output.writer_context_gaps.len() + planner_output.character_context_gaps.len();
+        if total_gaps > self.planner.max_context_gaps {
             return Err(PlanningError::LimitExceeded {
                 limit: "max_context_gaps",
             });
@@ -51,18 +48,18 @@ impl RetrievalPlanBuilder {
                 limit: "max_character_think_requests",
             });
         }
-        if planner_output.story_goal.as_str().trim().is_empty() {
+        if planner_output.story_goal.trim().is_empty() {
             return Err(PlanningError::InvalidOutput {
                 code: "story_goal_empty",
             });
         }
-        if planner_output.story_goal.as_str().len() > self.planner.max_goal_bytes {
-            return Err(PlanningError::LimitExceeded {
+        let story_goal = BoundedText::try_new(planner_output.story_goal, "story_goal", self.planner.max_goal_bytes)
+            .map_err(|_| PlanningError::LimitExceeded {
                 limit: "max_goal_bytes",
-            });
-        }
-        let validated_think_requests =
-            self.validate_think_requests(planner_output.character_think_requests, snapshot)?;
+            })?;
+
+        let think_request_domain = self.convert_think_requests(planner_output.character_think_requests)?;
+        let validated_think_requests = self.validate_think_requests(think_request_domain, snapshot)?;
         let think_requests = merge_narrative_think_requests(
             validated_think_requests,
             &narrative_plan.character_impulses,
@@ -74,8 +71,8 @@ impl RetrievalPlanBuilder {
         let mut knowledge_requests = Vec::new();
         knowledge_requests.extend(self.narrative_requests(narrative_plan)?);
 
-        for gap in planner_output.context_gaps {
-            match self.resolve_gap(gap, baseline, snapshot, &think_requests, prompt_context)? {
+        for gap in planner_output.writer_context_gaps {
+            match self.resolve_writer_gap(gap, prompt_context)? {
                 GapOutcome::RoleCognition { role_id, reason } => {
                     base_cognition
                         .entry(role_id)
@@ -83,6 +80,9 @@ impl RetrievalPlanBuilder {
                 }
                 GapOutcome::Knowledge(request) => knowledge_requests.push(request),
             }
+        }
+        for gap in planner_output.character_context_gaps {
+            knowledge_requests.push(self.resolve_character_gap(gap, &think_requests, prompt_context)?);
         }
         for request in &think_requests {
             base_cognition
@@ -105,7 +105,6 @@ impl RetrievalPlanBuilder {
                 knowledge_kinds: vec![KnowledgeKind::Rumor, KnowledgeKind::Memory],
                 entities: vec![KnowledgeEntity::Role(role_id.clone())],
                 topics: Vec::new(),
-                query_text: None,
                 reason: reason.as_str(),
                 origin: *origin,
                 signal_priority: 0,
@@ -118,15 +117,37 @@ impl RetrievalPlanBuilder {
             return Err(PlanningError::LimitExceeded { limit: "max_requests" });
         }
         Ok(WriterPlan {
-            story_goal: WriterStoryGoal {
-                summary: planner_output.story_goal,
-            },
+            story_goal: WriterStoryGoal { summary: story_goal },
             retrieval_plan: RetrievalPlan {
                 character_requests,
                 knowledge_requests,
             },
             character_think_requests: think_requests,
         })
+    }
+
+    fn convert_think_requests(
+        &self,
+        requests: Vec<CharacterThinkRequestDto>,
+    ) -> Result<Vec<CharacterThinkRequest>, PlanningError> {
+        requests
+            .into_iter()
+            .map(|dto| {
+                let role_id = RoleId::try_new(dto.role_id).map_err(|_| PlanningError::UnknownRole)?;
+                if dto.reason.trim().is_empty() {
+                    return Err(PlanningError::InvalidOutput {
+                        code: "character_think_reason_empty",
+                    });
+                }
+                let reason =
+                    BoundedText::try_new(dto.reason, "reason", self.planner.max_reason_bytes).map_err(|_| {
+                        PlanningError::LimitExceeded {
+                            limit: "max_reason_bytes",
+                        }
+                    })?;
+                Ok(CharacterThinkRequest { role_id, reason })
+            })
+            .collect()
     }
 
     fn validate_think_requests(
@@ -137,16 +158,6 @@ impl RetrievalPlanBuilder {
         let mut out = Vec::new();
         let mut seen = BTreeSet::new();
         for request in requests {
-            if request.reason.as_str().len() > self.planner.max_reason_bytes {
-                return Err(PlanningError::LimitExceeded {
-                    limit: "max_reason_bytes",
-                });
-            }
-            if request.reason.as_str().trim().is_empty() {
-                return Err(PlanningError::InvalidOutput {
-                    code: "character_think_reason_empty",
-                });
-            }
             if &request.role_id == snapshot.player_role_id() {
                 return Err(PlanningError::PlayerRoleRequested);
             }
@@ -178,7 +189,6 @@ impl RetrievalPlanBuilder {
                 knowledge_kinds: vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
                 entities: vec![entity],
                 topics: Vec::new(),
-                query_text: None,
                 reason: "narrative reference",
                 origin: RetrievalRequestOrigin::Narrative,
                 signal_priority: 2,
@@ -187,142 +197,89 @@ impl RetrievalPlanBuilder {
         Ok(requests)
     }
 
-    fn resolve_gap(
+    fn resolve_writer_gap(
         &self,
-        mut gap: PlannerContextGap,
-        baseline: &BaselineContext,
-        snapshot: &StoryReadSnapshot,
-        think_requests: &[CharacterThinkRequest],
+        gap: PlannerWriterContextGapDto,
         prompt_context: &WriterPlannerPromptContext,
     ) -> Result<GapOutcome, PlanningError> {
-        if gap.reason.as_str().len() > self.planner.max_reason_bytes {
-            return Err(PlanningError::LimitExceeded {
-                limit: "max_reason_bytes",
-            });
-        }
-        if gap.reason.as_str().trim().is_empty() {
+        if gap.reason.trim().is_empty() {
             return Err(PlanningError::InvalidOutput {
                 code: "context_gap_reason_empty",
             });
         }
-        if gap.target_id.is_some() == gap.query_text.is_some() {
+        let reason = BoundedText::try_new(gap.reason, "reason", self.planner.max_reason_bytes).map_err(|_| {
+            PlanningError::LimitExceeded {
+                limit: "max_reason_bytes",
+            }
+        })?;
+        let target = prompt_context
+            .indexed_targets
+            .get(gap.target_id.as_str())
+            .ok_or(PlanningError::UnknownRetrievalKey)?;
+        match target {
+            IndexedRetrievalTarget::Role(role_id) => Ok(GapOutcome::RoleCognition {
+                role_id: role_id.clone(),
+                reason,
+            }),
+            IndexedRetrievalTarget::Knowledge(source_id) => {
+                let request = self.make_request(RequestDraft {
+                    delivery: KnowledgeDelivery::Writer,
+                    target_source_id: Some(source_id.clone()),
+                    knowledge_kinds: vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
+                    entities: Vec::new(),
+                    topics: Vec::new(),
+                    reason: reason.as_str(),
+                    origin: RetrievalRequestOrigin::Planner,
+                    signal_priority: 0,
+                })?;
+                Ok(GapOutcome::Knowledge(request))
+            }
+        }
+    }
+
+    fn resolve_character_gap(
+        &self,
+        gap: PlannerCharacterContextGapDto,
+        think_requests: &[CharacterThinkRequest],
+        prompt_context: &WriterPlannerPromptContext,
+    ) -> Result<KnowledgeRetrievalRequest, PlanningError> {
+        if gap.reason.trim().is_empty() {
             return Err(PlanningError::InvalidOutput {
-                code: "retrieval_selector_exclusivity",
+                code: "context_gap_reason_empty",
             });
         }
-        if let Some(target_id) = &gap.target_id {
-            let target = prompt_context
-                .indexed_targets
-                .get(target_id.as_str())
-                .ok_or(PlanningError::UnknownRetrievalKey)?;
-            return match target {
-                IndexedRetrievalTarget::Role(role_id) => {
-                    if !matches!(&gap.delivery, KnowledgeDelivery::Writer) {
-                        return Err(PlanningError::KnowledgeAudienceViolation);
-                    }
-                    Ok(GapOutcome::RoleCognition {
-                        role_id: role_id.clone(),
-                        reason: gap.reason,
-                    })
+        let reason = BoundedText::try_new(gap.reason, "reason", self.planner.max_reason_bytes).map_err(|_| {
+            PlanningError::LimitExceeded {
+                limit: "max_reason_bytes",
+            }
+        })?;
+        let role_id = RoleId::try_new(gap.role_id).map_err(|_| PlanningError::UnknownRole)?;
+        if !think_requests.iter().any(|request| request.role_id == role_id) {
+            return Err(PlanningError::KnowledgeAudienceViolation);
+        }
+        let target = prompt_context
+            .indexed_targets
+            .get(gap.target_id.as_str())
+            .ok_or(PlanningError::UnknownRetrievalKey)?;
+        let source_id = match target {
+            IndexedRetrievalTarget::Knowledge(source_id) => {
+                if matches!(source_id, KnowledgeSourceId::Fact(_)) {
+                    return Err(PlanningError::KnowledgeAudienceViolation);
                 }
-                IndexedRetrievalTarget::Knowledge(source_id) => {
-                    if matches!(&gap.delivery, KnowledgeDelivery::Character { .. })
-                        && matches!(source_id, KnowledgeSourceId::Fact(_))
-                    {
-                        return Err(PlanningError::KnowledgeAudienceViolation);
-                    }
-                    authorize_gap(&gap, think_requests)?;
-                    let knowledge_kinds = match &gap.delivery {
-                        KnowledgeDelivery::Writer => vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
-                        KnowledgeDelivery::Character { .. } => vec![KnowledgeKind::Rumor, KnowledgeKind::Memory],
-                    };
-                    let request = self.make_request(RequestDraft {
-                        delivery: gap.delivery,
-                        target_source_id: Some(source_id.clone()),
-                        knowledge_kinds,
-                        entities: Vec::new(),
-                        topics: Vec::new(),
-                        query_text: None,
-                        reason: gap.reason.as_str(),
-                        origin: RetrievalRequestOrigin::Planner,
-                        signal_priority: 0,
-                    })?;
-                    Ok(GapOutcome::Knowledge(request))
-                }
-            };
-        }
-        authorize_gap(&gap, think_requests)?;
-        let mut entities = Vec::new();
-        let mut topics = Vec::new();
-        if let Some(query) = &gap.query_text {
-            if query.as_str().len() > self.planner.max_query_bytes {
-                return Err(PlanningError::LimitExceeded {
-                    limit: "max_query_bytes",
-                });
+                source_id.clone()
             }
-            let matched_topics = self.topic_matcher.match_topics(query.as_str(), snapshot.topic_dictionary());
-            for topic in matched_topics {
-                if !topics.contains(&topic) {
-                    topics.push(topic);
-                }
-            }
-            let haystack = normalize_match_text(query.as_str());
-            for entity in snapshot.entity_catalog() {
-                let key = match entity {
-                    KnowledgeEntity::World(key) => key.as_str(),
-                    KnowledgeEntity::Role(id) => id.as_str(),
-                    KnowledgeEntity::Location(key) => key.as_str(),
-                    KnowledgeEntity::Scene(key) => key.as_str(),
-                    KnowledgeEntity::NarrativeNode(key) => key.as_str(),
-                    KnowledgeEntity::Event(key) => key.as_str(),
-                };
-                if term_matches(&haystack, &normalize_match_text(key)) && !entities.contains(entity) {
-                    entities.push(entity.clone());
-                }
-            }
-            gap.query_text = Some(
-                BoundedText::try_new(normalize_match_text(query.as_str()), "query_text", self.planner.max_query_bytes)
-                    .map_err(|_| PlanningError::InvalidOutput {
-                        code: "query_text_invalid",
-                    })?,
-            );
-        }
-        if entities.len() > self.planner.max_entities_per_request {
-            return Err(PlanningError::LimitExceeded {
-                limit: "max_entities_per_request",
-            });
-        }
-        if topics.len() > self.planner.max_topics_per_request {
-            return Err(PlanningError::LimitExceeded {
-                limit: "max_topics_per_request",
-            });
-        }
-        for entity in &entities {
-            if !entity_is_known(entity, snapshot.entity_catalog(), &baseline.retrieval_signals.entities) {
-                return Err(PlanningError::UnknownRetrievalKey);
-            }
-        }
-        for topic in &topics {
-            if !snapshot.topic_dictionary().contains_key(topic) {
-                return Err(PlanningError::UnknownRetrievalKey);
-            }
-        }
-        let knowledge_kinds = match &gap.delivery {
-            KnowledgeDelivery::Writer => vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
-            KnowledgeDelivery::Character { .. } => vec![KnowledgeKind::Rumor, KnowledgeKind::Memory],
+            IndexedRetrievalTarget::Role(_) => return Err(PlanningError::KnowledgeAudienceViolation),
         };
-        let request = self.make_request(RequestDraft {
-            delivery: gap.delivery,
-            target_source_id: None,
-            knowledge_kinds,
-            entities,
-            topics,
-            query_text: gap.query_text,
-            reason: gap.reason.as_str(),
+        self.make_request(RequestDraft {
+            delivery: KnowledgeDelivery::Character { role_id },
+            target_source_id: Some(source_id),
+            knowledge_kinds: vec![KnowledgeKind::Rumor, KnowledgeKind::Memory],
+            entities: Vec::new(),
+            topics: Vec::new(),
+            reason: reason.as_str(),
             origin: RetrievalRequestOrigin::Planner,
             signal_priority: 0,
-        })?;
-        Ok(GapOutcome::Knowledge(request))
+        })
     }
 
     fn make_request(&self, draft: RequestDraft<'_>) -> Result<KnowledgeRetrievalRequest, PlanningError> {
@@ -347,7 +304,6 @@ impl RetrievalPlanBuilder {
             knowledge_kinds,
             entities,
             topics,
-            query_text: draft.query_text,
             reason,
             origin: draft.origin,
             signal_priority: draft.signal_priority,
@@ -366,22 +322,9 @@ struct RequestDraft<'a> {
     knowledge_kinds: Vec<KnowledgeKind>,
     entities: Vec<KnowledgeEntity>,
     topics: Vec<TopicKey>,
-    query_text: Option<BoundedText>,
     reason: &'a str,
     origin: RetrievalRequestOrigin,
     signal_priority: u8,
-}
-
-fn authorize_gap(gap: &PlannerContextGap, think_requests: &[CharacterThinkRequest]) -> Result<(), PlanningError> {
-    match &gap.delivery {
-        KnowledgeDelivery::Character { role_id } => {
-            if !think_requests.iter().any(|request| &request.role_id == role_id) {
-                return Err(PlanningError::KnowledgeAudienceViolation);
-            }
-        }
-        KnowledgeDelivery::Writer => {}
-    }
-    Ok(())
 }
 
 pub fn merge_narrative_think_requests(
@@ -469,7 +412,6 @@ struct RetrievalRequestKey {
     knowledge_kinds: Vec<KnowledgeKind>,
     entities: Vec<KnowledgeEntity>,
     topics: Vec<TopicKey>,
-    query_text: Option<String>,
 }
 
 fn canonical_key(request: &KnowledgeRetrievalRequest) -> RetrievalRequestKey {
@@ -479,7 +421,6 @@ fn canonical_key(request: &KnowledgeRetrievalRequest) -> RetrievalRequestKey {
         knowledge_kinds: request.knowledge_kinds.clone(),
         entities: request.entities.clone(),
         topics: request.topics.clone(),
-        query_text: request.query_text.as_ref().map(ToString::to_string),
     }
 }
 
@@ -489,12 +430,6 @@ fn origin_rank(origin: RetrievalRequestOrigin) -> u8 {
         RetrievalRequestOrigin::Narrative => 1,
         RetrievalRequestOrigin::Planner => 2,
     }
-}
-
-fn entity_is_known(entity: &KnowledgeEntity, catalog: &[KnowledgeEntity], signals: &[EntitySignal]) -> bool {
-    catalog.contains(entity)
-        || signals.iter().any(|signal| &signal.entity == entity)
-        || matches!(entity, KnowledgeEntity::Role(_))
 }
 
 #[cfg(test)]

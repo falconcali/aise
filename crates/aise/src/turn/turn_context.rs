@@ -1,4 +1,4 @@
-use crate::domain::ids::{StoryId, TurnId};
+use crate::domain::ids::{StoryId, TurnKey, TurnNumber};
 use crate::domain::narrative_graph::projector::NarrativeProjection;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{BaselineContext, CharacterDecision, RetrievedContext, RetrievedContextLimits, WriterPlan};
@@ -116,8 +116,12 @@ impl TurnExecutionContext {
         self.identity.story_id()
     }
 
-    pub fn turn_id(&self) -> &TurnId {
-        self.identity.turn_id()
+    pub fn turn_key(&self) -> &TurnKey {
+        self.identity.key()
+    }
+
+    pub fn turn_number(&self) -> TurnNumber {
+        self.identity.turn_number()
     }
 
     pub fn player_input(&self) -> &str {
@@ -773,8 +777,12 @@ impl TurnLlmCallScope<'_> {
         self.identity.story_id()
     }
 
-    pub fn turn_id(&self) -> &TurnId {
-        self.identity.turn_id()
+    pub fn turn_key(&self) -> &TurnKey {
+        self.identity.key()
+    }
+
+    pub fn turn_number(&self) -> TurnNumber {
+        self.identity.turn_number()
     }
 
     pub fn stage(&self) -> TurnStage {

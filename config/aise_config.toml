@@ -117,7 +117,6 @@ recent_segments_for_signals = 2
 max_context_gaps = 8
 max_character_think_requests = 8
 max_goal_bytes = 512
-max_query_bytes = 512
 max_reason_bytes = 256
 max_entities_per_request = 8
 max_topics_per_request = 8

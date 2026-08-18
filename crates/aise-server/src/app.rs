@@ -5,7 +5,7 @@ use aise::character::CharacterThinkPipeline;
 use aise::context::{
     BaselineContextBuilder, ContextRetrievalPipeline, EntityCandidateRetriever, TopicCandidateRetriever,
 };
-use aise::engine::{SystemClock, UuidIdGenerator};
+use aise::engine::SystemClock;
 use aise::llm::{LlmGateway, LlmProvider, OpenAiCompatProvider};
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::knowledge_read_port::KnowledgeReadPort;
@@ -96,15 +96,8 @@ pub async fn build_services(
         .build()?;
     let runtime = TurnRuntime::new(pipeline_set);
 
-    let engine = AiseEngine::new(
-        runtime,
-        store.clone(),
-        coordinator,
-        config.aise.clone(),
-        Arc::new(UuidIdGenerator),
-        Arc::new(SystemClock),
-    )
-    .with_trace_sink(trace_sink);
+    let engine = AiseEngine::new(runtime, store.clone(), coordinator, config.aise.clone(), Arc::new(SystemClock))
+        .with_trace_sink(trace_sink);
 
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&config.aise.storage.database_url)
         .await

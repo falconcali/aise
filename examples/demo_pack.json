@@ -59,7 +59,7 @@
     "facts": {
       "lodge_is_remote": {
         "content": "木屋位于人迹罕至的密林深处。",
-        "retrieval_hint": "木屋地理位置：位于密林深处，人迹罕至",
+        "retrieval_hint": "木屋地理位置",
         "salience": 5
       }
     },

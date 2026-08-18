@@ -41,6 +41,7 @@ pub enum AssetValidationCode {
     ArchiveMimeForbidden,
     ArchiveSizeExceeded,
     ArchiveRatioExceeded,
+    RetrievalHintRequired,
 }
 
 impl AssetValidationCode {
@@ -72,6 +73,7 @@ impl AssetValidationCode {
             AssetValidationCode::ArchiveMimeForbidden => "archive_mime_forbidden",
             AssetValidationCode::ArchiveSizeExceeded => "archive_size_exceeded",
             AssetValidationCode::ArchiveRatioExceeded => "archive_ratio_exceeded",
+            AssetValidationCode::RetrievalHintRequired => "retrieval_hint_required",
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::domain::asset::ids::NarrativeNodeKey;
-use crate::domain::ids::TurnId;
+use crate::domain::ids::TurnNumber;
 use crate::domain::narrative_graph::condition::NarrativeNodeState;
 use crate::domain::narrative_graph::effect::{NarrativeEffectDefinition, NarrativeEffectId, NarrativeTransitionKind};
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ pub struct PendingNarrativeEffect {
     pub source_node: NarrativeNodeKey,
     pub source_transition: NarrativeTransitionKind,
     pub source_graph_revision: u64,
-    pub created_by_turn: Option<TurnId>,
+    pub created_by_turn: Option<TurnNumber>,
     pub effect_index: u32,
     pub expires_after_turn: Option<u64>,
     pub definition: NarrativeEffectDefinition,
@@ -23,7 +23,7 @@ pub struct PendingNarrativeEffect {
 pub struct NarrativeRuntimeState {
     pub graph_revision: u64,
     pub node_states: BTreeMap<NarrativeNodeKey, NarrativeNodeState>,
-    pub activation_turns: BTreeMap<NarrativeNodeKey, TurnId>,
+    pub activation_turns: BTreeMap<NarrativeNodeKey, TurnNumber>,
     pub pending_effects: BTreeMap<NarrativeEffectId, PendingNarrativeEffect>,
 }
 

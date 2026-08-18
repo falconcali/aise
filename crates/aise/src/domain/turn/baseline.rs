@@ -10,7 +10,6 @@ use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::role::{RoleController, StoryRoleState, StoryRoleView};
 use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::planning::RetrievalIndexScope;
 use crate::domain::turn::retrieval::RetrievalSignals;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -99,14 +98,13 @@ pub struct NarrativeGraphStateIndex {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BaselineContext {
+    pub story_title: BoundedText,
     pub story_profile: StoryProfile,
     pub instance_settings: InstanceSettings,
     pub player_role: RoleContextView,
     pub relevant_roles: Vec<RoleContextView>,
     pub relevant_world_knowledge: RelevantWorldKnowledge,
-    pub role_index_scope: RetrievalIndexScope,
     pub role_index: Vec<RoleIndexEntry>,
-    pub knowledge_index_scope: RetrievalIndexScope,
     pub knowledge_index: Vec<KnowledgeIndexEntry>,
     pub story_continuity: StoryContinuity,
     pub active_story_constraints: Vec<ActiveStoryConstraint>,
@@ -117,6 +115,7 @@ pub struct BaselineContext {
 impl BaselineContext {
     pub fn estimate_tokens(&self) -> u64 {
         let mut total = self.story_continuity.estimate_tokens();
+        total = total.saturating_add(estimate_text_tokens(self.story_title.as_str()));
         total = total.saturating_add(estimate_text_tokens(self.player_role.profile.name.as_str()));
         for role in &self.relevant_roles {
             total = total.saturating_add(estimate_text_tokens(role.profile.name.as_str()));

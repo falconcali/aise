@@ -1,4 +1,4 @@
-use crate::domain::ids::TurnId;
+use crate::domain::ids::TurnNumber;
 use crate::turn::turn_contract::CommittedTurnResult;
 use crate::turn::turn_pipeline::TurnStage;
 use crate::turn::turn_trace::TurnTrace;
@@ -8,12 +8,12 @@ use thiserror::Error;
 #[derive(Debug, Clone)]
 pub enum TurnEvent {
     StageStarted {
-        turn_id: TurnId,
+        turn_number: Option<TurnNumber>,
         stage: TurnStage,
     },
 
     ValidationCompleted {
-        turn_id: TurnId,
+        turn_number: Option<TurnNumber>,
         attempt: u32,
         decision: crate::turn::turn_validation::ValidationDecision,
         issue_codes: Vec<crate::turn::turn_validation::ValidationIssueCode>,
@@ -25,36 +25,35 @@ pub enum TurnEvent {
     },
 
     Failed {
-        turn_id: TurnId,
+        turn_number: Option<TurnNumber>,
         code: &'static str,
     },
 
     Cancelled {
-        turn_id: TurnId,
+        turn_number: Option<TurnNumber>,
         code: &'static str,
     },
 
     Conflict {
-        turn_id: TurnId,
+        turn_number: Option<TurnNumber>,
         code: &'static str,
     },
 
     TraceCompleted {
-        turn_id: TurnId,
         trace: TurnTrace,
     },
 }
 
 impl TurnEvent {
-    pub fn turn_id(&self) -> Option<&TurnId> {
+    pub fn turn_number(&self) -> Option<TurnNumber> {
         match self {
-            TurnEvent::StageStarted { turn_id, .. } => Some(turn_id),
-            TurnEvent::ValidationCompleted { turn_id, .. } => Some(turn_id),
-            TurnEvent::Committed { .. } => None,
-            TurnEvent::Failed { turn_id, .. } => Some(turn_id),
-            TurnEvent::Cancelled { turn_id, .. } => Some(turn_id),
-            TurnEvent::Conflict { turn_id, .. } => Some(turn_id),
-            TurnEvent::TraceCompleted { turn_id, .. } => Some(turn_id),
+            TurnEvent::StageStarted { turn_number, .. } => *turn_number,
+            TurnEvent::ValidationCompleted { turn_number, .. } => *turn_number,
+            TurnEvent::Committed { result, .. } => Some(result.turn_number),
+            TurnEvent::Failed { turn_number, .. } => *turn_number,
+            TurnEvent::Cancelled { turn_number, .. } => *turn_number,
+            TurnEvent::Conflict { turn_number, .. } => *turn_number,
+            TurnEvent::TraceCompleted { trace } => trace.turn_number,
         }
     }
 
@@ -104,29 +103,35 @@ impl TurnEvent {
     fn payload(&self) -> serde_json::Value {
         use serde_json::json;
         match self {
-            TurnEvent::StageStarted { turn_id, stage } => {
-                json!({ "turn_id": turn_id.as_str(), "stage": stage.as_str() })
+            TurnEvent::StageStarted { turn_number, stage } => {
+                json!({ "turn_number": turn_number.map(TurnNumber::get), "stage": stage.as_str() })
             }
             TurnEvent::ValidationCompleted {
-                turn_id,
+                turn_number,
                 attempt,
                 decision,
                 issue_codes,
             } => json!({
-                "turn_id": turn_id.as_str(),
+                "turn_number": turn_number.map(TurnNumber::get),
                 "attempt": attempt,
                 "decision": decision.as_str(),
                 "issue_codes": issue_codes.iter().map(|code| code.as_str()).collect::<Vec<_>>(),
             }),
             TurnEvent::Committed { result, replayed } => json!({
-                "turn_id": result.turn_id.as_str(),
+                "turn_number": result.turn_number.get(),
                 "story_revision": result.story_revision.get(),
                 "replayed": replayed,
             }),
-            TurnEvent::Failed { turn_id, code } => json!({ "turn_id": turn_id.as_str(), "code": code }),
-            TurnEvent::Cancelled { turn_id, code } => json!({ "turn_id": turn_id.as_str(), "code": code }),
-            TurnEvent::Conflict { turn_id, code } => json!({ "turn_id": turn_id.as_str(), "code": code }),
-            TurnEvent::TraceCompleted { trace, .. } => serde_json::to_value(trace).unwrap_or(serde_json::Value::Null),
+            TurnEvent::Failed { turn_number, code } => {
+                json!({ "turn_number": turn_number.map(TurnNumber::get), "code": code })
+            }
+            TurnEvent::Cancelled { turn_number, code } => {
+                json!({ "turn_number": turn_number.map(TurnNumber::get), "code": code })
+            }
+            TurnEvent::Conflict { turn_number, code } => {
+                json!({ "turn_number": turn_number.map(TurnNumber::get), "code": code })
+            }
+            TurnEvent::TraceCompleted { trace } => serde_json::to_value(trace).unwrap_or(serde_json::Value::Null),
         }
     }
 }

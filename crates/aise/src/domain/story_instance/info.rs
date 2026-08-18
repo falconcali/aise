@@ -6,4 +6,5 @@ pub struct StoryInfo {
     pub story_id: StoryId,
     pub created_at_ms: i64,
     pub base_revision: StoryRevision,
+    pub last_committed_turn_number: u64,
 }

@@ -220,7 +220,6 @@ async fn character_fact_request_is_rejected_before_store_lookup() {
             "village",
         ))],
         topics: Vec::new(),
-        query_text: None,
         reason: aise::domain::asset::validation::BoundedText::try_new("x", "r", 32).unwrap(),
         origin: aise::domain::turn::RetrievalRequestOrigin::Planner,
         signal_priority: 0,

@@ -4,7 +4,7 @@ use crate::domain::narrative_graph::projector::{NarrativeProjectionInput, Narrat
 use crate::domain::narrative_graph::state_view::CommittedNarrativeStateView;
 use crate::llm::gateway::LlmGateway;
 use crate::planning::error::PlanningError;
-use crate::planning::planner_output::PlannerOutput;
+use crate::planning::planner_output::WriterPlannerOutputDto;
 use crate::planning::retrieval_plan_builder::RetrievalPlanBuilder;
 use crate::planning::writer_planner_prompt::WriterPlannerPromptContextProjector;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
@@ -72,7 +72,7 @@ impl TurnExecutionPipeline for WriterPlanner {
         let narrative_payload = match &projection_result {
             Ok(projection) => serde_json::json!({
                 "story_id": ctx.story_id(),
-                "turn_id": ctx.turn_id(),
+                "turn_number": ctx.turn_number().get(),
                 "graph_revision": snapshot.graph_revision(),
                 "active_node_count": projection.plan.active_nodes.len(),
                 "condition_query_count": projection.condition_queries.len(),
@@ -82,7 +82,7 @@ impl TurnExecutionPipeline for WriterPlanner {
             }),
             Err(_) => serde_json::json!({
                 "story_id": ctx.story_id(),
-                "turn_id": ctx.turn_id(),
+                "turn_number": ctx.turn_number().get(),
                 "graph_revision": snapshot.graph_revision(),
                 "active_node_count": 0,
                 "condition_query_count": 0,
@@ -98,7 +98,7 @@ impl TurnExecutionPipeline for WriterPlanner {
         let player_input = BoundedText::try_new(
             ctx.player_input().to_owned(),
             "player_input",
-            self.config.max_query_bytes.max(4096),
+            crate::turn::turn_contract::MAX_PLAYER_INPUT_CHARS,
         )
         .map_err(|_| map_planning_error(PlanningError::LimitExceeded { limit: "player_input" }))?;
         let projection = WriterPlannerPromptContextProjector
@@ -154,7 +154,7 @@ impl TurnExecutionPipeline for WriterPlanner {
                     error.to_string(),
                 )
             })?;
-        let planner_output: PlannerOutput = serde_json::from_str(&completion.text)
+        let planner_output: WriterPlannerOutputDto = serde_json::from_str(&completion.text)
             .map_err(|_| map_planning_error(PlanningError::InvalidOutput { code: "invalid_json" }))?;
         let plan = self
             .plan_builder

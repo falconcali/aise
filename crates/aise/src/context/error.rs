@@ -21,6 +21,12 @@ pub enum ContextError {
     CandidateLimitExceeded,
     #[error("retrieved context budget exceeded: {limit}")]
     RetrievedBudgetExceeded { limit: &'static str },
+    #[error("index limit exceeded: {index} actual {actual} maximum {maximum}")]
+    IndexLimitExceeded {
+        index: &'static str,
+        actual: usize,
+        maximum: usize,
+    },
     #[error("knowledge read failed")]
     Store(#[from] StoreError),
 }
@@ -37,6 +43,7 @@ impl ContextError {
             ContextError::InvalidRecord { .. } => "retrieval_record_invalid",
             ContextError::CandidateLimitExceeded => "retrieval_candidate_limit",
             ContextError::RetrievedBudgetExceeded { .. } => "retrieval_context_limit",
+            ContextError::IndexLimitExceeded { .. } => "context_index_limit_exceeded",
             ContextError::Store(StoreError::RevisionConflict) => "retrieval_snapshot_conflict",
             ContextError::Store(_) => "store_error",
         }

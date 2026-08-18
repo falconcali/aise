@@ -129,7 +129,7 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
         let context = RetrievedContext::try_new(world, characters, limits).map_err(map_retrieved_context_error)?;
         let payload = serde_json::json!({
             "story_id": ctx.story_id(),
-            "turn_id": ctx.turn_id(),
+            "turn_number": ctx.turn_number().get(),
             "base_revision": snapshot.base_revision().get(),
             "character_request_count": plan.retrieval_plan.character_requests.len(),
             "knowledge_request_count": plan.retrieval_plan.knowledge_requests.len(),

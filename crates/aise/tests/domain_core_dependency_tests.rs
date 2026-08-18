@@ -1,5 +1,5 @@
 use aise::domain::error::DomainInputError;
-use aise::domain::ids::{ConstraintId, StoryId, StoryRevision, TurnId};
+use aise::domain::ids::{ConstraintId, StoryId, StoryRevision, TurnKey, TurnNumber, TurnNumberError};
 use aise::turn::turn_contract::{
     IdempotencyKey, MAX_IDEMPOTENCY_KEY_CHARS, MAX_PLAYER_INPUT_CHARS, TurnIdentity, TurnRequest, TurnRequestError,
 };
@@ -16,13 +16,14 @@ fn story_id_rejects_empty_and_blank() {
 }
 
 #[test]
-fn turn_id_rejects_empty_and_blank() {
-    let empty = TurnId::try_new("").unwrap_err();
-    assert_eq!(empty, DomainInputError::EmptyTurnId);
-    assert_eq!(empty.to_string(), "turn_id must not be empty");
-    let blank = TurnId::try_new("   ").unwrap_err();
-    assert_eq!(blank, DomainInputError::EmptyTurnId);
-    assert_eq!(blank.to_string(), "turn_id must not be empty");
+fn turn_number_rejects_zero_and_out_of_range() {
+    let zero = TurnNumber::try_new(0).unwrap_err();
+    assert_eq!(zero, TurnNumberError::Zero);
+    let overflow = TurnNumber::try_new(u64::MAX).unwrap_err();
+    assert_eq!(overflow, TurnNumberError::ExceedsSqliteRange);
+    let ok = TurnNumber::try_new(1).unwrap();
+    assert_eq!(ok.get(), 1);
+    assert_eq!(ok.checked_next().unwrap().get(), 2);
 }
 
 #[test]
@@ -38,19 +39,19 @@ fn constraint_id_rejects_empty_and_blank() {
 #[test]
 fn domain_ids_preserve_string_serde_shape() {
     let story_id = StoryId::try_new("story-1").unwrap();
-    let turn_id = TurnId::try_new("turn-1").unwrap();
+    let turn_number = TurnNumber::try_new(1).unwrap();
     let constraint_id = ConstraintId::try_new("c-1").unwrap();
     assert_eq!(serde_json::to_string(&story_id).unwrap(), "\"story-1\"");
-    assert_eq!(serde_json::to_string(&turn_id).unwrap(), "\"turn-1\"");
+    assert_eq!(serde_json::to_string(&turn_number).unwrap(), "1");
     assert_eq!(serde_json::to_string(&constraint_id).unwrap(), "\"c-1\"");
     let story_round_trip: StoryId = serde_json::from_str("\"story-1\"").unwrap();
-    let turn_round_trip: TurnId = serde_json::from_str("\"turn-1\"").unwrap();
+    let turn_round_trip: TurnNumber = serde_json::from_str("1").unwrap();
     let constraint_round_trip: ConstraintId = serde_json::from_str("\"c-1\"").unwrap();
     assert_eq!(story_round_trip, story_id);
-    assert_eq!(turn_round_trip, turn_id);
+    assert_eq!(turn_round_trip, turn_number);
     assert_eq!(constraint_round_trip, constraint_id);
     assert!(serde_json::from_str::<StoryId>("\"\"").is_err());
-    assert!(serde_json::from_str::<TurnId>("\"   \"").is_err());
+    assert!(serde_json::from_str::<TurnNumber>("0").is_err());
     assert!(serde_json::from_str::<ConstraintId>("\"\"").is_err());
 }
 
@@ -126,11 +127,10 @@ fn turn_request_errors_are_request_scoped() {
 #[test]
 fn turn_identity_constructor_is_infallible() {
     let identity: TurnIdentity = TurnIdentity::new(
-        StoryId::try_new("story-1").unwrap(),
-        TurnId::try_new("turn-1").unwrap(),
+        TurnKey::new(StoryId::try_new("story-1").unwrap(), TurnNumber::try_new(1).unwrap()),
         IdempotencyKey::try_new("key-1".to_string()).unwrap(),
         1000,
     );
     assert_eq!(identity.story_id().as_str(), "story-1");
-    assert_eq!(identity.turn_id().as_str(), "turn-1");
+    assert_eq!(identity.turn_number().get(), 1);
 }

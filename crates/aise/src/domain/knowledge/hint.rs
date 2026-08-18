@@ -1,4 +1,4 @@
-use crate::domain::asset::validation::{AssetValidationError, BoundedText};
+use crate::domain::asset::validation::{AssetValidationCode, AssetValidationError, BoundedText};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -53,6 +53,25 @@ impl std::fmt::Display for RetrievalHint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.0.as_str())
     }
+}
+
+pub fn normalize_static_retrieval_hint(
+    content: &BoundedText,
+    configured: Option<RetrievalHint>,
+) -> Result<RetrievalHint, AssetValidationError> {
+    if let Some(hint) = configured {
+        return Ok(hint);
+    }
+    if content.as_str().len() <= RetrievalHint::MAX_BYTES {
+        return RetrievalHint::try_new(content.as_str()).map_err(|_| AssetValidationError::Invalid {
+            code: AssetValidationCode::RetrievalHintRequired,
+            path: "retrieval_hint".to_owned(),
+        });
+    }
+    Err(AssetValidationError::Invalid {
+        code: AssetValidationCode::RetrievalHintRequired,
+        path: "retrieval_hint".to_owned(),
+    })
 }
 
 #[cfg(test)]

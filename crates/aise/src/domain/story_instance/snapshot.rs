@@ -2,7 +2,7 @@ use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
 use crate::domain::asset::ids::{FactKey, Sha256Digest, TopicKey};
 use crate::domain::asset::story_pack::StoryProfile;
-use crate::domain::asset::validation::ScalarValue;
+use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::asset::world_book::TopicDefinition;
 use crate::domain::ids::{RoleId, StoryId, StoryRevision};
 use crate::domain::knowledge::KnowledgeIdHighWater;
@@ -33,6 +33,7 @@ pub struct StoryReadSnapshot {
     story_id: StoryId,
     base_revision: StoryRevision,
     pack: FrozenStoryPackRef,
+    story_title: BoundedText,
     story_profile: StoryProfile,
     instance_settings: InstanceSettings,
     roles: BTreeMap<RoleId, StoryRoleView>,
@@ -53,6 +54,7 @@ pub struct StoryReadSnapshotParts {
     pub story_id: StoryId,
     pub base_revision: StoryRevision,
     pub pack: FrozenStoryPackRef,
+    pub story_title: BoundedText,
     pub story_profile: StoryProfile,
     pub instance_settings: InstanceSettings,
     pub roles: BTreeMap<RoleId, StoryRoleView>,
@@ -73,6 +75,7 @@ impl StoryReadSnapshot {
             story_id,
             base_revision,
             pack,
+            story_title,
             story_profile,
             instance_settings,
             roles,
@@ -158,6 +161,7 @@ impl StoryReadSnapshot {
             story_id,
             base_revision,
             pack,
+            story_title,
             story_profile,
             instance_settings,
             roles,
@@ -184,6 +188,10 @@ impl StoryReadSnapshot {
 
     pub fn pack(&self) -> &FrozenStoryPackRef {
         &self.pack
+    }
+
+    pub fn story_title(&self) -> &BoundedText {
+        &self.story_title
     }
 
     pub fn story_profile(&self) -> &StoryProfile {

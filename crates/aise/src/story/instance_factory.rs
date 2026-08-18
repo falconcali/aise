@@ -452,7 +452,13 @@ fn materialize_knowledge(
             key: Some(key.clone()),
             text: seed.content.clone(),
             proposition,
-            retrieval_hint: seed.retrieval_hint.clone(),
+            retrieval_hint: crate::domain::knowledge::normalize_static_retrieval_hint(
+                &seed.content,
+                seed.retrieval_hint.clone(),
+            )
+            .map_err(|_| StoryInstantiationError::InvalidReference {
+                code: "retrieval_hint_required",
+            })?,
             entities: canonical(seed.entities.clone()),
             topics: canonical(seed.topics.clone()),
             salience: seed.salience,
@@ -478,7 +484,13 @@ fn materialize_knowledge(
             key: Some(key.clone()),
             content: seed.content.clone(),
             claim,
-            retrieval_hint: seed.retrieval_hint.clone(),
+            retrieval_hint: crate::domain::knowledge::normalize_static_retrieval_hint(
+                &seed.content,
+                seed.retrieval_hint.clone(),
+            )
+            .map_err(|_| StoryInstantiationError::InvalidReference {
+                code: "retrieval_hint_required",
+            })?,
             entities: canonical(seed.entities.clone()),
             topics: canonical(seed.topics.clone()),
             salience: seed.salience,

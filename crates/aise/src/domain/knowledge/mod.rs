@@ -8,7 +8,7 @@ pub mod rumor;
 pub use crate::domain::error::KnowledgeIdError;
 pub use entry::{KnowledgeEntity, KnowledgeEntry};
 pub use fact::{Proposition, WorldFact};
-pub use hint::{RetrievalHint, RetrievalHintError};
+pub use hint::{RetrievalHint, RetrievalHintError, normalize_static_retrieval_hint};
 pub use memory::MemoryEntry;
 pub use query::{
     KnowledgeIdAllocation, KnowledgeIdHighWater, KnowledgeIndexMatch, KnowledgeKind, KnowledgeSequence,
