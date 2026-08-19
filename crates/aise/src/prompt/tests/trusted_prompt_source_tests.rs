@@ -26,7 +26,7 @@ fn packaged_writer_planner_composes_exact_three_layers() {
         ),
         ("narrative_direction".into(), Value::String("None.".into())),
         ("active_story_constraints".into(), Value::String("None.".into())),
-        ("player_input".into(), Value::String(runtime_value.into())),
+        ("player_contribution".into(), Value::String(runtime_value.into())),
     ]));
     let fti_vars = TrustedPromptVars::new(HashMap::new());
     let composition = source
@@ -61,7 +61,7 @@ fn writer_planner_runtime_context_uses_canonical_section_order() {
         "knowledge_index",
         "narrative_direction",
         "active_story_constraints",
-        "player_input",
+        "player_contribution",
     ];
     let rc_vars = RuntimePromptVars::new(
         names
@@ -90,14 +90,14 @@ fn writer_planner_runtime_context_uses_canonical_section_order() {
         "## Knowledge Index",
         "## Narrative Direction",
         "## Active Story Constraints",
-        "## Player Input",
+        "## Pending Player Contribution",
     ];
     let positions = headings
         .iter()
         .map(|heading| rc.find(heading).expect("required heading"))
         .collect::<Vec<_>>();
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-    assert!(rc.ends_with("player_input"));
+    assert!(rc.ends_with("player_contribution"));
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn packaged_character_think_composes_exact_three_layers() {
         "recent_story",
         "narrative_character_impulses",
         "thinking_focus",
-        "player_input",
+        "player_contribution",
     ];
     let rc_vars = RuntimePromptVars::new(
         names
@@ -144,7 +144,7 @@ fn character_think_runtime_context_uses_canonical_section_order() {
         "recent_story",
         "narrative_character_impulses",
         "thinking_focus",
-        "player_input",
+        "player_contribution",
     ];
     let rc_vars = RuntimePromptVars::new(
         names
@@ -168,14 +168,14 @@ fn character_think_runtime_context_uses_canonical_section_order() {
         "### Recent Story",
         "## Narrative Character Impulses",
         "## Thinking Focus",
-        "## Player Input",
+        "## Pending Player Contribution",
     ];
     let positions = headings
         .iter()
         .map(|heading| rc.find(heading).expect("required heading"))
         .collect::<Vec<_>>();
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-    assert!(rc.ends_with("player_input"));
+    assert!(rc.ends_with("player_contribution"));
     assert!(!rc.contains("Current Perception"));
 }
 
@@ -195,7 +195,7 @@ fn packaged_story_repairer_composes_exact_three_layers() {
         "narrative_direction",
         "relevant_knowledge",
         "character_decisions",
-        "player_input",
+        "player_contribution",
         "previous_story_text",
         "validation_issues",
     ];

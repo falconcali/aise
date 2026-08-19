@@ -5,7 +5,7 @@ Create the Writer Plan for the next story segment using the Runtime Context.
 
 ## MUST
 
-- Set `story_goal` to the immediate narrative transition the next story segment should make.
+- Set `story_goal` to the immediate narrative transition, including both the in-story realization of Pending Player Contribution and the immediate causal response or progress that follows it.
 - Request only context not already provided in the Runtime Context that could materially affect that transition.
 - For a writer-side context need, add one entry to `writer_context_gaps` with the exact indexed `target_id` from the Character Index or Knowledge Index. For a character-scoped context need, add one entry to `character_context_gaps` with the exact Role ID (`role_id`) and the exact indexed `target_id`. Emit a gap only when a suitable indexed target exists; never invent a target or use content text as an ID.
 - Pair every entry in `character_context_gaps` with a Character Think request for the same exact Role ID (`role_id`), and request Character Think only for existing AI-controlled Roles whose private decisions could materially affect that transition.
@@ -13,7 +13,7 @@ Create the Writer Plan for the next story segment using the Runtime Context.
 
 ## NEVER
 
-- Treat Player Input as a guaranteed outcome or invent additional player behavior.
+- Treat Pending Player Contribution as already present in Story Continuity, skip its in-story realization, guarantee an attempted outcome, invent additional player behavior, convert a requested external outcome into Player Character behavior, or make the causal response confirm or imply a private Player Character thought without independent grounding.
 - Invent facts, character knowledge, IDs, or index entries.
 - Generate the story segment itself.
 

@@ -98,7 +98,7 @@ pub enum SpanPayload {
 pub struct TurnData {
     pub story_id: String,
     pub turn_number: Option<TurnNumber>,
-    pub player_input: String,
+    pub player_contribution: String,
     pub status: String,
     pub error: Option<String>,
 }

@@ -17,7 +17,7 @@ slots:
       - { name: narrative_direction, var_type: string, required: true }
       - { name: relevant_knowledge, var_type: string, required: true }
       - { name: character_decisions, var_type: string, required: true }
-      - { name: player_input, var_type: string, required: true }
+      - { name: player_contribution, var_type: string, required: true }
       - { name: previous_story_text, var_type: string, required: true }
       - { name: validation_issues, var_type: string, required: true }
   - slot_id: context.story_repairer.fti
@@ -41,7 +41,7 @@ slots:
       - { name: knowledge_index, var_type: string, required: true }
       - { name: narrative_direction, var_type: string, required: true }
       - { name: active_story_constraints, var_type: string, required: true }
-      - { name: player_input, var_type: string, required: true }
+      - { name: player_contribution, var_type: string, required: true }
   - slot_id: context.writer_planner.fti
     allowed_kinds: [text]
     required: false
@@ -58,7 +58,7 @@ slots:
       - { name: recent_story, var_type: string, required: true }
       - { name: narrative_character_impulses, var_type: string, required: true }
       - { name: thinking_focus, var_type: string, required: true }
-      - { name: player_input, var_type: string, required: true }
+      - { name: player_contribution, var_type: string, required: true }
   - slot_id: context.character_think.fti
     allowed_kinds: [text]
     required: false
@@ -80,7 +80,7 @@ slots:
       - { name: narrative_direction, var_type: string, required: true }
       - { name: relevant_knowledge, var_type: string, required: true }
       - { name: character_decisions, var_type: string, required: true }
-      - { name: player_input, var_type: string, required: true }
+      - { name: player_contribution, var_type: string, required: true }
   - slot_id: context.story_generator.fti
     allowed_kinds: [text]
     required: false

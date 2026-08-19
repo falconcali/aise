@@ -1,7 +1,12 @@
-use crate::domain::ids::{StoryId, TurnKey, TurnNumber};
+use crate::domain::asset::ids::Sha256Digest;
+use crate::domain::ids::{RoleIdHighWater, StoryId, TurnKey, TurnNumber};
+use crate::domain::knowledge::KnowledgeIdHighWater;
 use crate::domain::narrative_graph::projector::NarrativeProjection;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
-use crate::domain::turn::{BaselineContext, CharacterDecision, RetrievedContext, RetrievedContextLimits, WriterPlan};
+use crate::domain::turn::{
+    BaselineContext, CharacterDecision, RetrievedContext, RetrievedContextLimits, StoryCandidateVersion,
+    ValidatedNarrativeResolution, WriterPlan,
+};
 use crate::domain::turn::{StoryGeneratorOutput, StoryStateExtractionDto, StoryStateExtractionEnvelope};
 use crate::turn::turn_budget::{CorrectionKind, TurnBudget};
 use crate::turn::turn_contract::{
@@ -10,7 +15,10 @@ use crate::turn::turn_contract::{
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::TurnStage;
 use crate::turn::turn_trace::{PendingSpan, TraceRecorder};
-use crate::turn::turn_validation::{BoundedValidationIssues, ValidatedChangeSet, ValidationDecision, ValidationResult};
+use crate::turn::turn_validation::{
+    BoundedValidationIssues, StateChange, ValidatedChangeSet, ValidatedChangeSetParts, ValidationDecision,
+    ValidationResult,
+};
 use serde::Serialize;
 use std::time::Instant;
 
@@ -84,6 +92,46 @@ impl TurnExecutionContext {
         })
     }
 
+    pub fn set_pahse(&mut self, phase: TurnPhase) {
+        if self.phase != phase {
+            self.phase = phase;
+        }
+    }
+
+    pub fn construct_changeset(&mut self) -> Result<(), TurnExecutionError> {
+        let story = self.story.as_ref().ok_or_else(|| {
+            TurnExecutionError::new(
+                TurnFailureKind::InvariantViolation,
+                "missing_story_text",
+                Some(TurnStage::StoryGenerator),
+                "story text is required before constructing the change set",
+            )
+        })?;
+        let parts = ValidatedChangeSetParts {
+            story_text: story.story_text.clone(),
+            new_roles: Vec::new(),
+            role_changes: Vec::new(),
+            relationship_operations: Vec::new(),
+            knowledge_mutations: Vec::new(),
+            knowledge_id_high_water: KnowledgeIdHighWater::zero(),
+            next_role_id_high_water: RoleIdHighWater::zero(),
+            narrative_events: Vec::new(),
+            narrative_resolution: ValidatedNarrativeResolution {
+                candidate_version: StoryCandidateVersion {
+                    content_digest: Sha256Digest::from_bytes([0u8; 32]),
+                    repair_attempt: 0,
+                },
+                transitions: Vec::new(),
+                condition_results: std::collections::BTreeMap::new(),
+                pending_effects: Vec::new(),
+                next_graph_revision: 0,
+            },
+            constraint_change: StateChange::Unchanged,
+        };
+        self.change_set = Some(ValidatedChangeSet::new(parts)?);
+        Ok(())
+    }
+
     pub fn phase(&self) -> TurnPhase {
         self.phase
     }
@@ -124,8 +172,8 @@ impl TurnExecutionContext {
         self.identity.turn_number()
     }
 
-    pub fn player_input(&self) -> &str {
-        self.request.player_input()
+    pub fn player_contribution(&self) -> &str {
+        self.request.player_contribution()
     }
 
     pub fn baseline(&self) -> Option<&BaselineContext> {

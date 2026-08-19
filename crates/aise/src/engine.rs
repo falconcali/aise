@@ -194,7 +194,7 @@ impl AiseEngine {
 
         let turn_number = ctx.turn_number();
         let story_id_owned = ctx.story_id().clone();
-        let player_input = truncate(ctx.player_input(), MAX_LLM_CONTENT_CHARS);
+        let player_contribution = truncate(ctx.player_contribution(), MAX_LLM_CONTENT_CHARS);
         let (status, error) = match &runtime_outcome {
             Ok(()) => ("ok", None),
             Err(e) => ("error", Some(e.to_string())),
@@ -204,7 +204,7 @@ impl AiseEngine {
             &SpanPayload::Turn(TurnData {
                 story_id: story_id_owned.to_string(),
                 turn_number: Some(turn_number),
-                player_input,
+                player_contribution,
                 status: status.to_owned(),
                 error,
             }),

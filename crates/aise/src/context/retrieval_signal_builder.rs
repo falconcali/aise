@@ -18,14 +18,18 @@ impl RetrievalSignalBuilder {
         }
     }
 
-    pub fn build(&self, snapshot: &StoryReadSnapshot, player_input: &str) -> Result<RetrievalSignals, ContextError> {
+    pub fn build(
+        &self,
+        snapshot: &StoryReadSnapshot,
+        player_contribution: &str,
+    ) -> Result<RetrievalSignals, ContextError> {
         let mut entities = Vec::new();
         let mut topics = Vec::new();
 
         self.push_text_matches(
-            player_input,
+            player_contribution,
             snapshot,
-            RetrievalSignalOrigin::PlayerInput,
+            RetrievalSignalOrigin::PlayerContribution,
             0,
             &mut entities,
             &mut topics,
@@ -161,3 +165,7 @@ fn entity_match_text(entity: &KnowledgeEntity) -> String {
         KnowledgeEntity::Event(key) => key.as_str().to_owned(),
     }
 }
+
+#[cfg(test)]
+#[path = "tests/retrieval_signal_builder_tests.rs"]
+mod tests;

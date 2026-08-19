@@ -1,5 +1,5 @@
-use crate::runtime::turn_pipeline_set::TurnPipelineSet;
-use crate::turn::turn_budget::CorrectionKind;
+﻿use crate::runtime::turn_pipeline_set::TurnPipelineSet;
+//use crate::turn::turn_budget::CorrectionKind;
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::TurnPhase;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
@@ -41,41 +41,44 @@ impl TurnRuntime {
         ctx.complete_context_preparation()?;
         self.execute(self.pipeline_set.story_generator(), ctx, sink).await?;
 
-        loop {
-            if matches!(ctx.phase(), TurnPhase::StoryReady | TurnPhase::StateReextractionRequired) {
-                self.execute(self.pipeline_set.story_state_extractor(), ctx, sink).await?;
-            }
-            if ctx.phase() == TurnPhase::CandidateReady {
-                self.execute(self.pipeline_set.validation(), ctx, sink).await?;
-                let decision = ctx.validation_decision()?;
-                let issue_codes = ctx
-                    .validation()
-                    .map(|result| result.issues().iter().map(|issue| issue.code).collect::<Vec<_>>())
-                    .unwrap_or_default();
-                let _ = sink.emit(TurnEvent::ValidationCompleted {
-                    turn_number: Some(ctx.turn_number()),
-                    attempt: ctx.budget().correction_rounds().saturating_add(1),
-                    decision,
-                    issue_codes,
-                });
-            }
-            match ctx.phase() {
-                TurnPhase::ReadyToCommit => break,
-                TurnPhase::Failed => {
-                    return Err(ctx.validation_rejected_error().unwrap_or_else(|error| error));
-                }
-                TurnPhase::StoryRepairRequired => {
-                    ctx.consume_correction_round(CorrectionKind::StoryRepair)?;
-                    self.execute(self.pipeline_set.story_repairer(), ctx, sink).await?;
-                }
-                TurnPhase::StateReextractionRequired => {
-                    ctx.consume_correction_round(CorrectionKind::StateReextraction)?;
-                }
-                other => {
-                    return Err(invariant(format!("unexpected turn phase in correction loop: {other:?}")));
-                }
-            }
-        }
+        // loop {
+        //     if matches!(ctx.phase(), TurnPhase::StoryReady | TurnPhase::StateReextractionRequired) {
+        //         self.execute(self.pipeline_set.story_state_extractor(), ctx, sink).await?;
+        //     }
+        //     if ctx.phase() == TurnPhase::CandidateReady {
+        //         self.execute(self.pipeline_set.validation(), ctx, sink).await?;
+        //         let decision = ctx.validation_decision()?;
+        //         let issue_codes = ctx
+        //             .validation()
+        //             .map(|result| result.issues().iter().map(|issue| issue.code).collect::<Vec<_>>())
+        //             .unwrap_or_default();
+        //         let _ = sink.emit(TurnEvent::ValidationCompleted {
+        //             turn_number: Some(ctx.turn_number()),
+        //             attempt: ctx.budget().correction_rounds().saturating_add(1),
+        //             decision,
+        //             issue_codes,
+        //         });
+        //     }
+        //     match ctx.phase() {
+        //         TurnPhase::ReadyToCommit => break,
+        //         TurnPhase::Failed => {
+        //             return Err(ctx.validation_rejected_error().unwrap_or_else(|error| error));
+        //         }
+        //         TurnPhase::StoryRepairRequired => {
+        //             ctx.consume_correction_round(CorrectionKind::StoryRepair)?;
+        //             self.execute(self.pipeline_set.story_repairer(), ctx, sink).await?;
+        //         }
+        //         TurnPhase::StateReextractionRequired => {
+        //             ctx.consume_correction_round(CorrectionKind::StateReextraction)?;
+        //         }
+        //         other => {
+        //             return Err(invariant(format!("unexpected turn phase in correction loop: {other:?}")));
+        //         }
+        //     }
+        // }
+
+        ctx.set_pahse(TurnPhase::ReadyToCommit); // TODO : Debug Code
+        ctx.construct_changeset()?; // TODO : Debug Code
 
         self.execute(self.pipeline_set.committer(), ctx, sink).await?;
         ctx.committed_result()

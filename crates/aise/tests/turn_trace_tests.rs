@@ -1,5 +1,7 @@
 use aise::domain::ids::{StoryId, TurnNumber};
-use aise::turn::turn_trace::{TraceId, TraceRecorder, TraceSpan, TraceSpanSink, TurnTrace, truncate};
+use aise::turn::turn_trace::{
+    SpanPayload, TraceId, TraceRecorder, TraceSpan, TraceSpanSink, TurnData, TurnTrace, truncate,
+};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -103,4 +105,18 @@ fn truncates_long_text() {
     assert!(cut.starts_with(&"a".repeat(1000)));
     assert!(cut.ends_with("…[+2000 chars]"));
     assert_eq!(truncate("short", 1000), "short");
+}
+
+#[test]
+fn turn_trace_serializes_player_contribution_only() {
+    let payload = SpanPayload::Turn(TurnData {
+        story_id: "story-1".into(),
+        turn_number: Some(TurnNumber::try_new(1).unwrap()),
+        player_contribution: truncate(&"你".repeat(3000), 1000),
+        status: "ok".into(),
+        error: None,
+    });
+    let json = serde_json::to_value(payload).unwrap();
+    assert!(json["player_contribution"].as_str().unwrap().ends_with("…[+2000 chars]"));
+    assert!(json.get(["player", "input"].join("_")).is_none());
 }

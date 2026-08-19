@@ -453,13 +453,13 @@ impl Store for SqliteStore {
         .await?;
 
         sqlx::query(
-            "INSERT INTO story_turns (story_id, turn_number, player_input, story_text, status, created_at, \
+            "INSERT INTO story_turns (story_id, turn_number, player_contribution, story_text, status, created_at, \
              idempotency_key, request_digest, base_revision, committed_revision, result_json, sequence) \
              VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(commit.story_id.as_str())
         .bind(commit.turn.number.get() as i64)
-        .bind(&commit.turn.player_input)
+        .bind(&commit.turn.player_contribution)
         .bind(commit.changes.story_text())
         .bind(commit.turn.created_at)
         .bind(commit.idempotency_key.as_str())

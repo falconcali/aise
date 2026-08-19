@@ -163,13 +163,26 @@ fn story_repairer_assets_have_required_rule_counts() {
     let csi = include_str!("../../../assets/prompts/context-v2/csi/story-repairer.md.j2");
     let fti = include_str!("../../../assets/prompts/context-v2/fti/story-repairer.md.j2");
 
-    assert_eq!(section_item_count(csi, "## MUST", "## SHOULD"), 8);
+    assert_eq!(section_item_count(csi, "## MUST", "## SHOULD"), 10);
     assert_eq!(section_item_count(csi, "## SHOULD", "## NEVER"), 3);
     assert_eq!(section_item_count(csi, "## NEVER", "# Runtime Data Boundary"), 5);
     assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 5);
     assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
     assert!(!fti.contains("## SHOULD"));
     assert!(!fti.contains("{{ output_schema }}"));
+}
+
+#[test]
+fn story_repairer_assets_restore_omitted_contribution_components() {
+    let csi = include_str!("../../../assets/prompts/context-v2/csi/story-repairer.md.j2");
+    let fti = include_str!("../../../assets/prompts/context-v2/fti/story-repairer.md.j2");
+    assert!(csi.contains("same not-yet-committed source material used for the original generation"));
+    assert!(csi.contains(
+        "Preserve or restore the on-page realization of every explicitly supplied Player Character utterance, attempted action, and private thought"
+    ));
+    assert!(csi.contains("if Previous Story Text skipped a supplied component"));
+    assert!(csi.contains("never guarantee a requested external outcome"));
+    assert!(fti.contains("every supported component and the autonomy boundary of Pending Player Contribution"));
 }
 
 #[test]
@@ -189,7 +202,7 @@ fn story_repairer_runtime_context_has_exact_section_order() {
         "### Narrative Direction",
         "### Relevant Knowledge",
         "### AI Character Decisions",
-        "### Player Input",
+        "### Pending Player Contribution",
         "## Previous Story Text",
         "## Validation Issues",
     ];

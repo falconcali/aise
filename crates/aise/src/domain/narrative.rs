@@ -172,7 +172,7 @@ impl StoryContinuity {
 pub struct StoryTurn {
     pub number: TurnNumber,
     pub sequence: StorySequence,
-    pub player_input: String,
+    pub player_contribution: String,
     pub story_text: String,
     pub created_at: i64,
 }

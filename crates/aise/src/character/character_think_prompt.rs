@@ -23,7 +23,7 @@ pub struct CharacterThinkPromptContext {
     pub story_continuity: CharacterThinkStoryContinuityPromptView,
     pub narrative_character_impulses: Vec<CharacterThinkImpulsePromptView>,
     pub thinking_focus: BoundedText,
-    pub player_input: BoundedText,
+    pub player_contribution: BoundedText,
 }
 
 #[derive(Debug, Clone)]
@@ -131,9 +131,9 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
                 role_id: request.role_id.clone(),
             });
         }
-        let player_input = BoundedText::try_new(
-            ctx.player_input().to_owned(),
-            "player_input",
+        let player_contribution = BoundedText::try_new(
+            ctx.player_contribution().to_owned(),
+            "player_contribution",
             self.character_config.max_input_tokens.saturating_mul(4) as usize,
         )
         .map_err(|_| CharacterThinkProjectionError::InvalidPromptField)?;
@@ -199,7 +199,7 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
             story_continuity,
             narrative_character_impulses,
             thinking_focus: request.reason.clone(),
-            player_input,
+            player_contribution,
         };
         let mut rc_vars = render_runtime_vars(&context);
         while runtime_tokens(&rc_vars) > self.character_config.max_input_tokens
@@ -254,7 +254,10 @@ fn render_runtime_vars(context: &CharacterThinkPromptContext) -> RuntimePromptVa
             Value::String(render_impulses(&context.narrative_character_impulses)),
         ),
         ("thinking_focus".into(), Value::String(quoted(context.thinking_focus.as_str()))),
-        ("player_input".into(), Value::String(quoted(context.player_input.as_str()))),
+        (
+            "player_contribution".into(),
+            Value::String(quoted(context.player_contribution.as_str())),
+        ),
     ]))
 }
 

@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RetrievalSignalOrigin {
-    PlayerInput,
+    PlayerContribution,
     RoleState,
     Narrative,
     RecentStory,

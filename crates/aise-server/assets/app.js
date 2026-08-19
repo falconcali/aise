@@ -17,7 +17,7 @@ const roleListEl = $("role-list");
 const rolePickEl = $("role-pick");
 const backToPacksBtn = $("back-to-packs");
 const turnForm = $("turn-form");
-const playerInput = $("player-input");
+const playerContribution = $("player-contribution");
 const sendBtn = $("send-btn");
 const traceToggle = $("trace-toggle");
 const tabStory = $("tab-story");
@@ -364,9 +364,9 @@ async function openGame(session, initialStory = null) {
   resetTraceView();
   roleStateEl.innerHTML = `<p class="muted">加载中…</p>`;
   worldInfoEl.innerHTML = "";
-  playerInput.disabled = false;
+  playerContribution.disabled = false;
   sendBtn.disabled = false;
-  playerInput.focus();
+  playerContribution.focus();
   if (currentStory) {
     renderStory();
   }
@@ -400,9 +400,6 @@ function renderStory() {
     storyEl.textContent += `${story.opening.story_text}\n\n`;
   }
   for (const turn of story.turns || []) {
-    if (turn.player_input) {
-      storyEl.textContent += `\n你：${turn.player_input}\n\n`;
-    }
     storyEl.textContent += `${turn.story_text}\n\n`;
   }
   storyEl.scrollTop = storyEl.scrollHeight;
@@ -471,13 +468,11 @@ backToDetailBtn.onclick = () => {
 turnForm.onsubmit = async (e) => {
   e.preventDefault();
   if (!currentSession) return;
-  const input = playerInput.value.trim();
-  if (!input) return;
+  const contribution = playerContribution.value.trim();
+  if (!contribution) return;
 
-  playerInput.disabled = true;
+  playerContribution.disabled = true;
   sendBtn.disabled = true;
-  storyEl.textContent += `\n你：${input}\n\n`;
-  storyEl.scrollTop = storyEl.scrollHeight;
   const traceEnabled = traceToggle.checked;
   traceViewEl.innerHTML = traceEnabled
     ? '<div class="trace-empty">正在生成 Trace…</div>'
@@ -490,7 +485,7 @@ turnForm.onsubmit = async (e) => {
         "Content-Type": "application/json",
         "Idempotency-Key": crypto.randomUUID(),
       },
-      body: JSON.stringify({ player_input: input, include_trace: traceEnabled }),
+      body: JSON.stringify({ player_contribution: contribution, include_trace: traceEnabled }),
     });
     await consumeSse(res.body, {
       onStage: (stage) => console.debug("[stage]", stage),
@@ -521,10 +516,10 @@ turnForm.onsubmit = async (e) => {
       traceViewEl.innerHTML = '<div class="trace-empty">生成 Trace 失败，见上方错误信息</div>';
     }
   } finally {
-    playerInput.disabled = false;
+    playerContribution.disabled = false;
     sendBtn.disabled = false;
-    playerInput.value = "";
-    playerInput.focus();
+    playerContribution.value = "";
+    playerContribution.focus();
     if (traceEnabled && traceViewEl.querySelector(".trace-empty")?.textContent.includes("正在生成")) {
       traceViewEl.innerHTML = '<div class="trace-empty">未收到 Trace 数据（请求异常中断）</div>';
     }

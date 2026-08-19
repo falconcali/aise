@@ -159,7 +159,7 @@ fn commit_spec(
         turn: StoryTurn {
             number: turn_number,
             sequence: StorySequence::try_new(sequence).unwrap(),
-            player_input: "input".into(),
+            player_contribution: "input".into(),
             story_text: story_text.clone(),
             created_at: 1000 + sequence as i64,
         },

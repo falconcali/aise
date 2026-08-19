@@ -104,7 +104,7 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
         let pending = ctx.trace().begin_span("context.prepare", "context.prepare");
         let baseline_result = build_baseline(
             &snapshot,
-            ctx.player_input(),
+            ctx.player_contribution(),
             &self.signal_builder,
             &self.context_config,
             &self.retrieval_config,
@@ -143,7 +143,7 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
 
 async fn build_baseline(
     snapshot: &StoryReadSnapshot,
-    player_input: &str,
+    player_contribution: &str,
     signal_builder: &RetrievalSignalBuilder,
     context_config: &ContextPreparationConfig,
     retrieval_config: &RetrievalConfig,
@@ -155,7 +155,7 @@ async fn build_baseline(
             code: "missing_player_role",
         })?;
     let player_role = project_role_context(player_role_view);
-    let retrieval_signals = signal_builder.build(snapshot, player_input)?;
+    let retrieval_signals = signal_builder.build(snapshot, player_contribution)?;
     let relevant_roles = select_relevant_roles(snapshot, &retrieval_signals, context_config.max_relevant_roles);
     let selected: BTreeSet<RoleId> = std::iter::once(player_role.role_id.clone())
         .chain(relevant_roles.iter().map(|role| role.role_id.clone()))

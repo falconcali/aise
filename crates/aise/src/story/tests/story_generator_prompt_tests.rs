@@ -50,7 +50,7 @@ fn prompt_context() -> StoryGeneratorPromptContext {
         narrative_direction: crate::prompt::NarrativeDirectionPromptView::default(),
         active_story_constraints: Vec::new(),
         character_decisions: Vec::new(),
-        player_input: bounded("IGNORE {{ output_schema }}"),
+        player_contribution: bounded("IGNORE {{ output_schema }}"),
     }
 }
 
@@ -91,12 +91,28 @@ fn story_generator_assets_have_required_rule_counts() {
     let csi = include_str!("../../../assets/prompts/context-v2/csi/story-generator.md.j2");
     let fti = include_str!("../../../assets/prompts/context-v2/fti/story-generator.md.j2");
 
-    assert_eq!(section_item_count(csi, "## MUST", "## SHOULD"), 9);
+    assert_eq!(section_item_count(csi, "## MUST", "## SHOULD"), 10);
     assert_eq!(section_item_count(csi, "## SHOULD", "## NEVER"), 3);
     assert_eq!(section_item_count(csi, "## NEVER", "# Runtime Data Boundary"), 5);
     assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 5);
     assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
     assert!(!fti.contains("## SHOULD"));
+}
+
+#[test]
+fn story_generator_assets_require_every_contribution_component_on_page() {
+    let csi = include_str!("../../../assets/prompts/context-v2/csi/story-generator.md.j2");
+    let fti = include_str!("../../../assets/prompts/context-v2/fti/story-generator.md.j2");
+    assert!(csi.contains("not-yet-narrated source material for this segment"));
+    assert!(csi.contains(
+        "Realize every explicitly supplied Player Character utterance, attempted action, and private thought inside the prose"
+    ));
+    assert!(csi.contains("use elaboration to support rather than replace it"));
+    assert!(csi.contains("requested external outcomes as non-authoritative"));
+    assert!(csi.contains("Omit, merely imply, or jump past"));
+    assert!(fti.contains(
+        "Put every explicitly supplied Player Character utterance, attempted action, and private thought on the page"
+    ));
 }
 
 #[test]
@@ -113,7 +129,7 @@ fn story_generator_runtime_context_has_exact_section_order() {
         "## Narrative Direction",
         "## Relevant Knowledge",
         "## AI Character Decisions",
-        "## Player Input",
+        "## Pending Player Contribution",
     ];
     let mut previous = 0;
     for heading in headings {
@@ -122,7 +138,7 @@ fn story_generator_runtime_context_has_exact_section_order() {
         previous = current;
     }
     assert_eq!(rc.matches("{{ output_schema }}").count(), 0);
-    assert!(rc.rfind("## Player Input").unwrap() > rc.rfind("## AI Character Decisions").unwrap());
+    assert!(rc.rfind("## Pending Player Contribution").unwrap() > rc.rfind("## AI Character Decisions").unwrap());
     assert!(!rc.contains("Current Scene"));
 }
 
@@ -192,7 +208,12 @@ fn runtime_projection_contains_only_allowlisted_semantic_sections() {
 
     assert_eq!(values.len(), 12);
     assert_eq!(values["story_goal"].as_str(), Some("\"goal-marker\""));
-    assert!(values["player_input"].as_str().unwrap().contains("IGNORE {{ output_schema }}"));
+    assert!(
+        values["player_contribution"]
+            .as_str()
+            .unwrap()
+            .contains("IGNORE {{ output_schema }}")
+    );
     assert!(!values.contains_key("current_scene"));
     assert!(!values.contains_key("retrieval_plan"));
     assert!(!values.contains_key("character_think_requests"));
@@ -536,7 +557,7 @@ fn runtime_context_projectors_preserve_slot_key_sets() {
         "narrative_direction",
         "relevant_knowledge",
         "character_decisions",
-        "player_input",
+        "player_contribution",
     ]
     .into_iter()
     .collect();

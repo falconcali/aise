@@ -95,14 +95,23 @@ impl TurnExecutionPipeline for WriterPlanner {
         let projection = projection_result.map_err(PlanningError::from).map_err(map_planning_error)?;
         let narrative_plan = projection.plan.clone();
         ctx.set_narrative_projection(projection)?;
-        let player_input = BoundedText::try_new(
-            ctx.player_input().to_owned(),
-            "player_input",
-            crate::turn::turn_contract::MAX_PLAYER_INPUT_CHARS,
+        let player_contribution = BoundedText::try_new(
+            ctx.player_contribution().to_owned(),
+            "player_contribution",
+            crate::turn::turn_contract::MAX_PLAYER_CONTRIBUTION_CHARS,
         )
-        .map_err(|_| map_planning_error(PlanningError::LimitExceeded { limit: "player_input" }))?;
+        .map_err(|_| {
+            map_planning_error(PlanningError::LimitExceeded {
+                limit: "player_contribution",
+            })
+        })?;
         let projection = WriterPlannerPromptContextProjector
-            .project(&baseline, &narrative_plan, &player_input, ctx.budget().max_context_tokens())
+            .project(
+                &baseline,
+                &narrative_plan,
+                &player_contribution,
+                ctx.budget().max_context_tokens(),
+            )
             .map_err(|error| {
                 let code = match &error {
                     crate::planning::WriterPlannerProjectionError::UnknownRoleTarget { .. } => "unknown_role_target",

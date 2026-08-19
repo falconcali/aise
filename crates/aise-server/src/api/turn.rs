@@ -30,7 +30,7 @@ pub async fn run_turn(
     let story_id = session.story_id.clone();
     let include_trace = req.include_trace;
 
-    aise::turn::turn_contract::TurnRequest::try_new(req.player_input.clone())
+    aise::turn::turn_contract::TurnRequest::try_new(req.player_contribution.clone())
         .map_err(|error| ApiError::BadRequest(error.to_string()))?;
 
     let idempotency_key = headers
@@ -48,7 +48,7 @@ pub async fn run_turn(
     let spec = ExecuteTurnSpec {
         story_id,
         idempotency_key,
-        player_input: req.player_input,
+        player_contribution: req.player_contribution,
         cancellation: cancellation.clone(),
     };
 

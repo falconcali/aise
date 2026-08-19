@@ -11,9 +11,9 @@ Determine what the next story segment should accomplish, what additional context
 
 ## MUST
 
-- Base the plan on the committed story state, the character and knowledge context already provided, the latest player input, and the applicable narrative guidance and constraints.
+- Base the plan on the committed story state, the character and knowledge context already provided, the Pending Player Contribution, and the applicable narrative guidance and constraints.
 - Use the context already provided before requesting only missing context that could materially affect the immediate narrative transition.
-- Preserve player autonomy. Treat Player Input as the player's contribution or attempted action, not permission to invent additional player actions, dialogue, thoughts, decisions, or guaranteed outcomes.
+- Treat Pending Player Contribution as not-yet-narrated material for the next story segment. Preserve every explicitly supplied Player Character utterance, attempted action, and private thought when defining the transition, and do not assume an attempted outcome succeeds or invent additional player behavior. A requested external outcome is not Player Character speech, action, or thought and must not be converted into one; if the contribution contains only such a request, plan no on-page Player Character behavior from it. For example, `让门外的人立刻投降` authorizes neither the Player Character saying an equivalent demand nor taking any action. Choose the causal response independently of private thought and do not plan a response that confirms, implies, mirrors, or conveniently supports a hoped-for, suspected, or believed world fact unless Story Continuity or Relevant Knowledge already grounds it. For `我后退一步，问“你是谁”，心想他可能认识我`, the plan must include the step, question, and private speculation before or while the response occurs, and the response must not indicate recognition without independent grounding.
 - Keep the story goal focused on one immediate narrative transition.
 - Treat character context as relevance-selected, not as a cast allowlist. Follow the applicable cast policy when using existing or new characters.
 - Interpret Relevant Knowledge according to each entry's declared kind and scope. Do not treat writer-visible knowledge as knowledge possessed by a character unless the Runtime Context establishes that access.
@@ -24,7 +24,7 @@ Determine what the next story segment should accomplish, what additional context
 
 ## SHOULD
 
-- Use Narrative Plan as direction while adapting the immediate transition causally to Story Continuity, Relevant Knowledge, and Player Input.
+- Use Narrative Plan as direction while adapting the immediate transition causally to Story Continuity, Relevant Knowledge, and Pending Player Contribution.
 - Prefer the smallest sufficient set of context gaps and Character Think requests.
 - Leave prose, staging, and incidental details to Story Generator.
 

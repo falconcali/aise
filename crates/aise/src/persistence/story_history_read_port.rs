@@ -14,7 +14,7 @@ pub struct StoryHistoryQuery {
 pub struct StoryTurnView {
     pub turn_number: TurnNumber,
     pub sequence: StorySequence,
-    pub player_input: String,
+    pub player_contribution: String,
     pub story_text: String,
     pub created_at: i64,
 }
@@ -37,7 +37,7 @@ pub struct StoryHistoryPage {
 pub struct StoryHistoryConfig {
     pub default_page_size: usize,
     pub max_page_size: usize,
-    pub max_player_input_bytes: usize,
+    pub max_player_contribution_bytes: usize,
     pub max_story_text_bytes: usize,
 }
 
@@ -46,7 +46,7 @@ impl Default for StoryHistoryConfig {
         Self {
             default_page_size: 20,
             max_page_size: 100,
-            max_player_input_bytes: 16 * 1024,
+            max_player_contribution_bytes: 16 * 1024,
             max_story_text_bytes: 64 * 1024,
         }
     }
@@ -56,7 +56,7 @@ impl StoryHistoryConfig {
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.default_page_size == 0
             || self.max_page_size == 0
-            || self.max_player_input_bytes == 0
+            || self.max_player_contribution_bytes == 0
             || self.max_story_text_bytes == 0
             || self.default_page_size > self.max_page_size
         {

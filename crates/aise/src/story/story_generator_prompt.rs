@@ -33,7 +33,7 @@ pub struct StoryGeneratorPromptContext {
     pub narrative_direction: NarrativeDirectionPromptView,
     pub active_story_constraints: Vec<ActiveStoryConstraintPromptView>,
     pub character_decisions: Vec<StoryGeneratorCharacterDecisionPromptView>,
-    pub player_input: BoundedText,
+    pub player_contribution: BoundedText,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -102,8 +102,8 @@ pub enum StoryGeneratorProjectionError {
     MissingBaseline,
     #[error("story generator writer plan is missing")]
     MissingWriterPlan,
-    #[error("story generator player input is invalid")]
-    InvalidPlayerInput,
+    #[error("story generator player contribution is invalid")]
+    InvalidPlayerContribution,
     #[error("story generator character decision role is unknown: {role_id}")]
     UnknownDecisionRole { role_id: RoleId },
     #[error("story generator character decision targets player role: {role_id}")]
@@ -140,8 +140,12 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
     ) -> Result<StoryGeneratorPromptProjection, StoryGeneratorProjectionError> {
         let baseline = ctx.baseline().ok_or(StoryGeneratorProjectionError::MissingBaseline)?;
         let plan = ctx.plan().ok_or(StoryGeneratorProjectionError::MissingWriterPlan)?;
-        let player_input = BoundedText::try_new(ctx.player_input().to_owned(), "player_input", 4096)
-            .map_err(|_| StoryGeneratorProjectionError::InvalidPlayerInput)?;
+        let player_contribution = BoundedText::try_new(
+            ctx.player_contribution().to_owned(),
+            "player_contribution",
+            crate::turn::turn_contract::MAX_PLAYER_CONTRIBUTION_CHARS,
+        )
+        .map_err(|_| StoryGeneratorProjectionError::InvalidPlayerContribution)?;
         let player_role = project_role(
             &baseline.player_role,
             &self.config,
@@ -181,7 +185,7 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
             narrative_direction,
             active_story_constraints,
             character_decisions,
-            player_input,
+            player_contribution,
         };
         let rc_vars = prune_dialogue_examples_to_budget(&mut context, ctx.budget().max_context_tokens(), 0)?;
         let fti_vars = TrustedPromptVars::new(HashMap::new());
@@ -369,7 +373,10 @@ pub(crate) fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> Runt
             "character_decisions".into(),
             Value::String(render_decisions(&context.character_decisions)),
         ),
-        ("player_input".into(), Value::String(quoted(context.player_input.as_str()))),
+        (
+            "player_contribution".into(),
+            Value::String(quoted(context.player_contribution.as_str())),
+        ),
     ]))
 }
 

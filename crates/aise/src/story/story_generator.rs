@@ -193,7 +193,7 @@ fn map_projection_error(error: StoryGeneratorProjectionError) -> TurnExecutionEr
     let code = match error {
         StoryGeneratorProjectionError::MissingBaseline => "missing_baseline",
         StoryGeneratorProjectionError::MissingWriterPlan => "missing_writer_plan",
-        StoryGeneratorProjectionError::InvalidPlayerInput => "invalid_player_input",
+        StoryGeneratorProjectionError::InvalidPlayerContribution => "invalid_player_contribution",
         StoryGeneratorProjectionError::UnknownDecisionRole { .. } => "unknown_decision_role",
         StoryGeneratorProjectionError::PlayerRoleDecision { .. } => "player_role_decision",
         StoryGeneratorProjectionError::DuplicateRoleDecision { .. } => "duplicate_role_decision",

@@ -7,7 +7,7 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-pub const MAX_PLAYER_INPUT_CHARS: usize = 4096;
+pub const MAX_PLAYER_CONTRIBUTION_CHARS: usize = 4096;
 pub const MAX_IDEMPOTENCY_KEY_CHARS: usize = 128;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -16,10 +16,10 @@ pub enum TurnRequestError {
     EmptyIdempotencyKey,
     #[error("idempotency key is {actual} chars, maximum {maximum}")]
     IdempotencyKeyTooLong { actual: usize, maximum: usize },
-    #[error("player input must not be empty")]
-    EmptyPlayerInput,
-    #[error("player input is {actual} chars, maximum {maximum}")]
-    PlayerInputTooLong { actual: usize, maximum: usize },
+    #[error("player contribution must not be empty")]
+    EmptyPlayerContribution,
+    #[error("player contribution is {actual} chars, maximum {maximum}")]
+    PlayerContributionTooLong { actual: usize, maximum: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -56,9 +56,9 @@ impl fmt::Display for IdempotencyKey {
 pub struct RequestDigest(String);
 
 impl RequestDigest {
-    fn from_canonical_input(input: &str) -> Self {
+    fn from_canonical_contribution(contribution: &str) -> Self {
         let mut hasher = Sha256::new();
-        hasher.update(input.as_bytes());
+        hasher.update(contribution.as_bytes());
         let hex = hasher.finalize().iter().fold(String::new(), |mut out, byte| {
             use std::fmt::Write;
             let _ = write!(out, "{byte:02x}");
@@ -115,32 +115,32 @@ impl TurnIdentity {
 
 #[derive(Debug, Clone)]
 pub struct TurnRequest {
-    player_input: String,
+    player_contribution: String,
     request_digest: RequestDigest,
 }
 
 impl TurnRequest {
-    pub fn try_new(player_input: String) -> Result<Self, TurnRequestError> {
-        let normalized = player_input.trim().to_string();
+    pub fn try_new(player_contribution: String) -> Result<Self, TurnRequestError> {
+        let normalized = player_contribution.trim().to_string();
         let char_count = normalized.chars().count();
         if char_count == 0 {
-            return Err(TurnRequestError::EmptyPlayerInput);
+            return Err(TurnRequestError::EmptyPlayerContribution);
         }
-        if char_count > MAX_PLAYER_INPUT_CHARS {
-            return Err(TurnRequestError::PlayerInputTooLong {
+        if char_count > MAX_PLAYER_CONTRIBUTION_CHARS {
+            return Err(TurnRequestError::PlayerContributionTooLong {
                 actual: char_count,
-                maximum: MAX_PLAYER_INPUT_CHARS,
+                maximum: MAX_PLAYER_CONTRIBUTION_CHARS,
             });
         }
-        let request_digest = RequestDigest::from_canonical_input(&normalized);
+        let request_digest = RequestDigest::from_canonical_contribution(&normalized);
         Ok(Self {
-            player_input: normalized,
+            player_contribution: normalized,
             request_digest,
         })
     }
 
-    pub fn player_input(&self) -> &str {
-        &self.player_input
+    pub fn player_contribution(&self) -> &str {
+        &self.player_contribution
     }
 
     pub fn request_digest(&self) -> &RequestDigest {
@@ -152,7 +152,7 @@ impl TurnRequest {
 pub struct ExecuteTurnSpec {
     pub story_id: StoryId,
     pub idempotency_key: IdempotencyKey,
-    pub player_input: String,
+    pub player_contribution: String,
     pub cancellation: TurnCancellation,
 }
 
@@ -188,7 +188,7 @@ impl ValidatedExecuteTurnSpec {
 
 impl ExecuteTurnSpec {
     pub fn try_into_validated(self) -> Result<ValidatedExecuteTurnSpec, TurnRequestError> {
-        let request = TurnRequest::try_new(self.player_input)?;
+        let request = TurnRequest::try_new(self.player_contribution)?;
         Ok(ValidatedExecuteTurnSpec {
             story_id: self.story_id,
             idempotency_key: self.idempotency_key,

@@ -8,7 +8,7 @@ pub struct CreateSessionRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct TurnRequest {
-    pub player_input: String,
+    pub player_contribution: String,
     #[serde(default)]
     pub include_trace: bool,
 }

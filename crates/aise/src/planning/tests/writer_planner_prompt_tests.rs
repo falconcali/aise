@@ -94,6 +94,20 @@ fn writer_planner_assets_preserve_required_rule_counts() {
     assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
 }
 
+#[test]
+fn writer_planner_assets_require_contribution_realization_and_response() {
+    let csi = include_str!("../../../assets/prompts/context-v2/csi/writer-planner.md.j2");
+    let fti = include_str!("../../../assets/prompts/context-v2/fti/writer-planner.md.j2");
+    assert!(csi.contains("not-yet-narrated material for the next story segment"));
+    assert!(
+        csi.contains("every explicitly supplied Player Character utterance, attempted action, and private thought")
+    );
+    assert!(fti.contains(
+        "including both the in-story realization of Pending Player Contribution and the immediate causal response or progress that follows it"
+    ));
+    assert!(fti.contains("skip its in-story realization"));
+}
+
 fn section_item_count(text: &str, start: &str, end: &str) -> usize {
     let section = text.split_once(start).unwrap().1.split_once(end).unwrap().0;
     section.lines().filter(|line| line.starts_with("- ")).count()
@@ -161,9 +175,9 @@ fn writer_planner_prompt_uses_relevant_characters_without_presence() {
         character_impulses: Vec::new(),
         effect_dispositions: Vec::new(),
     };
-    let player_input = bounded("go north");
+    let player_contribution = bounded("go north");
     let projection = projector
-        .project(&baseline, &narrative_plan, &player_input, 100_000)
+        .project(&baseline, &narrative_plan, &player_contribution, 100_000)
         .expect("writer planner projection");
 
     let vars = projection.rc_vars.as_map();
@@ -197,9 +211,9 @@ fn writer_planner_indexed_targets_cover_role_and_knowledge_index_entries() {
         character_impulses: Vec::new(),
         effect_dispositions: Vec::new(),
     };
-    let player_input = bounded("go north");
+    let player_contribution = bounded("go north");
     let projection = projector
-        .project(&baseline, &narrative_plan, &player_input, 100_000)
+        .project(&baseline, &narrative_plan, &player_contribution, 100_000)
         .expect("writer planner projection");
 
     assert!(matches!(
@@ -297,9 +311,9 @@ fn writer_planner_renders_story_continuity_as_prose() {
         character_impulses: Vec::new(),
         effect_dispositions: Vec::new(),
     };
-    let player_input = bounded("go north");
+    let player_contribution = bounded("go north");
     let projection = projector
-        .project(&baseline, &narrative_plan, &player_input, 100_000)
+        .project(&baseline, &narrative_plan, &player_contribution, 100_000)
         .expect("writer planner projection");
     let vars = projection.rc_vars.as_map();
     assert_eq!(vars["story_summary"].as_str().unwrap(), "summary-one");

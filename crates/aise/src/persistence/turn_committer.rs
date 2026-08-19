@@ -90,7 +90,7 @@ impl TurnExecutionPipeline for TurnCommitter {
                         "failed to assign next story sequence",
                     )
                 })?,
-                player_input: ctx.player_input().to_string(),
+                player_contribution: ctx.player_contribution().to_string(),
                 story_text,
                 created_at,
             },

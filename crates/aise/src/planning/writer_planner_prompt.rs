@@ -58,7 +58,7 @@ impl WriterPlannerPromptContextProjector {
         &self,
         baseline: &BaselineContext,
         narrative_plan: &NarrativePlan,
-        player_input: &BoundedText,
+        player_contribution: &BoundedText,
         max_input_tokens: u64,
     ) -> Result<WriterPlannerPromptProjection, WriterPlannerProjectionError> {
         let mut indexed_targets = BTreeMap::new();
@@ -126,7 +126,10 @@ impl WriterPlannerPromptContextProjector {
                 Value::String(render_narrative_direction(&narrative_direction)),
             ),
             ("active_story_constraints".into(), Value::String(render_constraints(baseline))),
-            ("player_input".into(), Value::String(render_data(player_input.as_str()))),
+            (
+                "player_contribution".into(),
+                Value::String(render_data(player_contribution.as_str())),
+            ),
         ]);
         let fti_vars: HashMap<String, Value> = HashMap::new();
         let input_tokens = rc_vars

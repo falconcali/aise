@@ -1,7 +1,8 @@
 use aise::domain::error::DomainInputError;
 use aise::domain::ids::{ConstraintId, StoryId, StoryRevision, TurnKey, TurnNumber, TurnNumberError};
 use aise::turn::turn_contract::{
-    IdempotencyKey, MAX_IDEMPOTENCY_KEY_CHARS, MAX_PLAYER_INPUT_CHARS, TurnIdentity, TurnRequest, TurnRequestError,
+    IdempotencyKey, MAX_IDEMPOTENCY_KEY_CHARS, MAX_PLAYER_CONTRIBUTION_CHARS, TurnIdentity, TurnRequest,
+    TurnRequestError,
 };
 use aise::turn::turn_trace::{TraceId, TraceIdError};
 
@@ -110,18 +111,34 @@ fn turn_request_errors_are_request_scoped() {
             maximum: MAX_IDEMPOTENCY_KEY_CHARS,
         }
     );
-    let input_error = TurnRequest::try_new(String::new()).unwrap_err();
-    assert_eq!(input_error, TurnRequestError::EmptyPlayerInput);
-    assert_eq!(input_error.to_string(), "player input must not be empty");
-    let long_input = "x".repeat(MAX_PLAYER_INPUT_CHARS + 1);
-    let input_error = TurnRequest::try_new(long_input).unwrap_err();
+    let contribution_error = TurnRequest::try_new(String::new()).unwrap_err();
+    assert_eq!(contribution_error, TurnRequestError::EmptyPlayerContribution);
+    assert_eq!(contribution_error.to_string(), "player contribution must not be empty");
+    let long_contribution = "x".repeat(MAX_PLAYER_CONTRIBUTION_CHARS + 1);
+    let contribution_error = TurnRequest::try_new(long_contribution).unwrap_err();
     assert_eq!(
-        input_error,
-        TurnRequestError::PlayerInputTooLong {
-            actual: MAX_PLAYER_INPUT_CHARS + 1,
-            maximum: MAX_PLAYER_INPUT_CHARS,
+        contribution_error,
+        TurnRequestError::PlayerContributionTooLong {
+            actual: MAX_PLAYER_CONTRIBUTION_CHARS + 1,
+            maximum: MAX_PLAYER_CONTRIBUTION_CHARS,
         }
     );
+    assert_eq!(
+        contribution_error.to_string(),
+        format!(
+            "player contribution is {} chars, maximum {}",
+            MAX_PLAYER_CONTRIBUTION_CHARS + 1,
+            MAX_PLAYER_CONTRIBUTION_CHARS
+        )
+    );
+}
+
+#[test]
+fn turn_request_normalizes_contribution_once_and_digests_normalized_bytes() {
+    let normalized = TurnRequest::try_new("你是谁".into()).unwrap();
+    let padded = TurnRequest::try_new("  你是谁  ".into()).unwrap();
+    assert_eq!(padded.player_contribution(), "你是谁");
+    assert_eq!(padded.request_digest(), normalized.request_digest());
 }
 
 #[test]
