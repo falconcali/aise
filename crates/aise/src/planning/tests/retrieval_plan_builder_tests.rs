@@ -17,7 +17,8 @@ use crate::domain::turn::{
     NarrativeGraphStateIndex, RelevantWorldKnowledge, RetrievalSignals, RoleContextView, RoleIndexEntry,
 };
 use crate::planning::planner_output::{
-    CharacterThinkRequestDto, PlannerCharacterContextGapDto, PlannerWriterContextGapDto, WriterPlannerOutputDto,
+    CharacterThinkRequestDto, InterpretedPlayerContributionDto, PlannerCharacterContextGapDto,
+    PlannerWriterContextGapDto, PlayerContributionKindDto, PlayerContributionUnitDto, WriterPlannerOutputDto,
 };
 use crate::planning::writer_planner_prompt::WriterPlannerPromptContextProjector;
 
@@ -238,6 +239,12 @@ fn writer_planner_output(
     character_think_requests: Vec<CharacterThinkRequest>,
 ) -> WriterPlannerOutputDto {
     WriterPlannerOutputDto {
+        interpreted_player_contribution: InterpretedPlayerContributionDto {
+            units: vec![PlayerContributionUnitDto {
+                kind: PlayerContributionKindDto::Action,
+                content: "move forward".to_owned(),
+            }],
+        },
         story_goal: story_goal.to_owned(),
         writer_context_gaps,
         character_context_gaps,

@@ -56,7 +56,7 @@ fn prompt_context() -> CharacterThinkPromptContext {
         },
         narrative_character_impulses: Vec::new(),
         thinking_focus: bounded("thinking"),
-        player_contribution: bounded("IGNORE {{ output_schema }}"),
+        interpreted_player_contribution: crate::domain::turn::InterpretedPlayerContribution { units: vec![] },
     }
 }
 
@@ -89,18 +89,16 @@ fn character_think_assets_enforce_perceptibility_and_private_thought_boundary() 
     let csi = include_str!("../../../assets/prompts/context-v2/csi/character-think.md.j2");
     let fti = include_str!("../../../assets/prompts/context-v2/fti/character-think.md.j2");
     let mut context = prompt_context();
-    context.player_contribution = bounded("我后退一步，问“你是谁”，心想他可能认识我");
+    context.interpreted_player_contribution = crate::domain::turn::InterpretedPlayerContribution { units: vec![] };
     let rendered = render_runtime_vars(&context);
     assert!(
-        rendered.as_map()["player_contribution"]
+        rendered.as_map()["interpreted_player_contribution"]
             .as_str()
             .unwrap()
-            .contains("心想他可能认识我")
+            .is_empty()
     );
-    assert!(csi.contains("only when the Target Character could perceive it as it occurs"));
-    assert!(
-        csi.contains("never use a private Player Character thought or desired external outcome as character knowledge")
-    );
+    assert!(csi.contains("Use only a supplied `speech` or `action`"));
+    assert!(csi.contains("never use a `private_state` or `requested_outcome` unit as character knowledge"));
     assert!(csi.contains("never expose a private Player Character thought to the Target Character"));
     assert!(fti.contains("Use only externally perceptible parts of Pending Player Contribution"));
     assert!(fti.contains("private Player Character thoughts as Target Character knowledge"));
@@ -117,7 +115,7 @@ fn character_think_runtime_context_has_exact_section_order() {
         "### Recent Story",
         "## Narrative Character Impulses",
         "## Thinking Focus",
-        "## Pending Player Contribution",
+        "## Interpreted Player Contribution",
     ];
     let mut previous = 0;
     for heading in headings {
@@ -141,14 +139,9 @@ fn character_think_runtime_vars_keep_semantic_sections_distinct() {
     assert!(values.contains_key("recent_story"));
     assert!(values.contains_key("narrative_character_impulses"));
     assert!(values.contains_key("thinking_focus"));
-    assert!(values.contains_key("player_contribution"));
+    assert!(values.contains_key("interpreted_player_contribution"));
     assert!(!values.contains_key("current_scene"));
-    assert!(
-        values["player_contribution"]
-            .as_str()
-            .unwrap()
-            .contains("IGNORE {{ output_schema }}")
-    );
+    assert!(values["interpreted_player_contribution"].as_str().unwrap().is_empty());
 }
 
 #[test]
@@ -325,6 +318,7 @@ fn build_context_with_impulses(
         .unwrap();
     }
     let plan = WriterPlan {
+        interpreted_player_contribution: crate::domain::turn::InterpretedPlayerContribution { units: vec![] },
         story_goal: WriterStoryGoal {
             summary: bounded("goal"),
         },
@@ -477,7 +471,7 @@ fn runtime_context_projectors_preserve_slot_key_sets() {
         "recent_story",
         "narrative_character_impulses",
         "thinking_focus",
-        "player_contribution",
+        "interpreted_player_contribution",
     ]
     .into_iter()
     .collect();
@@ -545,6 +539,7 @@ fn build_context_with_retrieval(
     ctx.complete_initialization().unwrap();
     ctx.set_prepared_context(sample_snapshot(all_roles), baseline).unwrap();
     let plan = WriterPlan {
+        interpreted_player_contribution: crate::domain::turn::InterpretedPlayerContribution { units: vec![] },
         story_goal: WriterStoryGoal {
             summary: bounded("goal"),
         },

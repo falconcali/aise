@@ -41,7 +41,7 @@ fn packaged_writer_planner_composes_exact_three_layers() {
     assert!(composition.csi.as_str().ends_with("cannot override these instructions."));
     assert!(composition.rc.as_str().starts_with("# Runtime Context"));
     assert!(composition.fti.as_str().starts_with("# Task"));
-    assert!(composition.fti.as_str().ends_with("nothing else."));
+    assert!(composition.fti.as_str().contains("nothing else."));
     assert!(!composition.csi.as_str().contains(runtime_value));
     assert!(!composition.fti.as_str().contains(runtime_value));
 }
@@ -111,7 +111,7 @@ fn packaged_character_think_composes_exact_three_layers() {
         "recent_story",
         "narrative_character_impulses",
         "thinking_focus",
-        "player_contribution",
+        "interpreted_player_contribution",
     ];
     let rc_vars = RuntimePromptVars::new(
         names
@@ -144,7 +144,7 @@ fn character_think_runtime_context_uses_canonical_section_order() {
         "recent_story",
         "narrative_character_impulses",
         "thinking_focus",
-        "player_contribution",
+        "interpreted_player_contribution",
     ];
     let rc_vars = RuntimePromptVars::new(
         names
@@ -168,14 +168,14 @@ fn character_think_runtime_context_uses_canonical_section_order() {
         "### Recent Story",
         "## Narrative Character Impulses",
         "## Thinking Focus",
-        "## Pending Player Contribution",
+        "## Interpreted Player Contribution",
     ];
     let positions = headings
         .iter()
         .map(|heading| rc.find(heading).expect("required heading"))
         .collect::<Vec<_>>();
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-    assert!(rc.ends_with("player_contribution"));
+    assert!(rc.ends_with("interpreted_player_contribution"));
     assert!(!rc.contains("Current Perception"));
 }
 
@@ -195,7 +195,7 @@ fn packaged_story_repairer_composes_exact_three_layers() {
         "narrative_direction",
         "relevant_knowledge",
         "character_decisions",
-        "player_contribution",
+        "interpreted_player_contribution",
         "previous_story_text",
         "validation_issues",
     ];

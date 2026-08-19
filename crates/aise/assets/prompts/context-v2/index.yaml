@@ -22,7 +22,7 @@ assets:
   - asset_id: context-v2/writer-planner-fti
     kind: text
     source_path: fti/writer-planner.md.j2
-    output_contract_ref: writer_planner_output.v1
+    output_contract_ref: writer_planner_output.v2
     status: active
   - asset_id: context-v2/character-think-csi
     kind: text

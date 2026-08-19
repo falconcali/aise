@@ -102,8 +102,31 @@ pub struct WriterStoryGoal {
     pub summary: BoundedText,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayerContributionKind {
+    Speech,
+    Action,
+    PrivateState,
+    RequestedOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayerContributionUnit {
+    pub kind: PlayerContributionKind,
+    pub content: BoundedText,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InterpretedPlayerContribution {
+    pub units: Vec<PlayerContributionUnit>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct WriterPlan {
+    pub interpreted_player_contribution: InterpretedPlayerContribution,
     pub story_goal: WriterStoryGoal,
     pub retrieval_plan: RetrievalPlan,
     pub character_think_requests: Vec<CharacterThinkRequest>,

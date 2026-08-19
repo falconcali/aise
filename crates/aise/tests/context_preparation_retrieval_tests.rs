@@ -7,8 +7,8 @@ use aise::domain::ids::RoleId;
 use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::text::estimate_text_tokens;
 use aise::domain::turn::{
-    CandidateRetrieverKind, CharacterThinkRequest, KnowledgeDelivery, KnowledgeRetrievalRequest, RetrievalPlan,
-    RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
+    CandidateRetrieverKind, CharacterThinkRequest, InterpretedPlayerContribution, KnowledgeDelivery,
+    KnowledgeRetrievalRequest, RetrievalPlan, RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
 };
 use aise::planning::planner_output::WriterPlannerOutputDto;
 use aise::planning::retrieval_plan_builder::RetrievalPlanBuilder;
@@ -89,6 +89,7 @@ fn planner_cannot_replace_narrative_plan_or_constraints() {
 #[test]
 fn automatic_requests_run_when_planner_gaps_are_empty() {
     let plan = WriterPlan {
+        interpreted_player_contribution: InterpretedPlayerContribution { units: vec![] },
         story_goal: WriterStoryGoal {
             summary: BoundedText::try_new("goal", "goal", 64).unwrap(),
         },
@@ -162,6 +163,7 @@ fn context_and_llm_accounting_share_one_token_estimator() {
 #[test]
 fn retrieval_and_character_think_are_enabled_from_plan_collections() {
     let empty = WriterPlan {
+        interpreted_player_contribution: InterpretedPlayerContribution { units: vec![] },
         story_goal: WriterStoryGoal {
             summary: BoundedText::try_new("goal", "goal", 64).unwrap(),
         },
@@ -171,6 +173,7 @@ fn retrieval_and_character_think_are_enabled_from_plan_collections() {
     assert!(empty.retrieval_plan.knowledge_requests.is_empty());
     assert!(empty.character_think_requests.is_empty());
     let filled = WriterPlan {
+        interpreted_player_contribution: InterpretedPlayerContribution { units: vec![] },
         story_goal: WriterStoryGoal {
             summary: BoundedText::try_new("goal", "goal", 64).unwrap(),
         },

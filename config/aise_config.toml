@@ -121,6 +121,8 @@ max_reason_bytes = 256
 max_entities_per_request = 8
 max_topics_per_request = 8
 max_kinds_per_request = 3
+max_player_contribution_units = 32
+max_interpreted_player_contribution_bytes = 16384
 
 [aise.retrieval]
 max_requests = 16
@@ -146,10 +148,6 @@ max_role_profile_bytes = 512
 max_cast_policy_violations = 8
 max_knowledge_context_items = 128
 max_knowledge_context_tokens = 2048
-max_new_roles_per_turn = 16
-max_knowledge_items = 1024
-max_role_profile_bytes = 4096
-max_cast_policy_violations = 16
 
 [aise.prompt.source]
 kind = "packaged"

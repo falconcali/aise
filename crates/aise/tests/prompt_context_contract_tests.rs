@@ -141,7 +141,7 @@ fn story_generator_composes_csi_runtime_context_and_fti() {
         ("narrative_direction".into(), Value::String("None.".into())),
         ("relevant_knowledge".into(), Value::String("None.".into())),
         ("character_decisions".into(), Value::String("None.".into())),
-        ("player_contribution".into(), Value::String(marker.into())),
+        ("interpreted_player_contribution".into(), Value::String(marker.into())),
     ]);
     let source = CatalogPromptSource::from_config(&aise::config::PromptModuleConfig::default()).expect("catalog");
     let composition = source
@@ -177,7 +177,7 @@ fn full_runtime_vars(profile: PromptProfile, story_summary: &str, recent_story: 
             ("current_character_state".into(), Value::String("state".into())),
             ("narrative_character_impulses".into(), Value::String("impulses".into())),
             ("thinking_focus".into(), Value::String("focus".into())),
-            ("player_contribution".into(), Value::String("input".into())),
+            ("interpreted_player_contribution".into(), Value::String("input".into())),
         ]),
         PromptProfile::StoryGenerator => HashMap::from([
             ("story_profile".into(), Value::String("profile".into())),
@@ -189,7 +189,7 @@ fn full_runtime_vars(profile: PromptProfile, story_summary: &str, recent_story: 
             ("narrative_direction".into(), Value::String("direction".into())),
             ("relevant_knowledge".into(), Value::String("knowledge".into())),
             ("character_decisions".into(), Value::String("decisions".into())),
-            ("player_contribution".into(), Value::String("input".into())),
+            ("interpreted_player_contribution".into(), Value::String("input".into())),
         ]),
         PromptProfile::StoryRepairer => HashMap::from([
             ("story_profile".into(), Value::String("profile".into())),
@@ -201,7 +201,7 @@ fn full_runtime_vars(profile: PromptProfile, story_summary: &str, recent_story: 
             ("narrative_direction".into(), Value::String("direction".into())),
             ("relevant_knowledge".into(), Value::String("knowledge".into())),
             ("character_decisions".into(), Value::String("decisions".into())),
-            ("player_contribution".into(), Value::String("input".into())),
+            ("interpreted_player_contribution".into(), Value::String("input".into())),
             ("previous_story_text".into(), Value::String("previous".into())),
             ("validation_issues".into(), Value::String("issues".into())),
         ]),
@@ -234,7 +234,12 @@ fn pending_player_contribution_remains_single_runtime_context_data() {
         PromptProfile::StoryRepairer,
     ] {
         let mut vars = full_runtime_vars(profile, "summary", "recent");
-        vars.insert("player_contribution".into(), Value::String(marker.into()));
+        let slot_name = if profile == PromptProfile::WriterPlanner {
+            "player_contribution"
+        } else {
+            "interpreted_player_contribution"
+        };
+        vars.insert(slot_name.into(), Value::String(marker.into()));
         let composition = source
             .compose(&PromptCompositionInput {
                 profile,
@@ -245,7 +250,12 @@ fn pending_player_contribution_remains_single_runtime_context_data() {
         assert_eq!(composition.rc.as_str().matches(marker).count(), 1);
         assert_eq!(composition.csi.as_str().matches(marker).count(), 0);
         assert_eq!(composition.fti.as_str().matches(marker).count(), 0);
-        assert_eq!(composition.rc.as_str().matches("Pending Player Contribution").count(), 1);
+        let heading = if profile == PromptProfile::WriterPlanner {
+            "Pending Player Contribution"
+        } else {
+            "Interpreted Player Contribution"
+        };
+        assert_eq!(composition.rc.as_str().matches(heading).count(), 1);
     }
 }
 

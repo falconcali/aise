@@ -9,12 +9,14 @@ use crate::domain::narrative_graph::projector::NarrativePlan;
 use crate::domain::story_instance::role::RoleController;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{
-    BaselineContext, CharacterRetrievalRequest, CharacterThinkRequest, KnowledgeDelivery, KnowledgeRetrievalRequest,
-    RetrievalPlan, RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
+    BaselineContext, CharacterRetrievalRequest, CharacterThinkRequest, InterpretedPlayerContribution,
+    KnowledgeDelivery, KnowledgeRetrievalRequest, PlayerContributionKind, PlayerContributionUnit, RetrievalPlan,
+    RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
 };
 use crate::planning::error::PlanningError;
 use crate::planning::planner_output::{
-    CharacterThinkRequestDto, PlannerCharacterContextGapDto, PlannerWriterContextGapDto, WriterPlannerOutputDto,
+    CharacterThinkRequestDto, InterpretedPlayerContributionDto, PlannerCharacterContextGapDto,
+    PlannerWriterContextGapDto, PlayerContributionKindDto, WriterPlannerOutputDto,
 };
 use crate::planning::writer_planner_prompt::{IndexedRetrievalTarget, WriterPlannerPromptContext};
 use std::collections::{BTreeMap, BTreeSet};
@@ -53,6 +55,8 @@ impl RetrievalPlanBuilder {
                 code: "story_goal_empty",
             });
         }
+        let interpreted_player_contribution =
+            self.convert_player_contribution(planner_output.interpreted_player_contribution)?;
         let story_goal = BoundedText::try_new(planner_output.story_goal, "story_goal", self.planner.max_goal_bytes)
             .map_err(|_| PlanningError::LimitExceeded {
                 limit: "max_goal_bytes",
@@ -117,6 +121,7 @@ impl RetrievalPlanBuilder {
             return Err(PlanningError::LimitExceeded { limit: "max_requests" });
         }
         Ok(WriterPlan {
+            interpreted_player_contribution,
             story_goal: WriterStoryGoal { summary: story_goal },
             retrieval_plan: RetrievalPlan {
                 character_requests,
@@ -124,6 +129,54 @@ impl RetrievalPlanBuilder {
             },
             character_think_requests: think_requests,
         })
+    }
+
+    fn convert_player_contribution(
+        &self,
+        value: InterpretedPlayerContributionDto,
+    ) -> Result<InterpretedPlayerContribution, PlanningError> {
+        if value.units.is_empty() || value.units.len() > self.planner.max_player_contribution_units {
+            return Err(PlanningError::LimitExceeded {
+                limit: "max_player_contribution_units",
+            });
+        }
+        let total_bytes = value
+            .units
+            .iter()
+            .map(|unit| unit.content.len())
+            .fold(0usize, usize::saturating_add);
+        if total_bytes > self.planner.max_interpreted_player_contribution_bytes {
+            return Err(PlanningError::LimitExceeded {
+                limit: "max_interpreted_player_contribution_bytes",
+            });
+        }
+        let units = value
+            .units
+            .into_iter()
+            .map(|unit| {
+                if unit.content.trim().is_empty() {
+                    return Err(PlanningError::InvalidOutput {
+                        code: "player_contribution_unit_content_empty",
+                    });
+                }
+                let content = BoundedText::try_new(
+                    unit.content,
+                    "interpreted_player_contribution",
+                    self.planner.max_interpreted_player_contribution_bytes,
+                )
+                .map_err(|_| PlanningError::LimitExceeded {
+                    limit: "max_interpreted_player_contribution_bytes",
+                })?;
+                let kind = match unit.kind {
+                    PlayerContributionKindDto::Speech => PlayerContributionKind::Speech,
+                    PlayerContributionKindDto::Action => PlayerContributionKind::Action,
+                    PlayerContributionKindDto::PrivateState => PlayerContributionKind::PrivateState,
+                    PlayerContributionKindDto::RequestedOutcome => PlayerContributionKind::RequestedOutcome,
+                };
+                Ok(PlayerContributionUnit { kind, content })
+            })
+            .collect::<Result<Vec<_>, PlanningError>>()?;
+        Ok(InterpretedPlayerContribution { units })
     }
 
     fn convert_think_requests(
