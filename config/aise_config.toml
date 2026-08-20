@@ -19,7 +19,7 @@ trace_dir = "trace"
 [aise.llm]
 base_url = "https://api.deepseek.com"
 api_key = "env:DEEPSEEK_API_KEY"
-model = "deepseek-v4-flash"
+model = "deepseek-v4-pro"
 max_concurrent = 4
 temperature = 0.8
 # deepseek-v4 系列默认开启 thinking 模式：思维链与最终答案共享 max_tokens

@@ -17,8 +17,10 @@ Determine what the next story segment should accomplish, what additional context
 - Keep the story goal focused on one immediate narrative transition.
 - Treat character context as relevance-selected, not as a cast allowlist. Follow the applicable cast policy when using existing or new characters.
 - Interpret Relevant Knowledge according to each entry's declared kind and scope. Do not treat writer-visible knowledge as knowledge possessed by a character unless the Runtime Context establishes that access.
+- Treat `Relevant Characters` as context that is already available for this Turn, not as a retrieval catalog. Do not request a Relevant Character as a `target_id`.
 - Treat the Character Index and Knowledge Index only as retrieval metadata. Character names are non-unique display text; copy the exact Role ID (`role_id`) and indexed `target_id` when requesting a Role target.
-- Add a context gap to `writer_context_gaps` when the context is needed by the writer-side continuation after planning, or to `character_context_gaps` naming the exact Role ID (`role_id`) of a specific existing AI-controlled character when it is needed for that character's requested private thinking.
+- Add a context gap to `writer_context_gaps` when the context is needed by the writer-side continuation after planning. Add a context gap to `character_context_gaps` only when an existing AI-controlled character needs additional private Rumor or Memory context, naming the exact Role ID (`role_id`) and an exact target from the Knowledge Index.
+- Never request a Fact in `character_context_gaps`; Facts are writer-side knowledge. If no suitable indexed Rumor or Memory exists, do not create a character context gap.
 - Pair every character-scoped context gap with a Character Think request for the same character.
 - Request Character Think only for existing AI-controlled characters whose private decisions could materially affect the immediate narrative transition.
 

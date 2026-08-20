@@ -72,17 +72,21 @@ impl RetrievalPlanBuilder {
         knowledge_requests.extend(self.narrative_requests(narrative_plan)?);
 
         for gap in planner_output.writer_context_gaps {
-            match self.resolve_writer_gap(gap, prompt_context)? {
-                GapOutcome::RoleCognition { role_id, reason } => {
-                    base_cognition
-                        .entry(role_id)
-                        .or_insert((reason, RetrievalRequestOrigin::Planner));
+            if let Some(outcome) = self.resolve_writer_gap(gap, prompt_context)? {
+                match outcome {
+                    GapOutcome::RoleCognition { role_id, reason } => {
+                        base_cognition
+                            .entry(role_id)
+                            .or_insert((reason, RetrievalRequestOrigin::Planner));
+                    }
+                    GapOutcome::Knowledge(request) => knowledge_requests.push(request),
                 }
-                GapOutcome::Knowledge(request) => knowledge_requests.push(request),
             }
         }
         for gap in planner_output.character_context_gaps {
-            knowledge_requests.push(self.resolve_character_gap(gap, &think_requests, prompt_context)?);
+            if let Some(request) = self.resolve_character_gap(gap, &think_requests, prompt_context)? {
+                knowledge_requests.push(request);
+            }
         }
         for request in &think_requests {
             base_cognition
@@ -201,7 +205,7 @@ impl RetrievalPlanBuilder {
         &self,
         gap: PlannerWriterContextGapDto,
         prompt_context: &WriterPlannerPromptContext,
-    ) -> Result<GapOutcome, PlanningError> {
+    ) -> Result<Option<GapOutcome>, PlanningError> {
         if gap.reason.trim().is_empty() {
             return Err(PlanningError::InvalidOutput {
                 code: "context_gap_reason_empty",
@@ -212,15 +216,18 @@ impl RetrievalPlanBuilder {
                 limit: "max_reason_bytes",
             }
         })?;
-        let target = prompt_context
-            .indexed_targets
-            .get(gap.target_id.as_str())
-            .ok_or(PlanningError::UnknownRetrievalKey)?;
+        let target = match prompt_context.indexed_targets.get(gap.target_id.as_str()) {
+            Some(target) => target,
+            None => {
+                warn_dropped_gap("writer", None, &gap.target_id, &PlanningError::UnknownRetrievalKey);
+                return Ok(None);
+            }
+        };
         match target {
-            IndexedRetrievalTarget::Role(role_id) => Ok(GapOutcome::RoleCognition {
+            IndexedRetrievalTarget::Role(role_id) => Ok(Some(GapOutcome::RoleCognition {
                 role_id: role_id.clone(),
                 reason,
-            }),
+            })),
             IndexedRetrievalTarget::Knowledge(source_id) => {
                 let request = self.make_request(RequestDraft {
                     delivery: KnowledgeDelivery::Writer,
@@ -232,7 +239,7 @@ impl RetrievalPlanBuilder {
                     origin: RetrievalRequestOrigin::Planner,
                     signal_priority: 0,
                 })?;
-                Ok(GapOutcome::Knowledge(request))
+                Ok(Some(GapOutcome::Knowledge(request)))
             }
         }
     }
@@ -242,7 +249,7 @@ impl RetrievalPlanBuilder {
         gap: PlannerCharacterContextGapDto,
         think_requests: &[CharacterThinkRequest],
         prompt_context: &WriterPlannerPromptContext,
-    ) -> Result<KnowledgeRetrievalRequest, PlanningError> {
+    ) -> Result<Option<KnowledgeRetrievalRequest>, PlanningError> {
         if gap.reason.trim().is_empty() {
             return Err(PlanningError::InvalidOutput {
                 code: "context_gap_reason_empty",
@@ -253,22 +260,56 @@ impl RetrievalPlanBuilder {
                 limit: "max_reason_bytes",
             }
         })?;
-        let role_id = RoleId::try_new(gap.role_id).map_err(|_| PlanningError::UnknownRole)?;
+        let role_id = match RoleId::try_new(gap.role_id.clone()) {
+            Ok(role_id) => role_id,
+            Err(_) => {
+                warn_dropped_gap("character", Some(&gap.role_id), &gap.target_id, &PlanningError::UnknownRole);
+                return Ok(None);
+            }
+        };
         if !think_requests.iter().any(|request| request.role_id == role_id) {
-            return Err(PlanningError::KnowledgeAudienceViolation);
+            warn_dropped_gap(
+                "character",
+                Some(&gap.role_id),
+                &gap.target_id,
+                &PlanningError::KnowledgeAudienceViolation,
+            );
+            return Ok(None);
         }
-        let target = prompt_context
-            .indexed_targets
-            .get(gap.target_id.as_str())
-            .ok_or(PlanningError::UnknownRetrievalKey)?;
+        let target = match prompt_context.indexed_targets.get(gap.target_id.as_str()) {
+            Some(target) => target,
+            None => {
+                warn_dropped_gap(
+                    "character",
+                    Some(&gap.role_id),
+                    &gap.target_id,
+                    &PlanningError::UnknownRetrievalKey,
+                );
+                return Ok(None);
+            }
+        };
         let source_id = match target {
             IndexedRetrievalTarget::Knowledge(source_id) => {
                 if matches!(source_id, KnowledgeSourceId::Fact(_)) {
-                    return Err(PlanningError::KnowledgeAudienceViolation);
+                    warn_dropped_gap(
+                        "character",
+                        Some(&gap.role_id),
+                        &gap.target_id,
+                        &PlanningError::KnowledgeAudienceViolation,
+                    );
+                    return Ok(None);
                 }
                 source_id.clone()
             }
-            IndexedRetrievalTarget::Role(_) => return Err(PlanningError::KnowledgeAudienceViolation),
+            IndexedRetrievalTarget::Role(_) => {
+                warn_dropped_gap(
+                    "character",
+                    Some(&gap.role_id),
+                    &gap.target_id,
+                    &PlanningError::KnowledgeAudienceViolation,
+                );
+                return Ok(None);
+            }
         };
         self.make_request(RequestDraft {
             delivery: KnowledgeDelivery::Character { role_id },
@@ -280,6 +321,7 @@ impl RetrievalPlanBuilder {
             origin: RetrievalRequestOrigin::Planner,
             signal_priority: 0,
         })
+        .map(Some)
     }
 
     fn make_request(&self, draft: RequestDraft<'_>) -> Result<KnowledgeRetrievalRequest, PlanningError> {
@@ -309,6 +351,17 @@ impl RetrievalPlanBuilder {
             signal_priority: draft.signal_priority,
         })
     }
+}
+
+fn warn_dropped_gap(gap_kind: &'static str, role_id: Option<&str>, target_id: &str, error: &PlanningError) {
+    tracing::warn!(
+        gap_kind,
+        role_id = role_id.unwrap_or(""),
+        target_id,
+        error_kind = std::any::type_name_of_val(error),
+        error = %error,
+        "writer planner context gap dropped"
+    );
 }
 
 enum GapOutcome {

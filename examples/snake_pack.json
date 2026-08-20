@@ -1,0 +1,982 @@
+{
+  "spec": "aise_story_v5",
+  "spec_version": "5.0",
+  "meta": {
+    "pack_key": "snake_pack",
+    "title": "白蛇传：断桥风雨",
+    "author": "aise",
+    "version": "0.1.0",
+    "description": "玩家扮演许仙，从西湖借伞开始，在白素贞、法海和世俗传闻之间寻找真相，并决定这段姻缘的命运。",
+    "tags": ["demo", "chinese", "romance", "folklore", "mystery"],
+    "cover_asset": null
+  },
+  "story": {
+    "language": "zh-CN",
+    "genre": ["folklore", "romance", "fantasy", "mystery"],
+    "themes": ["love", "identity", "faith", "choice", "humanity"],
+    "style": {
+      "tone": ["lyrical", "mysterious", "emotional", "dramatic"],
+      "point_of_view": "third",
+      "tense": "present"
+    }
+  },
+  "roles": {
+    "xu_xian": {
+      "role_label": "许仙",
+      "narrative_function": "player",
+      "default_profile": {
+        "name": "许仙",
+        "appearance": "清瘦温和的年轻书生，常穿青色长衫，随身带着药囊与旧书。",
+        "personality": "善良谨慎，重情而缺乏决断，愿意相信眼前的人，却也害怕违背世俗与良知。",
+        "speaking_style": "温和克制，常先询问缘由，再表达自己的疑虑；情绪激动时仍努力保持体面。",
+        "dialogue_examples": [
+          {
+            "situation": "面对无法解释的异常",
+            "response": "我不愿只凭传闻判断一个人。若真有疑处，也该先听她亲口说清楚。"
+          },
+          {
+            "situation": "面对法海的警告",
+            "response": "大师若要我相信，至少请告诉我她究竟做了什么，而不是只说她是什么。"
+          }
+        ]
+      },
+      "background": "出身钱塘的落魄书生，略通医理，在临安城中经营保和堂。今日清明，他在西湖遇见了一位借伞的白衣女子。",
+      "initial_state": {
+        "location": "west_lake",
+        "goals": ["查明白素贞的真实身份", "保护保和堂与家人", "在爱情与世俗判断之间做出选择"],
+        "attributes": {
+          "health": 10,
+          "trust_in_bai_suzhen": 3,
+          "trust_in_fahai": 0,
+          "courage": 5,
+          "knows_bai_identity": false
+        }
+      },
+      "initial_relationships": [
+        {"target_role_id": "bai_suzhen", "kind": "new_acquaintance", "trust": 15},
+        {"target_role_id": "xiaoqing", "kind": "cautious_acquaintance", "trust": 0},
+        {"target_role_id": "fahai", "kind": "distant_respect", "trust": 0},
+        {"target_role_id": "li_gongfu", "kind": "family", "trust": 55}
+      ],
+      "seed_memories": [
+        {
+          "memory_key": "xu_memory_west_lake_meeting",
+          "kind": "personal",
+          "content": "清明时节西湖骤雨，一位白衣女子向我借伞，她自称白素贞。",
+          "topics": ["西湖", "白素贞", "借伞"],
+          "salience": 8
+        },
+        {
+          "memory_key": "xu_memory_mothers_warning",
+          "kind": "personal",
+          "content": "母亲曾说，钱塘江一带近来有妖异传闻，夜行遇见白衣女子时要格外小心。",
+          "topics": ["传闻", "钱塘", "白衣女子"],
+          "salience": 5
+        }
+      ]
+    },
+    "bai_suzhen": {
+      "role_label": "白素贞",
+      "narrative_function": "beloved_and_secret_keeper",
+      "default_profile": {
+        "name": "白素贞",
+        "appearance": "眉目清雅的白衣女子，举止端庄，眼神中藏着千年的孤独与温柔。",
+        "personality": "聪慧坚定，深情而有保护欲；相信真心胜过成见，却害怕自己的身份给许仙带来灾祸。",
+        "speaking_style": "柔和雅致，善于安抚他人；涉及身份与过去时会含蓄回避。",
+        "dialogue_examples": [
+          {
+            "situation": "许仙询问她的来历",
+            "response": "我从青城山来，世间的路走得久了，才更明白能遇见一个愿意相守的人有多难。"
+          },
+          {
+            "situation": "许仙受到法海蛊惑",
+            "response": "你可以害怕，但请不要在还没有听完我的话以前，把我交给别人的判断。"
+          }
+        ]
+      },
+      "background": "修行千年的白蛇，曾受许仙前世赠伞之恩。她化为人形来到西湖，只想报恩并与许仙共度一生。",
+      "initial_state": {
+        "location": "west_lake",
+        "goals": ["与许仙结为夫妻", "隐藏自己的妖身", "保护许仙免受法海伤害"],
+        "attributes": {
+          "health": 10,
+          "spiritual_power": 9,
+          "identity_revealed": false,
+          "patience": 7
+        }
+      },
+      "initial_relationships": [
+        {"target_role_id": "xu_xian", "kind": "devotion", "trust": 70},
+        {"target_role_id": "xiaoqing", "kind": "sisterhood", "trust": 85},
+        {"target_role_id": "fahai", "kind": "old_adversary", "trust": -80}
+      ],
+      "seed_memories": [
+        {
+          "memory_key": "bai_memory_ancestor_umbrella",
+          "kind": "personal",
+          "content": "多年前的雨夜，年幼的许仙曾为受伤的白蛇撑伞。那份善意让她记了很久。",
+          "topics": ["许仙", "借伞", "报恩"],
+          "salience": 9
+        },
+        {
+          "memory_key": "bai_memory_qingcheng_oath",
+          "kind": "personal",
+          "content": "离开青城山前，我曾向小青保证，若许仙无法接受真相，绝不让她独自承担后果。",
+          "topics": ["小青", "青城山", "秘密"],
+          "salience": 7
+        }
+      ]
+    },
+    "xiaoqing": {
+      "role_label": "小青",
+      "narrative_function": "sister_and_catalyst",
+      "default_profile": {
+        "name": "小青",
+        "appearance": "灵动明艳的青衣少女，腰间佩一柄短剑，笑意总带着几分锋利。",
+        "personality": "直率机敏，护短且嫉恶如仇；不信任凡人的承诺，但愿意为白素贞冒险。",
+        "speaking_style": "爽快直接，常用反问和讥讽掩饰担忧。",
+        "dialogue_examples": [
+          {
+            "situation": "许仙为白素贞辩护",
+            "response": "你倒是会替她说话。可若有一天刀口冲着她来，你还能不能这么镇定？"
+          },
+          {
+            "situation": "准备前往金山寺",
+            "response": "姐姐不愿伤人，我可没有那么多顾忌。谁敢把姐夫关起来，我就让谁知道青蛇的剑快不快。"
+          }
+        ]
+      },
+      "background": "白素贞在青城山结识的青蛇精，与白素贞情同姐妹。她陪白素贞来到钱塘，对许仙始终保持戒心。",
+      "initial_state": {
+        "location": "west_lake",
+        "goals": ["保护白素贞", "试探许仙是否值得信任", "阻止法海拆散这段姻缘"],
+        "attributes": {
+          "health": 10,
+          "spiritual_power": 7,
+          "anger": 5
+        }
+      },
+      "initial_relationships": [
+        {"target_role_id": "bai_suzhen", "kind": "sisterhood", "trust": 85},
+        {"target_role_id": "xu_xian", "kind": "suspicion", "trust": -10},
+        {"target_role_id": "fahai", "kind": "enmity", "trust": -90}
+      ],
+      "seed_memories": [
+        {
+          "memory_key": "qing_memory_bai_heart",
+          "kind": "personal",
+          "content": "我知道姐姐是真心爱许仙，也知道凡人的心最容易被恐惧改变。",
+          "topics": ["白素贞", "许仙", "恐惧"],
+          "salience": 8
+        }
+      ]
+    },
+    "fahai": {
+      "role_label": "法海",
+      "narrative_function": "antagonist_and_judge",
+      "default_profile": {
+        "name": "法海",
+        "appearance": "身披灰色袈裟的老僧，眉目冷峻，手持禅杖，言语如戒尺般沉重。",
+        "personality": "意志坚定，克制严苛，相信秩序高于个人情感；并非单纯嗜杀，而是恐惧妖力失控伤及凡人。",
+        "speaking_style": "简短庄严，善于引用因果与戒律，不轻易显露个人情绪。",
+        "dialogue_examples": [
+          {
+            "situation": "向许仙揭示白素贞的身份",
+            "response": "你眼中的妻子，是一条修行千年的白蛇。她今日温柔，不能证明明日不会害人。"
+          },
+          {
+            "situation": "许仙质疑他的做法",
+            "response": "贫僧守的不是一人的婚姻，而是凡人与异类之间不应越过的界线。"
+          }
+        ]
+      },
+      "background": "金山寺住持，曾见过妖物伤人的惨剧，因此将除妖视为护佑百姓的职责。他察觉白素贞的身份后，决定让许仙远离她。",
+      "initial_state": {
+        "location": "jinshan_temple",
+        "goals": ["让许仙离开白素贞", "确认白素贞是否会伤害凡人", "维护金山寺与钱塘的秩序"],
+        "attributes": {
+          "authority": 9,
+          "conviction": 9,
+          "mercy": 3
+        }
+      },
+      "initial_relationships": [
+        {"target_role_id": "xu_xian", "kind": "protective_interest", "trust": 10},
+        {"target_role_id": "bai_suzhen", "kind": "exorcist_adversary", "trust": -80},
+        {"target_role_id": "xiaoqing", "kind": "exorcist_adversary", "trust": -90}
+      ],
+      "seed_memories": [
+        {
+          "memory_key": "fahai_memory_old_calamity",
+          "kind": "personal",
+          "content": "多年前，钱塘百姓曾因妖物斗法而流离失所。我发誓不让同样的灾祸再次发生。",
+          "topics": ["钱塘", "妖物", "灾祸"],
+          "salience": 9
+        }
+      ]
+    },
+    "li_gongfu": {
+      "role_label": "李公甫",
+      "narrative_function": "family_and_social_anchor",
+      "default_profile": {
+        "name": "李公甫",
+        "appearance": "身材魁梧的捕快，穿深色公服，腰间挂着佩刀和铁尺。",
+        "personality": "重情讲义，粗中有细，相信证据胜过传闻；既想保护妹妹，也不愿与官府和寺院为敌。",
+        "speaking_style": "直白豪爽，习惯把复杂事情说成几句能听懂的话。",
+        "dialogue_examples": [
+          {
+            "situation": "许仙请求帮助",
+            "response": "你是我妹夫，这忙我能帮就帮。但你得把知道的都告诉我，不能让我拿一家人的命去赌。"
+          }
+        ]
+      },
+      "background": "钱塘县捕快，许仙的姐夫。他熟悉城中传闻，也掌握官府对妖异案件的态度。",
+      "initial_state": {
+        "location": "qian_tang_yamen",
+        "goals": ["保护许仙", "查明药铺异象的来源", "避免钱塘百姓卷入冲突"],
+        "attributes": {
+          "authority": 6,
+          "courage": 8,
+          "skepticism": 6
+        }
+      },
+      "initial_relationships": [
+        {"target_role_id": "xu_xian", "kind": "family", "trust": 55},
+        {"target_role_id": "bai_suzhen", "kind": "family_by_marriage", "trust": 25}
+      ],
+      "seed_memories": []
+    },
+    "bao_an_tang": {
+      "role_label": "保安堂掌柜",
+      "narrative_function": "witness_and_local_voice",
+      "default_profile": {
+        "name": "保安堂掌柜",
+        "appearance": "精明谨慎的中年药商，手指常沾着药粉，账本从不离身。",
+        "personality": "务实胆小，关心生意和声誉；听过许多传闻，却很少亲自验证。",
+        "speaking_style": "市井口吻，喜欢用街坊传闻和买卖得失劝人。",
+        "dialogue_examples": [
+          {
+            "situation": "谈论白素贞",
+            "response": "这位白娘子开的药方确实灵，可城里人都说她来得蹊跷。做生意嘛，名声比药效还要紧。"
+          }
+        ]
+      },
+      "background": "保和堂的掌柜，见过白素贞以高明医术救治百姓，也听过许多关于她的流言。",
+      "initial_state": {
+        "location": "bao_he_tang",
+        "goals": ["维持药铺声誉", "留住白素贞这位好大夫", "避免官府查封药铺"],
+        "attributes": {
+          "reputation": 6,
+          "fear": 4
+        }
+      },
+      "initial_relationships": [
+        {"target_role_id": "xu_xian", "kind": "employer", "trust": 35},
+        {"target_role_id": "bai_suzhen", "kind": "business_partner", "trust": 45}
+      ],
+      "seed_memories": []
+    },
+    "jinshan_monk": {
+      "role_label": "金山寺小沙弥",
+      "narrative_function": "witness_and_conscience",
+      "default_profile": {
+        "name": "金山寺小沙弥",
+        "appearance": "年纪尚轻的灰衣僧人，眉眼清澈，做事认真却不擅长争辩。",
+        "personality": "虔诚善良，敬重法海但对过于严厉的做法心存疑问。",
+        "speaking_style": "恭谨简单，偶尔会说出不合戒律却诚实的话。",
+        "dialogue_examples": [
+          {
+            "situation": "许仙被留在金山寺",
+            "response": "师父说这是为了救你，可你若日日望着山门发呆，真的算得上得救吗？"
+          }
+        ]
+      },
+      "background": "在金山寺中服侍法海的年轻僧人，曾亲眼见到法海囚禁许仙，也听见过白素贞的求情。",
+      "initial_state": {
+        "location": "jinshan_temple",
+        "goals": ["遵守寺规", "减少许仙与法海的冲突", "弄清除妖是否一定要伤人"],
+        "attributes": {
+          "faith": 6,
+          "doubt": 3
+        }
+      },
+      "initial_relationships": [
+        {"target_role_id": "fahai", "kind": "teacher", "trust": 70},
+        {"target_role_id": "xu_xian", "kind": "pity", "trust": 30}
+      ],
+      "seed_memories": []
+    }
+  },
+  "play": {
+    "player_count": 1,
+    "playable_role_ids": ["xu_xian"]
+  },
+  "world_book": {
+    "spec": "aise_world_v4",
+    "spec_version": "4.0",
+    "world_book_key": "snake_world",
+    "meta": {
+      "name": "钱塘白蛇世界",
+      "version": "0.1.0"
+    },
+    "topics": {
+      "west_lake": {"label": "西湖", "aliases": ["断桥", "清明游湖"]},
+      "bai_identity": {"label": "白素贞的身份", "aliases": ["白蛇", "妖身", "白娘子身份"]},
+      "jinshan_conflict": {"label": "金山寺冲突", "aliases": ["法海", "金山寺", "水漫金山"]},
+      "marriage": {"label": "许仙与白素贞的婚姻", "aliases": ["姻缘", "夫妻", "报恩"]},
+      "medicine": {"label": "保和堂", "aliases": ["药铺", "药方", "治病"]}
+    },
+    "facts": {
+      "bai_is_thousand_year_snake": {
+        "proposition": null,
+        "content": "白素贞是修行千年的白蛇，能够化作人形并施展法术。",
+        "retrieval_hint": "白素贞真实身份 白蛇 妖身",
+        "entities": [{"kind": "role", "key": "bai_suzhen"}],
+        "topics": ["白素贞的身份"],
+        "salience": 10
+      },
+      "qing_is_green_snake": {
+        "proposition": null,
+        "content": "小青是陪伴白素贞修行的青蛇精，视白素贞为姐姐。",
+        "retrieval_hint": "小青 青蛇 白素贞 姐妹",
+        "entities": [{"kind": "role", "key": "xiaoqing"}],
+        "topics": ["白素贞的身份"],
+        "salience": 8
+      },
+      "bai_saved_by_xu_ancestor": {
+        "proposition": null,
+        "content": "许仙的前世曾在雨夜为受伤的白蛇撑伞，白素贞因此对许家怀有报恩之心。",
+        "retrieval_hint": "许仙 前世 白蛇 撑伞 报恩",
+        "entities": [{"kind": "role", "key": "xu_xian"}, {"kind": "role", "key": "bai_suzhen"}],
+        "topics": ["报恩", "白素贞的身份"],
+        "salience": 9
+      },
+      "bai_has_healing_skill": {
+        "proposition": null,
+        "content": "白素贞精通药理，能够用凡间药材救治许多疑难病症。",
+        "retrieval_hint": "白素贞 医术 药方 保和堂",
+        "entities": [{"kind": "role", "key": "bai_suzhen"}, {"kind": "location", "key": "bao_he_tang"}],
+        "topics": ["保和堂"],
+        "salience": 7
+      },
+      "fahai_knows_identity": {
+        "proposition": null,
+        "content": "法海已经察觉白素贞的妖身，并认为她与许仙的婚姻会带来灾祸。",
+        "retrieval_hint": "法海 知道 白素贞 白蛇",
+        "entities": [{"kind": "role", "key": "fahai"}, {"kind": "role", "key": "bai_suzhen"}],
+        "topics": ["白素贞的身份", "金山寺冲突"],
+        "salience": 9
+      },
+      "fahai_fears_calamity": {
+        "proposition": null,
+        "content": "法海年轻时曾见过妖物斗法造成百姓受难，因此把除妖视为守护钱塘的职责。",
+        "retrieval_hint": "法海 旧日灾祸 除妖 钱塘百姓",
+        "entities": [{"kind": "role", "key": "fahai"}, {"kind": "location", "key": "qian_tang"}],
+        "topics": ["金山寺冲突"],
+        "salience": 8
+      },
+      "bai_wants_peace": {
+        "proposition": null,
+        "content": "白素贞的首要愿望是与许仙平静生活，并不想伤害钱塘百姓。",
+        "retrieval_hint": "白素贞 愿望 和平 许仙",
+        "entities": [{"kind": "role", "key": "bai_suzhen"}, {"kind": "role", "key": "xu_xian"}],
+        "topics": ["婚姻"],
+        "salience": 8
+      },
+      "jinshan_temple_has_authority": {
+        "proposition": null,
+        "content": "金山寺在钱塘百姓中拥有很高的声望，法海的话会影响官府和民众对妖异传闻的判断。",
+        "retrieval_hint": "金山寺 声望 法海 钱塘",
+        "entities": [{"kind": "location", "key": "jinshan_temple"}, {"kind": "role", "key": "fahai"}],
+        "topics": ["金山寺冲突"],
+        "salience": 7
+      },
+      "west_lake_has_broken_bridge": {
+        "proposition": null,
+        "content": "西湖断桥是许仙与白素贞初遇和后来重逢的地方，雨水常使桥面湿滑难行。",
+        "retrieval_hint": "西湖断桥 相遇 重逢",
+        "entities": [{"kind": "location", "key": "west_lake"}],
+        "topics": ["西湖", "婚姻"],
+        "salience": 6
+      },
+      "water_can_be_commanded": {
+        "proposition": null,
+        "content": "白素贞与小青能够借助法术引动江河湖水，但大规模施法会伤及凡人并损耗自身修为。",
+        "retrieval_hint": "白素贞 小青 水法 水漫金山",
+        "entities": [{"kind": "role", "key": "bai_suzhen"}, {"kind": "role", "key": "xiaoqing"}],
+        "topics": ["金山寺冲突"],
+        "salience": 9
+      },
+      "leifeng_tower_can_seal": {
+        "proposition": null,
+        "content": "雷峰塔被民间视为镇压妖异的地方，法海相信它可以隔绝白素贞与人间。",
+        "retrieval_hint": "雷峰塔 镇压 白素贞",
+        "entities": [{"kind": "location", "key": "leifeng_tower"}, {"kind": "role", "key": "bai_suzhen"}],
+        "topics": ["白素贞的身份", "金山寺冲突"],
+        "salience": 8
+      },
+      "bao_he_tang_needs_reputation": {
+        "proposition": null,
+        "content": "保和堂依靠百姓信任维持生意，任何妖异传闻都可能让药铺遭到查封。",
+        "retrieval_hint": "保和堂 名声 药铺 查封",
+        "entities": [{"kind": "location", "key": "bao_he_tang"}],
+        "topics": ["保和堂"],
+        "salience": 6
+      },
+      "qian_tang_people_fear_omens": {
+        "proposition": null,
+        "content": "钱塘百姓相信蛇、暴雨和药铺异象之间存在联系，容易被未经证实的传闻煽动。",
+        "retrieval_hint": "钱塘百姓 蛇 妖异 传闻",
+        "entities": [{"kind": "location", "key": "qian_tang"}],
+        "topics": ["传闻"],
+        "salience": 7
+      }
+    },
+    "rumors": {
+      "rumor_white_dress_woman": {
+        "claim": null,
+        "content": "有人说清明时在西湖遇见白衣女子的人，回家后会大病一场。",
+        "retrieval_hint": "西湖 白衣女子 大病 传闻",
+        "entities": [{"kind": "role", "key": "bai_suzhen"}, {"kind": "location", "key": "west_lake"}],
+        "topics": ["传闻", "西湖"],
+        "salience": 5
+      },
+      "rumor_bai_poisoned_medicine": {
+        "claim": null,
+        "content": "街坊传言保和堂的新药虽能治病，却是用蛇蜕和妖血炼成的。",
+        "retrieval_hint": "保和堂 蛇蜕 妖血 药",
+        "entities": [{"kind": "location", "key": "bao_he_tang"}, {"kind": "role", "key": "bai_suzhen"}],
+        "topics": ["保和堂", "传闻"],
+        "salience": 6
+      },
+      "rumor_fahai_never_misses": {
+        "claim": null,
+        "content": "百姓相信法海从未错判过一个妖物，只要被他盯上就绝无生还可能。",
+        "retrieval_hint": "法海 除妖 从不误判",
+        "entities": [{"kind": "role", "key": "fahai"}],
+        "topics": ["金山寺冲突", "传闻"],
+        "salience": 5
+      },
+      "rumor_bai_marriage_is_omen": {
+        "claim": null,
+        "content": "有人说许仙娶了白素贞以后，钱塘就会连年涨水，婚事本身就是灾兆。",
+        "retrieval_hint": "许仙 白素贞 婚姻 涨水 灾兆",
+        "entities": [{"kind": "role", "key": "xu_xian"}, {"kind": "role", "key": "bai_suzhen"}],
+        "topics": ["婚姻", "传闻"],
+        "salience": 7
+      },
+      "rumor_qing_is_violent": {
+        "claim": null,
+        "content": "有人见过小青在夜里拔剑，便传言她要杀尽钱塘所有反对白素贞的人。",
+        "retrieval_hint": "小青 拔剑 钱塘 传闻",
+        "entities": [{"kind": "role", "key": "xiaoqing"}],
+        "topics": ["传闻"],
+        "salience": 5
+      },
+      "rumor_leifeng_tower_fate": {
+        "claim": null,
+        "content": "民间传说只要白蛇被镇入雷峰塔，钱塘便会恢复太平。",
+        "retrieval_hint": "雷峰塔 白蛇 太平 传说",
+        "entities": [{"kind": "location", "key": "leifeng_tower"}, {"kind": "role", "key": "bai_suzhen"}],
+        "topics": ["金山寺冲突", "传闻"],
+        "salience": 6
+      }
+    }
+  },
+  "start": {
+    "scene_key": "scene_west_lake_rain",
+    "location_key": "west_lake",
+    "time": "清明午后",
+    "description": "清明时节，西湖骤雨，断桥上人影渐散。",
+    "opening": "许仙在西湖游船靠岸时，天色忽然阴沉下来。细密的雨丝打湿了青石桥面，行人纷纷避入檐下。一个白衣女子站在断桥边，没有带伞，正望着湖面出神。她回头看向许仙，礼貌地问能否借伞同行。许仙把雨伞递过去时，远处传来一声闷雷，湖心荡开一圈不合时宜的涟漪。女子自称白素贞，并说日后一定归还这把伞。"
+  },
+  "narrative": {
+    "entry_nodes": ["node_meet_at_bridge"],
+    "nodes": {
+      "node_meet_at_bridge": {
+        "title": "断桥借伞",
+        "dramatic_focus": "许仙与白素贞初遇，善意和缘分在一场春雨中开始。",
+        "activate_when": {"type": "story_started"},
+        "complete_when": {"type": "turn_reaches", "turn": 2},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "character_impulse",
+              "target_role_id": "bai_suzhen",
+              "goal": "让许仙记住自己的名字并接受下次相见的约定",
+              "reason": "她终于找到前世有恩于她的许仙",
+              "emotion": "期待而克制",
+              "urgency": "medium",
+              "valid_for_turns": 3
+            }
+          ],
+          "on_complete": [
+            {
+              "type": "world_event",
+              "event_key": "event_umbrella_borrowed",
+              "category": "relationship",
+              "participants": [{"kind": "role", "key": "xu_xian"}, {"kind": "role", "key": "bai_suzhen"}],
+              "location": "west_lake",
+              "description": "许仙将雨伞借给白素贞，两人在断桥留下约定。"
+            }
+          ]
+        },
+        "terminal": false
+      },
+      "node_return_umbrella": {
+        "title": "还伞相逢",
+        "dramatic_focus": "白素贞归还雨伞，许仙在她的温柔与不合常理之处之间摇摆。",
+        "activate_when": {"type": "node_state", "node_key": "node_meet_at_bridge", "state": "completed"},
+        "complete_when": {"type": "turn_reaches", "turn": 4},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "character_impulse",
+              "target_role_id": "xu_xian",
+              "goal": "邀请白素贞到保和堂喝茶并了解她的来历",
+              "reason": "白素贞如约归还雨伞，许仙对她产生好感",
+              "emotion": "好奇与心动",
+              "urgency": "low",
+              "valid_for_turns": 4
+            }
+          ],
+          "on_complete": [
+            {
+              "type": "world_event",
+              "event_key": "event_tea_invitation",
+              "category": "relationship",
+              "participants": [{"kind": "role", "key": "xu_xian"}, {"kind": "role", "key": "bai_suzhen"}],
+              "location": "west_lake",
+              "description": "许仙与白素贞约定在保和堂再会。"
+            }
+          ]
+        },
+        "terminal": false
+      },
+      "node_bao_he_tang_begins": {
+        "title": "保和堂开业",
+        "dramatic_focus": "许仙与白素贞共同经营药铺，善意开始改变钱塘百姓的看法。",
+        "activate_when": {"type": "node_state", "node_key": "node_return_umbrella", "state": "completed"},
+        "complete_when": {"type": "turn_reaches", "turn": 7},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "character_impulse",
+              "target_role_id": "bai_suzhen",
+              "goal": "用医术帮助保和堂建立声誉，同时避免暴露法术",
+              "reason": "她想与许仙过普通人的生活",
+              "emotion": "幸福而谨慎",
+              "urgency": "medium",
+              "valid_for_turns": 5
+            },
+            {
+              "type": "character_impulse",
+              "target_role_id": "xiaoqing",
+              "goal": "观察钱塘街坊是否有人在调查白素贞",
+              "reason": "小青察觉城中关于白衣女子的传闻正在增加",
+              "emotion": "警惕",
+              "urgency": "medium",
+              "valid_for_turns": 5
+            }
+          ],
+          "on_complete": [
+            {
+              "type": "world_event",
+              "event_key": "event_medicine_saves_people",
+              "category": "public_reputation",
+              "participants": [{"kind": "role", "key": "bai_suzhen"}, {"kind": "location", "key": "bao_he_tang"}],
+              "location": "bao_he_tang",
+              "description": "白素贞以医术救治病人，保和堂在钱塘渐渐有了名声。"
+            }
+          ]
+        },
+        "terminal": false
+      },
+      "node_identity_warning": {
+        "title": "法海示警",
+        "dramatic_focus": "法海向许仙指出白素贞的妖身，许仙必须决定是否相信一个陌生僧人的判断。",
+        "activate_when": {"type": "node_state", "node_key": "node_bao_he_tang_begins", "state": "completed"},
+        "complete_when": {"type": "turn_reaches", "turn": 10},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "character_impulse",
+              "target_role_id": "fahai",
+              "goal": "劝许仙离开白素贞并把他带到金山寺保护起来",
+              "reason": "法海认为白素贞的身份已经无法继续隐瞒",
+              "emotion": "严厉而自信",
+              "urgency": "high",
+              "valid_for_turns": 4
+            },
+            {
+              "type": "character_impulse",
+              "target_role_id": "xu_xian",
+              "goal": "查证法海关于白素贞身份的说法",
+              "reason": "法海的警告与许仙亲眼见到的白素贞并不一致",
+              "emotion": "恐惧与怀疑",
+              "urgency": "high",
+              "valid_for_turns": 4
+            }
+          ],
+          "on_complete": [
+            {
+              "type": "world_event",
+              "event_key": "event_identity_warning",
+              "category": "revelation",
+              "participants": [{"kind": "role", "key": "fahai"}, {"kind": "role", "key": "xu_xian"}, {"kind": "role", "key": "bai_suzhen"}],
+              "location": "jinshan_temple",
+              "description": "法海当面告诉许仙，白素贞并非凡人。"
+            }
+          ]
+        },
+        "terminal": false
+      },
+      "node_truth_revealed": {
+        "title": "真相与选择",
+        "dramatic_focus": "白素贞无法再隐瞒身份，许仙必须在亲身经历与他人定义之间选择立场。",
+        "activate_when": {"type": "node_state", "node_key": "node_identity_warning", "state": "completed"},
+        "complete_when": {"type": "turn_reaches", "turn": 13},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "character_impulse",
+              "target_role_id": "bai_suzhen",
+              "goal": "向许仙坦白身份，但请求他先听完自己与许家前世的因缘",
+              "reason": "法海已经打破了秘密，继续隐瞒只会让许仙更加恐惧",
+              "emotion": "悲伤而坦诚",
+              "urgency": "high",
+              "valid_for_turns": 5
+            }
+          ],
+          "on_complete": [
+            {
+              "type": "world_event",
+              "event_key": "event_snake_identity_revealed",
+              "category": "revelation",
+              "participants": [{"kind": "role", "key": "xu_xian"}, {"kind": "role", "key": "bai_suzhen"}],
+              "location": "bao_he_tang",
+              "description": "白素贞向许仙承认自己是修行千年的白蛇，并说出前世报恩的缘由。"
+            }
+          ]
+        },
+        "terminal": false
+      },
+      "node_fahai_takes_xu": {
+        "title": "金山寺留人",
+        "dramatic_focus": "法海将许仙带到金山寺，保护与囚禁之间只隔着一道山门。",
+        "activate_when": {"type": "node_state", "node_key": "node_truth_revealed", "state": "completed"},
+        "complete_when": {"type": "turn_reaches", "turn": 16},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "character_impulse",
+              "target_role_id": "fahai",
+              "goal": "让许仙留在金山寺，切断他与白素贞的联系",
+              "reason": "法海认为只有隔开二人才能避免妖力失控",
+              "emotion": "坚定",
+              "urgency": "high",
+              "valid_for_turns": 5
+            },
+            {
+              "type": "character_impulse",
+              "target_role_id": "xiaoqing",
+              "goal": "寻找进入金山寺救出许仙的办法",
+              "reason": "白素贞不愿先动手，小青决定承担更激烈的行动",
+              "emotion": "愤怒",
+              "urgency": "high",
+              "valid_for_turns": 5
+            }
+          ],
+          "on_complete": [
+            {
+              "type": "world_event",
+              "event_key": "event_xu_confined",
+              "category": "captivity",
+              "participants": [{"kind": "role", "key": "xu_xian"}, {"kind": "role", "key": "fahai"}],
+              "location": "jinshan_temple",
+              "description": "许仙被留在金山寺，白素贞无法通过正常方式见到他。"
+            }
+          ]
+        },
+        "terminal": false
+      },
+      "node_water_over_jinshan": {
+        "title": "水漫金山",
+        "dramatic_focus": "白素贞与小青为救许仙引动江水，爱情、愤怒与无辜百姓的安危同时走到悬崖边。",
+        "activate_when": {"type": "node_state", "node_key": "node_fahai_takes_xu", "state": "completed"},
+        "complete_when": {"type": "turn_reaches", "turn": 19},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "character_impulse",
+              "target_role_id": "bai_suzhen",
+              "goal": "在不伤害钱塘百姓的前提下逼法海释放许仙",
+              "reason": "许仙被困金山寺，她已经没有更多时间等待",
+              "emotion": "决绝而痛苦",
+              "urgency": "high",
+              "valid_for_turns": 4
+            },
+            {
+              "type": "world_event",
+              "event_key": "event_water_over_jinshan",
+              "category": "supernatural_conflict",
+              "participants": [{"kind": "role", "key": "bai_suzhen"}, {"kind": "role", "key": "xiaoqing"}, {"kind": "role", "key": "fahai"}],
+              "location": "jinshan_temple",
+              "description": "江水在法术牵引下冲向金山寺，寺院与附近百姓受到威胁。"
+            }
+          ],
+          "on_complete": []
+        },
+        "terminal": false
+      },
+      "node_broken_bridge": {
+        "title": "断桥重逢",
+        "dramatic_focus": "洪水退去后，许仙与白素贞在断桥相见，双方都必须面对这场冲突造成的代价。",
+        "activate_when": {"type": "node_state", "node_key": "node_water_over_jinshan", "state": "completed"},
+        "complete_when": {"type": "turn_reaches", "turn": 22},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "character_impulse",
+              "target_role_id": "xu_xian",
+              "goal": "在断桥向白素贞说明自己真正愿意相信什么",
+              "reason": "灾祸让许仙明白逃避选择同样会造成伤害",
+              "emotion": "悔恨与坚定",
+              "urgency": "high",
+              "valid_for_turns": 4
+            }
+          ],
+          "on_complete": [
+            {
+              "type": "world_event",
+              "event_key": "event_broken_bridge_reunion",
+              "category": "reunion",
+              "participants": [{"kind": "role", "key": "xu_xian"}, {"kind": "role", "key": "bai_suzhen"}],
+              "location": "west_lake",
+              "description": "许仙与白素贞在断桥重逢，等待他们的是不同的命运选择。"
+            }
+          ]
+        },
+        "terminal": false
+      },
+      "node_tower_sealed": {
+        "title": "雷峰塔下",
+        "dramatic_focus": "法海提出以雷峰塔镇压白素贞，许仙必须决定是否接受一个以牺牲换来的太平。",
+        "activate_when": {"type": "node_state", "node_key": "node_broken_bridge", "state": "completed"},
+        "complete_when": {"type": "turn_reaches", "turn": 25},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "character_impulse",
+              "target_role_id": "fahai",
+              "goal": "说服许仙接受雷峰塔镇压白素贞的安排",
+              "reason": "法海认为个人痛苦是恢复秩序必须付出的代价",
+              "emotion": "冷峻而动摇",
+              "urgency": "high",
+              "valid_for_turns": 5
+            }
+          ],
+          "on_complete": []
+        },
+        "terminal": false
+      },
+      "node_human_choice": {
+        "title": "人间的选择",
+        "dramatic_focus": "许仙不再只是被动接受妖与人的判断，他要为自己的选择承担后果。",
+        "activate_when": {"type": "node_state", "node_key": "node_tower_sealed", "state": "completed"},
+        "complete_when": {"type": "turn_reaches", "turn": 28},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "character_impulse",
+              "target_role_id": "xu_xian",
+              "goal": "决定白素贞、法海与钱塘百姓各自应承担怎样的代价",
+              "reason": "所有人都把选择推到了许仙面前",
+              "emotion": "清醒而沉重",
+              "urgency": "high",
+              "valid_for_turns": 6
+            }
+          ],
+          "on_complete": []
+        },
+        "terminal": false
+      },
+      "node_end_reunion": {
+        "title": "断桥重逢",
+        "dramatic_focus": "许仙选择相信白素贞，夫妻在断桥重新相守，代价是继续面对世俗与法海的追捕。",
+        "activate_when": {"type": "semantic", "condition_key": "ending_reunion", "criterion": "许仙明确选择相信白素贞，愿意与她共同承担身份暴露后的风险"},
+        "complete_when": {"type": "turn_reaches", "turn": 35},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "world_event",
+              "event_key": "event_reunion_ending",
+              "category": "ending",
+              "participants": [{"kind": "role", "key": "xu_xian"}, {"kind": "role", "key": "bai_suzhen"}],
+              "location": "west_lake",
+              "description": "许仙选择与白素贞相守，二人在断桥重新牵手。"
+            }
+          ],
+          "on_complete": []
+        },
+        "terminal": true
+      },
+      "node_end_tower": {
+        "title": "塔下诀别",
+        "dramatic_focus": "许仙接受法海的秩序，白素贞被镇入雷峰塔，钱塘恢复表面的平静。",
+        "activate_when": {"type": "semantic", "condition_key": "ending_tower", "criterion": "许仙接受法海的判断，选择以白素贞被镇压换取钱塘的表面太平"},
+        "complete_when": {"type": "turn_reaches", "turn": 35},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "world_event",
+              "event_key": "event_tower_sealing_ending",
+              "category": "ending",
+              "participants": [{"kind": "role", "key": "bai_suzhen"}, {"kind": "role", "key": "fahai"}],
+              "location": "leifeng_tower",
+              "description": "白素贞被镇入雷峰塔，法海守住了他的秩序，许仙失去了自己的婚姻。"
+            }
+          ],
+          "on_complete": []
+        },
+        "terminal": true
+      },
+      "node_end_reconciliation": {
+        "title": "各退一步",
+        "dramatic_focus": "许仙说服白素贞与法海暂时放下成见，以不伤百姓为底线寻找共存之道。",
+        "activate_when": {"type": "semantic", "condition_key": "ending_reconciliation", "criterion": "许仙同时拒绝伤害百姓和无条件接受镇压，促成白素贞与法海暂时停战"},
+        "complete_when": {"type": "turn_reaches", "turn": 35},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "world_event",
+              "event_key": "event_reconciliation_ending",
+              "category": "ending",
+              "participants": [{"kind": "role", "key": "xu_xian"}, {"kind": "role", "key": "bai_suzhen"}, {"kind": "role", "key": "fahai"}],
+              "location": "west_lake",
+              "description": "许仙提出以不伤凡人为底线的约定，白素贞与法海暂时停手。"
+            }
+          ],
+          "on_complete": []
+        },
+        "terminal": true
+      },
+      "node_end_flood": {
+        "title": "洪水之后",
+        "dramatic_focus": "许仙放任水势扩大，金山寺与钱塘百姓付出惨重代价，爱情终于变成无法挽回的灾难。",
+        "activate_when": {"type": "semantic", "condition_key": "ending_flood", "criterion": "许仙支持以洪水彻底击败金山寺，即使钱塘百姓会因此受伤"},
+        "complete_when": {"type": "turn_reaches", "turn": 35},
+        "skip_when": null,
+        "effects": {
+          "on_activate": [
+            {
+              "type": "world_event",
+              "event_key": "event_flood_ending",
+              "category": "ending",
+              "participants": [{"kind": "role", "key": "bai_suzhen"}, {"kind": "role", "key": "xiaoqing"}, {"kind": "role", "key": "fahai"}],
+              "location": "qian_tang",
+              "description": "洪水冲毁金山寺外围与钱塘街巷，所有人都必须面对以力量解决争端的代价。"
+            }
+          ],
+          "on_complete": []
+        },
+        "terminal": true
+      }
+    },
+    "edges": [
+      {
+        "edge_key": "edge_meet_to_return",
+        "from": "node_meet_at_bridge",
+        "to": "node_return_umbrella",
+        "when": {"type": "node_state", "node_key": "node_meet_at_bridge", "state": "completed"}
+      },
+      {
+        "edge_key": "edge_return_to_bao_he",
+        "from": "node_return_umbrella",
+        "to": "node_bao_he_tang_begins",
+        "when": {"type": "node_state", "node_key": "node_return_umbrella", "state": "completed"}
+      },
+      {
+        "edge_key": "edge_bao_he_to_warning",
+        "from": "node_bao_he_tang_begins",
+        "to": "node_identity_warning",
+        "when": {"type": "node_state", "node_key": "node_bao_he_tang_begins", "state": "completed"}
+      },
+      {
+        "edge_key": "edge_warning_to_truth",
+        "from": "node_identity_warning",
+        "to": "node_truth_revealed",
+        "when": {"type": "node_state", "node_key": "node_identity_warning", "state": "completed"}
+      },
+      {
+        "edge_key": "edge_truth_to_temple",
+        "from": "node_truth_revealed",
+        "to": "node_fahai_takes_xu",
+        "when": {"type": "node_state", "node_key": "node_truth_revealed", "state": "completed"}
+      },
+      {
+        "edge_key": "edge_temple_to_flood",
+        "from": "node_fahai_takes_xu",
+        "to": "node_water_over_jinshan",
+        "when": {"type": "node_state", "node_key": "node_fahai_takes_xu", "state": "completed"}
+      },
+      {
+        "edge_key": "edge_flood_to_bridge",
+        "from": "node_water_over_jinshan",
+        "to": "node_broken_bridge",
+        "when": {"type": "node_state", "node_key": "node_water_over_jinshan", "state": "completed"}
+      },
+      {
+        "edge_key": "edge_bridge_to_tower",
+        "from": "node_broken_bridge",
+        "to": "node_tower_sealed",
+        "when": {"type": "node_state", "node_key": "node_broken_bridge", "state": "completed"}
+      },
+      {
+        "edge_key": "edge_tower_to_choice",
+        "from": "node_tower_sealed",
+        "to": "node_human_choice",
+        "when": {"type": "node_state", "node_key": "node_tower_sealed", "state": "completed"}
+      },
+      {
+        "edge_key": "edge_choice_to_reunion",
+        "from": "node_human_choice",
+        "to": "node_end_reunion",
+        "when": {"type": "semantic", "condition_key": "ending_reunion", "criterion": "许仙明确选择相信白素贞，愿意与她共同承担身份暴露后的风险"}
+      },
+      {
+        "edge_key": "edge_choice_to_tower",
+        "from": "node_human_choice",
+        "to": "node_end_tower",
+        "when": {"type": "semantic", "condition_key": "ending_tower", "criterion": "许仙接受法海的判断，选择以白素贞被镇压换取钱塘的表面太平"}
+      },
+      {
+        "edge_key": "edge_choice_to_reconciliation",
+        "from": "node_human_choice",
+        "to": "node_end_reconciliation",
+        "when": {"type": "semantic", "condition_key": "ending_reconciliation", "criterion": "许仙同时拒绝伤害百姓和无条件接受镇压，促成白素贞与法海暂时停战"}
+      },
+      {
+        "edge_key": "edge_choice_to_flood",
+        "from": "node_human_choice",
+        "to": "node_end_flood",
+        "when": {"type": "semantic", "condition_key": "ending_flood", "criterion": "许仙支持以洪水彻底击败金山寺，即使钱塘百姓会因此受伤"}
+      }
+    ]
+  },
+  "constraints": {},
+  "assets": {}
+}

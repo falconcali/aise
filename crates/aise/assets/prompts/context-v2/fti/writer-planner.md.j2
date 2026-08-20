@@ -7,9 +7,12 @@ Create the Writer Plan for the next story segment using the Runtime Context.
 
 - Set `story_goal` to the immediate narrative transition, including both the in-story realization of Pending Player Contribution and the immediate causal response or progress that follows it.
 - Request only context not already provided in the Runtime Context that could materially affect that transition.
-- For a writer-side context need, add one entry to `writer_context_gaps` with the exact indexed `target_id` from the Character Index or Knowledge Index. For a character-scoped context need, add one entry to `character_context_gaps` with the exact Role ID (`role_id`) and the exact indexed `target_id`. Emit a gap only when a suitable indexed target exists; never invent a target or use content text as an ID.
+- For a writer-side context need, add one entry to `writer_context_gaps` with the exact indexed `target_id` from the Character Index or Knowledge Index. For a character-scoped context need, add one entry to `character_context_gaps` only for an additional Rumor or Memory, with the exact AI-controlled Role ID (`role_id`) and the exact indexed `target_id` from the Knowledge Index. `Relevant Characters` are already provided and are not retrieval targets.
+- Never put a Fact, a Role ID, a character name, a topic label, or a fabricated `fact_*`/`rumor_*` value in `character_context_gaps.target_id`. Emit a gap only when a suitable indexed target exists; otherwise use an empty array and rely on `character_think_requests` when private thinking alone is needed.
 - Pair every entry in `character_context_gaps` with a Character Think request for the same exact Role ID (`role_id`), and request Character Think only for existing AI-controlled Roles whose private decisions could materially affect that transition.
 - Use empty arrays for `writer_context_gaps`, `character_context_gaps`, and `character_think_requests` when none are needed.
+
+Example: when an existing AI-controlled character already appears in `Relevant Characters` and only needs to decide how to respond, emit that character in `character_think_requests` and leave `character_context_gaps` empty.
 
 ## NEVER
 

@@ -466,7 +466,7 @@ fn role_cognition_request_deduplicates_by_role() {
 }
 
 #[test]
-fn indexed_target_audience_matrix_is_enforced() {
+fn invalid_character_context_gaps_are_dropped_without_aborting_plan() {
     let baseline = baseline_with_roles("protagonist", &["npc-a"]);
     let snapshot = sample_snapshot("protagonist", &["npc-a"]);
     let plan = NarrativePlan::empty();
@@ -478,10 +478,10 @@ fn indexed_target_audience_matrix_is_enforced() {
         vec![character_gap("npc-a", "npc-a", "role target for character audience")],
         vec![think_request("npc-a", "think reason")],
     );
-    let error = builder()
+    let writer_plan = builder()
         .build(&baseline, &plan, role_to_character, &snapshot, &writer_context)
-        .unwrap_err();
-    assert!(matches!(error, PlanningError::KnowledgeAudienceViolation));
+        .unwrap();
+    assert_eq!(writer_plan.story_goal.summary.as_str(), "goal");
 
     let mut baseline_with_fact = baseline.clone();
     baseline_with_fact.knowledge_index = vec![crate::domain::turn::KnowledgeIndexEntry {
@@ -501,7 +501,7 @@ fn indexed_target_audience_matrix_is_enforced() {
         )],
         vec![think_request("npc-a", "think reason")],
     );
-    let error = builder()
+    let writer_plan = builder()
         .build(
             &baseline_with_fact,
             &plan,
@@ -509,10 +509,16 @@ fn indexed_target_audience_matrix_is_enforced() {
             &snapshot,
             &writer_context_with_fact,
         )
-        .unwrap_err();
-    assert!(matches!(error, PlanningError::KnowledgeAudienceViolation));
+        .unwrap();
+    assert_eq!(writer_plan.story_goal.summary.as_str(), "goal");
+    assert!(writer_plan.retrieval_plan.knowledge_requests.iter().all(|request| {
+        request.target_source_id
+            != Some(crate::domain::knowledge::KnowledgeSourceId::Fact(
+                crate::domain::ids::FactId::try_new("fact_0001").unwrap(),
+            ))
+    }));
 
-    let mut baseline_with_rumor = baseline.clone();
+    let mut baseline_with_rumor = baseline;
     baseline_with_rumor.knowledge_index = vec![crate::domain::turn::KnowledgeIndexEntry {
         source_id: crate::domain::knowledge::KnowledgeSourceId::Rumor(
             crate::domain::ids::RumorId::try_new("rumor_0001").unwrap(),
@@ -530,7 +536,7 @@ fn indexed_target_audience_matrix_is_enforced() {
         )],
         Vec::new(),
     );
-    let error = builder()
+    let writer_plan = builder()
         .build(
             &baseline_with_rumor,
             &plan,
@@ -538,6 +544,56 @@ fn indexed_target_audience_matrix_is_enforced() {
             &snapshot,
             &writer_context_with_rumor,
         )
+        .unwrap();
+    assert_eq!(writer_plan.story_goal.summary.as_str(), "goal");
+    assert!(writer_plan.retrieval_plan.knowledge_requests.iter().all(|request| {
+        request.target_source_id
+            != Some(crate::domain::knowledge::KnowledgeSourceId::Rumor(
+                crate::domain::ids::RumorId::try_new("rumor_0001").unwrap(),
+            ))
+    }));
+}
+
+#[test]
+fn unknown_writer_context_target_is_dropped_without_aborting_plan() {
+    let baseline = baseline_with_roles("protagonist", &[]);
+    let snapshot = sample_snapshot("protagonist", &[]);
+    let plan = NarrativePlan::empty();
+    let writer_context = writer_prompt_context(&baseline, &plan);
+    let output = writer_planner_output(
+        "continue the conversation",
+        vec![writer_gap("invented_target", "unavailable context")],
+        Vec::new(),
+        Vec::new(),
+    );
+
+    let writer_plan = builder().build(&baseline, &plan, output, &snapshot, &writer_context).unwrap();
+
+    assert_eq!(writer_plan.story_goal.summary.as_str(), "continue the conversation");
+    assert!(writer_plan.retrieval_plan.knowledge_requests.is_empty());
+}
+
+#[test]
+fn empty_context_gap_reason_remains_a_hard_error() {
+    let baseline = baseline_with_roles("protagonist", &[]);
+    let snapshot = sample_snapshot("protagonist", &[]);
+    let plan = NarrativePlan::empty();
+    let writer_context = writer_prompt_context(&baseline, &plan);
+    let output = writer_planner_output(
+        "continue the conversation",
+        vec![writer_gap("invented_target", "")],
+        Vec::new(),
+        Vec::new(),
+    );
+
+    let error = builder()
+        .build(&baseline, &plan, output, &snapshot, &writer_context)
         .unwrap_err();
-    assert!(matches!(error, PlanningError::KnowledgeAudienceViolation));
+
+    assert!(matches!(
+        error,
+        PlanningError::InvalidOutput {
+            code: "context_gap_reason_empty"
+        }
+    ));
 }
