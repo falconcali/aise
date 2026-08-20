@@ -207,7 +207,7 @@ fn runtime_projection_contains_only_allowlisted_semantic_sections() {
     let values = vars.as_map();
 
     assert_eq!(values.len(), 12);
-    assert_eq!(values["story_goal"].as_str(), Some("\"goal-marker\""));
+    assert_eq!(values["story_goal"].as_str(), Some("goal-marker"));
     assert!(
         values["player_contribution"]
             .as_str()

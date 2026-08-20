@@ -129,7 +129,7 @@ impl StoryRepairerPromptContextProjector for DefaultStoryRepairerPromptContextPr
             .collect::<Result<Vec<_>, StoryRepairerProjectionError>>()?;
         let mut generation = self.generation_projector.project(ctx)?;
         let validation_issues_rendered = render_validation_issues(&validation_issues);
-        let previous_story_rendered = quoted(previous_story.story_text.as_str());
+        let previous_story_rendered = previous_story.story_text.as_str().to_owned();
         let extra_tokens = estimate_text_tokens(&previous_story_rendered)
             .saturating_add(estimate_text_tokens(&validation_issues_rendered));
         let generation_vars = prune_dialogue_examples_to_budget(

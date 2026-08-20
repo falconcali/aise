@@ -295,7 +295,7 @@ fn render_story_summary(value: &str) -> String {
 }
 
 fn render_data(value: &str) -> String {
-    quoted(value)
+    value.to_owned()
 }
 
 fn quoted_list(values: &[BoundedText]) -> String {

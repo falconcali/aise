@@ -253,10 +253,13 @@ fn render_runtime_vars(context: &CharacterThinkPromptContext) -> RuntimePromptVa
             "narrative_character_impulses".into(),
             Value::String(render_impulses(&context.narrative_character_impulses)),
         ),
-        ("thinking_focus".into(), Value::String(quoted(context.thinking_focus.as_str()))),
+        (
+            "thinking_focus".into(),
+            Value::String(context.thinking_focus.as_str().to_owned()),
+        ),
         (
             "player_contribution".into(),
-            Value::String(quoted(context.player_contribution.as_str())),
+            Value::String(context.player_contribution.as_str().to_owned()),
         ),
     ]))
 }

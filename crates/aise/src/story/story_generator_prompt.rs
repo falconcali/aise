@@ -360,7 +360,7 @@ pub(crate) fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> Runt
             "active_story_constraints".into(),
             Value::String(render_constraints(&context.active_story_constraints)),
         ),
-        ("story_goal".into(), Value::String(quoted(context.story_goal.as_str()))),
+        ("story_goal".into(), Value::String(context.story_goal.as_str().to_owned())),
         (
             "narrative_direction".into(),
             Value::String(render_narrative_direction(&context.narrative_direction)),
@@ -375,7 +375,7 @@ pub(crate) fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> Runt
         ),
         (
             "player_contribution".into(),
-            Value::String(quoted(context.player_contribution.as_str())),
+            Value::String(context.player_contribution.as_str().to_owned()),
         ),
     ]))
 }

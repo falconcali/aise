@@ -37,6 +37,8 @@ max_repair_rounds = 3
 # thinking 模式（deepseek-v4 系列默认开启）下，reasoning 与最终答案共享
 # max_tokens 预算，预算太小会在 content 返回前被截断（finish_reason=length）。
 max_tokens = 4096
+max_input_tokens = 32768
+max_total_tokens = 36864
 
 [aise.assets]
 max_key_bytes = 128
@@ -146,10 +148,6 @@ max_role_profile_bytes = 512
 max_cast_policy_violations = 8
 max_knowledge_context_items = 128
 max_knowledge_context_tokens = 2048
-max_new_roles_per_turn = 16
-max_knowledge_items = 1024
-max_role_profile_bytes = 4096
-max_cast_policy_violations = 16
 
 [aise.prompt.source]
 kind = "packaged"

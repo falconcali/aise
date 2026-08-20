@@ -57,10 +57,7 @@ fn render_narrative_direction_renders_active_directions_only() {
         world_event_intents: Vec::new(),
     };
     let rendered = render_narrative_direction(&view);
-    assert_eq!(
-        rendered,
-        "### Active Directions\n\n- \"Tension rises between the two factions.\""
-    );
+    assert_eq!(rendered, "### Active Directions\n\n- Tension rises between the two factions.");
 }
 
 #[test]
@@ -116,6 +113,6 @@ fn render_narrative_direction_joins_both_sections_with_blank_line() {
     let rendered = render_narrative_direction(&view);
     assert_eq!(
         rendered,
-        "### Active Directions\n\n- \"A confrontation looms.\"\n\n### World Event Intents\n\n- category: \"confrontation\"\n  description: \"Rival factions prepare to clash.\""
+        "### Active Directions\n\n- A confrontation looms.\n\n### World Event Intents\n\n- category: \"confrontation\"\n  description: \"Rival factions prepare to clash.\""
     );
 }

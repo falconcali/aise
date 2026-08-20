@@ -50,7 +50,7 @@ pub fn render_narrative_direction(view: &NarrativeDirectionPromptView) -> String
         let items = view
             .active_directions
             .iter()
-            .map(|direction| format!("- {}", quoted(direction.as_str())))
+            .map(|direction| format!("- {}", direction.as_str()))
             .collect::<Vec<_>>()
             .join("\n");
         sections.push(format!("### Active Directions\n\n{items}"));

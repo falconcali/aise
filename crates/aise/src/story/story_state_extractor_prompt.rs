@@ -391,7 +391,7 @@ fn project_location(
 
 fn render_runtime_vars(context: &StoryStateExtractorPromptContext) -> RuntimePromptVars {
     RuntimePromptVars::new(HashMap::from([
-        ("story_text".into(), Value::String(quoted(context.story_text.as_str()))),
+        ("story_text".into(), Value::String(context.story_text.as_str().to_owned())),
         ("roles".into(), Value::String(render_roles(&context.roles))),
         (
             "relationships".into(),
