@@ -7,7 +7,6 @@ use crate::planning::planner_output::{WriterPlannerOutputDto, writer_planner_out
 fn writer_planner_output_reads_goal_gaps_and_character_requests() {
     let output: WriterPlannerOutputDto = serde_json::from_str(
         r#"{
-            "interpreted_player_contribution":{"units":[{"kind":"action","content":"reach the gate"}]},
             "story_goal":"reach the gate",
             "writer_context_gaps":[{"target_id":"npc-guard","reason":"need location lore"}],
             "character_context_gaps":[],
@@ -90,7 +89,6 @@ fn writer_planner_schema_requires_contract_fields_without_delivery_union() {
     assert_eq!(
         schema["required"],
         serde_json::json!([
-            "interpreted_player_contribution",
             "story_goal",
             "writer_context_gaps",
             "character_context_gaps",

@@ -99,8 +99,12 @@ fn writer_planner_assets_require_contribution_realization_and_response() {
     let csi = include_str!("../../../assets/prompts/context-v2/csi/writer-planner.md.j2");
     let fti = include_str!("../../../assets/prompts/context-v2/fti/writer-planner.md.j2");
     assert!(csi.contains("not-yet-narrated material for the next story segment"));
-    assert!(csi.contains("Preserve every explicitly supplied Player Character utterance"));
-    assert!(fti.contains("one ordered, non-empty `interpreted_player_contribution.units` array"));
+    assert!(
+        csi.contains("every explicitly supplied Player Character utterance, attempted action, and private thought")
+    );
+    assert!(fti.contains(
+        "including both the in-story realization of Pending Player Contribution and the immediate causal response or progress that follows it"
+    ));
     assert!(fti.contains("skip its in-story realization"));
 }
 

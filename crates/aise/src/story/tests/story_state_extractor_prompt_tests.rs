@@ -306,7 +306,6 @@ fn build_context(
     ctx.set_prepared_context(sample_snapshot(all_roles), baseline).unwrap();
     let think_targets: Vec<_> = retrieved.characters().keys().cloned().collect();
     let plan = WriterPlan {
-        interpreted_player_contribution: crate::domain::turn::InterpretedPlayerContribution { units: vec![] },
         story_goal: WriterStoryGoal {
             summary: bounded("goal"),
         },

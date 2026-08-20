@@ -184,7 +184,6 @@ fn build_ready_context(
     ctx.set_prepared_context(sample_snapshot(&player), sample_baseline(&player))
         .unwrap();
     let plan = WriterPlan {
-        interpreted_player_contribution: crate::domain::turn::InterpretedPlayerContribution { units: vec![] },
         story_goal: WriterStoryGoal {
             summary: bounded("goal"),
         },

@@ -6,11 +6,8 @@ use crate::domain::ids::RoleId;
 use crate::domain::narrative_graph::effect::ImpulseUrgency;
 use crate::domain::story_instance::role::RoleController;
 use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::{CharacterThinkRequest, InterpretedPlayerContribution};
-use crate::prompt::{
-    RoleKnowledgePromptView, RuntimePromptVars, TrustedPromptVars, render_interpreted_player_contribution,
-    render_role_knowledge,
-};
+use crate::domain::turn::CharacterThinkRequest;
+use crate::prompt::{RoleKnowledgePromptView, RuntimePromptVars, TrustedPromptVars, render_role_knowledge};
 use crate::turn::turn_context::TurnExecutionContext;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -26,7 +23,7 @@ pub struct CharacterThinkPromptContext {
     pub story_continuity: CharacterThinkStoryContinuityPromptView,
     pub narrative_character_impulses: Vec<CharacterThinkImpulsePromptView>,
     pub thinking_focus: BoundedText,
-    pub interpreted_player_contribution: InterpretedPlayerContribution,
+    pub player_contribution: BoundedText,
 }
 
 #[derive(Debug, Clone)]
@@ -118,7 +115,7 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
     ) -> Result<CharacterThinkPromptProjection, CharacterThinkProjectionError> {
         let baseline = ctx.baseline().ok_or(CharacterThinkProjectionError::MissingStageState)?;
         let snapshot = ctx.snapshot().ok_or(CharacterThinkProjectionError::MissingStageState)?;
-        let plan = ctx.plan().ok_or(CharacterThinkProjectionError::MissingStageState)?;
+        let _plan = ctx.plan().ok_or(CharacterThinkProjectionError::MissingStageState)?;
         if request.reason.as_str().trim().is_empty()
             || request.reason.as_str().len() > self.character_config.max_thinking_focus_bytes
         {
@@ -134,7 +131,12 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
                 role_id: request.role_id.clone(),
             });
         }
-        let interpreted_player_contribution = plan.interpreted_player_contribution.clone();
+        let player_contribution = BoundedText::try_new(
+            ctx.player_contribution().to_owned(),
+            "player_contribution",
+            self.character_config.max_input_tokens.saturating_mul(4) as usize,
+        )
+        .map_err(|_| CharacterThinkProjectionError::InvalidPromptField)?;
         let knowledge = project_knowledge(ctx, &request.role_id);
         let narrative_character_impulses = ctx
             .narrative_projection()
@@ -197,7 +199,7 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
             story_continuity,
             narrative_character_impulses,
             thinking_focus: request.reason.clone(),
-            interpreted_player_contribution,
+            player_contribution,
         };
         let mut rc_vars = render_runtime_vars(&context);
         while runtime_tokens(&rc_vars) > self.character_config.max_input_tokens
@@ -253,8 +255,8 @@ fn render_runtime_vars(context: &CharacterThinkPromptContext) -> RuntimePromptVa
         ),
         ("thinking_focus".into(), Value::String(quoted(context.thinking_focus.as_str()))),
         (
-            "interpreted_player_contribution".into(),
-            Value::String(render_interpreted_player_contribution(&context.interpreted_player_contribution)),
+            "player_contribution".into(),
+            Value::String(quoted(context.player_contribution.as_str())),
         ),
     ]))
 }

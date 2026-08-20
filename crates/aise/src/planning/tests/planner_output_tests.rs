@@ -24,12 +24,6 @@ fn dto_rejects_unknown_fields() {
 
 fn valid_dto() -> WriterPlannerOutputDto {
     WriterPlannerOutputDto {
-        interpreted_player_contribution: InterpretedPlayerContributionDto {
-            units: vec![PlayerContributionUnitDto {
-                kind: PlayerContributionKindDto::PrivateState,
-                content: "player feels afraid".to_owned(),
-            }],
-        },
         story_goal: "advance the plot".to_owned(),
         writer_context_gaps: vec![PlannerWriterContextGapDto {
             target_id: "fact_0001".to_owned(),

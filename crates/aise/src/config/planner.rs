@@ -10,8 +10,6 @@ pub struct PlannerConfig {
     pub max_entities_per_request: usize,
     pub max_topics_per_request: usize,
     pub max_kinds_per_request: usize,
-    pub max_player_contribution_units: usize,
-    pub max_interpreted_player_contribution_bytes: usize,
 }
 
 impl Default for PlannerConfig {
@@ -24,8 +22,6 @@ impl Default for PlannerConfig {
             max_entities_per_request: 8,
             max_topics_per_request: 8,
             max_kinds_per_request: 3,
-            max_player_contribution_units: 32,
-            max_interpreted_player_contribution_bytes: 16 * 1024,
         }
     }
 }
@@ -54,16 +50,6 @@ impl PlannerConfig {
         }
         if self.max_kinds_per_request == 0 {
             return Err(ConfigError::Invalid("planner.max_kinds_per_request must be positive".into()));
-        }
-        if self.max_player_contribution_units == 0 {
-            return Err(ConfigError::Invalid(
-                "planner.max_player_contribution_units must be positive".into(),
-            ));
-        }
-        if self.max_interpreted_player_contribution_bytes == 0 {
-            return Err(ConfigError::Invalid(
-                "planner.max_interpreted_player_contribution_bytes must be positive".into(),
-            ));
         }
         Ok(())
     }

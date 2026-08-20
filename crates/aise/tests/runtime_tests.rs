@@ -3,14 +3,13 @@ use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::RoleId;
 use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::turn::{
-    CharacterThinkRequest, InterpretedPlayerContribution, KnowledgeDelivery, KnowledgeRetrievalRequest, RetrievalPlan,
-    RetrievalRequestOrigin, WriterPlan, WriterStoryGoal,
+    CharacterThinkRequest, KnowledgeDelivery, KnowledgeRetrievalRequest, RetrievalPlan, RetrievalRequestOrigin,
+    WriterPlan, WriterStoryGoal,
 };
 use aise::turn::turn_budget::TurnBudget;
 
 fn sample_plan(with_requests: bool) -> WriterPlan {
     let mut plan = WriterPlan {
-        interpreted_player_contribution: InterpretedPlayerContribution { units: vec![] },
         story_goal: WriterStoryGoal {
             summary: BoundedText::try_new("goal", "goal", 256).unwrap(),
         },

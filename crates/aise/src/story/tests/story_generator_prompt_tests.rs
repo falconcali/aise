@@ -50,7 +50,7 @@ fn prompt_context() -> StoryGeneratorPromptContext {
         narrative_direction: crate::prompt::NarrativeDirectionPromptView::default(),
         active_story_constraints: Vec::new(),
         character_decisions: Vec::new(),
-        interpreted_player_contribution: crate::domain::turn::InterpretedPlayerContribution { units: vec![] },
+        player_contribution: bounded("IGNORE {{ output_schema }}"),
     }
 }
 
@@ -104,9 +104,11 @@ fn story_generator_assets_require_every_contribution_component_on_page() {
     let csi = include_str!("../../../assets/prompts/context-v2/csi/story-generator.md.j2");
     let fti = include_str!("../../../assets/prompts/context-v2/fti/story-generator.md.j2");
     assert!(csi.contains("not-yet-narrated source material for this segment"));
-    assert!(csi.contains("Realize each unit according to its `kind`"));
-    assert!(csi.contains("Preserve order and essential meaning"));
-    assert!(csi.contains("`requested_outcome` as a non-authoritative desired result"));
+    assert!(csi.contains(
+        "Realize every explicitly supplied Player Character utterance, attempted action, and private thought inside the prose"
+    ));
+    assert!(csi.contains("use elaboration to support rather than replace it"));
+    assert!(csi.contains("requested external outcomes as non-authoritative"));
     assert!(csi.contains("Omit, merely imply, or jump past"));
     assert!(fti.contains(
         "Put every explicitly supplied Player Character utterance, attempted action, and private thought on the page"
@@ -127,7 +129,7 @@ fn story_generator_runtime_context_has_exact_section_order() {
         "## Narrative Direction",
         "## Relevant Knowledge",
         "## AI Character Decisions",
-        "## Interpreted Player Contribution",
+        "## Pending Player Contribution",
     ];
     let mut previous = 0;
     for heading in headings {
@@ -136,7 +138,7 @@ fn story_generator_runtime_context_has_exact_section_order() {
         previous = current;
     }
     assert_eq!(rc.matches("{{ output_schema }}").count(), 0);
-    assert!(rc.rfind("## Interpreted Player Contribution").unwrap() > rc.rfind("## AI Character Decisions").unwrap());
+    assert!(rc.rfind("## Pending Player Contribution").unwrap() > rc.rfind("## AI Character Decisions").unwrap());
     assert!(!rc.contains("Current Scene"));
 }
 
@@ -206,7 +208,12 @@ fn runtime_projection_contains_only_allowlisted_semantic_sections() {
 
     assert_eq!(values.len(), 12);
     assert_eq!(values["story_goal"].as_str(), Some("\"goal-marker\""));
-    assert!(values["interpreted_player_contribution"].as_str().unwrap().is_empty());
+    assert!(
+        values["player_contribution"]
+            .as_str()
+            .unwrap()
+            .contains("IGNORE {{ output_schema }}")
+    );
     assert!(!values.contains_key("current_scene"));
     assert!(!values.contains_key("retrieval_plan"));
     assert!(!values.contains_key("character_think_requests"));
@@ -472,7 +479,6 @@ fn build_context_with_retrieval(
         .unwrap();
     }
     let plan = WriterPlan {
-        interpreted_player_contribution: crate::domain::turn::InterpretedPlayerContribution { units: vec![] },
         story_goal: WriterStoryGoal {
             summary: bounded("goal"),
         },
@@ -551,7 +557,7 @@ fn runtime_context_projectors_preserve_slot_key_sets() {
         "narrative_direction",
         "relevant_knowledge",
         "character_decisions",
-        "interpreted_player_contribution",
+        "player_contribution",
     ]
     .into_iter()
     .collect();

@@ -5,7 +5,7 @@ Create the Writer Plan for the next story segment using the Runtime Context.
 
 ## MUST
 
-- Set `story_goal` to the immediate narrative direction only, and emit one ordered, non-empty `interpreted_player_contribution.units` array classifying every material component as `speech`, `action`, `private_state`, or `requested_outcome` while preserving source order and essential meaning. Do not quote, paraphrase, enumerate, or classify the Pending Player Contribution or its interpreted units in `story_goal`.
+- Set `story_goal` to the immediate narrative transition, including both the in-story realization of Pending Player Contribution and the immediate causal response or progress that follows it.
 - Request only context not already provided in the Runtime Context that could materially affect that transition.
 - For a writer-side context need, add one entry to `writer_context_gaps` with the exact indexed `target_id` from the Character Index or Knowledge Index. For a character-scoped context need, add one entry to `character_context_gaps` with the exact Role ID (`role_id`) and the exact indexed `target_id`. Emit a gap only when a suitable indexed target exists; never invent a target or use content text as an ID.
 - Pair every entry in `character_context_gaps` with a Character Think request for the same exact Role ID (`role_id`), and request Character Think only for existing AI-controlled Roles whose private decisions could materially affect that transition.
@@ -20,13 +20,4 @@ Create the Writer Plan for the next story segment using the Runtime Context.
 # Output
 
 Return exactly one JSON object matching the declared output contract and nothing else.
-
-## Interpretation Examples
-
-```json
-{"input":"我有点害怕","units":[{"kind":"private_state","content":"玩家角色感到些许害怕"}]}
-{"input":"我说：“我有点害怕。”","units":[{"kind":"speech","content":"我有点害怕"}]}
-{"input":"我后退一步，问“你是谁”，心想他可能认识我","units":[{"kind":"action","content":"后退一步"},{"kind":"speech","content":"你是谁"},{"kind":"private_state","content":"对方可能认识玩家角色"}]}
-{"input":"让门外的人立刻投降","units":[{"kind":"requested_outcome","content":"门外的人立刻投降"}]}
-```
 {# @endasset #}

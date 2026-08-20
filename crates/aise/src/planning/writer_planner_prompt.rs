@@ -128,7 +128,7 @@ impl WriterPlannerPromptContextProjector {
             ("active_story_constraints".into(), Value::String(render_constraints(baseline))),
             (
                 "player_contribution".into(),
-                Value::String(render_pending_player_contribution(player_contribution.as_str())),
+                Value::String(render_data(player_contribution.as_str())),
             ),
         ]);
         let fti_vars: HashMap<String, Value> = HashMap::new();
@@ -294,9 +294,8 @@ fn render_story_summary(value: &str) -> String {
     }
 }
 
-fn render_pending_player_contribution(value: &str) -> String {
-    let body = value.split('\n').map(|line| format!("  {line}")).collect::<Vec<_>>().join("\n");
-    format!("text: |-\n{body}")
+fn render_data(value: &str) -> String {
+    quoted(value)
 }
 
 fn quoted_list(values: &[BoundedText]) -> String {

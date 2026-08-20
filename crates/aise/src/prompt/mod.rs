@@ -8,7 +8,6 @@ mod metadata;
 mod model;
 mod narrative_direction;
 mod pack;
-mod player_contribution;
 mod policy;
 pub mod profile;
 mod renderer;
@@ -41,7 +40,6 @@ pub use narrative_direction::{
     NarrativeDirectionPromptView, WorldEventIntentPromptView, project_narrative_direction, render_narrative_direction,
 };
 pub use pack::{PromptPack, ResolvedPack, resolve_pack};
-pub use player_contribution::render_interpreted_player_contribution;
 pub use policy::{PreamblePosition, PromptPolicy};
 pub use profile::{PromptProfile, PromptProfileAssets, PromptProfileRegistry};
 pub use renderer::PromptRenderer;
