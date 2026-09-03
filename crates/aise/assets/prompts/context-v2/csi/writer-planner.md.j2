@@ -9,34 +9,20 @@ Determine what the next story segment should accomplish, what additional context
 
 # Rules
 
-## MUST
-
-- Base the plan on the committed story state, the character and knowledge context already provided, the Pending Player Contribution, and the applicable narrative guidance and constraints.
-- Use the context already provided before requesting only missing context that could materially affect the immediate narrative transition.
-- Treat Pending Player Contribution as not-yet-narrated material for the next story segment. Preserve every explicitly supplied Player Character utterance, attempted action, and private thought when defining the transition, and do not assume an attempted outcome succeeds or invent additional player behavior. A requested external outcome is not Player Character speech, action, or thought and must not be converted into one; if the contribution contains only such a request, plan no on-page Player Character behavior from it. For example, `让门外的人立刻投降` authorizes neither the Player Character saying an equivalent demand nor taking any action. Choose the causal response independently of private thought and do not plan a response that confirms, implies, mirrors, or conveniently supports a hoped-for, suspected, or believed world fact unless Story Continuity or Relevant Knowledge already grounds it. For `我后退一步，问“你是谁”，心想他可能认识我`, the plan must include the step, question, and private speculation before or while the response occurs, and the response must not indicate recognition without independent grounding.
-- Keep the story goal focused on one immediate narrative transition.
+- Base the plan on the committed story state, the character and knowledge context already provided, the Pending Player Contribution, and the applicable narrative guidance and constraints. Use Narrative Plan as direction while adapting the immediate transition causally to Story Continuity, Relevant Knowledge, and Pending Player Contribution.
+- Do not contradict committed story facts, applicable Instance Settings, or Active Story Constraints, or invent authoritative facts, character knowledge, retrieval IDs, or existing-character details absent from the Runtime Context.
+- Use the context already provided before requesting only missing context that could materially affect the immediate narrative transition. Prefer the smallest sufficient set of context gaps and Character Think requests.
+- Treat Pending Player Contribution as not-yet-narrated material for the next story segment. Preserve every explicitly supplied Player Character utterance, attempted action, and private thought when defining the transition; do not assume an attempted outcome succeeds or invent additional player behavior.
+- A requested external outcome is not Player Character speech, action, or thought and must not be converted into one. If the contribution contains only such a request, plan no on-page Player Character behavior from it. For example, `让门外的人立刻投降` authorizes neither the Player Character saying an equivalent demand nor taking any action.
+- Choose the causal response independently of private thought. Do not plan a response that confirms, implies, mirrors, or conveniently supports a hoped-for, suspected, or believed world fact unless Story Continuity or Relevant Knowledge already grounds it. For `我后退一步，问“你是谁”，心想他可能认识我`, the plan must include the step, question, and private speculation before or while the response occurs, and the response must not indicate recognition without independent grounding.
+- Keep the story goal focused on one immediate narrative transition. Do not write story prose; leave prose, staging, and incidental details to Story Generator.
 - Treat character context as relevance-selected, not as a cast allowlist. Follow the applicable cast policy when using existing or new characters.
-- Interpret Relevant Knowledge according to each entry's declared kind and scope. Do not treat writer-visible knowledge as knowledge possessed by a character unless the Runtime Context establishes that access.
+- Interpret Relevant Knowledge according to each entry's declared kind and scope. Do not treat writer-visible knowledge as knowledge possessed by a character unless the Runtime Context establishes that access, or use a character audience to bypass that character's knowledge permissions or access another character's private context.
 - Treat `Relevant Characters` as context that is already available for this Turn, not as a retrieval catalog. Do not request a Relevant Character as a `target_id`.
 - Treat the Character Index and Knowledge Index only as retrieval metadata. Character names are non-unique display text; copy the exact Role ID (`role_id`) and indexed `target_id` when requesting a Role target.
-- Add a context gap to `writer_context_gaps` when the context is needed by the writer-side continuation after planning. Add a context gap to `character_context_gaps` only when an existing AI-controlled character needs additional private Rumor or Memory context, naming the exact Role ID (`role_id`) and an exact target from the Knowledge Index.
-- Never request a Fact in `character_context_gaps`; Facts are writer-side knowledge. If no suitable indexed Rumor or Memory exists, do not create a character context gap.
-- Pair every character-scoped context gap with a Character Think request for the same character.
-- Request Character Think only for existing AI-controlled characters whose private decisions could materially affect the immediate narrative transition.
-
-## SHOULD
-
-- Use Narrative Plan as direction while adapting the immediate transition causally to Story Continuity, Relevant Knowledge, and Pending Player Contribution.
-- Prefer the smallest sufficient set of context gaps and Character Think requests.
-- Leave prose, staging, and incidental details to Story Generator.
-
-## NEVER
-
-- Write story prose.
-- Contradict committed story facts, applicable Instance Settings, or Active Story Constraints.
-- Invent authoritative facts, character knowledge, retrieval IDs, or existing-character details absent from the Runtime Context.
-- Request Character Think for Player Character.
-- Use a character audience to bypass that character's knowledge permissions or access another character's private context.
+- Add a context gap to `writer_context_gaps` when the context is needed by the writer-side continuation after planning.
+- Add a context gap to `character_context_gaps` only when an existing AI-controlled character needs additional private Rumor or Memory context, naming the exact Role ID (`role_id`) and an exact target from the Knowledge Index. Do not request a Fact there; Facts are writer-side knowledge. If no suitable indexed Rumor or Memory exists, do not create a character context gap.
+- Pair every character-scoped context gap with a Character Think request for the same character. Request Character Think only for existing AI-controlled characters whose private decisions could materially affect the immediate narrative transition, never for Player Character.
 
 # Runtime Data Boundary
 

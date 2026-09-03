@@ -28,15 +28,16 @@ fn bounded(value: &str) -> BoundedText {
 }
 
 #[test]
-fn story_state_extractor_assets_have_required_rule_counts() {
+fn story_state_extractor_assets_use_unified_rule_sections() {
     let csi = include_str!("../../../assets/prompts/context-v2/csi/story-state-extractor.md.j2");
     let fti = include_str!("../../../assets/prompts/context-v2/fti/story-state-extractor.md.j2");
 
-    assert_eq!(section_item_count(csi, "## MUST", "## NEVER"), 10);
-    assert_eq!(section_item_count(csi, "## NEVER", "# Runtime Data Boundary"), 5);
-    assert!(!csi.contains("## SHOULD"));
-    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 7);
-    assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
+    assert_eq!(section_item_count(csi, "# Rules", "# Runtime Data Boundary"), 15);
+    assert_eq!(section_item_count(fti, "## Rules", "# Output"), 9);
+    for heading in ["## MUST", "## SHOULD", "## NEVER"] {
+        assert!(!csi.contains(heading));
+        assert!(!fti.contains(heading));
+    }
     assert!(!fti.contains("{{ output_schema }}"));
 }
 

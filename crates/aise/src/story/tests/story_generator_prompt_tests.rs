@@ -87,16 +87,16 @@ fn decision(
 }
 
 #[test]
-fn story_generator_assets_have_required_rule_counts() {
+fn story_generator_assets_use_unified_rule_sections() {
     let csi = include_str!("../../../assets/prompts/context-v2/csi/story-generator.md.j2");
     let fti = include_str!("../../../assets/prompts/context-v2/fti/story-generator.md.j2");
 
-    assert_eq!(section_item_count(csi, "## MUST", "## SHOULD"), 10);
-    assert_eq!(section_item_count(csi, "## SHOULD", "## NEVER"), 3);
-    assert_eq!(section_item_count(csi, "## NEVER", "# Runtime Data Boundary"), 5);
-    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 5);
-    assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
-    assert!(!fti.contains("## SHOULD"));
+    assert_eq!(section_item_count(csi, "# Rules", "# Runtime Data Boundary"), 18);
+    assert_eq!(section_item_count(fti, "## Rules", "# Output"), 8);
+    for heading in ["## MUST", "## SHOULD", "## NEVER"] {
+        assert!(!csi.contains(heading));
+        assert!(!fti.contains(heading));
+    }
 }
 
 #[test]
@@ -109,10 +109,8 @@ fn story_generator_assets_require_every_contribution_component_on_page() {
     ));
     assert!(csi.contains("use elaboration to support rather than replace it"));
     assert!(csi.contains("requested external outcomes as non-authoritative"));
-    assert!(csi.contains("Omit, merely imply, or jump past"));
-    assert!(fti.contains(
-        "Put every explicitly supplied Player Character utterance, attempted action, and private thought on the page"
-    ));
+    assert!(csi.contains("Do not omit, merely imply, or jump past"));
+    assert!(fti.contains("Incorporate the Pending Player Contribution itself into the generated story segment"));
 }
 
 #[test]

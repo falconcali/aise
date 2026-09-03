@@ -159,16 +159,16 @@ fn sample_snapshot(player: &StoryRole, continuity: StoryContinuity) -> StoryRead
 }
 
 #[test]
-fn story_repairer_assets_have_required_rule_counts() {
+fn story_repairer_assets_use_unified_rule_sections() {
     let csi = include_str!("../../../assets/prompts/context-v2/csi/story-repairer.md.j2");
     let fti = include_str!("../../../assets/prompts/context-v2/fti/story-repairer.md.j2");
 
-    assert_eq!(section_item_count(csi, "## MUST", "## SHOULD"), 10);
-    assert_eq!(section_item_count(csi, "## SHOULD", "## NEVER"), 3);
-    assert_eq!(section_item_count(csi, "## NEVER", "# Runtime Data Boundary"), 5);
-    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 5);
-    assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
-    assert!(!fti.contains("## SHOULD"));
+    assert_eq!(section_item_count(csi, "# Rules", "# Runtime Data Boundary"), 17);
+    assert_eq!(section_item_count(fti, "## Rules", "# Output"), 7);
+    for heading in ["## MUST", "## SHOULD", "## NEVER"] {
+        assert!(!csi.contains(heading));
+        assert!(!fti.contains(heading));
+    }
     assert!(!fti.contains("{{ output_schema }}"));
 }
 
@@ -180,8 +180,8 @@ fn story_repairer_assets_restore_omitted_contribution_components() {
     assert!(csi.contains(
         "Preserve or restore the on-page realization of every explicitly supplied Player Character utterance, attempted action, and private thought"
     ));
-    assert!(csi.contains("if Previous Story Text skipped a supplied component"));
-    assert!(csi.contains("never guarantee a requested external outcome"));
+    assert!(csi.contains("If Previous Story Text skipped a supplied component"));
+    assert!(csi.contains("do not guarantee a requested external outcome"));
     assert!(fti.contains("every supported component and the autonomy boundary of Pending Player Contribution"));
 }
 

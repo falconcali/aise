@@ -60,28 +60,21 @@ fn prompt_context() -> CharacterThinkPromptContext {
     }
 }
 
+fn section_item_count(text: &str, start: &str, end: &str) -> usize {
+    let section = text.split_once(start).unwrap().1.split_once(end).unwrap().0;
+    section.lines().filter(|line| line.starts_with("- ")).count()
+}
+
 #[test]
-fn character_think_csi_and_fti_have_exact_rule_counts() {
+fn character_think_assets_use_unified_rule_sections() {
     let csi = include_str!("../../../assets/prompts/context-v2/csi/character-think.md.j2");
     let fti = include_str!("../../../assets/prompts/context-v2/fti/character-think.md.j2");
-
-    let must_section = csi.split_once("## MUST").unwrap().1.split_once("## SHOULD").unwrap().0;
-    assert_eq!(must_section.lines().filter(|line| line.starts_with("- ")).count(), 10);
-    let should_section = csi.split_once("## SHOULD").unwrap().1.split_once("## NEVER").unwrap().0;
-    assert_eq!(should_section.lines().filter(|line| line.starts_with("- ")).count(), 3);
-    let never_section = csi
-        .split_once("## NEVER")
-        .unwrap()
-        .1
-        .split_once("# Runtime Data Boundary")
-        .unwrap()
-        .0;
-    assert_eq!(never_section.lines().filter(|line| line.starts_with("- ")).count(), 5);
-
-    let fti_must = fti.split_once("## MUST").unwrap().1.split_once("## NEVER").unwrap().0;
-    assert_eq!(fti_must.lines().filter(|line| line.starts_with("- ")).count(), 5);
-    let fti_never = fti.split_once("## NEVER").unwrap().1.split_once("# Output").unwrap().0;
-    assert_eq!(fti_never.lines().filter(|line| line.starts_with("- ")).count(), 3);
+    assert_eq!(section_item_count(csi, "# Rules", "# Runtime Data Boundary"), 12);
+    assert_eq!(section_item_count(fti, "## Rules", "# Output"), 8);
+    for heading in ["## MUST", "## SHOULD", "## NEVER"] {
+        assert!(!csi.contains(heading));
+        assert!(!fti.contains(heading));
+    }
 }
 
 #[test]
@@ -99,9 +92,11 @@ fn character_think_assets_enforce_perceptibility_and_private_thought_boundary() 
     );
     assert!(csi.contains("only when the Target Character could perceive it as it occurs"));
     assert!(
-        csi.contains("never use a private Player Character thought or desired external outcome as character knowledge")
+        csi.contains(
+            "Do not use a private Player Character thought or desired external outcome as character knowledge"
+        )
     );
-    assert!(csi.contains("never expose a private Player Character thought to the Target Character"));
+    assert!(csi.contains("Do not expose a private Player Character thought to the Target Character"));
     assert!(fti.contains("Use only externally perceptible parts of Pending Player Contribution"));
     assert!(fti.contains("private Player Character thoughts as Target Character knowledge"));
 }

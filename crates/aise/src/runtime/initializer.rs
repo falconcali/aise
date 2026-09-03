@@ -13,9 +13,10 @@ impl TurnExecutionPipeline for TurnInitializer {
     }
 
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
-        if ctx.player_contribution().trim().is_empty() {
-            return Err(TurnExecutionError::invalid_request("empty player contribution"));
+        if ctx.player_contribution().is_empty() {
+            Err(TurnExecutionError::invalid_request("empty player contribution"))
+        } else {
+            ctx.complete_initialization()
         }
-        ctx.complete_initialization()
     }
 }

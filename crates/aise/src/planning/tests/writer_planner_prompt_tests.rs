@@ -84,14 +84,15 @@ fn writer_role_rendering_elides_empty_goals_and_attributes() {
 }
 
 #[test]
-fn writer_planner_assets_preserve_required_rule_counts() {
+fn writer_planner_assets_use_unified_rule_sections() {
     let csi = include_str!("../../../assets/prompts/context-v2/csi/writer-planner.md.j2");
     let fti = include_str!("../../../assets/prompts/context-v2/fti/writer-planner.md.j2");
-    assert_eq!(section_item_count(csi, "## MUST", "## SHOULD"), 10);
-    assert_eq!(section_item_count(csi, "## SHOULD", "## NEVER"), 3);
-    assert_eq!(section_item_count(csi, "## NEVER", "# Runtime Data Boundary"), 5);
-    assert_eq!(section_item_count(fti, "## MUST", "## NEVER"), 5);
-    assert_eq!(section_item_count(fti, "## NEVER", "# Output"), 3);
+    assert_eq!(section_item_count(csi, "# Rules", "# Runtime Data Boundary"), 14);
+    assert_eq!(section_item_count(fti, "## Rules", "# Output"), 11);
+    for heading in ["## MUST", "## SHOULD", "## NEVER"] {
+        assert!(!csi.contains(heading));
+        assert!(!fti.contains(heading));
+    }
 }
 
 #[test]
