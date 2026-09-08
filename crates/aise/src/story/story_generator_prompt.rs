@@ -8,8 +8,8 @@ use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::{BaselineContext, RetrievedCharacterContext, RoleContextView};
 use crate::prompt::{
-    NarrativeDirectionPromptView, RoleKnowledgePromptView, RuntimePromptVars, StoryProfilePromptView,
-    TrustedPromptVars, WorldKnowledgePromptView, merge_world_knowledge, project_narrative_direction,
+    NarrativeDirectionPromptView, RoleKnowledgePromptView, RcPromptVars, StoryProfilePromptView,
+    FtiPromptVars, WorldKnowledgePromptView, merge_world_knowledge, project_narrative_direction,
     render_narrative_direction, render_relevant_knowledge, render_role_knowledge, render_story_profile_view,
 };
 use crate::turn::turn_context::TurnExecutionContext;
@@ -92,8 +92,8 @@ pub struct StoryGeneratorCharacterDecisionPromptView {
 
 pub struct StoryGeneratorPromptProjection {
     pub context: StoryGeneratorPromptContext,
-    pub rc_vars: RuntimePromptVars,
-    pub fti_vars: TrustedPromptVars,
+    pub rc_vars: RcPromptVars,
+    pub fti_vars: FtiPromptVars,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -188,7 +188,7 @@ impl StoryGeneratorPromptContextProjector for DefaultStoryGeneratorPromptContext
             player_contribution,
         };
         let rc_vars = prune_dialogue_examples_to_budget(&mut context, ctx.budget().max_context_tokens(), 0)?;
-        let fti_vars = TrustedPromptVars::new(HashMap::new());
+        let fti_vars = FtiPromptVars::new(HashMap::new());
         Ok(StoryGeneratorPromptProjection {
             context,
             rc_vars,
@@ -333,8 +333,8 @@ fn project_decisions(
         .collect()
 }
 
-pub(crate) fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> RuntimePromptVars {
-    RuntimePromptVars::new(HashMap::from([
+pub(crate) fn render_runtime_vars(context: &StoryGeneratorPromptContext) -> RcPromptVars {
+    RcPromptVars::new(HashMap::from([
         (
             "story_profile".into(),
             Value::String(render_story_profile_view(&context.story_profile)),
@@ -384,7 +384,7 @@ pub(crate) fn prune_dialogue_examples_to_budget(
     context: &mut StoryGeneratorPromptContext,
     max_tokens: u64,
     extra_tokens: u64,
-) -> Result<RuntimePromptVars, StoryGeneratorProjectionError> {
+) -> Result<RcPromptVars, StoryGeneratorProjectionError> {
     let mut vars = render_runtime_vars(context);
     let mut role_ids = std::iter::once(context.player_role.role_id.clone())
         .chain(context.ai_roles.iter().map(|role| role.role_id.clone()))
@@ -430,7 +430,7 @@ fn select_dialogue_examples(examples: &[DialogueExample], config: &ContextPrepar
         .collect()
 }
 
-fn runtime_tokens(vars: &RuntimePromptVars) -> u64 {
+fn runtime_tokens(vars: &RcPromptVars) -> u64 {
     vars.as_map()
         .values()
         .filter_map(Value::as_str)

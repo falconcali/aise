@@ -208,16 +208,16 @@ The shared composer accepts already-prepared render variables. It MUST NOT know 
 
 ```rust
 #[derive(Debug, Clone, Default)]
-pub struct RuntimePromptVars(HashMap<String, serde_json::Value>);
+pub struct RcPromptVars(HashMap<String, serde_json::Value>);
 
 #[derive(Debug, Clone, Default)]
-pub struct TrustedPromptVars(HashMap<String, serde_json::Value>);
+pub struct FtiPromptVars(HashMap<String, serde_json::Value>);
 
 #[derive(Debug, Clone)]
 pub struct PromptCompositionInput {
     pub profile: PromptProfile,
-    pub rc_vars: RuntimePromptVars,
-    pub fti_vars: TrustedPromptVars,
+    pub rc_vars: RcPromptVars,
+    pub fti_vars: FtiPromptVars,
 }
 ```
 
@@ -232,7 +232,7 @@ Profile-specific PromptContext
         │
         │  child-spec-owned semantic rendering preparation
         ▼
-RuntimePromptVars + TrustedPromptVars
+RcPromptVars + FtiPromptVars
         │
         │  shared architecture
         ▼
@@ -242,9 +242,9 @@ PromptComposer
 Rules for variable ownership:
 
 - `CSI` receives no runtime variables from `PromptCompositionInput`.
-- `RuntimePromptVars` may contain untrusted story/runtime data only.
-- `TrustedPromptVars` may contain engine-authored FTI data only, such as a trusted schema fragment generated from code.
-- Child code MUST NOT copy player text, story assets, memories, retrieved data, previous model output, or validation text into `TrustedPromptVars`.
+- `RcPromptVars` may contain untrusted story/runtime data only.
+- `FtiPromptVars` may contain engine-authored FTI data only, such as a trusted schema fragment generated from code.
+- Child code MUST NOT copy player text, story assets, memories, retrieved data, previous model output, or validation text into `FtiPromptVars`.
 - The parent architecture does not define the keys inside either variable map; each child spec owns its keys.
 
 ### 3.5 Prompt Composer
@@ -274,8 +274,8 @@ impl<'a> PromptComposer<'a> {
 ```text
 1. Resolve PromptProfileAssets from PromptProfileRegistry.
 2. Render CSI with empty variables through PromptCatalog.
-3. Render RC with RuntimePromptVars through PromptCatalog.
-4. Render FTI with TrustedPromptVars through PromptCatalog.
+3. Render RC with RcPromptVars through PromptCatalog.
+4. Render FTI with FtiPromptVars through PromptCatalog.
 5. Require all three results to be text/fragment output, not message bundles.
 6. Wrap each rendered layer in its trust-specific newtype.
 7. Return PromptComposition with per-layer PromptMetadata.
@@ -458,8 +458,8 @@ A child spec may modify shared code only to register or consume its profile thro
 7. **P-COMP-01**: Every migrated Turn LLM profile MUST produce exactly three logical layers: one CSI, one RC, and one FTI.
 8. **P-COMP-02**: The logical order MUST always be CSI -> RC -> FTI.
 9. **P-COMP-03**: CSI MUST render from a trusted project slot selected by the registered `PromptProfile`; runtime data MUST NOT provide CSI variables.
-10. **P-COMP-04**: RC MUST render only from child-produced `RuntimePromptVars`.
-11. **P-COMP-05**: FTI MUST render from a trusted project slot and may consume only `TrustedPromptVars` produced by engine code.
+10. **P-COMP-04**: RC MUST render only from child-produced `RcPromptVars`.
+11. **P-COMP-05**: FTI MUST render from a trusted project slot and may consume only `FtiPromptVars` produced by engine code.
 12. **P-COMP-06**: Structured output instructions remain part of FTI; the framework MUST NOT introduce a fourth logical output layer.
 13. **P-COMP-07**: Runtime strings that look like instructions remain RC data and MUST NOT change slot selection, prompt pack selection, trusted variables, or provider authority.
 14. **P-COMP-08**: The parent framework MUST NOT serialize `TurnExecutionContext`, a stage prompt context, or another whole domain object directly into RC JSON.
@@ -539,7 +539,7 @@ The architecture layer MUST NOT emit profile-semantic metrics such as Planner ga
 - [ ] Code generated from this spec defines no WriterPlanner RC sections, WriterPlanner output fields, CharacterThink RC sections, CharacterThought fields, or profile-specific output validation.
 - [ ] `rg 'serde_json::to_string\(context\)' crates/aise/src` returns zero matches in the Turn prompt-generation path.
 - [ ] `RuntimeContextEncoder::encode` has no Turn LLM caller; `runtime_context_encoder.rs` is deleted when no other valid caller remains.
-- [ ] Runtime story/player/retrieval/model-output data cannot choose CSI/FTI slots or populate `TrustedPromptVars` — verified by architecture trust-boundary tests.
+- [ ] Runtime story/player/retrieval/model-output data cannot choose CSI/FTI slots or populate `FtiPromptVars` — verified by architecture trust-boundary tests.
 - [ ] Registering an unregistered profile path fails with `PromptError::ProfileNotRegistered` and does not fall back to another profile.
 - [ ] A layer that resolves to `RenderedPrompt::Messages` fails composition rather than silently flattening messages.
 - [ ] `cargo test prompt::` passes.

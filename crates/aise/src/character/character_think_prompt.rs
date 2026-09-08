@@ -7,7 +7,7 @@ use crate::domain::narrative_graph::effect::ImpulseUrgency;
 use crate::domain::story_instance::role::RoleController;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::CharacterThinkRequest;
-use crate::prompt::{RoleKnowledgePromptView, RuntimePromptVars, TrustedPromptVars, render_role_knowledge};
+use crate::prompt::{RoleKnowledgePromptView, RcPromptVars, FtiPromptVars, render_role_knowledge};
 use crate::turn::turn_context::TurnExecutionContext;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -67,8 +67,8 @@ pub struct CharacterThinkImpulsePromptView {
 
 pub struct CharacterThinkPromptProjection {
     pub context: CharacterThinkPromptContext,
-    pub rc_vars: RuntimePromptVars,
-    pub fti_vars: TrustedPromptVars,
+    pub rc_vars: RcPromptVars,
+    pub fti_vars: FtiPromptVars,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -212,7 +212,7 @@ impl CharacterThinkPromptContextProjector for DefaultCharacterThinkPromptContext
         if runtime_tokens(&rc_vars) > self.character_config.max_input_tokens {
             return Err(CharacterThinkProjectionError::RequiredPromptDataExceedsBudget);
         }
-        let fti_vars = TrustedPromptVars::new(HashMap::new());
+        let fti_vars = FtiPromptVars::new(HashMap::new());
         Ok(CharacterThinkPromptProjection {
             context,
             rc_vars,
@@ -231,8 +231,8 @@ fn project_knowledge(ctx: &TurnExecutionContext, role_id: &RoleId) -> RoleKnowle
     }
 }
 
-fn render_runtime_vars(context: &CharacterThinkPromptContext) -> RuntimePromptVars {
-    RuntimePromptVars::new(HashMap::from([
+fn render_runtime_vars(context: &CharacterThinkPromptContext) -> RcPromptVars {
+    RcPromptVars::new(HashMap::from([
         (
             "target_character".into(),
             Value::String(render_target_role(&context.target_role)),
@@ -378,7 +378,7 @@ fn select_dialogue_examples(examples: &[DialogueExample], config: &ContextPrepar
         .collect()
 }
 
-fn runtime_tokens(vars: &RuntimePromptVars) -> u64 {
+fn runtime_tokens(vars: &RcPromptVars) -> u64 {
     vars.as_map()
         .values()
         .filter_map(Value::as_str)

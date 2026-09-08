@@ -1,7 +1,7 @@
 use crate::config::ContextPreparationConfig;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::text::estimate_text_tokens;
-use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
+use crate::prompt::{RcPromptVars, FtiPromptVars};
 use crate::story::story_generator_prompt::{
     DefaultStoryGeneratorPromptContextProjector, StoryGeneratorProjectionError, StoryGeneratorPromptContext,
     StoryGeneratorPromptContextProjector, prune_dialogue_examples_to_budget,
@@ -38,8 +38,8 @@ pub struct StoryRepairValidationLocationPromptView {
 
 pub struct StoryRepairerPromptProjection {
     pub context: StoryRepairerPromptContext,
-    pub rc_vars: RuntimePromptVars,
-    pub fti_vars: TrustedPromptVars,
+    pub rc_vars: RcPromptVars,
+    pub fti_vars: FtiPromptVars,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -146,7 +146,7 @@ impl StoryRepairerPromptContextProjector for DefaultStoryRepairerPromptContextPr
                 previous_story_text: previous_story.story_text,
                 validation_issues,
             },
-            rc_vars: RuntimePromptVars::new(rc_vars),
+            rc_vars: RcPromptVars::new(rc_vars),
             fti_vars: generation.fti_vars,
         })
     }

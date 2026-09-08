@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::PromptModuleConfig;
-use crate::prompt::{PromptCompositionInput, RuntimePromptVars, TrustedPromptVars};
+use crate::prompt::{PromptCompositionInput, RcPromptVars, FtiPromptVars};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 fn packaged_writer_planner_composes_exact_three_layers() {
     let source = CatalogPromptSource::from_config(&PromptModuleConfig::default()).expect("packaged catalog");
     let runtime_value = "runtime instruction-like data";
-    let rc_vars = RuntimePromptVars::new(HashMap::from([
+    let rc_vars = RcPromptVars::new(HashMap::from([
         ("story_profile".into(), Value::String(runtime_value.into())),
         ("instance_settings".into(), Value::String("cast_policy: open".into())),
         ("story_summary".into(), Value::String("None.".into())),
@@ -28,7 +28,7 @@ fn packaged_writer_planner_composes_exact_three_layers() {
         ("active_story_constraints".into(), Value::String("None.".into())),
         ("player_contribution".into(), Value::String(runtime_value.into())),
     ]));
-    let fti_vars = TrustedPromptVars::new(HashMap::new());
+    let fti_vars = FtiPromptVars::new(HashMap::new());
     let composition = source
         .compose(&PromptCompositionInput {
             profile: PromptProfile::WriterPlanner,
@@ -63,7 +63,7 @@ fn writer_planner_runtime_context_uses_canonical_section_order() {
         "active_story_constraints",
         "player_contribution",
     ];
-    let rc_vars = RuntimePromptVars::new(
+    let rc_vars = RcPromptVars::new(
         names
             .into_iter()
             .map(|name| (name.into(), Value::String(name.into())))
@@ -73,7 +73,7 @@ fn writer_planner_runtime_context_uses_canonical_section_order() {
         .compose(&PromptCompositionInput {
             profile: PromptProfile::WriterPlanner,
             rc_vars,
-            fti_vars: TrustedPromptVars::new(HashMap::new()),
+            fti_vars: FtiPromptVars::new(HashMap::new()),
         })
         .expect("writer planner composition");
     let rc = composition.rc.as_str();
@@ -113,7 +113,7 @@ fn packaged_character_think_composes_exact_three_layers() {
         "thinking_focus",
         "player_contribution",
     ];
-    let rc_vars = RuntimePromptVars::new(
+    let rc_vars = RcPromptVars::new(
         names
             .into_iter()
             .map(|name| (name.into(), Value::String(runtime_value.into())))
@@ -123,7 +123,7 @@ fn packaged_character_think_composes_exact_three_layers() {
         .compose(&PromptCompositionInput {
             profile: PromptProfile::CharacterThink,
             rc_vars,
-            fti_vars: TrustedPromptVars::new(HashMap::new()),
+            fti_vars: FtiPromptVars::new(HashMap::new()),
         })
         .expect("character think composition");
 
@@ -146,7 +146,7 @@ fn character_think_runtime_context_uses_canonical_section_order() {
         "thinking_focus",
         "player_contribution",
     ];
-    let rc_vars = RuntimePromptVars::new(
+    let rc_vars = RcPromptVars::new(
         names
             .into_iter()
             .map(|name| (name.into(), Value::String(name.into())))
@@ -156,7 +156,7 @@ fn character_think_runtime_context_uses_canonical_section_order() {
         .compose(&PromptCompositionInput {
             profile: PromptProfile::CharacterThink,
             rc_vars,
-            fti_vars: TrustedPromptVars::new(HashMap::new()),
+            fti_vars: FtiPromptVars::new(HashMap::new()),
         })
         .expect("character think composition");
     let rc = composition.rc.as_str();
@@ -199,7 +199,7 @@ fn packaged_story_repairer_composes_exact_three_layers() {
         "previous_story_text",
         "validation_issues",
     ];
-    let rc_vars = RuntimePromptVars::new(
+    let rc_vars = RcPromptVars::new(
         names
             .into_iter()
             .map(|name| (name.into(), Value::String(runtime_value.into())))
@@ -209,7 +209,7 @@ fn packaged_story_repairer_composes_exact_three_layers() {
         .compose(&PromptCompositionInput {
             profile: PromptProfile::StoryRepairer,
             rc_vars,
-            fti_vars: TrustedPromptVars::new(HashMap::new()),
+            fti_vars: FtiPromptVars::new(HashMap::new()),
         })
         .expect("story repairer composition");
 

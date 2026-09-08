@@ -224,7 +224,7 @@ InvalidPlayerContribution,
 
 `StoryGenerator` maps that variant to the error code `invalid_player_contribution`. All `BoundedText` field labels and limit names use `player_contribution`.
 
-Every active `RuntimePromptVars` map and every relevant `slots.yaml` entry MUST contain exactly the key:
+Every active `RcPromptVars` map and every relevant `slots.yaml` entry MUST contain exactly the key:
 
 ```text
 player_contribution

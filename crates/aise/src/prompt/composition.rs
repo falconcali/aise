@@ -67,9 +67,9 @@ pub struct PromptCompositionMetadata {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct RuntimePromptVars(HashMap<String, Value>);
+pub struct RcPromptVars(HashMap<String, Value>);
 
-impl RuntimePromptVars {
+impl RcPromptVars {
     pub fn new(vars: HashMap<String, Value>) -> Self {
         Self(vars)
     }
@@ -79,16 +79,16 @@ impl RuntimePromptVars {
     }
 }
 
-impl From<HashMap<String, Value>> for RuntimePromptVars {
+impl From<HashMap<String, Value>> for RcPromptVars {
     fn from(vars: HashMap<String, Value>) -> Self {
         Self::new(vars)
     }
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct TrustedPromptVars(HashMap<String, Value>);
+pub struct FtiPromptVars(HashMap<String, Value>);
 
-impl TrustedPromptVars {
+impl FtiPromptVars {
     pub fn new(vars: HashMap<String, Value>) -> Self {
         Self(vars)
     }
@@ -98,7 +98,7 @@ impl TrustedPromptVars {
     }
 }
 
-impl From<HashMap<String, Value>> for TrustedPromptVars {
+impl From<HashMap<String, Value>> for FtiPromptVars {
     fn from(vars: HashMap<String, Value>) -> Self {
         Self::new(vars)
     }
@@ -107,8 +107,8 @@ impl From<HashMap<String, Value>> for TrustedPromptVars {
 #[derive(Debug, Clone)]
 pub struct PromptCompositionInput {
     pub profile: PromptProfile,
-    pub rc_vars: RuntimePromptVars,
-    pub fti_vars: TrustedPromptVars,
+    pub rc_vars: RcPromptVars,
+    pub fti_vars: FtiPromptVars,
 }
 
 pub struct PromptComposer<'a> {

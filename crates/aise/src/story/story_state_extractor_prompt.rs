@@ -5,7 +5,7 @@ use crate::domain::ids::{MemoryId, RoleId, allocate_dynamic_role_candidates};
 use crate::domain::knowledge::KnowledgeSourceId;
 use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
-use crate::prompt::{RuntimePromptVars, TrustedPromptVars};
+use crate::prompt::{RcPromptVars, FtiPromptVars};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::TurnPhase;
 use crate::turn::turn_validation::{ValidationDecision, ValidationIssueCode, ValidationLocation};
@@ -89,8 +89,8 @@ pub struct StoryStateExtractorValidationLocationPromptView {
 
 pub struct StoryStateExtractorPromptProjection {
     pub context: StoryStateExtractorPromptContext,
-    pub rc_vars: RuntimePromptVars,
-    pub fti_vars: TrustedPromptVars,
+    pub rc_vars: RcPromptVars,
+    pub fti_vars: FtiPromptVars,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -259,7 +259,7 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
         if input_tokens > ctx.budget().state_extractor_max_context_tokens() {
             return Err(StoryStateExtractorProjectionError::RequiredPromptDataExceedsBudget);
         }
-        let fti_vars = TrustedPromptVars::new(HashMap::new());
+        let fti_vars = FtiPromptVars::new(HashMap::new());
         Ok(StoryStateExtractorPromptProjection {
             context,
             rc_vars,
@@ -389,8 +389,8 @@ fn project_location(
     })
 }
 
-fn render_runtime_vars(context: &StoryStateExtractorPromptContext) -> RuntimePromptVars {
-    RuntimePromptVars::new(HashMap::from([
+fn render_runtime_vars(context: &StoryStateExtractorPromptContext) -> RcPromptVars {
+    RcPromptVars::new(HashMap::from([
         ("story_text".into(), Value::String(context.story_text.as_str().to_owned())),
         ("roles".into(), Value::String(render_roles(&context.roles))),
         (

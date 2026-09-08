@@ -13,7 +13,7 @@ use aise::domain::turn::{BaselineContext, NarrativeGraphStateIndex, RetrievalSig
 use aise::planning::WriterPlannerPromptContextProjector;
 use aise::prompt::profile::PromptProfile;
 use aise::prompt::{
-    CatalogPromptSource, PromptCompositionInput, RuntimePromptVars, TrustedPromptSource, TrustedPromptVars,
+    CatalogPromptSource, PromptCompositionInput, RcPromptVars, TrustedPromptSource, FtiPromptVars,
     project_narrative_direction, render_narrative_direction,
 };
 use serde_json::Value;
@@ -147,8 +147,8 @@ fn story_generator_composes_csi_runtime_context_and_fti() {
     let composition = source
         .compose(&PromptCompositionInput {
             profile: PromptProfile::StoryGenerator,
-            rc_vars: RuntimePromptVars::new(runtime),
-            fti_vars: TrustedPromptVars::new(HashMap::new()),
+            rc_vars: RcPromptVars::new(runtime),
+            fti_vars: FtiPromptVars::new(HashMap::new()),
         })
         .expect("composition");
 
@@ -216,8 +216,8 @@ fn compose_rc(source: &CatalogPromptSource, profile: PromptProfile, story_summar
     let composition = source
         .compose(&PromptCompositionInput {
             profile,
-            rc_vars: RuntimePromptVars::new(full_runtime_vars(profile, story_summary, recent_story)),
-            fti_vars: TrustedPromptVars::new(HashMap::new()),
+            rc_vars: RcPromptVars::new(full_runtime_vars(profile, story_summary, recent_story)),
+            fti_vars: FtiPromptVars::new(HashMap::new()),
         })
         .expect("composition");
     composition.rc.as_str().to_owned()
@@ -238,8 +238,8 @@ fn pending_player_contribution_remains_single_runtime_context_data() {
         let composition = source
             .compose(&PromptCompositionInput {
                 profile,
-                rc_vars: RuntimePromptVars::new(vars),
-                fti_vars: TrustedPromptVars::new(HashMap::new()),
+                rc_vars: RcPromptVars::new(vars),
+                fti_vars: FtiPromptVars::new(HashMap::new()),
             })
             .expect("composition");
         assert_eq!(composition.rc.as_str().matches(marker).count(), 1);
@@ -305,8 +305,8 @@ fn story_continuity_is_not_recursively_rendered_or_promoted() {
         let composition = source
             .compose(&PromptCompositionInput {
                 profile,
-                rc_vars: RuntimePromptVars::new(vars),
-                fti_vars: TrustedPromptVars::new(HashMap::new()),
+                rc_vars: RcPromptVars::new(vars),
+                fti_vars: FtiPromptVars::new(HashMap::new()),
             })
             .expect("composition");
         assert!(

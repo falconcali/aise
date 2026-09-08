@@ -7,7 +7,7 @@ use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::{BaselineContext, RoleContextView};
 use crate::prompt::{
-    RuntimePromptVars, StoryProfilePromptView, TrustedPromptVars, project_narrative_direction,
+    RcPromptVars, StoryProfilePromptView, FtiPromptVars, project_narrative_direction,
     render_narrative_direction, render_relevant_knowledge, render_story_profile_view,
     world_knowledge_view_from_baseline,
 };
@@ -33,8 +33,8 @@ pub struct WriterPlannerPromptContext {
 
 pub struct WriterPlannerPromptProjection {
     pub context: WriterPlannerPromptContext,
-    pub rc_vars: RuntimePromptVars,
-    pub fti_vars: TrustedPromptVars,
+    pub rc_vars: RcPromptVars,
+    pub fti_vars: FtiPromptVars,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -146,8 +146,8 @@ impl WriterPlannerPromptContextProjector {
                 provided_role_ids,
                 provided_knowledge_ids,
             },
-            rc_vars: RuntimePromptVars::new(rc_vars),
-            fti_vars: TrustedPromptVars::new(fti_vars),
+            rc_vars: RcPromptVars::new(rc_vars),
+            fti_vars: FtiPromptVars::new(fti_vars),
         })
     }
 }

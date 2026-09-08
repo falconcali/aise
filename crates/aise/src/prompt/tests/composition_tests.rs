@@ -143,8 +143,8 @@ fn registry(rc_slot: &str) -> PromptProfileRegistry {
 fn input(runtime_text: &str) -> PromptCompositionInput {
     PromptCompositionInput {
         profile: PromptProfile::WriterPlanner,
-        rc_vars: RuntimePromptVars::from(HashMap::from([("runtime_text".to_string(), json!(runtime_text))])),
-        fti_vars: TrustedPromptVars::from(HashMap::from([("schema".to_string(), json!("{\"type\":\"object\"}"))])),
+        rc_vars: RcPromptVars::from(HashMap::from([("runtime_text".to_string(), json!(runtime_text))])),
+        fti_vars: FtiPromptVars::from(HashMap::from([("schema".to_string(), json!("{\"type\":\"object\"}"))])),
     }
 }
 

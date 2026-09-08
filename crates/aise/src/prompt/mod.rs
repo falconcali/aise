@@ -23,8 +23,8 @@ pub use asset::{CompiledPromptAsset, PromptAssetManifest, compute_asset_hash};
 pub use catalog::PromptCatalog;
 pub use composition::{
     CoreSystemInstruction, FinalTaskInstruction, PromptComposer, PromptComposition, PromptCompositionInput,
-    PromptCompositionMetadata, PromptLayer, ProviderPromptEncoder, RuntimeContextMessage, RuntimePromptVars,
-    TrustedPromptVars,
+    PromptCompositionMetadata, PromptLayer, ProviderPromptEncoder, RuntimeContextMessage, RcPromptVars,
+    FtiPromptVars,
 };
 pub use error::PromptError;
 pub use knowledge_view::{

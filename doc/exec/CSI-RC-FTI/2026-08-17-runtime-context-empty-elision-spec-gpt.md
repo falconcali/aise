@@ -52,10 +52,10 @@ Eliminate model-visible empty sentinels and empty sections from every Runtime Co
 
 ### 3.1 RC Value Protocol
 
-Every declared RC variable MUST be present in `RuntimePromptVars` with a string value:
+Every declared RC variable MUST be present in `RcPromptVars` with a string value:
 
 ```rust
-RuntimePromptVars::new(HashMap::from([
+RcPromptVars::new(HashMap::from([
     ("required_section".into(), Value::String(required_rendered)),
     (
         "optional_section".into(),
