@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::PromptModuleConfig;
-use crate::prompt::{PromptCompositionInput, RcPromptVars, FtiPromptVars};
+use crate::prompt::{FtiPromptVars, PromptCompositionInput, RcPromptVars};
 use serde_json::Value;
 use std::collections::HashMap;
 

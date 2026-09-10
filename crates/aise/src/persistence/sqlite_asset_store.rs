@@ -60,9 +60,7 @@ impl SqliteAssetStore {
         let narrative_definition_json = serde_json::to_vec(&pack.narrative).map_err(|_| StoreError::Serialization {
             kind: StoreSerializationErrorKind::InvalidStoryState,
         })?;
-        let topic_dictionary_json = serde_json::to_vec(&world_book.topics).map_err(|_| StoreError::Serialization {
-            kind: StoreSerializationErrorKind::InvalidWorldState,
-        })?;
+        let topic_dictionary_json = b"{}".to_vec();
         sqlx::query(
             "INSERT INTO story_packs (pack_id, pack_key, version, digest, pack_json, manifest_json, \
              world_book_json, story_profile_json, role_definitions_json, \

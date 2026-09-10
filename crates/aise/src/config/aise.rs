@@ -1,3 +1,4 @@
+use super::activation::ActivationConfig;
 use super::assets::AssetLimitsConfig;
 use super::character_think::CharacterThinkConfig;
 use super::content::TurnContentLimitsConfig;
@@ -45,6 +46,8 @@ pub struct AiseConfig {
     pub state_extractor: StateExtractorConfig,
     #[serde(default)]
     pub narrative: NarrativeConfig,
+    #[serde(default)]
+    pub activation: ActivationConfig,
 }
 
 impl AiseConfig {
@@ -65,6 +68,7 @@ impl AiseConfig {
             .map_err(|error| ConfigError::Invalid(error.into()))?;
         self.state_extractor.validate()?;
         self.narrative.validate()?;
+        self.activation.validate()?;
         if self.context.recent_segments_for_signals > self.content.max_recent_segments {
             return Err(ConfigError::Invalid(
                 "context.recent_segments_for_signals must be <= content.max_recent_segments".into(),

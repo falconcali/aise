@@ -1,3 +1,4 @@
+mod activation;
 mod aise;
 mod assets;
 mod character_think;
@@ -14,6 +15,9 @@ mod state_extractor;
 mod storage;
 mod turn;
 
+pub use activation::{
+    ActivationConfig, ActivationIndexLimits, ActivationRuleLimitsConfig, ActivationRuntimeLimits, FragmentMatchCacheKey,
+};
 pub use aise::AiseConfig;
 pub use assets::AssetLimitsConfig;
 pub use character_think::CharacterThinkConfig;

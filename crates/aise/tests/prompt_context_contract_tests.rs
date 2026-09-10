@@ -13,7 +13,7 @@ use aise::domain::turn::{BaselineContext, NarrativeGraphStateIndex, RetrievalSig
 use aise::planning::WriterPlannerPromptContextProjector;
 use aise::prompt::profile::PromptProfile;
 use aise::prompt::{
-    CatalogPromptSource, PromptCompositionInput, RcPromptVars, TrustedPromptSource, FtiPromptVars,
+    CatalogPromptSource, FtiPromptVars, PromptCompositionInput, RcPromptVars, TrustedPromptSource,
     project_narrative_direction, render_narrative_direction,
 };
 use serde_json::Value;

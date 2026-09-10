@@ -6,7 +6,7 @@ use crate::domain::knowledge::fact::{Proposition, WorldFact};
 use crate::domain::knowledge::memory::MemoryEntry;
 use crate::domain::knowledge::query::{KnowledgeSource, allocate_knowledge_ids};
 use crate::domain::knowledge::rumor::{Claim, SharedRumor, TruthValue};
-use crate::domain::knowledge::{KnowledgeEntry, KnowledgeIdHighWater, KnowledgeKind, KnowledgeSourceId};
+use crate::domain::knowledge::{KnowledgeEntry, KnowledgeIdHighWater, KnowledgeKind, KnowledgeSourceId, RetrievalHint};
 use crate::domain::narrative_graph::condition::{
     ConditionEvalContext, NarrativeNodeState, RoleControllerKind, evaluate_condition,
 };
@@ -454,13 +454,23 @@ fn materialize_knowledge(
             proposition,
             retrieval_hint: crate::domain::knowledge::normalize_static_retrieval_hint(
                 &seed.content,
-                seed.retrieval_hint.clone(),
+                seed.retrieval_hint
+                    .as_ref()
+                    .map(|value| RetrievalHint::try_new(value.as_str().to_owned()))
+                    .transpose()
+                    .map_err(|_| StoryInstantiationError::InvalidReference {
+                        code: "retrieval_hint_invalid",
+                    })?,
             )
             .map_err(|_| StoryInstantiationError::InvalidReference {
                 code: "retrieval_hint_required",
             })?,
-            entities: canonical(seed.entities.clone()),
-            topics: canonical(seed.topics.clone()),
+            activation: seed.activation.clone(),
+            activation_rule_version: seed.activation.rule_version().map_err(|_| {
+                StoryInstantiationError::InvalidReference {
+                    code: "activation_rule_invalid",
+                }
+            })?,
             salience: seed.salience,
             source: source.clone(),
         }));
@@ -486,13 +496,23 @@ fn materialize_knowledge(
             claim,
             retrieval_hint: crate::domain::knowledge::normalize_static_retrieval_hint(
                 &seed.content,
-                seed.retrieval_hint.clone(),
+                seed.retrieval_hint
+                    .as_ref()
+                    .map(|value| RetrievalHint::try_new(value.as_str().to_owned()))
+                    .transpose()
+                    .map_err(|_| StoryInstantiationError::InvalidReference {
+                        code: "retrieval_hint_invalid",
+                    })?,
             )
             .map_err(|_| StoryInstantiationError::InvalidReference {
                 code: "retrieval_hint_required",
             })?,
-            entities: canonical(seed.entities.clone()),
-            topics: canonical(seed.topics.clone()),
+            activation: seed.activation.clone(),
+            activation_rule_version: seed.activation.rule_version().map_err(|_| {
+                StoryInstantiationError::InvalidReference {
+                    code: "activation_rule_invalid",
+                }
+            })?,
             salience: seed.salience,
             source_role_id: None,
             truth_value: TruthValue::Unverified,
@@ -508,26 +528,17 @@ fn materialize_knowledge(
                 code: "knowledge_id_allocation_kind_mismatch",
             });
         };
-        let entities = canonical(vec![crate::domain::asset::entity::KnowledgeEntity::Role(role_id.clone())]);
         entries.push(KnowledgeEntry::Memory(MemoryEntry {
             id,
             owner: role_id,
             kind: seed.kind.clone(),
             content: seed.content.clone(),
-            entities,
-            topics: canonical(seed.topics.clone()),
             salience: seed.salience,
             source: source.clone(),
             created_at_ms,
         }));
     }
     Ok((entries, allocation.new_high_water))
-}
-
-fn canonical<T: Ord>(mut values: Vec<T>) -> Vec<T> {
-    values.sort();
-    values.dedup();
-    values
 }
 
 fn enforce_limit(actual: usize, maximum: usize, limit: &'static str) -> Result<(), StoryInstantiationError> {

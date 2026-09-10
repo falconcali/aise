@@ -1,6 +1,3 @@
-pub use crate::domain::asset::entity::KnowledgeEntity;
-
-use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::fact::WorldFact;
@@ -39,22 +36,6 @@ impl KnowledgeEntry {
             Self::Fact(value) => &value.text,
             Self::Rumor(value) => &value.content,
             Self::Memory(value) => &value.content,
-        }
-    }
-
-    pub fn entities(&self) -> &[KnowledgeEntity] {
-        match self {
-            Self::Fact(value) => &value.entities,
-            Self::Rumor(value) => &value.entities,
-            Self::Memory(value) => &value.entities,
-        }
-    }
-
-    pub fn topics(&self) -> &[TopicKey] {
-        match self {
-            Self::Fact(value) => &value.topics,
-            Self::Rumor(value) => &value.topics,
-            Self::Memory(value) => &value.topics,
         }
     }
 

@@ -7,9 +7,8 @@ use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::{BaselineContext, RoleContextView};
 use crate::prompt::{
-    RcPromptVars, StoryProfilePromptView, FtiPromptVars, project_narrative_direction,
-    render_narrative_direction, render_relevant_knowledge, render_story_profile_view,
-    world_knowledge_view_from_baseline,
+    FtiPromptVars, RcPromptVars, StoryProfilePromptView, project_narrative_direction, render_narrative_direction,
+    render_relevant_knowledge, render_story_profile_view, world_knowledge_view_from_baseline,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};

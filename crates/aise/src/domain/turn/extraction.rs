@@ -1,8 +1,7 @@
-use crate::domain::asset::entity::KnowledgeEntity;
-use crate::domain::asset::ids::{MemoryKind, NarrativeConditionKey, Sha256Digest, TopicKey};
-use crate::domain::asset::text_matcher::TextMatcher;
+use crate::domain::asset::ids::{MemoryKind, NarrativeConditionKey, Sha256Digest};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::{FactId, MemoryId, RoleId, RumorId, TurnNumber};
+use crate::domain::knowledge::activation::KnowledgeActivationRule;
 use crate::domain::knowledge::hint::{RetrievalHint, normalize_static_retrieval_hint};
 use crate::domain::knowledge::query::{KnowledgeSourceId, allocate_knowledge_ids};
 use crate::domain::knowledge::rumor::TruthValue;
@@ -368,6 +367,8 @@ pub enum ExtractionEnrichmentError {
     ContentExceedsBudget,
     #[error("retrieval_hint is invalid")]
     InvalidRetrievalHint,
+    #[error("activation rule is invalid")]
+    InvalidActivationRule,
     #[error("knowledge id allocation overflowed")]
     AllocationOverflow,
     #[error("update/delete target does not reference a known knowledge item")]
@@ -414,8 +415,11 @@ pub fn enrich_extracted_knowledge(
     for draft in &dto.add_facts {
         let content = bounded_content(&draft.content, context.max_content_bytes)?;
         let retrieval_hint = enriched_retrieval_hint(&draft.retrieval_hint, &content)?;
-        let topics = recompute_topics(snapshot, content.as_str(), retrieval_hint.as_str());
         let id = next_fact_id(&mut assigned)?;
+        let activation = KnowledgeActivationRule::disabled();
+        let activation_rule_version = activation
+            .rule_version()
+            .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)?;
         operations.push(ValidatedKnowledgeOperation::Add(KnowledgeEntry::Fact(
             crate::domain::knowledge::fact::WorldFact {
                 id,
@@ -423,8 +427,8 @@ pub fn enrich_extracted_knowledge(
                 text: content,
                 proposition: None,
                 retrieval_hint,
-                entities: Vec::new(),
-                topics,
+                activation,
+                activation_rule_version,
                 salience: DEFAULT_RUNTIME_KNOWLEDGE_SALIENCE,
                 source: source.clone(),
             },
@@ -436,7 +440,10 @@ pub fn enrich_extracted_knowledge(
             existing_fact_salience(context.retrieved, &target).ok_or(ExtractionEnrichmentError::UnknownTarget)?;
         let content = bounded_content(&update.content, context.max_content_bytes)?;
         let retrieval_hint = enriched_retrieval_hint(&update.retrieval_hint, &content)?;
-        let topics = recompute_topics(snapshot, content.as_str(), retrieval_hint.as_str());
+        let activation = KnowledgeActivationRule::disabled();
+        let activation_rule_version = activation
+            .rule_version()
+            .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)?;
         operations.push(ValidatedKnowledgeOperation::Update {
             target: KnowledgeSourceId::Fact(target.clone()),
             value: KnowledgeEntry::Fact(crate::domain::knowledge::fact::WorldFact {
@@ -445,8 +452,8 @@ pub fn enrich_extracted_knowledge(
                 text: content,
                 proposition: None,
                 retrieval_hint,
-                entities: Vec::new(),
-                topics,
+                activation,
+                activation_rule_version,
                 salience: existing_salience,
                 source: source.clone(),
             }),
@@ -456,9 +463,11 @@ pub fn enrich_extracted_knowledge(
     for draft in &dto.add_rumors {
         let content = bounded_content(&draft.content, context.max_content_bytes)?;
         let retrieval_hint = enriched_retrieval_hint(&draft.retrieval_hint, &content)?;
-        let topics = recompute_topics(snapshot, content.as_str(), retrieval_hint.as_str());
         let source_role_id = resolve_source_role(&draft.source_role_id, snapshot, accepted_new_roles)?;
-        let entities = source_role_id.iter().cloned().map(KnowledgeEntity::Role).collect();
+        let activation = KnowledgeActivationRule::disabled();
+        let activation_rule_version = activation
+            .rule_version()
+            .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)?;
         let id = next_rumor_id(&mut assigned)?;
         operations.push(ValidatedKnowledgeOperation::Add(KnowledgeEntry::Rumor(
             crate::domain::knowledge::rumor::SharedRumor {
@@ -467,8 +476,8 @@ pub fn enrich_extracted_knowledge(
                 content,
                 claim: None,
                 retrieval_hint,
-                entities,
-                topics,
+                activation,
+                activation_rule_version,
                 salience: DEFAULT_RUNTIME_KNOWLEDGE_SALIENCE,
                 source_role_id,
                 truth_value: draft.truth_value.clone(),
@@ -482,9 +491,11 @@ pub fn enrich_extracted_knowledge(
             existing_rumor_salience(context.retrieved, &target).ok_or(ExtractionEnrichmentError::UnknownTarget)?;
         let content = bounded_content(&update.content, context.max_content_bytes)?;
         let retrieval_hint = enriched_retrieval_hint(&update.retrieval_hint, &content)?;
-        let topics = recompute_topics(snapshot, content.as_str(), retrieval_hint.as_str());
         let source_role_id = resolve_source_role(&update.source_role_id, snapshot, accepted_new_roles)?;
-        let entities = source_role_id.iter().cloned().map(KnowledgeEntity::Role).collect();
+        let activation = KnowledgeActivationRule::disabled();
+        let activation_rule_version = activation
+            .rule_version()
+            .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)?;
         operations.push(ValidatedKnowledgeOperation::Update {
             target: KnowledgeSourceId::Rumor(target.clone()),
             value: KnowledgeEntry::Rumor(crate::domain::knowledge::rumor::SharedRumor {
@@ -493,8 +504,8 @@ pub fn enrich_extracted_knowledge(
                 content,
                 claim: None,
                 retrieval_hint,
-                entities,
-                topics,
+                activation,
+                activation_rule_version,
                 salience: existing_salience,
                 source_role_id,
                 truth_value: update.truth_value.clone(),
@@ -521,7 +532,6 @@ pub fn enrich_extracted_knowledge(
         let memory_kind =
             MemoryKind::try_new(draft.memory_kind.clone()).map_err(|_| ExtractionEnrichmentError::InvalidMemoryKind)?;
         let content = bounded_content(&draft.content, context.max_content_bytes)?;
-        let topics = recompute_topics(snapshot, content.as_str(), "");
         let id = next_memory_id(&mut assigned)?;
         operations.push(ValidatedKnowledgeOperation::Add(KnowledgeEntry::Memory(
             crate::domain::knowledge::memory::MemoryEntry {
@@ -529,8 +539,6 @@ pub fn enrich_extracted_knowledge(
                 owner: owner.clone(),
                 kind: memory_kind,
                 content,
-                entities: vec![KnowledgeEntity::Role(owner)],
-                topics,
                 salience: DEFAULT_RUNTIME_KNOWLEDGE_SALIENCE,
                 source: source.clone(),
                 created_at_ms: context.created_at_ms,
@@ -544,7 +552,6 @@ pub fn enrich_extracted_knowledge(
         let memory_kind = MemoryKind::try_new(update.memory_kind.clone())
             .map_err(|_| ExtractionEnrichmentError::InvalidMemoryKind)?;
         let content = bounded_content(&update.content, context.max_content_bytes)?;
-        let topics = recompute_topics(snapshot, content.as_str(), "");
         operations.push(ValidatedKnowledgeOperation::Update {
             target: KnowledgeSourceId::Memory(target.clone()),
             value: KnowledgeEntry::Memory(crate::domain::knowledge::memory::MemoryEntry {
@@ -552,8 +559,6 @@ pub fn enrich_extracted_knowledge(
                 owner: owner.clone(),
                 kind: memory_kind,
                 content,
-                entities: vec![KnowledgeEntity::Role(owner)],
-                topics,
                 salience: existing_salience,
                 source: source.clone(),
                 created_at_ms: context.created_at_ms,
@@ -616,19 +621,6 @@ fn enriched_retrieval_hint(raw: &str, content: &BoundedText) -> Result<Retrieval
         Some(RetrievalHint::try_new(raw.trim()).map_err(|_| ExtractionEnrichmentError::InvalidRetrievalHint)?)
     };
     normalize_static_retrieval_hint(content, configured).map_err(|_| ExtractionEnrichmentError::InvalidRetrievalHint)
-}
-
-fn recompute_topics(snapshot: &StoryReadSnapshot, content: &str, retrieval_hint: &str) -> Vec<TopicKey> {
-    let matcher = TextMatcher;
-    let combined = if retrieval_hint.is_empty() {
-        content.to_owned()
-    } else {
-        format!("{content}\n{retrieval_hint}")
-    };
-    let mut topics = matcher.match_topics(&combined, snapshot.topic_dictionary());
-    topics.sort();
-    topics.dedup();
-    topics
 }
 
 fn role_is_known(role_id: &RoleId, snapshot: &StoryReadSnapshot, accepted_new_roles: &[StoryRole]) -> bool {

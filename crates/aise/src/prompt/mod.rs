@@ -22,9 +22,9 @@ mod validator;
 pub use asset::{CompiledPromptAsset, PromptAssetManifest, compute_asset_hash};
 pub use catalog::PromptCatalog;
 pub use composition::{
-    CoreSystemInstruction, FinalTaskInstruction, PromptComposer, PromptComposition, PromptCompositionInput,
-    PromptCompositionMetadata, PromptLayer, ProviderPromptEncoder, RuntimeContextMessage, RcPromptVars,
-    FtiPromptVars,
+    CoreSystemInstruction, FinalTaskInstruction, FtiPromptVars, PromptComposer, PromptComposition,
+    PromptCompositionInput, PromptCompositionMetadata, PromptLayer, ProviderPromptEncoder, RcPromptVars,
+    RuntimeContextMessage,
 };
 pub use error::PromptError;
 pub use knowledge_view::{

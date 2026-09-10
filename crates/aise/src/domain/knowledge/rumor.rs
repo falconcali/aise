@@ -1,7 +1,7 @@
-use crate::domain::asset::entity::KnowledgeEntity;
-use crate::domain::asset::ids::{RumorKey, TopicKey};
+use crate::domain::asset::ids::RumorKey;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::{RoleId, RumorId};
+use crate::domain::knowledge::activation::{ActivationRuleVersion, KnowledgeActivationRule};
 use crate::domain::knowledge::hint::RetrievalHint;
 use crate::domain::knowledge::query::KnowledgeSource;
 use serde::{Deserialize, Serialize};
@@ -14,10 +14,8 @@ pub struct SharedRumor {
     pub content: BoundedText,
     pub claim: Option<Claim>,
     pub retrieval_hint: RetrievalHint,
-    #[serde(default)]
-    pub entities: Vec<KnowledgeEntity>,
-    #[serde(default)]
-    pub topics: Vec<TopicKey>,
+    pub activation: KnowledgeActivationRule,
+    pub activation_rule_version: ActivationRuleVersion,
     pub salience: u8,
     pub source_role_id: Option<RoleId>,
     pub truth_value: TruthValue,
@@ -35,7 +33,7 @@ pub enum TruthValue {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Claim {
-    pub subject: KnowledgeEntity,
+    pub subject: BoundedText,
     pub predicate: BoundedText,
     pub value: ScalarValue,
 }

@@ -183,8 +183,6 @@ impl Store for SqliteStore {
                     salience: entry.salience(),
                     source: entry.source(),
                     payload_json,
-                    entities: entry.entities(),
-                    topics: entry.topics(),
                 },
             )
             .await?;
@@ -641,8 +639,6 @@ struct KnowledgeEntryWrite<'a> {
     salience: u8,
     source: &'a crate::domain::knowledge::KnowledgeSource,
     payload_json: String,
-    entities: &'a [crate::domain::asset::entity::KnowledgeEntity],
-    topics: &'a [crate::domain::asset::ids::TopicKey],
 }
 
 async fn insert_knowledge_entry(
@@ -670,61 +666,6 @@ async fn insert_knowledge_entry(
     .execute(&mut **tx)
     .await
     .map_err(SqliteStoreError::from)?;
-    write_knowledge_entity_and_topic_rows(
-        tx,
-        entry.story_id,
-        entry.knowledge_kind,
-        entry.source_id,
-        entry.entities,
-        entry.topics,
-    )
-    .await
-}
-
-async fn write_knowledge_entity_and_topic_rows(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    story_id: &StoryId,
-    knowledge_kind: &str,
-    source_id: &str,
-    entities: &[crate::domain::asset::entity::KnowledgeEntity],
-    topics: &[crate::domain::asset::ids::TopicKey],
-) -> Result<(), StoreError> {
-    for entity in entities {
-        let (entity_kind, entity_key) = match entity {
-            crate::domain::asset::entity::KnowledgeEntity::World(key) => ("world", key.as_str().to_owned()),
-            crate::domain::asset::entity::KnowledgeEntity::Role(id) => ("role", id.as_str().to_owned()),
-            crate::domain::asset::entity::KnowledgeEntity::Location(key) => ("location", key.as_str().to_owned()),
-            crate::domain::asset::entity::KnowledgeEntity::Scene(key) => ("scene", key.as_str().to_owned()),
-            crate::domain::asset::entity::KnowledgeEntity::NarrativeNode(key) => {
-                ("narrative_node", key.as_str().to_owned())
-            }
-            crate::domain::asset::entity::KnowledgeEntity::Event(key) => ("event", key.as_str().to_owned()),
-        };
-        sqlx::query(
-            "INSERT INTO knowledge_entry_entities \
-             (story_id, knowledge_kind, source_id, entity_kind, entity_key) VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(story_id.as_str())
-        .bind(knowledge_kind)
-        .bind(source_id)
-        .bind(entity_kind)
-        .bind(&entity_key)
-        .execute(&mut **tx)
-        .await
-        .map_err(SqliteStoreError::from)?;
-    }
-    for topic in topics {
-        sqlx::query(
-            "INSERT INTO knowledge_entry_topics (story_id, knowledge_kind, source_id, topic_key) VALUES (?, ?, ?, ?)",
-        )
-        .bind(story_id.as_str())
-        .bind(knowledge_kind)
-        .bind(source_id)
-        .bind(topic.as_str())
-        .execute(&mut **tx)
-        .await
-        .map_err(SqliteStoreError::from)?;
-    }
     Ok(())
 }
 
@@ -752,8 +693,6 @@ async fn apply_knowledge_mutation(
                     salience: entry.salience(),
                     source: entry.source(),
                     payload_json,
-                    entities: entry.entities(),
-                    topics: entry.topics(),
                 },
             )
             .await
@@ -780,24 +719,6 @@ async fn apply_knowledge_mutation(
                     kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
                 })?;
             let merged = merge_knowledge_update(existing, value.clone())?;
-            sqlx::query(
-                "DELETE FROM knowledge_entry_entities WHERE story_id = ? AND knowledge_kind = ? AND source_id = ?",
-            )
-            .bind(story_id.as_str())
-            .bind(knowledge_kind)
-            .bind(&source_id_str)
-            .execute(&mut **tx)
-            .await
-            .map_err(SqliteStoreError::from)?;
-            sqlx::query(
-                "DELETE FROM knowledge_entry_topics WHERE story_id = ? AND knowledge_kind = ? AND source_id = ?",
-            )
-            .bind(story_id.as_str())
-            .bind(knowledge_kind)
-            .bind(&source_id_str)
-            .execute(&mut **tx)
-            .await
-            .map_err(SqliteStoreError::from)?;
             let payload_json = serde_json::to_string(&merged).map_err(|_| StoreError::Serialization {
                 kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
             })?;
@@ -824,15 +745,7 @@ async fn apply_knowledge_mutation(
                     constraint: "knowledge_update_target_missing".to_owned(),
                 });
             }
-            write_knowledge_entity_and_topic_rows(
-                tx,
-                story_id,
-                knowledge_kind,
-                &source_id_str,
-                merged.entities(),
-                merged.topics(),
-            )
-            .await
+            Ok(())
         }
         ValidatedKnowledgeOperation::Delete { target } => {
             let (knowledge_kind, source_id_str) = match target {
@@ -872,8 +785,8 @@ fn merge_knowledge_update(
                 text: new.text,
                 proposition: new.proposition,
                 retrieval_hint: new.retrieval_hint,
-                entities: new.entities,
-                topics: new.topics,
+                activation: new.activation,
+                activation_rule_version: new.activation_rule_version,
                 salience: new.salience,
                 source: new.source,
             }))
@@ -885,8 +798,8 @@ fn merge_knowledge_update(
                 content: new.content,
                 claim: new.claim,
                 retrieval_hint: new.retrieval_hint,
-                entities: new.entities,
-                topics: new.topics,
+                activation: new.activation,
+                activation_rule_version: new.activation_rule_version,
                 salience: new.salience,
                 source_role_id: new.source_role_id,
                 truth_value: new.truth_value,
@@ -904,8 +817,6 @@ fn merge_knowledge_update(
                 owner: old.owner,
                 kind: new.kind,
                 content: new.content,
-                entities: new.entities,
-                topics: new.topics,
                 salience: new.salience,
                 source: new.source,
                 created_at_ms: old.created_at_ms,

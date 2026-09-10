@@ -7,7 +7,7 @@ use crate::domain::narrative_graph::effect::ImpulseUrgency;
 use crate::domain::story_instance::role::RoleController;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::CharacterThinkRequest;
-use crate::prompt::{RoleKnowledgePromptView, RcPromptVars, FtiPromptVars, render_role_knowledge};
+use crate::prompt::{FtiPromptVars, RcPromptVars, RoleKnowledgePromptView, render_role_knowledge};
 use crate::turn::turn_context::TurnExecutionContext;
 use serde_json::Value;
 use std::collections::HashMap;

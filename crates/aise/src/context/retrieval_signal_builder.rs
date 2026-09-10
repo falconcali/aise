@@ -165,7 +165,3 @@ fn entity_match_text(entity: &KnowledgeEntity) -> String {
         KnowledgeEntity::Event(key) => key.as_str().to_owned(),
     }
 }
-
-#[cfg(test)]
-#[path = "tests/retrieval_signal_builder_tests.rs"]
-mod tests;

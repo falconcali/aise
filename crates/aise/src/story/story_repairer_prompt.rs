@@ -1,7 +1,7 @@
 use crate::config::ContextPreparationConfig;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::text::estimate_text_tokens;
-use crate::prompt::{RcPromptVars, FtiPromptVars};
+use crate::prompt::{FtiPromptVars, RcPromptVars};
 use crate::story::story_generator_prompt::{
     DefaultStoryGeneratorPromptContextProjector, StoryGeneratorProjectionError, StoryGeneratorPromptContext,
     StoryGeneratorPromptContextProjector, prune_dialogue_examples_to_budget,

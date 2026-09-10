@@ -1,3 +1,4 @@
+pub mod activation;
 pub mod entry;
 pub mod fact;
 pub mod hint;
@@ -6,7 +7,7 @@ pub mod query;
 pub mod rumor;
 
 pub use crate::domain::error::KnowledgeIdError;
-pub use entry::{KnowledgeEntity, KnowledgeEntry};
+pub use entry::KnowledgeEntry;
 pub use fact::{Proposition, WorldFact};
 pub use hint::{RetrievalHint, RetrievalHintError, normalize_static_retrieval_hint};
 pub use memory::MemoryEntry;

@@ -1,3 +1,4 @@
+pub mod activation;
 pub mod baseline_ctx_builder;
 pub mod candidate_retriever;
 pub mod entity_candidate_retriever;

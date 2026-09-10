@@ -246,7 +246,7 @@ impl fmt::Debug for SemanticVersion {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Sha256Digest([u8; 32]);
 
 impl Sha256Digest {

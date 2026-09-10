@@ -1,13 +1,44 @@
 use crate::domain::asset::ids::TopicKey;
-use crate::domain::asset::world_book::{TopicDefinition, TopicDictionaryError, validate_topic_dictionary};
+use crate::domain::asset::validation::BoundedText;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopicDefinition {
+    pub label: BoundedText,
+    #[serde(default)]
+    pub aliases: Vec<BoundedText>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TopicDictionaryError {
+    #[error("topic alias collision after normalization: {normalized}")]
+    AliasCollision { normalized: String },
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct TextMatcher;
 
 impl TextMatcher {
     pub fn validate_dictionary(dictionary: &BTreeMap<TopicKey, TopicDefinition>) -> Result<(), TopicDictionaryError> {
-        validate_topic_dictionary(dictionary)
+        let mut seen = BTreeMap::<String, TopicKey>::new();
+        for (topic, definition) in dictionary {
+            let terms = std::iter::once(&definition.label).chain(definition.aliases.iter());
+            for term in terms {
+                let normalized = normalize_match_text(term.as_str());
+                if normalized.is_empty() {
+                    continue;
+                }
+                if let Some(existing) = seen.get(&normalized) {
+                    if existing != topic {
+                        return Err(TopicDictionaryError::AliasCollision { normalized });
+                    }
+                } else {
+                    seen.insert(normalized, topic.clone());
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn match_topics(&self, text: &str, dictionary: &BTreeMap<TopicKey, TopicDefinition>) -> Vec<TopicKey> {

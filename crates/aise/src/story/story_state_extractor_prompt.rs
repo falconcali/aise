@@ -5,7 +5,7 @@ use crate::domain::ids::{MemoryId, RoleId, allocate_dynamic_role_candidates};
 use crate::domain::knowledge::KnowledgeSourceId;
 use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
-use crate::prompt::{RcPromptVars, FtiPromptVars};
+use crate::prompt::{FtiPromptVars, RcPromptVars};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::TurnPhase;
 use crate::turn::turn_validation::{ValidationDecision, ValidationIssueCode, ValidationLocation};
