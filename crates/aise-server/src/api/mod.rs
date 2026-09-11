@@ -1,3 +1,4 @@
+pub mod activation_preview;
 pub mod bind;
 pub mod character_card;
 pub mod dto;

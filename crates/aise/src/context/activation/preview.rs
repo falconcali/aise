@@ -153,7 +153,7 @@ pub fn project_preview(
     Ok(projected)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum ActivationPreviewError {
     #[error("activation preview limits must be positive")]
     InvalidLimits,
@@ -163,6 +163,12 @@ pub enum ActivationPreviewError {
     MissingMetadata,
     #[error("activation preview response serialization failed")]
     Serialization,
+    #[error("activation preview store operation failed")]
+    Store(#[source] crate::persistence::StoreError),
+    #[error("activation preview target is unauthorized")]
+    UnauthorizedTarget,
+    #[error("activation preview activation failed")]
+    Activation(#[source] crate::domain::knowledge::activation::ActivationError),
 }
 
 fn validate_limits(limits: ActivationPreviewLimits) -> Result<(), ActivationPreviewError> {

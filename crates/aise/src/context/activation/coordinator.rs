@@ -65,13 +65,15 @@ impl KnowledgeActivationCoordinator {
             continuation: request.continuation,
             limits: request.limits,
         };
-        self.run_prepared(request)
-            .map_err(|error| StoreError::ConstraintViolation {
+        self.run_prepared(request).map_err(|error| StoreError::ConstraintViolation {
             constraint: error.to_string(),
         })
     }
 
-    pub fn run_prepared(&self, request: ActivationRequest<'_>) -> Result<ActivationResult, crate::domain::knowledge::activation::ActivationError> {
+    pub fn run_prepared(
+        &self,
+        request: ActivationRequest<'_>,
+    ) -> Result<ActivationResult, crate::domain::knowledge::activation::ActivationError> {
         self.engine.run(request)
     }
 

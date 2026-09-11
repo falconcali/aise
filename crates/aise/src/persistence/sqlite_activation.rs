@@ -4,12 +4,10 @@ use crate::domain::knowledge::activation::{
     ActivationEntryMetadata, ActivationIndexSnapshot, ActivationIndexSnapshotRef, ActivationRuleVersion,
     ActivationTimedState,
 };
-use crate::domain::knowledge::KnowledgeEntry;
+use crate::domain::knowledge::{KnowledgeEntry, KnowledgeKind, KnowledgeSourceId};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::persistence::activation_index_port::ActivationIndexPort;
-use crate::persistence::activation_timed_state_port::{
-    ActivationTimedStateQuery, ActivationTimedStateReadPort,
-};
+use crate::persistence::activation_timed_state_port::{ActivationTimedStateQuery, ActivationTimedStateReadPort};
 use crate::persistence::sqlite_error::SqliteStoreError;
 use crate::persistence::sqlite_store::SqliteStore;
 use crate::persistence::store::{StoreError, StoreSerializationErrorKind};
@@ -28,13 +26,12 @@ impl ActivationIndexPort for SqliteStore {
         limits: ActivationIndexLimits,
     ) -> Result<Arc<ActivationIndexSnapshot>, StoreError> {
         let mut tx = self.pool().begin().await.map_err(SqliteStoreError::from)?;
-        let overlay_version: i64 = sqlx::query_scalar(
-            "SELECT activation_overlay_version FROM story_instances WHERE story_id = ?1",
-        )
-        .bind(knowledge.story_id.as_str())
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(SqliteStoreError::from)?;
+        let overlay_version: i64 =
+            sqlx::query_scalar("SELECT activation_overlay_version FROM story_instances WHERE story_id = ?1")
+                .bind(knowledge.story_id.as_str())
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(SqliteStoreError::from)?;
         let rows = sqlx::query(
             "SELECT payload_json FROM knowledge_entries WHERE story_id = ?1 AND knowledge_kind != 'memory'
              ORDER BY source_id LIMIT ?2",
@@ -49,10 +46,9 @@ impl ActivationIndexPort for SqliteStore {
         let mut metadata = BTreeMap::new();
         for row in rows {
             let payload: String = row.try_get("payload_json").map_err(SqliteStoreError::from)?;
-            let entry: KnowledgeEntry =
-                serde_json::from_str(&payload).map_err(|_| StoreError::Serialization {
-                    kind: StoreSerializationErrorKind::InvalidWorldState,
-                })?;
+            let entry: KnowledgeEntry = serde_json::from_str(&payload).map_err(|_| StoreError::Serialization {
+                kind: StoreSerializationErrorKind::InvalidWorldState,
+            })?;
             let metadata_entry = match &entry {
                 KnowledgeEntry::Fact(value) => ActivationEntryMetadata {
                     source_id: entry.source_id(),
@@ -116,14 +112,26 @@ impl ActivationTimedStateReadPort for SqliteStore {
             .map(|row| {
                 let source_id: String = row.try_get("source_id").map_err(SqliteStoreError::from)?;
                 let rule_version: String = row.try_get("rule_version").map_err(SqliteStoreError::from)?;
-                let source_id = serde_json::from_value(serde_json::json!(source_id)).map_err(|_| StoreError::Serialization {
-                    kind: StoreSerializationErrorKind::InvalidWorldState,
-                })?;
-                let rule_version = ActivationRuleVersion(
-                    Sha256Digest::try_new(&rule_version).map_err(|_| StoreError::Serialization {
+                let kind = if source_id.starts_with("fact_") {
+                    KnowledgeKind::Fact
+                } else if source_id.starts_with("rumor_") {
+                    KnowledgeKind::Rumor
+                } else if source_id.starts_with("memory_") {
+                    KnowledgeKind::Memory
+                } else {
+                    return Err(StoreError::Serialization {
                         kind: StoreSerializationErrorKind::InvalidWorldState,
-                    })?,
-                );
+                    });
+                };
+                let source_id =
+                    KnowledgeSourceId::try_from_parts(kind, &source_id).map_err(|_| StoreError::Serialization {
+                        kind: StoreSerializationErrorKind::InvalidWorldState,
+                    })?;
+                let rule_version = ActivationRuleVersion(Sha256Digest::try_new(&rule_version).map_err(|_| {
+                    StoreError::Serialization {
+                        kind: StoreSerializationErrorKind::InvalidWorldState,
+                    }
+                })?);
                 Ok(ActivationTimedState {
                     source_id,
                     rule_version,

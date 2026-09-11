@@ -36,6 +36,7 @@ async fn main() -> anyhow::Result<()> {
             services.character_card_service,
             services.instance_factory,
             services.story_history_reader,
+            services.activation_preview,
         ),
     );
     let app = router(state, &config);

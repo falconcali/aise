@@ -57,6 +57,21 @@
             <div id="story" class="tab-panel active"></div>
             <div id="trace-view" class="tab-panel">
               <div id="trace-empty">勾选“调试 Trace”以生成</div>
+              <section id="activation-preview">
+                <h3>Activation Preview</h3>
+                <label for="activation-preview-contribution">Player Contribution</label>
+                <textarea id="activation-preview-contribution" maxlength="32768"></textarea>
+                <div id="activation-preview-bytes">0 bytes</div>
+                <label for="activation-preview-trigger">Generation Trigger</label>
+                <select id="activation-preview-trigger">
+                  <option value="normal">normal</option>
+                  <option value="continue">continue</option>
+                  <option value="regenerate">regenerate</option>
+                  <option value="dry_run_preview">dry_run_preview</option>
+                </select>
+                <button id="activation-preview-run" type="button">Run Preview</button>
+                <div id="activation-preview-result"></div>
+              </section>
             </div>
             <form id="turn-form" autocomplete="off">
               <input id="player-contribution" placeholder="输入角色要说、做或想的内容…" disabled />

@@ -2,6 +2,9 @@ use crate::config::ServerConfig;
 use crate::trace::{NoopRedactor, TraceRedactor, TraceSinkError, TraceWriter, TraceWriterConfig};
 use aise::AiseEngine;
 use aise::character::CharacterThinkPipeline;
+use aise::context::activation::{
+    ActivationPreviewLimits, ActivationPreviewServiceConfig, KnowledgeActivationPreviewService,
+};
 use aise::context::{
     BaselineContextBuilder, ContextRetrievalPipeline, EntityCandidateRetriever, TopicCandidateRetriever,
 };
@@ -10,6 +13,7 @@ use aise::llm::{LlmGateway, LlmProvider, OpenAiCompatProvider};
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::knowledge_read_port::KnowledgeReadPort;
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
+use aise::persistence::{ActivationIndexPort, ActivationTimedStateReadPort};
 use aise::persistence::{SqliteStore, SqliteStoryHistoryReader, Store, StoryHistoryReadPort, TurnCommitter};
 use aise::planning::WriterPlanner;
 use aise::prompt::{CatalogPromptSource, TrustedPromptSource};
@@ -34,6 +38,7 @@ pub struct EngineServices {
     pub character_card_service: Arc<CharacterCardService>,
     pub instance_factory: Arc<StoryInstanceFactory>,
     pub story_history_reader: Arc<dyn StoryHistoryReadPort>,
+    pub activation_preview: Arc<KnowledgeActivationPreviewService>,
 }
 
 pub async fn build_services(
@@ -52,7 +57,31 @@ pub async fn build_services(
         SqliteStoryHistoryReader::new(sqlite.clone(), config.aise.story_history.clone()).map_err(anyhow::Error::msg)?,
     );
     let store: Arc<dyn Store> = sqlite.clone();
-    let knowledge: Arc<dyn KnowledgeReadPort> = sqlite;
+    let knowledge: Arc<dyn KnowledgeReadPort> = sqlite.clone();
+    let activation_index: Arc<dyn ActivationIndexPort> = sqlite.clone();
+    let activation_timed_state: Arc<dyn ActivationTimedStateReadPort> = sqlite.clone();
+    let activation_preview = Arc::new(KnowledgeActivationPreviewService::new(
+        store.clone(),
+        knowledge.clone(),
+        activation_index,
+        activation_timed_state,
+        ActivationPreviewServiceConfig {
+            content_limits: config.aise.content.clone(),
+            context_config: config.aise.context.clone(),
+            asset_limits: config.aise.assets.clone(),
+            narrative_config: config.aise.narrative.clone(),
+            activation_config: config.aise.activation.clone(),
+            preview_limits: ActivationPreviewLimits {
+                max_player_contribution_bytes: config.aise.content.max_story_text_bytes,
+                max_external_targets: config.aise.activation.runtime.max_external_candidates,
+                max_response_entries: config.aise.activation.runtime.max_activated_entries,
+                max_evidence_per_entry: config.aise.activation.runtime.max_evidence_per_entry,
+                max_response_evidence: config.aise.activation.runtime.max_evidence_per_entry
+                    * config.aise.activation.runtime.max_activated_entries,
+                max_response_bytes: config.aise.content.max_knowledge_change_bytes,
+            },
+        },
+    ));
 
     let coordinator = StoryTurnCoordinator::new(&config.aise.coordinator);
 
@@ -126,6 +155,7 @@ pub async fn build_services(
         character_card_service,
         instance_factory,
         story_history_reader,
+        activation_preview,
     })
 }
 

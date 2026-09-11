@@ -2,6 +2,7 @@ use crate::config::ServerConfig;
 use crate::session::SessionRegistry;
 use crate::tasks::TurnTaskSupervisor;
 use aise::AiseEngine;
+use aise::context::activation::KnowledgeActivationPreviewService;
 use aise::persistence::StoryHistoryReadPort;
 use aise::story::character_card_service::CharacterCardService;
 use aise::story::instance_factory::StoryInstanceFactory;
@@ -17,6 +18,7 @@ pub struct AppState {
     pub character_card_service: Option<Arc<CharacterCardService>>,
     pub instance_factory: Option<Arc<StoryInstanceFactory>>,
     pub story_history_reader: Option<Arc<dyn StoryHistoryReadPort>>,
+    pub activation_preview: Option<Arc<KnowledgeActivationPreviewService>>,
 }
 
 impl AppState {
@@ -35,6 +37,7 @@ impl AppState {
             character_card_service: None,
             instance_factory: None,
             story_history_reader: None,
+            activation_preview: None,
         }
     }
 
@@ -44,11 +47,13 @@ impl AppState {
         character_card_service: Arc<CharacterCardService>,
         instance_factory: Arc<StoryInstanceFactory>,
         story_history_reader: Arc<dyn StoryHistoryReadPort>,
+        activation_preview: Arc<KnowledgeActivationPreviewService>,
     ) -> Self {
         self.pack_service = Some(pack_service);
         self.character_card_service = Some(character_card_service);
         self.instance_factory = Some(instance_factory);
         self.story_history_reader = Some(story_history_reader);
+        self.activation_preview = Some(activation_preview);
         self
     }
 }

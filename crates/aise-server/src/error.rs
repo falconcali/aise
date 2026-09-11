@@ -6,8 +6,10 @@ use axum::response::{IntoResponse, Response};
 pub enum ApiError {
     BadRequest(String),
     NotFound(String),
+    Forbidden(String),
     Conflict(String),
     Unprocessable(String),
+    ServiceUnavailable(String),
     Backpressure(String),
     Engine(anyhow::Error),
     Internal(anyhow::Error),
@@ -18,8 +20,10 @@ impl IntoResponse for ApiError {
         let (status, message) = match self {
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
+            ApiError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
             ApiError::Conflict(msg) => (StatusCode::CONFLICT, msg),
             ApiError::Unprocessable(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg),
+            ApiError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
             ApiError::Backpressure(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
             ApiError::Engine(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             ApiError::Internal(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),

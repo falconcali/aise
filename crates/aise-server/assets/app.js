@@ -28,6 +28,11 @@ const backToDetailBtn = $("back-to-detail");
 const roleStateEl = $("role-state");
 const worldInfoEl = $("world-info");
 const toastEl = $("toast");
+const activationPreviewContribution = $("activation-preview-contribution");
+const activationPreviewBytes = $("activation-preview-bytes");
+const activationPreviewTrigger = $("activation-preview-trigger");
+const activationPreviewRun = $("activation-preview-run");
+const activationPreviewResult = $("activation-preview-result");
 
 let packs = [];
 let sessions = [];
@@ -36,6 +41,62 @@ let currentPack = null;
 let currentPackJson = null;
 let currentSession = null;
 let currentStory = null;
+
+function renderActivationPreview(result) {
+  activationPreviewResult.replaceChildren();
+  const identity = document.createElement("div");
+  identity.textContent = `revision ${result.base_revision} · turn ${result.evaluated_turn_number} · pack ${result.pack_digest} · overlay ${result.overlay_version}`;
+  activationPreviewResult.appendChild(identity);
+  const summary = document.createElement("div");
+  summary.textContent = `stop: ${result.stop_reason} · truncated: ${result.truncated} · activated: ${result.activated.length}`;
+  activationPreviewResult.appendChild(summary);
+  for (const entry of result.activated) {
+    const item = document.createElement("article");
+    const title = document.createElement("h4");
+    title.textContent = `${entry.rank}. ${entry.source_id.kind}:${entry.source_id.id} · ${entry.knowledge_kind} · ${entry.activation_class}`;
+    item.appendChild(title);
+    const metadata = document.createElement("div");
+    metadata.textContent = `round ${entry.round} · recursion ${entry.recursion_level} · tokens ${entry.token_cost}`;
+    item.appendChild(metadata);
+    for (const evidence of entry.evidence) {
+      const row = document.createElement("div");
+      row.textContent = `${evidence.pattern_kind} #${evidence.pattern_ordinal} · ${evidence.fragment_kind} · depth ${evidence.recency_depth} · matches ${evidence.match_count}`;
+      item.appendChild(row);
+    }
+    activationPreviewResult.appendChild(item);
+  }
+  const rejections = document.createElement("div");
+  rejections.textContent = `rejections: ${JSON.stringify(result.rejection_counts)} · usage: ${JSON.stringify(result.usage)}`;
+  activationPreviewResult.appendChild(rejections);
+}
+
+activationPreviewContribution.oninput = () => {
+  activationPreviewBytes.textContent = `${new TextEncoder().encode(activationPreviewContribution.value).length} bytes`;
+};
+
+activationPreviewRun.onclick = async () => {
+  if (!currentStory || !activationPreviewContribution.value) return;
+  activationPreviewRun.disabled = true;
+  activationPreviewResult.replaceChildren();
+  try {
+    const response = await api(`/api/stories/${encodeURIComponent(currentStory.story_id)}/knowledge-activation/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        player_contribution: activationPreviewContribution.value,
+        generation_trigger: activationPreviewTrigger.value,
+        external_targets: [],
+      }),
+    });
+    renderActivationPreview(await response.json());
+  } catch (error) {
+    const failure = document.createElement("div");
+    failure.textContent = error.message;
+    activationPreviewResult.appendChild(failure);
+  } finally {
+    activationPreviewRun.disabled = false;
+  }
+};
 
 function showView(name) {
   currentView = name;
