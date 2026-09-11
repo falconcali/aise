@@ -56,6 +56,14 @@ pub struct SourceKnowledgeQuery<'a> {
 }
 
 #[derive(Debug, Clone)]
+pub struct OwnerMemoryQuery<'a> {
+    pub snapshot: &'a KnowledgeSnapshotRef,
+    pub owner: &'a RoleId,
+    pub limit: usize,
+    pub max_item_bytes: usize,
+}
+
+#[derive(Debug, Clone)]
 pub struct KnowledgeIndexQuery<'a> {
     pub snapshot: &'a KnowledgeSnapshotRef,
     pub knowledge_kinds: &'a [KnowledgeKind],
@@ -75,6 +83,10 @@ pub trait KnowledgeReadPort: Send + Sync {
     async fn find_by_topics(&self, query: TopicKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError>;
 
     async fn find_by_source_ids(&self, query: SourceKnowledgeQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError>;
+
+    async fn find_memories_by_owner(&self, _query: OwnerMemoryQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError> {
+        Ok(Vec::new())
+    }
 
     async fn list_index(&self, query: KnowledgeIndexQuery<'_>) -> Result<Vec<KnowledgeIndexRecord>, StoreError>;
 }

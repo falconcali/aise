@@ -1,6 +1,7 @@
 use crate::domain::asset::ids::Sha256Digest;
 use crate::domain::ids::{RoleIdHighWater, StoryId, TurnKey, TurnNumber};
 use crate::domain::knowledge::KnowledgeIdHighWater;
+use crate::domain::knowledge::activation::{ActivationContinuation, ActivationResult};
 use crate::domain::narrative_graph::projector::NarrativeProjection;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{
@@ -22,6 +23,12 @@ use crate::turn::turn_validation::{
 use serde::Serialize;
 use std::time::Instant;
 
+#[derive(Debug, Clone)]
+pub struct PreparedActivation {
+    pub continuation: ActivationContinuation,
+    pub pending_timed_state: crate::domain::knowledge::activation::PendingActivationStateDelta,
+}
+
 struct BoundStateExtraction {
     story_version: u32,
     envelope: StoryStateExtractionEnvelope,
@@ -38,6 +45,7 @@ pub struct TurnExecutionContext {
     baseline: Option<BaselineContext>,
     plan: Option<WriterPlan>,
     narrative_projection: Option<NarrativeProjection>,
+    activation: Option<PreparedActivation>,
     retrieved: RetrievedContext,
     character_decisions: Vec<CharacterDecision>,
     story: Option<StoryGeneratorOutput>,
@@ -78,6 +86,7 @@ impl TurnExecutionContext {
             baseline: None,
             plan: None,
             narrative_projection: None,
+            activation: None,
             retrieved: RetrievedContext::default(),
             character_decisions: Vec::new(),
             story: None,
@@ -190,6 +199,17 @@ impl TurnExecutionContext {
 
     pub fn narrative_projection(&self) -> Option<&NarrativeProjection> {
         self.narrative_projection.as_ref()
+    }
+
+    pub fn activation(&self) -> Option<&PreparedActivation> {
+        self.activation.as_ref()
+    }
+
+    pub fn replace_activation(&mut self, result: ActivationResult) {
+        self.activation = Some(PreparedActivation {
+            continuation: result.continuation,
+            pending_timed_state: result.pending_timed_state,
+        });
     }
 
     pub fn set_narrative_projection(&mut self, projection: NarrativeProjection) -> Result<(), TurnExecutionError> {

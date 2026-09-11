@@ -7,7 +7,7 @@ use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::domain::turn::KnowledgeDelivery;
 use crate::persistence::knowledge_read_port::{
     EntityKnowledgeQuery, KnowledgeFilter, KnowledgeIndexQuery, KnowledgeIndexRecord, KnowledgeLookupHit,
-    KnowledgeReadPort, KnowledgeRecord, SourceKnowledgeQuery, TopicKnowledgeQuery,
+    KnowledgeReadPort, KnowledgeRecord, OwnerMemoryQuery, SourceKnowledgeQuery, TopicKnowledgeQuery,
 };
 use crate::persistence::sqlite_error::SqliteStoreError;
 use crate::persistence::sqlite_store::SqliteStore;
@@ -49,6 +49,10 @@ impl KnowledgeReadPort for SqliteStore {
         load_by_source_ids(self.pool(), query).await
     }
 
+    async fn find_memories_by_owner(&self, query: OwnerMemoryQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError> {
+        load_memories_by_owner(self.pool(), query).await
+    }
+
     async fn list_index(&self, query: KnowledgeIndexQuery<'_>) -> Result<Vec<KnowledgeIndexRecord>, StoreError> {
         load_index(self.pool(), query).await
     }
@@ -68,9 +72,46 @@ impl KnowledgeReadPort for Arc<SqliteStore> {
         KnowledgeReadPort::find_by_source_ids(&**self, query).await
     }
 
+    async fn find_memories_by_owner(&self, query: OwnerMemoryQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError> {
+        KnowledgeReadPort::find_memories_by_owner(&**self, query).await
+    }
+
     async fn list_index(&self, query: KnowledgeIndexQuery<'_>) -> Result<Vec<KnowledgeIndexRecord>, StoreError> {
         KnowledgeReadPort::list_index(&**self, query).await
     }
+}
+
+async fn load_memories_by_owner(
+    pool: &sqlx::SqlitePool,
+    query: OwnerMemoryQuery<'_>,
+) -> Result<Vec<KnowledgeRecord>, StoreError> {
+    if query.limit == 0 || query.max_item_bytes == 0 {
+        return Ok(Vec::new());
+    }
+    let mut tx = pool.begin().await.map_err(SqliteStoreError::from)?;
+    verify_snapshot(&mut tx, query.snapshot).await?;
+    let rows = sqlx::query(
+        "SELECT e.source_id, e.knowledge_kind, e.memory_owner_role_id, e.content,
+         length(CAST(e.content AS BLOB)) AS content_bytes, e.salience, e.source_json, e.payload_json,
+         length(CAST(e.payload_json AS BLOB)) AS payload_bytes
+         FROM knowledge_entries e
+         WHERE e.story_id = ?1 AND e.knowledge_kind = 'memory'
+         AND e.memory_owner_role_id = ?2 ORDER BY e.source_id ASC LIMIT ?3",
+    )
+    .bind(query.snapshot.story_id.as_str())
+    .bind(query.owner.as_str())
+    .bind(i64::try_from(query.limit).map_err(|_| StoreError::LimitExceeded {
+        limit: "knowledge_limit",
+    })?)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(SqliteStoreError::from)?;
+    let records = rows
+        .iter()
+        .map(|row| materialize_row(row, query.max_item_bytes))
+        .collect::<Result<Vec<_>, _>>()?;
+    tx.commit().await.map_err(SqliteStoreError::from)?;
+    Ok(records)
 }
 
 async fn load_by_source_ids(
