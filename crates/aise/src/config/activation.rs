@@ -1,7 +1,5 @@
 use super::error::ConfigError;
-use crate::context::activation::scan_buffer::ScanFragmentKind;
-use crate::domain::asset::ids::Sha256Digest;
-use crate::domain::knowledge::activation::ActivationGroupKey;
+use crate::domain::knowledge::activation::{ActivationGroupKey, ActivationRuleLimits};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +172,19 @@ impl ActivationConfig {
         }
     }
 
+    pub fn domain_index_limits(&self) -> crate::domain::knowledge::activation::ActivationIndexLimits {
+        crate::domain::knowledge::activation::ActivationIndexLimits {
+            max_entries: self.index.max_entries,
+            max_overlay_entries: self.index.max_overlay_entries,
+            max_tombstones: self.index.max_tombstones,
+            max_literal_patterns: self.index.max_literal_patterns,
+            max_regex_patterns: self.index.max_regex_patterns,
+            max_compiled_bytes: self.index.max_compiled_bytes,
+            max_regex_program_bytes: self.rule.max_regex_program_bytes,
+            max_macro_expansion_bytes: self.rule.max_macro_expansion_bytes,
+        }
+    }
+
     pub fn validate(&self) -> Result<(), ConfigError> {
         let positive = [
             self.rule.max_primary_patterns_per_entry,
@@ -242,13 +253,15 @@ impl ActivationConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FragmentMatchCacheKey {
-    pub fragment_id: String,
-    pub fragment_kind: ScanFragmentKind,
-    pub content_hash: Sha256Digest,
-    pub pack_digest: Sha256Digest,
-    pub overlay_version: u64,
-    pub matcher_version: u32,
-    pub macro_digest: Sha256Digest,
+impl ActivationRuleLimitsConfig {
+    pub fn limits(&self) -> ActivationRuleLimits {
+        ActivationRuleLimits {
+            max_primary_patterns_per_entry: self.max_primary_patterns_per_entry,
+            max_secondary_patterns_per_entry: self.max_secondary_patterns_per_entry,
+            max_pattern_bytes: self.max_pattern_bytes,
+            max_regex_program_bytes: self.max_regex_program_bytes,
+            max_groups_per_entry: self.max_groups_per_entry,
+            max_group_key_bytes: self.max_group_key_bytes,
+        }
+    }
 }

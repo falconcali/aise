@@ -1,7 +1,7 @@
 use crate::domain::asset::ids::Sha256Digest;
 use crate::domain::ids::{RoleIdHighWater, StoryId, TurnKey, TurnNumber};
 use crate::domain::knowledge::KnowledgeIdHighWater;
-use crate::domain::knowledge::activation::{ActivationContinuation, ActivationResult};
+use crate::domain::knowledge::activation::ActivationContinuation;
 use crate::domain::narrative_graph::projector::NarrativeProjection;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{
@@ -244,11 +244,10 @@ impl TurnExecutionContext {
         self.activation.as_ref()
     }
 
-    pub fn replace_activation(&mut self, result: ActivationResult) {
-        self.activation = Some(PreparedActivation {
-            continuation: result.continuation,
-            pending_timed_state: result.pending_timed_state,
-        });
+    pub fn replace_activation(&mut self, activation: PreparedActivation) -> Result<(), TurnExecutionError> {
+        self.expect_phase(TurnPhase::Prepared)?;
+        self.activation = Some(activation);
+        Ok(())
     }
 
     pub fn set_narrative_projection(&mut self, projection: NarrativeProjection) -> Result<(), TurnExecutionError> {

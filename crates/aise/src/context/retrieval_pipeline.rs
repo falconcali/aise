@@ -106,7 +106,7 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
         };
         let index = self
             .coordinator
-            .prepare_index(snapshot.knowledge_snapshot(), macros.clone())
+            .build_index_snapshot(snapshot.knowledge_snapshot(), &macros)
             .await
             .map_err(|error| map_context_error(ContextError::from(error)))?;
         let mut seeds = Vec::new();
@@ -154,19 +154,20 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
         }
         let activation_result = self
             .coordinator
-            .run(
-                snapshot.knowledge_snapshot(),
-                &scan_buffer,
+            .run(crate::context::activation::ActivationRunSpec {
+                snapshot: snapshot.knowledge_snapshot(),
+                scan_buffer: &scan_buffer,
                 macros,
-                ctx.story_id(),
-                ctx.turn_number(),
-                GenerationTrigger::Normal,
-                ActivationRunMode::CommitEligible,
-                &seeds,
-                Some(prepared.continuation.clone()),
-            )
+                story_id: ctx.story_id(),
+                turn_number: ctx.turn_number(),
+                generation_trigger: GenerationTrigger::Normal,
+                mode: ActivationRunMode::CommitEligible,
+                external_seeds: &seeds,
+                continuation: Some(prepared.continuation.clone()),
+            })
             .await
-            .map_err(|error| map_context_error(ContextError::from(error)))?;
+            .map_err(|error| map_context_error(ContextError::from(error)))?
+            .result;
         let baseline_ids = baseline
             .relevant_world_knowledge
             .facts
@@ -318,7 +319,10 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
             "error_code": null,
         });
         ctx.trace().end_span_with(pending, &payload);
-        ctx.replace_activation(activation_result);
+        ctx.replace_activation(crate::turn::turn_context::PreparedActivation {
+            continuation: activation_result.continuation,
+            pending_timed_state: activation_result.pending_timed_state,
+        })?;
         ctx.set_retrieved_context(context)
     }
 }
@@ -401,9 +405,9 @@ fn trim_tokens(items: &mut Vec<RetrievedKnowledgeItem>, max_tokens: u64) {
 
 fn map_context_error(error: ContextError) -> TurnExecutionError {
     let stage = match &error {
-        ContextError::SnapshotInconsistent { .. }
-        | ContextError::ContinuityInvalid { .. }
-        | ContextError::SignalLimitExceeded { .. } => Some(TurnStage::BaselineBuilder),
+        ContextError::SnapshotInconsistent { .. } | ContextError::ContinuityInvalid { .. } => {
+            Some(TurnStage::BaselineBuilder)
+        }
         _ => Some(TurnStage::ContextRetrieval),
     };
     TurnExecutionError::new(TurnFailureKind::InvariantViolation, error.turn_code(), stage, error.to_string())

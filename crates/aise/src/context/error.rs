@@ -1,3 +1,4 @@
+use crate::domain::knowledge::activation::{ActivationError, ActivationStoreFailure};
 use crate::persistence::store::StoreError;
 use thiserror::Error;
 
@@ -7,14 +8,10 @@ pub enum ContextError {
     SnapshotInconsistent { code: &'static str },
     #[error("story continuity is invalid: {code}")]
     ContinuityInvalid { code: &'static str },
-    #[error("retrieval signal limit exceeded: {limit}")]
-    SignalLimitExceeded { limit: &'static str },
     #[error("retrieval plan is invalid: {code}")]
     InvalidPlan { code: &'static str },
     #[error("knowledge audience violation")]
     KnowledgeAudienceViolation,
-    #[error("candidate retriever configuration is invalid: {code}")]
-    InvalidRetrieverSet { code: &'static str },
     #[error("retrieval record is invalid: {code}")]
     InvalidRecord { code: &'static str },
     #[error("retrieval candidate limit exceeded")]
@@ -27,6 +24,8 @@ pub enum ContextError {
         actual: usize,
         maximum: usize,
     },
+    #[error("knowledge activation failed")]
+    Activation(#[from] ActivationError),
     #[error("knowledge read failed")]
     Store(#[from] StoreError),
 }
@@ -37,13 +36,16 @@ impl ContextError {
             ContextError::SnapshotInconsistent { .. } | ContextError::ContinuityInvalid { .. } => {
                 "context_snapshot_invalid"
             }
-            ContextError::SignalLimitExceeded { .. } => "context_baseline_limit",
             ContextError::InvalidPlan { .. } | ContextError::KnowledgeAudienceViolation => "writer_plan_invalid",
-            ContextError::InvalidRetrieverSet { .. } => "retrieval_candidate_limit",
             ContextError::InvalidRecord { .. } => "retrieval_record_invalid",
             ContextError::CandidateLimitExceeded => "retrieval_candidate_limit",
             ContextError::RetrievedBudgetExceeded { .. } => "retrieval_context_limit",
             ContextError::IndexLimitExceeded { .. } => "context_index_limit_exceeded",
+            ContextError::Activation(ActivationError::Store(ActivationStoreFailure::RevisionConflict)) => {
+                "retrieval_snapshot_conflict"
+            }
+            ContextError::Activation(ActivationError::Store(_)) => "store_error",
+            ContextError::Activation(error) => error.code(),
             ContextError::Store(StoreError::RevisionConflict) => "retrieval_snapshot_conflict",
             ContextError::Store(_) => "store_error",
         }

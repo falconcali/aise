@@ -183,18 +183,19 @@ async fn prepare_baseline(
         player_role_label: player_role.role_label.as_str().to_owned(),
     };
     let activation_result = coordinator
-        .run(
-            snapshot.knowledge_snapshot(),
-            &scan_buffer,
+        .run(crate::context::activation::ActivationRunSpec {
+            snapshot: snapshot.knowledge_snapshot(),
+            scan_buffer: &scan_buffer,
             macros,
-            snapshot.story_id(),
+            story_id: snapshot.story_id(),
             turn_number,
-            GenerationTrigger::Normal,
-            ActivationRunMode::CommitEligible,
-            &[],
-            None,
-        )
-        .await?;
+            generation_trigger: GenerationTrigger::Normal,
+            mode: ActivationRunMode::CommitEligible,
+            external_seeds: &[],
+            continuation: None,
+        })
+        .await?
+        .result;
     let relevant_world_knowledge =
         load_relevant_knowledge(snapshot, &activation_result, retrieval_config, coordinator.knowledge()).await?;
     let knowledge_index =

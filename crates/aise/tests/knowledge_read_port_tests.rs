@@ -206,6 +206,7 @@ async fn seeded_store(label: &str) -> (Arc<SqliteStore>, KnowledgeSnapshotRef, S
             max_memories: 128,
             max_relationships: 64,
             max_opening_bytes: 8192,
+            activation_rule_limits: aise::config::ActivationConfig::default().rule.limits(),
         },
         NarrativeConfig::default().as_limits(),
     );

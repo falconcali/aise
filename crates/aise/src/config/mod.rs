@@ -16,7 +16,8 @@ mod storage;
 mod turn;
 
 pub use activation::{
-    ActivationConfig, ActivationIndexLimits, ActivationRuleLimitsConfig, ActivationRuntimeLimits, FragmentMatchCacheKey,
+    ActivationConfig, ActivationIndexLimits, ActivationRuleLimitsConfig, ActivationRuntimeLimits,
+    FragmentMatchCacheLimits,
 };
 pub use aise::AiseConfig;
 pub use assets::AssetLimitsConfig;

@@ -1,8 +1,12 @@
 # Context Preparation and Retrieval — Design
 
+> **Status**: Superseded by [World Info Entry Activation Refactor — Design](./2026-09-05-world-info-entry-activation-design-gpt.md).
+> The Entity/Topic signal retrieval described below no longer exists; knowledge selection runs
+> through the World Info entry activation pipeline.
+
 > **Date**: 2026-08-08
 > **Author**: GPT-5.6 Codex
-> **Status**: Draft
+> **Status**: Superseded
 > **Prior docs**: [AISE Architecture v3.1](./2026-08-04-Architecture-gpt.md), [Story Pack Design v3.0](./2026-08-06-StoryPackDesign-gpt.md)
 
 ---

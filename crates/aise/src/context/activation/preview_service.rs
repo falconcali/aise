@@ -49,9 +49,10 @@ impl KnowledgeActivationPreviewService {
             knowledge,
             index,
             timed_state.clone(),
-            config.activation_config.index,
+            config.activation_config.domain_index_limits(),
             config.activation_config.rule,
             config.activation_config.domain_runtime_limits(),
+            config.activation_config.cache,
         );
         Self {
             store,
@@ -126,9 +127,13 @@ impl KnowledgeActivationPreviewService {
         };
         let index = self
             .coordinator
-            .prepare_index(snapshot.knowledge_snapshot(), macros)
+            .build_index_snapshot(snapshot.knowledge_snapshot(), &macros)
             .await
-            .map_err(ActivationPreviewError::Store)?;
+            .map_err(ActivationPreviewError::Activation)?;
+        let macro_digest = crate::domain::knowledge::activation::macro_digest(&macros);
+        let fragment_matches = self
+            .coordinator
+            .match_fragments(&spec.story_id, &index, &macro_digest, &scan_buffer);
         let timed_state = self
             .timed_state
             .load_timed_state(ActivationTimedStateQuery {
@@ -154,19 +159,24 @@ impl KnowledgeActivationPreviewService {
             .map_err(|_| ActivationPreviewError::InvalidLimits)?;
         let result = self
             .coordinator
-            .run_prepared(ActivationRequest {
-                story_id: &spec.story_id,
-                turn_number,
-                generation_trigger: spec.generation_trigger,
-                mode: ActivationRunMode::Preview,
-                knowledge_snapshot: snapshot.knowledge_snapshot(),
-                index_snapshot: &index,
-                scan_buffer: &scan_buffer,
-                timed_state: &timed_state,
-                external_seeds: &seeds,
-                continuation: None,
-                limits: self.activation_config.domain_runtime_limits(),
-            })
+            .drive(
+                ActivationRequest {
+                    story_id: &spec.story_id,
+                    turn_number,
+                    generation_trigger: spec.generation_trigger,
+                    mode: ActivationRunMode::Preview,
+                    knowledge_snapshot: snapshot.knowledge_snapshot(),
+                    index_snapshot: &index,
+                    scan_buffer: &scan_buffer,
+                    fragment_matches: &fragment_matches,
+                    timed_state: &timed_state,
+                    external_seeds: &seeds,
+                    continuation: None,
+                    limits: self.activation_config.domain_runtime_limits(),
+                },
+                snapshot.knowledge_snapshot(),
+            )
+            .await
             .map_err(ActivationPreviewError::Activation)?;
         project_preview(
             snapshot.knowledge_snapshot(),

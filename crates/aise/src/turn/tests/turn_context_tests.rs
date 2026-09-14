@@ -206,6 +206,19 @@ fn build_ready_context(
 }
 
 #[test]
+fn replace_activation_outside_prepared_phase_is_rejected() {
+    let mut ctx = build_ready_context(
+        TurnConfig::default(),
+        TurnContentLimitsConfig::default(),
+        vec![think_request("npc-1")],
+    );
+    let snapshot = sample_snapshot(&player_role());
+    let activation = PreparedActivation::empty(snapshot.knowledge_snapshot().clone(), TurnNumber::try_new(1).unwrap());
+    let error = ctx.replace_activation(activation).unwrap_err();
+    assert_eq!(error.code(), "invalid_phase_transition");
+}
+
+#[test]
 fn exact_request_and_decision_count_succeeds() {
     let mut ctx = build_ready_context(
         TurnConfig::default(),

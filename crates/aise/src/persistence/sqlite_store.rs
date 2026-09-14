@@ -620,7 +620,7 @@ async fn apply_activation_state_delta(
         )
         .bind(story_id.as_str())
         .bind(state.source_id.as_str())
-        .bind(state.rule_version.0.to_string())
+        .bind(state.rule_version.as_digest().to_string())
         .bind(sticky)
         .bind(cooldown)
         .execute(&mut **tx)
@@ -730,7 +730,7 @@ fn activation_rule_version(entry: &crate::domain::knowledge::KnowledgeEntry) -> 
         crate::domain::knowledge::KnowledgeEntry::Rumor(value) => Some(&value.activation_rule_version),
         crate::domain::knowledge::KnowledgeEntry::Memory(_) => None,
     };
-    Ok(version.map(|value| value.0.to_string()))
+    Ok(version.map(|value| value.as_digest().to_string()))
 }
 
 struct KnowledgeEntryWrite<'a> {

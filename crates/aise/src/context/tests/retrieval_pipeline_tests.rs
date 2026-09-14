@@ -1,7 +1,7 @@
 use super::*;
 use crate::config::{ActivationConfig, RetrievalConfig};
 use crate::context::activation::KnowledgeActivationCoordinator;
-use crate::domain::knowledge::activation::ActivationIndexSnapshot;
+use crate::domain::knowledge::activation::ActivationIndexMetadata;
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::persistence::activation_index_port::ActivationIndexPort;
 use crate::persistence::activation_timed_state_port::{ActivationTimedStateQuery, ActivationTimedStateReadPort};
@@ -37,12 +37,14 @@ impl ActivationIndexPort for EmptyIndex {
     async fn load_snapshot(
         &self,
         knowledge: &KnowledgeSnapshotRef,
-        _limits: crate::config::ActivationIndexLimits,
-    ) -> Result<Arc<ActivationIndexSnapshot>, StoreError> {
-        Ok(Arc::new(ActivationIndexSnapshot::new(
-            crate::domain::knowledge::activation::ActivationIndexSnapshotRef::from_knowledge(knowledge, 0, 1),
-            std::collections::BTreeMap::new(),
-        )))
+        _limits: crate::domain::knowledge::activation::ActivationIndexLimits,
+    ) -> Result<Arc<ActivationIndexMetadata>, StoreError> {
+        Ok(Arc::new(ActivationIndexMetadata {
+            reference: crate::domain::knowledge::activation::ActivationIndexSnapshotRef::from_knowledge(
+                knowledge, 0, 1,
+            ),
+            entries: std::collections::BTreeMap::new(),
+        }))
     }
 }
 
@@ -66,9 +68,10 @@ fn retrieval_pipeline_constructs_with_activation_coordinator() {
         knowledge,
         Arc::new(EmptyIndex),
         Arc::new(EmptyTimed),
-        activation.index,
+        activation.domain_index_limits(),
         activation.rule,
         activation.domain_runtime_limits(),
+        activation.cache,
     ));
     let pipeline = ContextRetrievalPipeline::new(RetrievalConfig::default(), activation, coordinator);
     assert_eq!(pipeline.stage(), TurnStage::ContextRetrieval);

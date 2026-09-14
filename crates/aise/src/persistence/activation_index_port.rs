@@ -1,5 +1,4 @@
-use crate::config::ActivationIndexLimits;
-use crate::domain::knowledge::activation::ActivationIndexSnapshot;
+use crate::domain::knowledge::activation::{ActivationIndexLimits, ActivationIndexMetadata};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::persistence::store::StoreError;
 use async_trait::async_trait;
@@ -11,5 +10,5 @@ pub trait ActivationIndexPort: Send + Sync {
         &self,
         knowledge: &KnowledgeSnapshotRef,
         limits: ActivationIndexLimits,
-    ) -> Result<Arc<ActivationIndexSnapshot>, StoreError>;
+    ) -> Result<Arc<ActivationIndexMetadata>, StoreError>;
 }

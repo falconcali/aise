@@ -1,5 +1,10 @@
 # AISE（AI Story Engine）技术架构设计 v3.1
 
+> **Status**: Superseded by [World Info Entry Activation Refactor — Design](./2026-09-05-world-info-entry-activation-design-gpt.md)
+> for knowledge retrieval. The Entity/Topic signal retrieval sections below are superseded:
+> knowledge selection is now performed by the World Info entry activation pipeline
+> (`domain/knowledge/activation` + `context/activation`). Entity/Topic index types no longer exist.
+
 ## 1. 文档定位
 
 本文是 AISE 最终架构的权威文档，定义目标架构、模块边界和运行时不变量。

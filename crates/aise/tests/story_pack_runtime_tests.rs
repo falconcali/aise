@@ -158,6 +158,7 @@ async fn runtime_services(label: &str) -> RuntimeServices {
             max_memories: 32,
             max_relationships: 32,
             max_opening_bytes: 8192,
+            activation_rule_limits: aise::config::ActivationConfig::default().rule.limits(),
         },
         NarrativeConfig::default().as_limits(),
     ));

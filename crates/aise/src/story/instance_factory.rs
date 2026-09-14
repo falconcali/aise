@@ -2,11 +2,12 @@ use crate::domain::asset::frozen_ref::FrozenCharacterCardRef;
 use crate::domain::asset::ids::{FactKey, PackId, PlayerId};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::{ConstraintId, RoleId, StoryId};
+use crate::domain::knowledge::activation::{ActivationRuleLimits, ActivationRuleVersion};
 use crate::domain::knowledge::fact::{Proposition, WorldFact};
 use crate::domain::knowledge::memory::MemoryEntry;
 use crate::domain::knowledge::query::{KnowledgeSource, allocate_knowledge_ids};
 use crate::domain::knowledge::rumor::{Claim, SharedRumor, TruthValue};
-use crate::domain::knowledge::{KnowledgeEntry, KnowledgeIdHighWater, KnowledgeKind, KnowledgeSourceId, RetrievalHint};
+use crate::domain::knowledge::{KnowledgeEntry, KnowledgeIdHighWater, KnowledgeKind, KnowledgeSourceId};
 use crate::domain::narrative_graph::condition::{
     ConditionEvalContext, NarrativeNodeState, RoleControllerKind, evaluate_condition,
 };
@@ -41,6 +42,7 @@ pub struct StoryInstantiationLimits {
     pub max_memories: usize,
     pub max_relationships: usize,
     pub max_opening_bytes: usize,
+    pub activation_rule_limits: ActivationRuleLimits,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -201,7 +203,8 @@ impl StoryInstanceFactory {
             roles.insert(role_id.clone(), role);
         }
         let relationships = materialize_relationships(pack, &roles)?;
-        let (knowledge, knowledge_id_high_water) = materialize_knowledge(frozen, spec.created_at_ms)?;
+        let (knowledge, knowledge_id_high_water) =
+            materialize_knowledge(frozen, spec.created_at_ms, self.limits.activation_rule_limits)?;
         let active_constraints = pack
             .constraints
             .iter()
@@ -406,6 +409,7 @@ fn materialize_relationships(
 fn materialize_knowledge(
     frozen: &FrozenStoryPack,
     created_at_ms: i64,
+    activation_rule_limits: ActivationRuleLimits,
 ) -> Result<(Vec<KnowledgeEntry>, KnowledgeIdHighWater), StoryInstantiationError> {
     let source = KnowledgeSource::Seed {
         pack_id: frozen.pack_id.clone(),
@@ -434,6 +438,11 @@ fn materialize_knowledge(
     let mut ids = allocation.assigned.into_iter();
     let mut entries = Vec::new();
     for (key, seed) in &frozen.resolved_world_book.facts {
+        seed.activation
+            .validate(activation_rule_limits)
+            .map_err(|_| StoryInstantiationError::InvalidReference {
+                code: "activation_rule_invalid",
+            })?;
         let KnowledgeSourceId::Fact(id) = ids.next().ok_or(StoryInstantiationError::LimitExceeded {
             limit: "knowledge_id_allocation",
         })?
@@ -454,28 +463,23 @@ fn materialize_knowledge(
             proposition,
             retrieval_hint: crate::domain::knowledge::normalize_static_retrieval_hint(
                 &seed.content,
-                seed.retrieval_hint
-                    .as_ref()
-                    .map(|value| RetrievalHint::try_new(value.as_str().to_owned()))
-                    .transpose()
-                    .map_err(|_| StoryInstantiationError::InvalidReference {
-                        code: "retrieval_hint_invalid",
-                    })?,
+                seed.retrieval_hint.clone(),
             )
             .map_err(|_| StoryInstantiationError::InvalidReference {
                 code: "retrieval_hint_required",
             })?,
             activation: seed.activation.clone(),
-            activation_rule_version: seed.activation.rule_version().map_err(|_| {
-                StoryInstantiationError::InvalidReference {
-                    code: "activation_rule_invalid",
-                }
-            })?,
+            activation_rule_version: ActivationRuleVersion::from_rule(&seed.activation),
             salience: seed.salience,
             source: source.clone(),
         }));
     }
     for (key, seed) in &frozen.resolved_world_book.rumors {
+        seed.activation
+            .validate(activation_rule_limits)
+            .map_err(|_| StoryInstantiationError::InvalidReference {
+                code: "activation_rule_invalid",
+            })?;
         let KnowledgeSourceId::Rumor(id) = ids.next().ok_or(StoryInstantiationError::LimitExceeded {
             limit: "knowledge_id_allocation",
         })?
@@ -496,23 +500,13 @@ fn materialize_knowledge(
             claim,
             retrieval_hint: crate::domain::knowledge::normalize_static_retrieval_hint(
                 &seed.content,
-                seed.retrieval_hint
-                    .as_ref()
-                    .map(|value| RetrievalHint::try_new(value.as_str().to_owned()))
-                    .transpose()
-                    .map_err(|_| StoryInstantiationError::InvalidReference {
-                        code: "retrieval_hint_invalid",
-                    })?,
+                seed.retrieval_hint.clone(),
             )
             .map_err(|_| StoryInstantiationError::InvalidReference {
                 code: "retrieval_hint_required",
             })?,
             activation: seed.activation.clone(),
-            activation_rule_version: seed.activation.rule_version().map_err(|_| {
-                StoryInstantiationError::InvalidReference {
-                    code: "activation_rule_invalid",
-                }
-            })?,
+            activation_rule_version: ActivationRuleVersion::from_rule(&seed.activation),
             salience: seed.salience,
             source_role_id: None,
             truth_value: TruthValue::Unverified,

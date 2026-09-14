@@ -115,6 +115,7 @@ async fn story_instance_snapshot_is_available_for_sse_recovery_path() {
             max_memories: 128,
             max_relationships: 64,
             max_opening_bytes: 8192,
+            activation_rule_limits: aise::config::ActivationConfig::default().rule.limits(),
         },
         NarrativeConfig::default().as_limits(),
     );

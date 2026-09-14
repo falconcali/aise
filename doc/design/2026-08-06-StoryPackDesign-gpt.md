@@ -1,5 +1,10 @@
 # AISE Story Pack Design v3.0
 
+> **Status**: Superseded by [World Info Entry Activation Refactor — Design](./2026-09-05-world-info-entry-activation-design-gpt.md)
+> for knowledge retrieval. The Entity/Topic retrieval sections below are superseded: World Book
+> seeds now carry `KnowledgeActivationRule` and `RetrievalHint`, and activation replaces the
+> Entity/Topic signal index.
+
 > 本文定义 AISE 原生故事包、人物卡、知识模型、Narrative Graph 及其与 Turn Runtime
 > 的集成边界。本文是资产与运行时集成设计，不包含数据库表、迁移编号或具体序列化
 > 实现。Turn 执行仍以

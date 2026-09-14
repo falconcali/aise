@@ -1,6 +1,7 @@
 use crate::config::{
     ActivationConfig, NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig,
 };
+use crate::domain::knowledge::activation::ActivationRuleLimits;
 use crate::domain::narrative_graph::definition::NarrativeLimits;
 use crate::domain::turn::StoryStateExtractionLimits;
 use crate::turn::turn_contract::{LlmBudgetReservation, LlmCallId, LlmCallUsage};
@@ -60,6 +61,7 @@ pub struct TurnBudgetLimits {
     pub max_condition_queries: usize,
     pub max_condition_evidence_bytes: usize,
     pub max_condition_reason_bytes: usize,
+    pub activation_rule_limits: ActivationRuleLimits,
 }
 
 impl TurnBudgetLimits {
@@ -119,6 +121,7 @@ impl TurnBudgetLimits {
             max_condition_queries: narrative.max_semantic_queries_per_turn,
             max_condition_evidence_bytes: narrative.max_evidence_bytes,
             max_condition_reason_bytes: narrative.max_result_reason_bytes,
+            activation_rule_limits: activation.rule.limits(),
         }
     }
 }
@@ -229,6 +232,10 @@ impl TurnBudget {
 
     pub fn state_extraction_limits(&self) -> StoryStateExtractionLimits {
         self.limits.state_extraction
+    }
+
+    pub fn activation_rule_limits(&self) -> ActivationRuleLimits {
+        self.limits.activation_rule_limits
     }
 
     pub fn narrative_limits(&self) -> NarrativeLimits {

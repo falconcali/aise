@@ -208,6 +208,7 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
         max_content_bytes: ctx.budget().max_knowledge_change_bytes(),
         max_activation_terms: extraction_limits.max_activation_terms,
         max_activation_pattern_bytes: extraction_limits.max_activation_pattern_bytes,
+        activation_rule_limits: ctx.budget().activation_rule_limits(),
     };
     let (knowledge_mutations, knowledge_id_high_water) =
         enrich_extracted_knowledge(dto, snapshot, &new_roles, &enrichment_context)

@@ -122,9 +122,116 @@ pub enum ActivationBudgetClass {
     Mandatory,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ActivationRuleVersion(pub Sha256Digest);
+pub struct ActivationRuleVersion(Sha256Digest);
+
+impl ActivationRuleVersion {
+    pub fn from_rule(rule: &KnowledgeActivationRule) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(b"aise.activation.rule.v1\x00");
+        hash_patterns(&mut hasher, b"keys", &rule.match_rule.keys);
+        hash_patterns(&mut hasher, b"secondary_keys", &rule.match_rule.secondary_keys);
+        hash_field(
+            &mut hasher,
+            b"secondary_logic",
+            secondary_logic_tag(rule.match_rule.secondary_logic),
+        );
+        hash_bool(&mut hasher, b"case_sensitive", rule.match_rule.case_sensitive);
+        hash_bool(&mut hasher, b"match_whole_words", rule.match_rule.match_whole_words);
+        hash_optional_u16(&mut hasher, b"scan_depth", rule.match_rule.scan_depth);
+        hash_bool(&mut hasher, b"enabled", rule.mode.enabled);
+        hash_bool(&mut hasher, b"constant", rule.mode.constant);
+        hash_bool(&mut hasher, b"exact_target_only", rule.mode.exact_target_only);
+        hash_bool(&mut hasher, b"exclude_recursion", rule.recursion.exclude_recursion);
+        hash_bool(&mut hasher, b"prevent_recursion", rule.recursion.prevent_recursion);
+        hash_optional_u16(&mut hasher, b"delay_until_recursion", rule.recursion.delay_until_recursion);
+        hash_field(&mut hasher, b"order", &rule.selection.order.to_be_bytes());
+        hash_field(&mut hasher, b"probability", &rule.selection.probability.to_be_bytes());
+        hash_field(&mut hasher, b"group_count", &(rule.selection.groups.len() as u64).to_be_bytes());
+        for group in &rule.selection.groups {
+            hash_field(&mut hasher, b"group", group.as_str().as_bytes());
+        }
+        hash_bool(&mut hasher, b"group_override", rule.selection.group_override);
+        hash_field(&mut hasher, b"group_weight", &rule.selection.group_weight.to_be_bytes());
+        hash_bool(&mut hasher, b"use_group_scoring", rule.selection.use_group_scoring);
+        hash_field(&mut hasher, b"sticky_turns", &rule.timing.sticky_turns.to_be_bytes());
+        hash_field(&mut hasher, b"cooldown_turns", &rule.timing.cooldown_turns.to_be_bytes());
+        hash_field(&mut hasher, b"delay_turns", &rule.timing.delay_turns.to_be_bytes());
+        hash_field(
+            &mut hasher,
+            b"trigger_count",
+            &(rule.scope.generation_triggers.len() as u64).to_be_bytes(),
+        );
+        for trigger in &rule.scope.generation_triggers {
+            hash_field(&mut hasher, b"trigger", &[generation_trigger_tag(*trigger)]);
+        }
+        hash_field(&mut hasher, b"budget_class", &[budget_class_tag(rule.budget_class)]);
+        Self(Sha256Digest::from_bytes(hasher.finalize().into()))
+    }
+
+    pub fn as_digest(&self) -> &Sha256Digest {
+        &self.0
+    }
+
+    pub fn from_digest(digest: Sha256Digest) -> Self {
+        Self(digest)
+    }
+}
+
+fn hash_field(hasher: &mut Sha256, label: &[u8], value: &[u8]) {
+    hasher.update(label);
+    hasher.update(b"=");
+    hasher.update((value.len() as u64).to_be_bytes());
+    hasher.update(value);
+    hasher.update(b";");
+}
+
+fn hash_bool(hasher: &mut Sha256, label: &[u8], value: bool) {
+    hash_field(hasher, label, &[u8::from(value)]);
+}
+
+fn hash_optional_u16(hasher: &mut Sha256, label: &[u8], value: Option<u16>) {
+    match value {
+        Some(value) => hash_field(hasher, label, &value.to_be_bytes()),
+        None => hash_field(hasher, label, b""),
+    }
+}
+
+fn hash_patterns(hasher: &mut Sha256, label: &[u8], patterns: &[ActivationPattern]) {
+    hash_field(hasher, label, &(patterns.len() as u64).to_be_bytes());
+    for pattern in patterns {
+        let ActivationPattern::Literal(value) = pattern;
+        hash_field(hasher, label, value.as_bytes());
+    }
+}
+
+fn secondary_logic_tag(logic: SecondaryLogic) -> &'static [u8] {
+    match logic {
+        SecondaryLogic::AndAny => b"and_any",
+        SecondaryLogic::AndAll => b"and_all",
+        SecondaryLogic::NotAny => b"not_any",
+        SecondaryLogic::NotAll => b"not_all",
+    }
+}
+
+fn generation_trigger_tag(trigger: GenerationTrigger) -> u8 {
+    match trigger {
+        GenerationTrigger::Normal => 0,
+        GenerationTrigger::Continue => 1,
+        GenerationTrigger::Regenerate => 2,
+        GenerationTrigger::Repair => 3,
+        GenerationTrigger::DryRunPreview => 4,
+    }
+}
+
+fn budget_class_tag(class: ActivationBudgetClass) -> u8 {
+    match class {
+        ActivationBudgetClass::Normal => 0,
+        ActivationBudgetClass::Reserved => 1,
+        ActivationBudgetClass::Mandatory => 2,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -159,6 +266,16 @@ impl ActivationGroupKey {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActivationRuleLimits {
+    pub max_primary_patterns_per_entry: usize,
+    pub max_secondary_patterns_per_entry: usize,
+    pub max_pattern_bytes: usize,
+    pub max_regex_program_bytes: usize,
+    pub max_groups_per_entry: usize,
+    pub max_group_key_bytes: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ActivationRuleValidationError {
     #[error("activation rule has no activation source")]
@@ -169,7 +286,7 @@ pub enum ActivationRuleValidationError {
     InvalidProbability,
     #[error("activation group key is invalid")]
     InvalidGroupKey,
-    #[error("activation group count exceeds the configured limit")]
+    #[error("activation rule has too many groups")]
     TooManyGroups,
     #[error("activation pattern is empty")]
     EmptyPattern,
@@ -179,6 +296,18 @@ pub enum ActivationRuleValidationError {
     InvalidRegex,
     #[error("activation macro is invalid")]
     InvalidMacro,
+    #[error("activation rule limit must be positive")]
+    InvalidLimit,
+    #[error("activation rule has too many primary patterns")]
+    TooManyPrimaryPatterns,
+    #[error("activation rule has too many secondary patterns")]
+    TooManySecondaryPatterns,
+    #[error("activation pattern exceeds its byte budget")]
+    PatternTooLong,
+    #[error("activation regex program exceeds its byte budget")]
+    RegexProgramTooLarge,
+    #[error("activation group key exceeds its byte budget")]
+    GroupKeyTooLong,
 }
 
 impl KnowledgeActivationRule {
@@ -222,7 +351,16 @@ impl KnowledgeActivationRule {
         }
     }
 
-    pub fn validate(&self, max_groups: usize) -> Result<(), ActivationRuleValidationError> {
+    pub fn validate(&self, limits: ActivationRuleLimits) -> Result<(), ActivationRuleValidationError> {
+        if limits.max_primary_patterns_per_entry == 0
+            || limits.max_secondary_patterns_per_entry == 0
+            || limits.max_pattern_bytes == 0
+            || limits.max_regex_program_bytes == 0
+            || limits.max_groups_per_entry == 0
+            || limits.max_group_key_bytes == 0
+        {
+            return Err(ActivationRuleValidationError::InvalidLimit);
+        }
         if self.mode.constant && self.mode.exact_target_only {
             return Err(ActivationRuleValidationError::ConflictingModes);
         }
@@ -232,13 +370,22 @@ impl KnowledgeActivationRule {
         if self.selection.probability > 100 {
             return Err(ActivationRuleValidationError::InvalidProbability);
         }
-        if self.selection.groups.len() > max_groups {
+        if self.match_rule.keys.len() > limits.max_primary_patterns_per_entry {
+            return Err(ActivationRuleValidationError::TooManyPrimaryPatterns);
+        }
+        if self.match_rule.secondary_keys.len() > limits.max_secondary_patterns_per_entry {
+            return Err(ActivationRuleValidationError::TooManySecondaryPatterns);
+        }
+        if self.selection.groups.len() > limits.max_groups_per_entry {
             return Err(ActivationRuleValidationError::TooManyGroups);
         }
         for pattern in self.match_rule.keys.iter().chain(self.match_rule.secondary_keys.iter()) {
-            validate_pattern(pattern)?;
+            validate_pattern(pattern, limits)?;
         }
         for group in &self.selection.groups {
+            if group.as_str().len() > limits.max_group_key_bytes {
+                return Err(ActivationRuleValidationError::GroupKeyTooLong);
+            }
             Self::validate_group(group)?;
         }
         if self.recursion.delay_until_recursion == Some(0) {
@@ -247,24 +394,20 @@ impl KnowledgeActivationRule {
         Ok(())
     }
 
-    pub fn rule_version(&self) -> Result<ActivationRuleVersion, serde_json::Error> {
-        let bytes = serde_json::to_vec(self)?;
-        let digest = Sha256::digest(bytes);
-        Ok(ActivationRuleVersion(Sha256Digest::from_bytes(digest.into())))
-    }
-
     fn validate_group(group: &ActivationGroupKey) -> Result<(), ActivationRuleValidationError> {
-        Self::validate_group_text(group.as_str())
-    }
-
-    fn validate_group_text(value: &str) -> Result<(), ActivationRuleValidationError> {
-        ActivationGroupKey::try_new(value.to_owned()).map(|_| ())
+        ActivationGroupKey::try_new(group.as_str().to_owned()).map(|_| ())
     }
 }
 
-fn validate_pattern(pattern: &ActivationPattern) -> Result<(), ActivationRuleValidationError> {
-    let ActivationPattern::Literal(value) = pattern;
-    let value = value.trim();
+fn validate_pattern(
+    pattern: &ActivationPattern,
+    limits: ActivationRuleLimits,
+) -> Result<(), ActivationRuleValidationError> {
+    let ActivationPattern::Literal(raw) = pattern;
+    if raw.len() > limits.max_pattern_bytes {
+        return Err(ActivationRuleValidationError::PatternTooLong);
+    }
+    let value = raw.trim();
     if value.is_empty() {
         return Err(ActivationRuleValidationError::EmptyPattern);
     }
@@ -275,20 +418,38 @@ fn validate_pattern(pattern: &ActivationPattern) -> Result<(), ActivationRuleVal
         if value.contains("{{") {
             return Err(ActivationRuleValidationError::InvalidMacro);
         }
-        if flags.chars().any(|flag| !matches!(flag, 'i' | 'm' | 's' | 'u'))
-            || flags.chars().count() != flags.chars().collect::<std::collections::BTreeSet<_>>().len()
-        {
-            return Err(ActivationRuleValidationError::InvalidRegex);
-        }
-        regex::RegexBuilder::new(expression)
-            .case_insensitive(flags.contains('i'))
-            .multi_line(flags.contains('m'))
-            .dot_matches_new_line(flags.contains('s'))
-            .unicode(true)
-            .build()
-            .map_err(|_| ActivationRuleValidationError::InvalidRegex)?;
+        compile_activation_regex(expression, flags, limits.max_regex_program_bytes)?;
     }
     Ok(())
+}
+
+pub fn compile_activation_regex(
+    expression: &str,
+    flags: &str,
+    max_program_bytes: usize,
+) -> Result<regex::Regex, ActivationRuleValidationError> {
+    if max_program_bytes == 0 {
+        return Err(ActivationRuleValidationError::InvalidLimit);
+    }
+    if flags.chars().any(|flag| !matches!(flag, 'i' | 'm' | 's' | 'u'))
+        || flags.chars().count() != flags.chars().collect::<std::collections::BTreeSet<_>>().len()
+    {
+        return Err(ActivationRuleValidationError::InvalidRegex);
+    }
+    let mut builder = regex::RegexBuilder::new(expression);
+    builder
+        .case_insensitive(flags.contains('i'))
+        .multi_line(flags.contains('m'))
+        .dot_matches_new_line(flags.contains('s'))
+        .unicode(true);
+    builder
+        .clone()
+        .build()
+        .map_err(|_| ActivationRuleValidationError::InvalidRegex)?;
+    builder
+        .size_limit(max_program_bytes)
+        .build()
+        .map_err(|_| ActivationRuleValidationError::RegexProgramTooLarge)
 }
 
 fn validate_macro_pattern(value: &str) -> Result<(), ActivationRuleValidationError> {

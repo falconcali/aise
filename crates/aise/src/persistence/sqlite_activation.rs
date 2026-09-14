@@ -1,10 +1,9 @@
-use crate::config::ActivationIndexLimits;
 use crate::domain::asset::ids::Sha256Digest;
 use crate::domain::knowledge::activation::{
-    ActivationEntryMetadata, ActivationIndexSnapshot, ActivationIndexSnapshotRef, ActivationRuleVersion,
-    ActivationTimedState,
+    ActivationEntryMetadata, ActivationIndexLimits, ActivationIndexMetadata, ActivationIndexSnapshotRef,
+    ActivationRuleVersion, ActivationTimedState, MATCHER_VERSION,
 };
-use crate::domain::knowledge::{KnowledgeEntry, KnowledgeKind, KnowledgeSourceId};
+use crate::domain::knowledge::{KnowledgeEntry, KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::persistence::activation_index_port::ActivationIndexPort;
 use crate::persistence::activation_timed_state_port::{ActivationTimedStateQuery, ActivationTimedStateReadPort};
@@ -16,15 +15,13 @@ use sqlx::Row;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-const MATCHER_VERSION: u32 = 1;
-
 #[async_trait]
 impl ActivationIndexPort for SqliteStore {
     async fn load_snapshot(
         &self,
         knowledge: &KnowledgeSnapshotRef,
         limits: ActivationIndexLimits,
-    ) -> Result<Arc<ActivationIndexSnapshot>, StoreError> {
+    ) -> Result<Arc<ActivationIndexMetadata>, StoreError> {
         let mut tx = self.pool().begin().await.map_err(SqliteStoreError::from)?;
         let overlay_version: i64 =
             sqlx::query_scalar("SELECT activation_overlay_version FROM story_instances WHERE story_id = ?1")
@@ -43,12 +40,17 @@ impl ActivationIndexPort for SqliteStore {
         .fetch_all(&mut *tx)
         .await
         .map_err(SqliteStoreError::from)?;
-        let mut metadata = BTreeMap::new();
+        let mut entries = BTreeMap::new();
+        let mut overlay_entries = 0usize;
         for row in rows {
             let payload: String = row.try_get("payload_json").map_err(SqliteStoreError::from)?;
             let entry: KnowledgeEntry = serde_json::from_str(&payload).map_err(|_| StoreError::Serialization {
                 kind: StoreSerializationErrorKind::InvalidWorldState,
             })?;
+            let from_pack = matches!(
+                entry.source(),
+                KnowledgeSource::Seed { pack_digest, .. } if pack_digest == &knowledge.pack_digest
+            );
             let metadata_entry = match &entry {
                 KnowledgeEntry::Fact(value) => ActivationEntryMetadata {
                     source_id: entry.source_id(),
@@ -56,6 +58,7 @@ impl ActivationIndexPort for SqliteStore {
                     rule: value.activation.clone(),
                     rule_version: value.activation_rule_version.clone(),
                     salience: value.salience,
+                    from_pack,
                 },
                 KnowledgeEntry::Rumor(value) => ActivationEntryMetadata {
                     source_id: entry.source_id(),
@@ -63,17 +66,26 @@ impl ActivationIndexPort for SqliteStore {
                     rule: value.activation.clone(),
                     rule_version: value.activation_rule_version.clone(),
                     salience: value.salience,
+                    from_pack,
                 },
                 KnowledgeEntry::Memory(_) => continue,
             };
-            metadata.insert(metadata_entry.source_id.clone(), metadata_entry);
+            if !from_pack {
+                overlay_entries = overlay_entries.saturating_add(1);
+                if overlay_entries > limits.max_overlay_entries {
+                    return Err(StoreError::LimitExceeded {
+                        limit: "activation_overlay_entries",
+                    });
+                }
+            }
+            entries.insert(metadata_entry.source_id.clone(), metadata_entry);
         }
         tx.commit().await.map_err(SqliteStoreError::from)?;
         let overlay_version = u64::try_from(overlay_version).map_err(|_| StoreError::Serialization {
             kind: StoreSerializationErrorKind::InvalidWorldState,
         })?;
         let reference = ActivationIndexSnapshotRef::from_knowledge(knowledge, overlay_version, MATCHER_VERSION);
-        Ok(Arc::new(ActivationIndexSnapshot::new(reference, metadata)))
+        Ok(Arc::new(ActivationIndexMetadata { reference, entries }))
     }
 }
 
@@ -83,7 +95,7 @@ impl ActivationIndexPort for Arc<SqliteStore> {
         &self,
         knowledge: &KnowledgeSnapshotRef,
         limits: ActivationIndexLimits,
-    ) -> Result<Arc<ActivationIndexSnapshot>, StoreError> {
+    ) -> Result<Arc<ActivationIndexMetadata>, StoreError> {
         ActivationIndexPort::load_snapshot(&**self, knowledge, limits).await
     }
 }
@@ -127,11 +139,12 @@ impl ActivationTimedStateReadPort for SqliteStore {
                     KnowledgeSourceId::try_from_parts(kind, &source_id).map_err(|_| StoreError::Serialization {
                         kind: StoreSerializationErrorKind::InvalidWorldState,
                     })?;
-                let rule_version = ActivationRuleVersion(Sha256Digest::try_new(&rule_version).map_err(|_| {
-                    StoreError::Serialization {
-                        kind: StoreSerializationErrorKind::InvalidWorldState,
-                    }
-                })?);
+                let rule_version =
+                    ActivationRuleVersion::from_digest(Sha256Digest::try_new(&rule_version).map_err(|_| {
+                        StoreError::Serialization {
+                            kind: StoreSerializationErrorKind::InvalidWorldState,
+                        }
+                    })?);
                 Ok(ActivationTimedState {
                     source_id,
                     rule_version,

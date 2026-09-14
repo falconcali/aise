@@ -155,8 +155,6 @@ key_type!(WorldBookKey);
 key_type!(StoryPackKey);
 key_type!(SceneKey);
 key_type!(LocationKey);
-key_type!(EntityKey);
-semantic_key_type!(TopicKey);
 key_type!(FactKey);
 key_type!(RumorKey);
 key_type!(MemoryKey);

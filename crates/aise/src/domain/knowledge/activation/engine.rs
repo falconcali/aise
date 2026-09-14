@@ -1,23 +1,19 @@
 use super::contracts::{
-    ActivatedKnowledgeRef, ActivationContinuation, ActivationEvidence, ActivationExecutionInput, ActivationOrdering,
-    ActivationPatternKind, ActivationRejectionReason, ActivationRequest, ActivationResult, ActivationWorkUsage,
+    ActivatedKnowledgeRef, ActivationContinuation, ActivationEntryBody, ActivationEntryMetadata, ActivationEvidence,
+    ActivationMachineState, ActivationOrdering, ActivationPatternKind, ActivationRecursionInput,
+    ActivationRejectionReason, ActivationRequest, ActivationResult, ActivationRoundOutcome, ActivationWorkUsage,
 };
-use super::rule::{
-    ActivationBudgetClass, ActivationGroupKey, ActivationPattern, SecondaryLogic, normalize_activation_literal,
-};
+use super::index::{FragmentPatternMatch, MATCHER_VERSION, summary_visible};
+use super::rule::{ActivationBudgetClass, ActivationGroupKey, SecondaryLogic};
 use super::scan::{ScanFragment, ScanFragmentKind};
 use super::state::{ActivationSeedKind, ActivationStopReason, ActivationTimedState, PendingActivationStateDelta};
+use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::TurnNumber;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use crate::domain::turn::KnowledgeDelivery;
-use regex::RegexBuilder;
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
-
-pub struct KnowledgeActivationEngine;
-
-const MATCHER_VERSION: u32 = 1;
 
 #[derive(Clone)]
 struct Candidate {
@@ -32,16 +28,6 @@ struct Candidate {
     deliveries: Vec<KnowledgeDelivery>,
 }
 
-struct RoundOutcome {
-    newly_activated: Vec<KnowledgeSourceId>,
-    budget_trimmed: bool,
-}
-
-struct TimedView {
-    valid: BTreeMap<KnowledgeSourceId, ActivationTimedState>,
-    delta: PendingActivationStateDelta,
-}
-
 #[derive(Default)]
 struct BudgetUsage {
     audience_items: BTreeMap<KnowledgeDelivery, usize>,
@@ -52,16 +38,42 @@ struct BudgetUsage {
     mandatory_tokens: u64,
 }
 
-type PatternMatchResult = (usize, BTreeSet<u16>, Vec<ActivationEvidence>);
+enum AdmissionOutcome {
+    Admitted,
+    Rejected,
+}
 
-impl KnowledgeActivationEngine {
-    pub fn run(&self, request: ActivationRequest<'_>) -> Result<ActivationResult, ActivationError> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    Start,
+    InitialRecursion,
+    DepthLoop,
+    DepthRecursion,
+    Done,
+}
+
+pub struct KnowledgeActivationSession<'a> {
+    request: ActivationRequest<'a>,
+    continuation: ActivationContinuation,
+    timed_valid: BTreeMap<KnowledgeSourceId, ActivationTimedState>,
+    timed_delta: PendingActivationStateDelta,
+    rejections: BTreeMap<ActivationRejectionReason, u32>,
+    budget: BudgetUsage,
+    recursion_fragments: Vec<ScanFragment>,
+    recursion_matches: BTreeMap<super::scan::ScanFragmentId, Vec<FragmentPatternMatch>>,
+    recursion_pending: Vec<KnowledgeSourceId>,
+    recursion_bodies: BTreeMap<KnowledgeSourceId, (BoundedText, u64)>,
+    pending: BTreeMap<KnowledgeSourceId, Candidate>,
+    stage: Stage,
+    state: ActivationMachineState,
+    budget_trimmed: bool,
+    recursion_exhausted: bool,
+}
+
+impl<'a> KnowledgeActivationSession<'a> {
+    pub fn start(request: ActivationRequest<'a>) -> Result<Self, ActivationError> {
         validate_request(&request)?;
-        let input = request
-            .index_snapshot
-            .execution_input()
-            .ok_or(ActivationError::MissingExecutionInput)?;
-        let mut continuation = match request.continuation.as_ref() {
+        let continuation = match request.continuation.as_ref() {
             Some(value) => {
                 if value.turn_number != request.turn_number
                     || value.generation_trigger != request.generation_trigger
@@ -75,141 +87,737 @@ impl KnowledgeActivationEngine {
             }
             None => new_continuation(&request),
         };
-        let mut timed = timed_view(&request)?;
-        let mut rejections = BTreeMap::new();
-        let mut budget = budget_usage(&request, &continuation)?;
-        account_scan_fragments(&request, &mut continuation)?;
-        let mut recursion_fragments = Vec::new();
-        let mut recursion_pending = Vec::new();
-        let mut budget_trimmed = false;
-        let mut recursion_exhausted = false;
+        let resumed = request.continuation.is_some();
+        let timed = timed_view(&request)?;
+        let budget = budget_usage(&request, &continuation)?;
+        Ok(Self {
+            request,
+            continuation,
+            timed_valid: timed.valid,
+            timed_delta: timed.delta,
+            rejections: BTreeMap::new(),
+            budget,
+            recursion_fragments: Vec::new(),
+            recursion_matches: BTreeMap::new(),
+            recursion_pending: Vec::new(),
+            recursion_bodies: BTreeMap::new(),
+            pending: BTreeMap::new(),
+            stage: Stage::Start,
+            state: if resumed {
+                ActivationMachineState::Resumed
+            } else {
+                ActivationMachineState::Initial
+            },
+            budget_trimmed: false,
+            recursion_exhausted: false,
+        })
+    }
 
-        let initial = process_round(
-            &request,
-            input,
-            &mut continuation,
-            &timed.valid,
-            &mut timed.delta,
-            &mut rejections,
-            &mut budget,
-            &recursion_fragments,
-        )?;
-        recursion_pending.extend(initial.newly_activated);
-        budget_trimmed |= initial.budget_trimmed;
+    pub fn state(&self) -> ActivationMachineState {
+        self.state
+    }
 
+    pub fn next_round(&mut self) -> Result<Option<ActivationRoundOutcome>, ActivationError> {
+        if !self.pending.is_empty() {
+            return Err(ActivationError::ContinuationMismatch);
+        }
         loop {
-            let added = add_recursion_fragments(
-                &request,
-                input,
-                &mut continuation,
-                &mut recursion_fragments,
-                &mut recursion_pending,
-            )?;
-            if added == 0 {
-                break;
-            }
-            if continuation.recursion_level >= request.limits.max_recursion_steps {
-                recursion_exhausted = true;
-                break;
-            }
-            continuation.recursion_level = continuation.recursion_level.saturating_add(1);
-            continuation.consumed.recursion_steps = continuation.consumed.recursion_steps.saturating_add(1);
-            let outcome = process_round(
-                &request,
-                input,
-                &mut continuation,
-                &timed.valid,
-                &mut timed.delta,
-                &mut rejections,
-                &mut budget,
-                &recursion_fragments,
-            )?;
-            recursion_pending.extend(outcome.newly_activated);
-            budget_trimmed |= outcome.budget_trimmed;
-        }
-
-        while request.limits.minimum_activations > continuation.activated.len()
-            && continuation.scan_depth < request.limits.max_scan_depth
-            && continuation.depth_expansions < request.limits.max_depth_expansions
-        {
-            continuation.scan_depth = continuation.scan_depth.saturating_add(1);
-            continuation.depth_expansions = continuation.depth_expansions.saturating_add(1);
-            account_scan_fragments(&request, &mut continuation)?;
-            let outcome = process_round(
-                &request,
-                input,
-                &mut continuation,
-                &timed.valid,
-                &mut timed.delta,
-                &mut rejections,
-                &mut budget,
-                &recursion_fragments,
-            )?;
-            recursion_pending.extend(outcome.newly_activated);
-            budget_trimmed |= outcome.budget_trimmed;
-            loop {
-                let added = add_recursion_fragments(
-                    &request,
-                    input,
-                    &mut continuation,
-                    &mut recursion_fragments,
-                    &mut recursion_pending,
-                )?;
-                if added == 0 {
-                    break;
+            match self.stage {
+                Stage::Done => return Ok(None),
+                Stage::Start => {
+                    self.account_scan_fragments()?;
+                    self.stage = Stage::InitialRecursion;
+                    return self.run_round(self.state).map(Some);
                 }
-                if continuation.recursion_level >= request.limits.max_recursion_steps {
-                    recursion_exhausted = true;
-                    break;
+                Stage::InitialRecursion => match self.expand_recursion()? {
+                    RecursionStep::None => self.stage = Stage::DepthLoop,
+                    RecursionStep::Exhausted => self.stage = Stage::DepthLoop,
+                    RecursionStep::Expanded => {
+                        return self.run_round(ActivationMachineState::Recursion).map(Some);
+                    }
+                },
+                Stage::DepthRecursion => match self.expand_recursion()? {
+                    RecursionStep::None => {
+                        self.stage = Stage::DepthLoop;
+                    }
+                    RecursionStep::Exhausted => {
+                        self.stage = Stage::Done;
+                        return Ok(None);
+                    }
+                    RecursionStep::Expanded => {
+                        return self.run_round(ActivationMachineState::Recursion).map(Some);
+                    }
+                },
+                Stage::DepthLoop => {
+                    let limits = self.request.limits;
+                    if limits.minimum_activations > self.continuation.activated.len()
+                        && self.continuation.scan_depth < limits.max_scan_depth
+                        && self.continuation.depth_expansions < limits.max_depth_expansions
+                    {
+                        self.continuation.scan_depth = self.continuation.scan_depth.saturating_add(1);
+                        self.continuation.depth_expansions = self.continuation.depth_expansions.saturating_add(1);
+                        self.account_scan_fragments()?;
+                        self.stage = Stage::DepthRecursion;
+                        return self.run_round(ActivationMachineState::DepthExpansion).map(Some);
+                    }
+                    self.stage = Stage::Done;
+                    return Ok(None);
                 }
-                continuation.recursion_level = continuation.recursion_level.saturating_add(1);
-                continuation.consumed.recursion_steps = continuation.consumed.recursion_steps.saturating_add(1);
-                let outcome = process_round(
-                    &request,
-                    input,
-                    &mut continuation,
-                    &timed.valid,
-                    &mut timed.delta,
-                    &mut rejections,
-                    &mut budget,
-                    &recursion_fragments,
-                )?;
-                recursion_pending.extend(outcome.newly_activated);
-                budget_trimmed |= outcome.budget_trimmed;
-            }
-            if recursion_exhausted {
-                break;
             }
         }
+    }
 
-        cleanup_timed_state(&request, &continuation, &timed.valid, &mut timed.delta);
-        continuation.consumed.knowledge_tokens = budget
+    pub fn supply_bodies(&mut self, input: ActivationRecursionInput) -> Result<(), ActivationError> {
+        for body in input.bodies {
+            let Some(candidate) = self.pending.remove(&body.source_id) else {
+                return Err(ActivationError::SnapshotMismatch);
+            };
+            self.admit_body(candidate, body)?;
+        }
+        if !self.pending.is_empty() {
+            return Err(ActivationError::SnapshotMismatch);
+        }
+        Ok(())
+    }
+
+    pub fn drop_admitted(&mut self, source_id: &KnowledgeSourceId) -> Result<(), ActivationError> {
+        if self.pending.remove(source_id).is_none() {
+            return Err(ActivationError::SnapshotMismatch);
+        }
+        reject(
+            &mut self.continuation,
+            &mut self.rejections,
+            source_id.clone(),
+            ActivationRejectionReason::Budget,
+        );
+        self.budget_trimmed = true;
+        Ok(())
+    }
+
+    pub fn finish(mut self) -> Result<ActivationResult, ActivationError> {
+        if !self.pending.is_empty() {
+            return Err(ActivationError::ContinuationMismatch);
+        }
+        cleanup_timed_state(&self.request, &self.continuation, &self.timed_valid, &mut self.timed_delta);
+        self.continuation.consumed.knowledge_tokens = self
+            .budget
             .normal_tokens
-            .saturating_add(budget.reserved_tokens)
-            .saturating_add(budget.mandatory_tokens);
-        let activated = ranked_activated(&mut continuation);
-        let stop_reason = if recursion_exhausted {
+            .saturating_add(self.budget.reserved_tokens)
+            .saturating_add(self.budget.mandatory_tokens);
+        let activated = ranked_activated(&mut self.continuation);
+        let limits = self.request.limits;
+        let stop_reason = if self.recursion_exhausted {
             ActivationStopReason::RecursionExhausted
-        } else if budget_trimmed {
+        } else if self.budget_trimmed {
             ActivationStopReason::WorkTrimmed
-        } else if request.limits.minimum_activations > activated.len()
-            && (continuation.scan_depth == request.limits.max_scan_depth
-                || continuation.depth_expansions == request.limits.max_depth_expansions)
+        } else if limits.minimum_activations > activated.len()
+            && (self.continuation.scan_depth == limits.max_scan_depth
+                || self.continuation.depth_expansions == limits.max_depth_expansions)
         {
             ActivationStopReason::MaximumDepthReached
-        } else if continuation.depth_expansions > 0 && activated.len() >= request.limits.minimum_activations {
+        } else if self.continuation.depth_expansions > 0 && activated.len() >= limits.minimum_activations {
             ActivationStopReason::MinimumSatisfied
         } else {
             ActivationStopReason::Complete
         };
+        self.state = ActivationMachineState::Complete;
         Ok(ActivationResult {
             activated,
-            continuation,
-            pending_timed_state: timed.delta,
-            rejection_summary: rejections,
+            continuation: self.continuation,
+            pending_timed_state: self.timed_delta,
+            rejection_summary: self.rejections,
             stop_reason,
         })
     }
+
+    fn run_round(&mut self, state: ActivationMachineState) -> Result<ActivationRoundOutcome, ActivationError> {
+        self.state = state;
+        let admitted = self.select_round()?;
+        Ok(ActivationRoundOutcome { admitted, state })
+    }
+
+    fn account_scan_fragments(&mut self) -> Result<(), ActivationError> {
+        let limits = self.request.limits;
+        for fragment in visible_base_fragments(&self.request, self.continuation.scan_depth) {
+            if !self.continuation.scanned_fragment_ids.insert(fragment.id.clone()) {
+                continue;
+            }
+            self.continuation.consumed.scan_fragments = self.continuation.consumed.scan_fragments.saturating_add(1);
+            self.continuation.consumed.scan_bytes = self
+                .continuation
+                .consumed
+                .scan_bytes
+                .saturating_add(fragment.text.as_str().len());
+            self.continuation.consumed.scan_tokens = self
+                .continuation
+                .consumed
+                .scan_tokens
+                .saturating_add(bytes_to_tokens(fragment.text.as_str().len()));
+        }
+        if self.continuation.consumed.scan_fragments > limits.max_scan_fragments {
+            return Err(ActivationError::WorkLimitExceeded {
+                limit: "scan_fragments",
+            });
+        }
+        if self.continuation.consumed.scan_bytes > limits.max_scan_bytes {
+            return Err(ActivationError::WorkLimitExceeded { limit: "scan_bytes" });
+        }
+        if self.continuation.consumed.scan_tokens > limits.max_scan_tokens {
+            return Err(ActivationError::WorkLimitExceeded { limit: "scan_tokens" });
+        }
+        Ok(())
+    }
+
+    fn select_round(&mut self) -> Result<Vec<KnowledgeSourceId>, ActivationError> {
+        let mut candidates = self.collect_candidates()?;
+        if candidates.len() > self.request.limits.max_candidates_per_round {
+            return Err(ActivationError::WorkLimitExceeded {
+                limit: "candidates_per_round",
+            });
+        }
+        let mut eligible = Vec::new();
+        for candidate in candidates.values_mut() {
+            self.continuation.consumed.candidate_evaluations =
+                self.continuation.consumed.candidate_evaluations.saturating_add(1);
+            let metadata = self
+                .request
+                .index_snapshot
+                .metadata
+                .get(&candidate.source_id)
+                .ok_or(ActivationError::ExternalTargetUnauthorized)?
+                .clone();
+            if self.continuation.activated.contains_key(&candidate.source_id) {
+                self.merge_existing_deliveries(&metadata, candidate)?;
+                continue;
+            }
+            if self.continuation.terminal_rejections.contains_key(&candidate.source_id) {
+                continue;
+            }
+            if let Some(reason) = self.pre_filter(&metadata, candidate) {
+                match reason {
+                    ActivationRejectionReason::RecursionLevelLocked => {
+                        increment(&mut self.rejections, reason);
+                    }
+                    other => reject(&mut self.continuation, &mut self.rejections, candidate.source_id.clone(), other),
+                }
+                continue;
+            }
+            eligible.push(candidate.clone());
+        }
+
+        eligible = resolve_groups(&self.request, &mut self.continuation, &mut self.rejections, eligible);
+        eligible.sort_by(|left, right| candidate_order(&self.request, left, right));
+        let mut admitted = Vec::new();
+        for candidate in eligible {
+            let metadata = self
+                .request
+                .index_snapshot
+                .metadata
+                .get(&candidate.source_id)
+                .ok_or(ActivationError::ExternalTargetUnauthorized)?
+                .clone();
+            if !candidate.sticky
+                && !probability_admits(
+                    self.request.story_id.as_str(),
+                    self.request.turn_number.get(),
+                    &candidate.source_id,
+                    metadata.rule.selection.probability,
+                    metadata.rule_version.as_digest().as_bytes(),
+                )
+            {
+                self.continuation.failed_probability.insert(candidate.source_id.clone());
+                reject(
+                    &mut self.continuation,
+                    &mut self.rejections,
+                    candidate.source_id,
+                    ActivationRejectionReason::Probability,
+                );
+                continue;
+            }
+            if self.continuation.activated.len().saturating_add(self.pending.len())
+                >= self.request.limits.max_activated_entries
+            {
+                if is_mandatory(metadata.rule.budget_class, candidate.mandatory) {
+                    return Err(ActivationError::MandatoryBudgetExceeded);
+                }
+                reject(
+                    &mut self.continuation,
+                    &mut self.rejections,
+                    candidate.source_id,
+                    ActivationRejectionReason::Budget,
+                );
+                self.budget_trimmed = true;
+                continue;
+            }
+            admitted.push(candidate.source_id.clone());
+            self.pending.insert(candidate.source_id.clone(), candidate);
+        }
+        Ok(admitted)
+    }
+
+    fn merge_existing_deliveries(
+        &mut self,
+        metadata: &ActivationEntryMetadata,
+        candidate: &Candidate,
+    ) -> Result<(), ActivationError> {
+        let Some(existing) = self.continuation.activated.get(&candidate.source_id) else {
+            return Ok(());
+        };
+        let token_cost = existing.token_cost;
+        let new_deliveries = candidate
+            .deliveries
+            .iter()
+            .filter(|delivery| !existing.deliveries.contains(delivery))
+            .cloned()
+            .collect::<Vec<_>>();
+        if new_deliveries.is_empty() {
+            return Ok(());
+        }
+        validate_deliveries(metadata.kind, &new_deliveries)?;
+        match admit_deliveries(
+            &self.request,
+            metadata.rule.budget_class,
+            candidate.mandatory,
+            token_cost,
+            &new_deliveries,
+            &mut self.budget,
+        ) {
+            AdmissionOutcome::Admitted => {}
+            AdmissionOutcome::Rejected => {
+                if is_mandatory(metadata.rule.budget_class, candidate.mandatory) {
+                    return Err(ActivationError::MandatoryBudgetExceeded);
+                }
+                increment(&mut self.rejections, ActivationRejectionReason::Budget);
+                self.budget_trimmed = true;
+                return Ok(());
+            }
+        }
+        if let Some(existing) = self.continuation.activated.get_mut(&candidate.source_id) {
+            existing.deliveries.extend(new_deliveries);
+            existing.deliveries.sort();
+            existing.deliveries.dedup();
+        }
+        Ok(())
+    }
+
+    fn pre_filter(
+        &self,
+        metadata: &ActivationEntryMetadata,
+        candidate: &Candidate,
+    ) -> Option<ActivationRejectionReason> {
+        if !metadata.rule.mode.enabled {
+            return Some(ActivationRejectionReason::Disabled);
+        }
+        if !metadata.rule.scope.generation_triggers.is_empty()
+            && !metadata
+                .rule
+                .scope
+                .generation_triggers
+                .contains(&self.request.generation_trigger)
+        {
+            return Some(ActivationRejectionReason::ScopeMismatch);
+        }
+        if metadata.rule.timing.delay_turns > 0
+            && self.request.turn_number.get() <= u64::from(metadata.rule.timing.delay_turns)
+        {
+            return Some(ActivationRejectionReason::Delayed);
+        }
+        if !candidate.sticky
+            && self.timed_valid.get(&candidate.source_id).is_some_and(|state| {
+                state
+                    .cooldown_through_turn
+                    .is_some_and(|through| through >= self.request.turn_number)
+            })
+        {
+            return Some(ActivationRejectionReason::Cooldown);
+        }
+        if !candidate.sticky && candidate.recursion_only && metadata.rule.recursion.exclude_recursion {
+            return Some(ActivationRejectionReason::RecursionExcluded);
+        }
+        if !candidate.sticky
+            && metadata
+                .rule
+                .recursion
+                .delay_until_recursion
+                .is_some_and(|level| self.continuation.recursion_level < level)
+        {
+            return Some(ActivationRejectionReason::RecursionLevelLocked);
+        }
+        None
+    }
+
+    fn admit_body(&mut self, candidate: Candidate, body: ActivationEntryBody) -> Result<(), ActivationError> {
+        let metadata = self
+            .request
+            .index_snapshot
+            .metadata
+            .get(&body.source_id)
+            .ok_or(ActivationError::IndexVersionMismatch)?
+            .clone();
+        if metadata.kind != body.kind || body.token_cost == 0 {
+            return Err(ActivationError::SnapshotMismatch);
+        }
+        let mandatory = is_mandatory(metadata.rule.budget_class, candidate.mandatory);
+        if body.body.as_str().len() > self.request.limits.max_single_entry_bytes {
+            if mandatory {
+                return Err(ActivationError::MandatoryBudgetExceeded);
+            }
+            reject(
+                &mut self.continuation,
+                &mut self.rejections,
+                body.source_id,
+                ActivationRejectionReason::Budget,
+            );
+            self.budget_trimmed = true;
+            return Ok(());
+        }
+        let mut deliveries = default_deliveries(metadata.kind);
+        deliveries.extend(candidate.deliveries.clone());
+        deliveries.sort();
+        deliveries.dedup();
+        validate_deliveries(metadata.kind, &deliveries)?;
+        match admit_deliveries(
+            &self.request,
+            metadata.rule.budget_class,
+            candidate.mandatory,
+            body.token_cost,
+            &deliveries,
+            &mut self.budget,
+        ) {
+            AdmissionOutcome::Admitted => {}
+            AdmissionOutcome::Rejected => {
+                if mandatory {
+                    return Err(ActivationError::MandatoryBudgetExceeded);
+                }
+                reject(
+                    &mut self.continuation,
+                    &mut self.rejections,
+                    body.source_id,
+                    ActivationRejectionReason::Budget,
+                );
+                self.budget_trimmed = true;
+                return Ok(());
+            }
+        }
+        let ordering = activation_ordering(&self.request, &candidate);
+        let mut evidence = candidate.evidence;
+        evidence.sort_by_key(|item| {
+            (
+                item.round,
+                item.recursion_level,
+                source_priority(item.fragment_kind),
+                item.recency_depth,
+                item.stable_fragment_order,
+                item.pattern_kind,
+                item.pattern_ordinal,
+            )
+        });
+        evidence.truncate(self.request.limits.max_evidence_per_entry);
+        let evidence_bytes = evidence.len().saturating_mul(std::mem::size_of::<ActivationEvidence>());
+        if self.continuation.evidence_bytes.saturating_add(evidence_bytes) > self.request.limits.max_evidence_bytes {
+            return Err(ActivationError::WorkLimitExceeded {
+                limit: "evidence_bytes",
+            });
+        }
+        self.continuation.evidence_bytes = self.continuation.evidence_bytes.saturating_add(evidence_bytes);
+        let source_id = body.source_id.clone();
+        self.continuation.activated.insert(
+            source_id.clone(),
+            ActivatedKnowledgeRef {
+                source_id: source_id.clone(),
+                deliveries,
+                activation_class: candidate.class,
+                rank: 0,
+                token_cost: body.token_cost,
+                evidence,
+                ordering,
+            },
+        );
+        self.continuation.consumed.activated_entries = self.continuation.consumed.activated_entries.saturating_add(1);
+        if !candidate.sticky {
+            update_timed_state(&self.request, &metadata, &mut self.timed_delta);
+        }
+        self.recursion_bodies.insert(source_id.clone(), (body.body, body.token_cost));
+        self.recursion_pending.push(source_id);
+        Ok(())
+    }
+
+    fn expand_recursion(&mut self) -> Result<RecursionStep, ActivationError> {
+        let added = self.add_recursion_fragments()?;
+        if added == 0 {
+            return Ok(RecursionStep::None);
+        }
+        if self.continuation.recursion_level >= self.request.limits.max_recursion_steps {
+            self.recursion_exhausted = true;
+            return Ok(RecursionStep::Exhausted);
+        }
+        self.continuation.recursion_level = self.continuation.recursion_level.saturating_add(1);
+        self.continuation.consumed.recursion_steps = self.continuation.consumed.recursion_steps.saturating_add(1);
+        Ok(RecursionStep::Expanded)
+    }
+
+    fn add_recursion_fragments(&mut self) -> Result<usize, ActivationError> {
+        self.recursion_pending.sort();
+        self.recursion_pending.dedup();
+        let mut added = 0usize;
+        for source_id in std::mem::take(&mut self.recursion_pending) {
+            let body = self.recursion_bodies.remove(&source_id);
+            if self.continuation.recursion_sources.contains(&source_id) {
+                continue;
+            }
+            let metadata = self
+                .request
+                .index_snapshot
+                .metadata
+                .get(&source_id)
+                .ok_or(ActivationError::IndexVersionMismatch)?
+                .clone();
+            self.continuation.recursion_sources.insert(source_id.clone());
+            if metadata.rule.recursion.prevent_recursion {
+                continue;
+            }
+            let Some((text, token_cost)) = body else {
+                return Err(ActivationError::SnapshotMismatch);
+            };
+            let bytes = text.as_str().len();
+            let limits = self.request.limits;
+            if self.continuation.consumed.recursion_fragments.saturating_add(1) > limits.max_recursion_fragments
+                || self.continuation.consumed.recursion_bytes.saturating_add(bytes) > limits.max_recursion_bytes
+                || self.continuation.consumed.recursion_tokens.saturating_add(token_cost) > limits.max_recursion_tokens
+            {
+                return Err(ActivationError::RecursionLimitReached);
+            }
+            let stable_order = u32::try_from(self.recursion_fragments.len()).unwrap_or(u32::MAX);
+            let fragment = ScanFragment::new(
+                ScanFragmentKind::RecursionContent,
+                self.continuation.recursion_level.saturating_add(1),
+                stable_order,
+                text,
+            );
+            let matches = self.request.index_snapshot.match_fragment(&fragment);
+            self.recursion_matches.insert(fragment.id.clone(), matches);
+            self.recursion_fragments.push(fragment);
+            self.continuation.consumed.recursion_fragments =
+                self.continuation.consumed.recursion_fragments.saturating_add(1);
+            self.continuation.consumed.recursion_bytes =
+                self.continuation.consumed.recursion_bytes.saturating_add(bytes);
+            self.continuation.consumed.recursion_tokens =
+                self.continuation.consumed.recursion_tokens.saturating_add(token_cost);
+            added = added.saturating_add(1);
+        }
+        Ok(added)
+    }
+
+    fn collect_candidates(&mut self) -> Result<BTreeMap<KnowledgeSourceId, Candidate>, ActivationError> {
+        let mut candidates = BTreeMap::new();
+        for source_id in &self.request.index_snapshot.constant_entries {
+            let metadata = self
+                .request
+                .index_snapshot
+                .metadata
+                .get(source_id)
+                .ok_or(ActivationError::IndexVersionMismatch)?;
+            merge_candidate(
+                &mut candidates,
+                Candidate {
+                    source_id: source_id.clone(),
+                    class: ActivationSeedKind::Constant,
+                    evidence: Vec::new(),
+                    score: 0,
+                    provider_rank: None,
+                    mandatory: metadata.rule.budget_class == ActivationBudgetClass::Mandatory,
+                    sticky: false,
+                    recursion_only: false,
+                    deliveries: Vec::new(),
+                },
+            );
+        }
+        for (source_id, state) in &self.timed_valid {
+            if state
+                .sticky_through_turn
+                .is_some_and(|through| through >= self.request.turn_number)
+            {
+                merge_candidate(
+                    &mut candidates,
+                    Candidate {
+                        source_id: source_id.clone(),
+                        class: ActivationSeedKind::Sticky,
+                        evidence: Vec::new(),
+                        score: 0,
+                        provider_rank: None,
+                        mandatory: false,
+                        sticky: true,
+                        recursion_only: false,
+                        deliveries: Vec::new(),
+                    },
+                );
+            }
+        }
+        for seed in self.request.external_seeds {
+            if !self.request.index_snapshot.metadata.contains_key(&seed.source_id) {
+                return Err(ActivationError::ExternalTargetUnauthorized);
+            }
+            merge_candidate(
+                &mut candidates,
+                Candidate {
+                    source_id: seed.source_id.clone(),
+                    class: seed.kind,
+                    evidence: Vec::new(),
+                    score: 0,
+                    provider_rank: seed.provider_rank,
+                    mandatory: seed.mandatory,
+                    sticky: false,
+                    recursion_only: false,
+                    deliveries: vec![seed.delivery.clone()],
+                },
+            );
+        }
+        self.collect_text_candidates(&mut candidates)?;
+        Ok(candidates)
+    }
+
+    fn collect_text_candidates(
+        &mut self,
+        candidates: &mut BTreeMap<KnowledgeSourceId, Candidate>,
+    ) -> Result<(), ActivationError> {
+        let round = self
+            .continuation
+            .depth_expansions
+            .saturating_add(self.continuation.recursion_level);
+        let recursion_level = self.continuation.recursion_level;
+        let mut by_source: BTreeMap<KnowledgeSourceId, Vec<FragmentPatternMatch>> = BTreeMap::new();
+        for fragment in visible_base_fragments(&self.request, self.continuation.scan_depth) {
+            let matches = self
+                .request
+                .fragment_matches
+                .get(&fragment.id)
+                .ok_or(ActivationError::IndexVersionMismatch)?;
+            for entry in matches.iter() {
+                by_source.entry(entry.source_id.clone()).or_default().push(entry.clone());
+            }
+        }
+        for fragment in &self.recursion_fragments {
+            let Some(matches) = self.recursion_matches.get(&fragment.id) else {
+                return Err(ActivationError::IndexVersionMismatch);
+            };
+            for entry in matches {
+                by_source.entry(entry.source_id.clone()).or_default().push(entry.clone());
+            }
+        }
+        let limits = self.request.limits;
+        for (source_id, metadata) in &self.request.index_snapshot.metadata {
+            if !metadata.rule.mode.enabled || metadata.rule.mode.constant || metadata.rule.mode.exact_target_only {
+                continue;
+            }
+            let entry_depth = metadata
+                .rule
+                .match_rule
+                .scan_depth
+                .unwrap_or(self.continuation.scan_depth)
+                .min(self.continuation.scan_depth);
+            let Some(entry_matches) = by_source.get(source_id) else {
+                continue;
+            };
+            let mut match_count_total = 0usize;
+            let mut primary_ordinals = BTreeSet::new();
+            let mut secondary_ordinals = BTreeSet::new();
+            let mut evidence = Vec::new();
+            for item in entry_matches {
+                if item.fragment_kind != ScanFragmentKind::RecursionContent {
+                    if item.recency_depth > entry_depth {
+                        continue;
+                    }
+                    if !summary_visible(
+                        item.fragment_kind,
+                        entry_depth,
+                        limits.include_summary_at_max_depth,
+                        limits.max_scan_depth,
+                    ) {
+                        continue;
+                    }
+                }
+                match_count_total = match_count_total.saturating_add(usize::from(item.match_count));
+                match item.pattern_kind {
+                    ActivationPatternKind::PrimaryLiteral | ActivationPatternKind::PrimaryRegex => {
+                        primary_ordinals.insert(item.pattern_ordinal);
+                    }
+                    ActivationPatternKind::SecondaryLiteral | ActivationPatternKind::SecondaryRegex => {
+                        secondary_ordinals.insert(item.pattern_ordinal);
+                    }
+                    _ => {}
+                }
+                evidence.push(ActivationEvidence {
+                    pattern_kind: item.pattern_kind,
+                    pattern_ordinal: item.pattern_ordinal,
+                    fragment_kind: item.fragment_kind,
+                    recency_depth: item.recency_depth,
+                    stable_fragment_order: item.stable_fragment_order,
+                    match_count: item.match_count,
+                    group_score_contribution: item.group_score_contribution,
+                    round,
+                    recursion_level,
+                });
+            }
+            self.continuation.consumed.pattern_matches =
+                self.continuation.consumed.pattern_matches.saturating_add(match_count_total);
+            if self.continuation.consumed.pattern_matches > limits.max_pattern_matches {
+                return Err(ActivationError::WorkLimitExceeded {
+                    limit: "pattern_matches",
+                });
+            }
+            if primary_ordinals.is_empty() {
+                continue;
+            }
+            if !secondary_logic(
+                metadata.rule.match_rule.secondary_logic,
+                &secondary_ordinals,
+                metadata.rule.match_rule.secondary_keys.len(),
+            ) {
+                increment(&mut self.rejections, ActivationRejectionReason::SecondaryCondition);
+                continue;
+            }
+            let recursion_only = evidence
+                .iter()
+                .filter(|item| {
+                    matches!(
+                        item.pattern_kind,
+                        ActivationPatternKind::PrimaryLiteral | ActivationPatternKind::PrimaryRegex
+                    )
+                })
+                .all(|item| item.fragment_kind == ScanFragmentKind::RecursionContent);
+            merge_candidate(
+                candidates,
+                Candidate {
+                    source_id: source_id.clone(),
+                    class: if recursion_only {
+                        ActivationSeedKind::Recursion
+                    } else {
+                        ActivationSeedKind::TextMatch
+                    },
+                    score: u16::try_from(primary_ordinals.len().saturating_add(secondary_ordinals.len()))
+                        .unwrap_or(u16::MAX),
+                    evidence,
+                    provider_rank: None,
+                    mandatory: metadata.rule.budget_class == ActivationBudgetClass::Mandatory,
+                    sticky: false,
+                    recursion_only,
+                    deliveries: Vec::new(),
+                },
+            );
+        }
+        Ok(())
+    }
+}
+
+enum RecursionStep {
+    None,
+    Expanded,
+    Exhausted,
+}
+
+struct TimedView {
+    valid: BTreeMap<KnowledgeSourceId, ActivationTimedState>,
+    delta: PendingActivationStateDelta,
 }
 
 fn validate_request(request: &ActivationRequest<'_>) -> Result<(), ActivationError> {
@@ -256,13 +864,7 @@ fn validate_request(request: &ActivationRequest<'_>) -> Result<(), ActivationErr
     {
         return Err(ActivationError::SnapshotMismatch);
     }
-    let mut literals = 0usize;
-    let mut regexes = 0usize;
     for metadata in request.index_snapshot.metadata.values() {
-        metadata
-            .rule
-            .validate(metadata.rule.selection.groups.len())
-            .map_err(|_| ActivationError::InvalidRule { code: "invalid_rule" })?;
         if metadata
             .rule
             .match_rule
@@ -273,27 +875,13 @@ fn validate_request(request: &ActivationRequest<'_>) -> Result<(), ActivationErr
                 code: "scan_depth_exceeded",
             });
         }
-        for pattern in metadata
-            .rule
-            .match_rule
-            .keys
-            .iter()
-            .chain(metadata.rule.match_rule.secondary_keys.iter())
-        {
-            let ActivationPattern::Literal(value) = pattern;
-            if regex_parts(value).is_some() {
-                regexes = regexes.saturating_add(1);
-            } else {
-                literals = literals.saturating_add(1);
-            }
-        }
     }
-    if literals > limits.max_literal_patterns {
+    if request.index_snapshot.literal_pattern_count() > limits.max_literal_patterns {
         return Err(ActivationError::WorkLimitExceeded {
             limit: "literal_patterns",
         });
     }
-    if regexes > limits.max_regex_patterns {
+    if request.index_snapshot.regex_pattern_count() > limits.max_regex_patterns {
         return Err(ActivationError::WorkLimitExceeded {
             limit: "regex_patterns",
         });
@@ -355,554 +943,27 @@ fn timed_view(request: &ActivationRequest<'_>) -> Result<TimedView, ActivationEr
     Ok(TimedView { valid, delta })
 }
 
-fn account_scan_fragments(
-    request: &ActivationRequest<'_>,
-    continuation: &mut ActivationContinuation,
-) -> Result<(), ActivationError> {
-    for fragment in visible_base_fragments(request, continuation.scan_depth) {
-        if !continuation.scanned_fragment_ids.insert(fragment.id.clone()) {
-            continue;
-        }
-        continuation.consumed.scan_fragments = continuation.consumed.scan_fragments.saturating_add(1);
-        continuation.consumed.scan_bytes =
-            continuation.consumed.scan_bytes.saturating_add(fragment.text.as_str().len());
-        continuation.consumed.scan_tokens = continuation
-            .consumed
-            .scan_tokens
-            .saturating_add(bytes_to_tokens(fragment.text.as_str().len()));
-    }
-    if continuation.consumed.scan_fragments > request.limits.max_scan_fragments {
-        return Err(ActivationError::WorkLimitExceeded {
-            limit: "scan_fragments",
-        });
-    }
-    if continuation.consumed.scan_bytes > request.limits.max_scan_bytes {
-        return Err(ActivationError::WorkLimitExceeded { limit: "scan_bytes" });
-    }
-    if continuation.consumed.scan_tokens > request.limits.max_scan_tokens {
-        return Err(ActivationError::WorkLimitExceeded { limit: "scan_tokens" });
-    }
-    Ok(())
-}
-
-fn process_round(
-    request: &ActivationRequest<'_>,
-    input: &ActivationExecutionInput,
-    continuation: &mut ActivationContinuation,
-    timed: &BTreeMap<KnowledgeSourceId, ActivationTimedState>,
-    timed_delta: &mut PendingActivationStateDelta,
-    rejections: &mut BTreeMap<ActivationRejectionReason, u32>,
-    budget: &mut BudgetUsage,
-    recursion_fragments: &[ScanFragment],
-) -> Result<RoundOutcome, ActivationError> {
-    let mut candidates = collect_candidates(request, input, continuation, timed, rejections, recursion_fragments)?;
-    if candidates.len() > request.limits.max_candidates_per_round {
-        return Err(ActivationError::WorkLimitExceeded {
-            limit: "candidates_per_round",
-        });
-    }
-    let mut eligible = Vec::new();
-    for candidate in candidates.values_mut() {
-        continuation.consumed.candidate_evaluations = continuation.consumed.candidate_evaluations.saturating_add(1);
-        let metadata = request
-            .index_snapshot
-            .metadata
-            .get(&candidate.source_id)
-            .ok_or(ActivationError::ExternalTargetUnauthorized)?;
-        if let Some(existing) = continuation.activated.get_mut(&candidate.source_id) {
-            let new_deliveries = candidate
-                .deliveries
-                .iter()
-                .filter(|delivery| !existing.deliveries.contains(delivery))
-                .cloned()
-                .collect::<Vec<_>>();
-            if new_deliveries.is_empty() {
-                continue;
-            }
-            validate_deliveries(metadata.kind, &new_deliveries)?;
-            let entry_input = input.entry(&candidate.source_id).ok_or(ActivationError::MissingEntryInput)?;
-            admit_deliveries(
-                request,
-                metadata.rule.budget_class,
-                candidate.mandatory,
-                entry_input.token_cost,
-                &new_deliveries,
-                budget,
-            )?;
-            existing.deliveries.extend(new_deliveries);
-            existing.deliveries.sort();
-            continue;
-        }
-        if continuation.terminal_rejections.contains_key(&candidate.source_id) {
-            continue;
-        }
-        if !metadata.rule.mode.enabled {
-            reject(
-                continuation,
-                rejections,
-                candidate.source_id.clone(),
-                ActivationRejectionReason::Disabled,
-            );
-            continue;
-        }
-        if !metadata.rule.scope.generation_triggers.is_empty()
-            && !metadata.rule.scope.generation_triggers.contains(&request.generation_trigger)
-        {
-            reject(
-                continuation,
-                rejections,
-                candidate.source_id.clone(),
-                ActivationRejectionReason::ScopeMismatch,
-            );
-            continue;
-        }
-        if metadata.rule.timing.delay_turns > 0
-            && request.turn_number.get() <= u64::from(metadata.rule.timing.delay_turns)
-        {
-            reject(
-                continuation,
-                rejections,
-                candidate.source_id.clone(),
-                ActivationRejectionReason::Delayed,
-            );
-            continue;
-        }
-        if !candidate.sticky
-            && timed.get(&candidate.source_id).is_some_and(|state| {
-                state
-                    .cooldown_through_turn
-                    .is_some_and(|through| through >= request.turn_number)
-            })
-        {
-            reject(
-                continuation,
-                rejections,
-                candidate.source_id.clone(),
-                ActivationRejectionReason::Cooldown,
-            );
-            continue;
-        }
-        if !candidate.sticky && candidate.recursion_only && metadata.rule.recursion.exclude_recursion {
-            reject(
-                continuation,
-                rejections,
-                candidate.source_id.clone(),
-                ActivationRejectionReason::RecursionExcluded,
-            );
-            continue;
-        }
-        if !candidate.sticky
-            && metadata
-                .rule
-                .recursion
-                .delay_until_recursion
-                .is_some_and(|level| continuation.recursion_level < level)
-        {
-            increment(rejections, ActivationRejectionReason::RecursionLevelLocked);
-            continue;
-        }
-        eligible.push(candidate.clone());
-    }
-
-    eligible = resolve_groups(request, continuation, rejections, eligible);
-    eligible.sort_by(|left, right| candidate_order(request, left, right));
-    let mut newly_activated = Vec::new();
-    let mut budget_trimmed = false;
-    for candidate in eligible {
-        let metadata = request
-            .index_snapshot
-            .metadata
-            .get(&candidate.source_id)
-            .ok_or(ActivationError::ExternalTargetUnauthorized)?;
-        if !candidate.sticky
-            && !probability_admits(
-                request.story_id.as_str(),
-                request.turn_number.get(),
-                &candidate.source_id,
-                metadata.rule.selection.probability,
-                metadata.rule_version.0.as_bytes(),
-            )
-        {
-            continuation.failed_probability.insert(candidate.source_id.clone());
-            reject(
-                continuation,
-                rejections,
-                candidate.source_id,
-                ActivationRejectionReason::Probability,
-            );
-            continue;
-        }
-        let entry_input = input.entry(&candidate.source_id).ok_or(ActivationError::MissingEntryInput)?;
-        if entry_input.body.as_str().len() > request.limits.max_single_entry_bytes {
-            if is_mandatory(metadata.rule.budget_class, candidate.mandatory) {
-                return Err(ActivationError::MandatoryBudgetExceeded);
-            }
-            reject(continuation, rejections, candidate.source_id, ActivationRejectionReason::Budget);
-            budget_trimmed = true;
-            continue;
-        }
-        let mut deliveries = entry_input.deliveries.clone();
-        deliveries.extend(candidate.deliveries.clone());
-        deliveries.sort();
-        deliveries.dedup();
-        validate_deliveries(metadata.kind, &deliveries)?;
-        if continuation.activated.len() >= request.limits.max_activated_entries {
-            if is_mandatory(metadata.rule.budget_class, candidate.mandatory) {
-                return Err(ActivationError::MandatoryBudgetExceeded);
-            }
-            reject(continuation, rejections, candidate.source_id, ActivationRejectionReason::Budget);
-            budget_trimmed = true;
-            continue;
-        }
-        if let Err(error) = admit_deliveries(
-            request,
-            metadata.rule.budget_class,
-            candidate.mandatory,
-            entry_input.token_cost,
-            &deliveries,
-            budget,
-        ) {
-            if is_mandatory(metadata.rule.budget_class, candidate.mandatory) {
-                return Err(error);
-            }
-            reject(continuation, rejections, candidate.source_id, ActivationRejectionReason::Budget);
-            budget_trimmed = true;
-            continue;
-        }
-        let ordering = activation_ordering(request, &candidate);
-        let mut evidence = candidate.evidence;
-        evidence.sort_by_key(|item| {
-            (
-                item.round,
-                item.recursion_level,
-                source_priority(item.fragment_kind),
-                item.recency_depth,
-                item.stable_fragment_order,
-                item.pattern_kind,
-                item.pattern_ordinal,
-            )
-        });
-        evidence.truncate(request.limits.max_evidence_per_entry);
-        let evidence_bytes = evidence.len().saturating_mul(std::mem::size_of::<ActivationEvidence>());
-        if continuation.evidence_bytes.saturating_add(evidence_bytes) > request.limits.max_evidence_bytes {
-            return Err(ActivationError::WorkLimitExceeded {
-                limit: "evidence_bytes",
-            });
-        }
-        continuation.evidence_bytes = continuation.evidence_bytes.saturating_add(evidence_bytes);
-        let source_id = candidate.source_id.clone();
-        continuation.activated.insert(
-            source_id.clone(),
-            ActivatedKnowledgeRef {
-                source_id: source_id.clone(),
-                deliveries,
-                activation_class: candidate.class,
-                rank: 0,
-                token_cost: entry_input.token_cost,
-                evidence,
-                ordering,
-            },
-        );
-        continuation.consumed.activated_entries = continuation.consumed.activated_entries.saturating_add(1);
-        if !candidate.sticky {
-            update_timed_state(request, metadata, timed_delta);
-        }
-        newly_activated.push(source_id);
-    }
-    Ok(RoundOutcome {
-        newly_activated,
-        budget_trimmed,
-    })
-}
-
-fn collect_candidates(
-    request: &ActivationRequest<'_>,
-    input: &ActivationExecutionInput,
-    continuation: &mut ActivationContinuation,
-    timed: &BTreeMap<KnowledgeSourceId, ActivationTimedState>,
-    rejections: &mut BTreeMap<ActivationRejectionReason, u32>,
-    recursion_fragments: &[ScanFragment],
-) -> Result<BTreeMap<KnowledgeSourceId, Candidate>, ActivationError> {
-    let mut candidates = BTreeMap::new();
-    for source_id in &request.index_snapshot.constant_entries {
-        let metadata = request
-            .index_snapshot
-            .metadata
-            .get(source_id)
-            .ok_or(ActivationError::IndexVersionMismatch)?;
-        merge_candidate(
-            &mut candidates,
-            Candidate {
-                source_id: source_id.clone(),
-                class: ActivationSeedKind::Constant,
-                evidence: Vec::new(),
-                score: 0,
-                provider_rank: None,
-                mandatory: metadata.rule.budget_class == ActivationBudgetClass::Mandatory,
-                sticky: false,
-                recursion_only: false,
-                deliveries: Vec::new(),
-            },
-        );
-    }
-    for (source_id, state) in timed {
-        if state.sticky_through_turn.is_some_and(|through| through >= request.turn_number) {
-            merge_candidate(
-                &mut candidates,
-                Candidate {
-                    source_id: source_id.clone(),
-                    class: ActivationSeedKind::Sticky,
-                    evidence: Vec::new(),
-                    score: 0,
-                    provider_rank: None,
-                    mandatory: false,
-                    sticky: true,
-                    recursion_only: false,
-                    deliveries: Vec::new(),
-                },
-            );
-        }
-    }
-    for seed in request.external_seeds {
-        if !request.index_snapshot.metadata.contains_key(&seed.source_id) {
-            return Err(ActivationError::ExternalTargetUnauthorized);
-        }
-        merge_candidate(
-            &mut candidates,
-            Candidate {
-                source_id: seed.source_id.clone(),
-                class: seed.kind,
-                evidence: Vec::new(),
-                score: 0,
-                provider_rank: seed.provider_rank,
-                mandatory: seed.mandatory,
-                sticky: false,
-                recursion_only: false,
-                deliveries: vec![seed.delivery.clone()],
-            },
-        );
-    }
-    let round = continuation.depth_expansions.saturating_add(continuation.recursion_level);
-    for (source_id, metadata) in &request.index_snapshot.metadata {
-        if !metadata.rule.mode.enabled || metadata.rule.mode.constant || metadata.rule.mode.exact_target_only {
-            continue;
-        }
-        let entry_depth = metadata
-            .rule
-            .match_rule
-            .scan_depth
-            .unwrap_or(continuation.scan_depth)
-            .min(continuation.scan_depth);
-        let mut fragments = visible_base_fragments(request, entry_depth);
-        fragments.extend(recursion_fragments.iter());
-        let primary = collect_pattern_matches(
-            &metadata.rule.match_rule.keys,
-            &fragments,
-            metadata.rule.match_rule.case_sensitive,
-            metadata.rule.match_rule.match_whole_words,
-            ActivationPatternKind::PrimaryLiteral,
-            input,
-            round,
-            continuation.recursion_level,
-            true,
-        )?;
-        let secondary_positive = matches!(
-            metadata.rule.match_rule.secondary_logic,
-            SecondaryLogic::AndAny | SecondaryLogic::AndAll
-        );
-        let secondary = collect_pattern_matches(
-            &metadata.rule.match_rule.secondary_keys,
-            &fragments,
-            metadata.rule.match_rule.case_sensitive,
-            metadata.rule.match_rule.match_whole_words,
-            ActivationPatternKind::SecondaryLiteral,
-            input,
-            round,
-            continuation.recursion_level,
-            secondary_positive,
-        )?;
-        continuation.consumed.pattern_matches = continuation
-            .consumed
-            .pattern_matches
-            .saturating_add(primary.0)
-            .saturating_add(secondary.0);
-        if continuation.consumed.pattern_matches > request.limits.max_pattern_matches {
-            return Err(ActivationError::WorkLimitExceeded {
-                limit: "pattern_matches",
-            });
-        }
-        if primary.1.is_empty() {
-            continue;
-        }
-        if !secondary_logic(
-            metadata.rule.match_rule.secondary_logic,
-            &secondary.1,
-            metadata.rule.match_rule.secondary_keys.len(),
-        ) {
-            increment(rejections, ActivationRejectionReason::SecondaryCondition);
-            continue;
-        }
-        let mut evidence = primary.2;
-        evidence.extend(secondary.2);
-        let recursion_only = evidence
-            .iter()
-            .filter(|item| {
-                matches!(
-                    item.pattern_kind,
-                    ActivationPatternKind::PrimaryLiteral | ActivationPatternKind::PrimaryRegex
-                )
-            })
-            .all(|item| item.fragment_kind == ScanFragmentKind::RecursionContent);
-        merge_candidate(
-            &mut candidates,
-            Candidate {
-                source_id: source_id.clone(),
-                class: if recursion_only {
-                    ActivationSeedKind::Recursion
-                } else {
-                    ActivationSeedKind::TextMatch
-                },
-                score: u16::try_from(primary.1.len().saturating_add(secondary.1.len())).unwrap_or(u16::MAX),
-                evidence,
-                provider_rank: None,
-                mandatory: metadata.rule.budget_class == ActivationBudgetClass::Mandatory,
-                sticky: false,
-                recursion_only,
-                deliveries: Vec::new(),
-            },
-        );
-    }
-    Ok(candidates)
-}
-
-fn collect_pattern_matches(
-    patterns: &[ActivationPattern],
-    fragments: &[&ScanFragment],
-    case_sensitive: bool,
-    whole_words: bool,
-    kind: ActivationPatternKind,
-    input: &ActivationExecutionInput,
-    round: u16,
-    recursion_level: u16,
-    positive_score: bool,
-) -> Result<PatternMatchResult, ActivationError> {
-    let mut count = 0usize;
-    let mut matched = BTreeSet::new();
-    let mut evidence = Vec::new();
-    for (ordinal, pattern) in patterns.iter().enumerate() {
-        let ActivationPattern::Literal(value) = pattern;
-        let (regex, is_regex) = parse_regex(value)?;
-        let literal = if is_regex {
-            None
-        } else {
-            Some(expand_macros(value, input)?)
-        };
-        for fragment in fragments {
-            let match_count = if let Some(regex) = &regex {
-                regex.find_iter(fragment.text.as_str()).count()
-            } else {
-                literal_count(
-                    fragment.text.as_str(),
-                    literal.as_deref().unwrap_or_default(),
-                    case_sensitive,
-                    whole_words,
-                )
-            };
-            if match_count == 0 {
-                continue;
-            }
-            count = count.saturating_add(match_count);
-            let ordinal = u16::try_from(ordinal).unwrap_or(u16::MAX);
-            matched.insert(ordinal);
-            evidence.push(ActivationEvidence {
-                pattern_kind: if is_regex {
-                    match kind {
-                        ActivationPatternKind::PrimaryLiteral => ActivationPatternKind::PrimaryRegex,
-                        ActivationPatternKind::SecondaryLiteral => ActivationPatternKind::SecondaryRegex,
-                        other => other,
-                    }
-                } else {
-                    kind
-                },
-                pattern_ordinal: ordinal,
-                fragment_kind: fragment.kind,
-                recency_depth: fragment.recency_depth,
-                stable_fragment_order: fragment.stable_order,
-                match_count: u16::try_from(match_count).unwrap_or(u16::MAX),
-                group_score_contribution: u16::from(positive_score),
-                round,
-                recursion_level,
-            });
-        }
-    }
-    Ok((count, matched, evidence))
-}
-
 fn visible_base_fragments<'a>(request: &'a ActivationRequest<'_>, depth: u16) -> Vec<&'a ScanFragment> {
     request
         .scan_buffer
         .visible_at_depth(depth)
         .filter(|fragment| {
             fragment.kind != ScanFragmentKind::RecursionContent
-                && (fragment.kind != ScanFragmentKind::StorySummary
-                    || (request.limits.include_summary_at_max_depth && depth == request.limits.max_scan_depth))
+                && summary_visible(
+                    fragment.kind,
+                    depth,
+                    request.limits.include_summary_at_max_depth,
+                    request.limits.max_scan_depth,
+                )
         })
         .collect()
 }
 
-fn expand_macros(value: &str, input: &ActivationExecutionInput) -> Result<String, ActivationError> {
-    let expanded = value
-        .replace("{{player_name}}", &input.macros().player_name)
-        .replace("{{player_role_label}}", &input.macros().player_role_label);
-    if expanded.len() > input.max_macro_expansion_bytes() {
-        return Err(ActivationError::WorkLimitExceeded {
-            limit: "macro_expansion_bytes",
-        });
+fn default_deliveries(kind: KnowledgeKind) -> Vec<KnowledgeDelivery> {
+    match kind {
+        KnowledgeKind::Fact | KnowledgeKind::Rumor => vec![KnowledgeDelivery::Writer],
+        KnowledgeKind::Memory => Vec::new(),
     }
-    Ok(expanded)
-}
-
-fn parse_regex(value: &str) -> Result<(Option<regex::Regex>, bool), ActivationError> {
-    let Some((expression, flags)) = regex_parts(value) else {
-        return Ok((None, false));
-    };
-    if flags.chars().any(|flag| !matches!(flag, 'i' | 'm' | 's' | 'u'))
-        || flags.chars().collect::<BTreeSet<_>>().len() != flags.chars().count()
-    {
-        return Err(ActivationError::InvalidRegex);
-    }
-    let regex = RegexBuilder::new(expression)
-        .case_insensitive(flags.contains('i'))
-        .multi_line(flags.contains('m'))
-        .dot_matches_new_line(flags.contains('s'))
-        .unicode(true)
-        .build()
-        .map_err(|_| ActivationError::InvalidRegex)?;
-    Ok((Some(regex), true))
-}
-
-fn regex_parts(value: &str) -> Option<(&str, &str)> {
-    let rest = value.strip_prefix('/')?;
-    let end = rest.rfind('/')?;
-    Some((&rest[..end], &rest[end + 1..]))
-}
-
-fn literal_count(text: &str, pattern: &str, case_sensitive: bool, whole_words: bool) -> usize {
-    let text = normalize_activation_literal(text, case_sensitive);
-    let pattern = normalize_activation_literal(pattern, case_sensitive);
-    if pattern.is_empty() {
-        return 0;
-    }
-    text.match_indices(&pattern)
-        .filter(|(offset, value)| {
-            !whole_words || {
-                let before = text[..*offset].chars().next_back();
-                let after = text[*offset + value.len()..].chars().next();
-                !before.is_some_and(|item| item.is_alphanumeric() || item == '_')
-                    && !after.is_some_and(|item| item.is_alphanumeric() || item == '_')
-            }
-        })
-        .count()
 }
 
 fn secondary_logic(logic: SecondaryLogic, matches: &BTreeSet<u16>, pattern_count: usize) -> bool {
@@ -1096,7 +1157,7 @@ fn group_winner<'a>(
     for candidate in &tied {
         let metadata = request.index_snapshot.metadata.get(&candidate.source_id)?;
         hasher.update(candidate.source_id.as_str().as_bytes());
-        hasher.update(metadata.rule_version.0.as_bytes());
+        hasher.update(metadata.rule_version.as_digest().as_bytes());
         hasher.update(metadata.rule.selection.group_weight.to_be_bytes());
     }
     let digest = hasher.finalize();
@@ -1230,11 +1291,11 @@ fn admit_deliveries(
     token_cost: u64,
     deliveries: &[KnowledgeDelivery],
     usage: &mut BudgetUsage,
-) -> Result<(), ActivationError> {
+) -> AdmissionOutcome {
     let additional_items = deliveries.len();
     let additional_tokens = token_cost.saturating_mul(u64::try_from(additional_items).unwrap_or(u64::MAX));
     if usage.total_items.saturating_add(additional_items) > request.limits.max_total_items {
-        return Err(ActivationError::MandatoryBudgetExceeded);
+        return AdmissionOutcome::Rejected;
     }
     for delivery in deliveries {
         if usage
@@ -1252,7 +1313,7 @@ fn admit_deliveries(
                 .saturating_add(token_cost)
                 > request.limits.max_tokens_per_audience
         {
-            return Err(ActivationError::MandatoryBudgetExceeded);
+            return AdmissionOutcome::Rejected;
         }
     }
     let total_tokens = usage
@@ -1260,7 +1321,7 @@ fn admit_deliveries(
         .saturating_add(usage.reserved_tokens)
         .saturating_add(usage.mandatory_tokens);
     if total_tokens.saturating_add(additional_tokens) > request.limits.max_total_tokens {
-        return Err(ActivationError::MandatoryBudgetExceeded);
+        return AdmissionOutcome::Rejected;
     }
     let effective_class = if forced_mandatory {
         ActivationBudgetClass::Mandatory
@@ -1275,7 +1336,7 @@ fn admit_deliveries(
     let reserved_ceiling = request.limits.max_total_tokens.saturating_sub(request.limits.mandatory_tokens);
     match effective_class {
         ActivationBudgetClass::Normal if usage.normal_tokens.saturating_add(additional_tokens) > normal_ceiling => {
-            return Err(ActivationError::MandatoryBudgetExceeded);
+            return AdmissionOutcome::Rejected;
         }
         ActivationBudgetClass::Reserved
             if usage
@@ -1284,7 +1345,7 @@ fn admit_deliveries(
                 .saturating_add(additional_tokens)
                 > reserved_ceiling =>
         {
-            return Err(ActivationError::MandatoryBudgetExceeded);
+            return AdmissionOutcome::Rejected;
         }
         _ => {}
     }
@@ -1307,7 +1368,7 @@ fn admit_deliveries(
             usage.mandatory_tokens = usage.mandatory_tokens.saturating_add(additional_tokens);
         }
     }
-    Ok(())
+    AdmissionOutcome::Admitted
 }
 
 fn validate_deliveries(kind: KnowledgeKind, deliveries: &[KnowledgeDelivery]) -> Result<(), ActivationError> {
@@ -1324,57 +1385,9 @@ fn is_mandatory(class: ActivationBudgetClass, forced: bool) -> bool {
     forced || class == ActivationBudgetClass::Mandatory
 }
 
-fn add_recursion_fragments(
-    request: &ActivationRequest<'_>,
-    input: &ActivationExecutionInput,
-    continuation: &mut ActivationContinuation,
-    recursion_fragments: &mut Vec<ScanFragment>,
-    pending: &mut Vec<KnowledgeSourceId>,
-) -> Result<usize, ActivationError> {
-    pending.sort();
-    pending.dedup();
-    let mut added = 0usize;
-    for source_id in std::mem::take(pending) {
-        if continuation.recursion_sources.contains(&source_id) {
-            continue;
-        }
-        let metadata = request
-            .index_snapshot
-            .metadata
-            .get(&source_id)
-            .ok_or(ActivationError::IndexVersionMismatch)?;
-        continuation.recursion_sources.insert(source_id.clone());
-        if metadata.rule.recursion.prevent_recursion {
-            continue;
-        }
-        let entry_input = input.entry(&source_id).ok_or(ActivationError::MissingEntryInput)?;
-        let bytes = entry_input.body.as_str().len();
-        if continuation.consumed.recursion_fragments.saturating_add(1) > request.limits.max_recursion_fragments
-            || continuation.consumed.recursion_bytes.saturating_add(bytes) > request.limits.max_recursion_bytes
-            || continuation.consumed.recursion_tokens.saturating_add(entry_input.token_cost)
-                > request.limits.max_recursion_tokens
-        {
-            return Err(ActivationError::RecursionLimitReached);
-        }
-        let stable_order = u32::try_from(recursion_fragments.len()).unwrap_or(u32::MAX);
-        recursion_fragments.push(ScanFragment::new(
-            ScanFragmentKind::RecursionContent,
-            continuation.recursion_level.saturating_add(1),
-            stable_order,
-            entry_input.body.clone(),
-        ));
-        continuation.consumed.recursion_fragments = continuation.consumed.recursion_fragments.saturating_add(1);
-        continuation.consumed.recursion_bytes = continuation.consumed.recursion_bytes.saturating_add(bytes);
-        continuation.consumed.recursion_tokens =
-            continuation.consumed.recursion_tokens.saturating_add(entry_input.token_cost);
-        added = added.saturating_add(1);
-    }
-    Ok(added)
-}
-
 fn update_timed_state(
     request: &ActivationRequest<'_>,
-    metadata: &super::contracts::ActivationEntryMetadata,
+    metadata: &ActivationEntryMetadata,
     delta: &mut PendingActivationStateDelta,
 ) {
     let sticky_turns = u64::from(metadata.rule.timing.sticky_turns);
@@ -1474,6 +1487,15 @@ fn source_priority(kind: ScanFragmentKind) -> u8 {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivationStoreFailure {
+    Unavailable,
+    RevisionConflict,
+    NotFound,
+    LimitExceeded,
+    Serialization,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ActivationError {
     #[error("activation rule is invalid: {code}")]
@@ -1496,8 +1518,28 @@ pub enum ActivationError {
     ExternalTargetUnauthorized,
     #[error("activation timed state is inconsistent")]
     TimedStateInconsistent,
-    #[error("activation execution input is missing")]
-    MissingExecutionInput,
-    #[error("activation execution input entry is missing")]
-    MissingEntryInput,
+    #[error("activation seed provider failed: {provider}")]
+    ProviderFailure { provider: &'static str },
+    #[error("activation store operation failed")]
+    Store(ActivationStoreFailure),
+}
+
+impl ActivationError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidRule { .. } => "activation_invalid_rule",
+            Self::InvalidRegex => "activation_invalid_regex",
+            Self::IndexVersionMismatch => "activation_index_version_mismatch",
+            Self::SnapshotMismatch => "activation_snapshot_mismatch",
+            Self::ContinuationMismatch => "activation_continuation_mismatch",
+            Self::WorkLimitExceeded { .. } => "activation_work_limit_exceeded",
+            Self::RecursionLimitReached => "activation_recursion_limit_reached",
+            Self::MandatoryBudgetExceeded => "activation_mandatory_budget_exceeded",
+            Self::ExternalTargetUnauthorized => "activation_external_target_unauthorized",
+            Self::TimedStateInconsistent => "activation_timed_state_inconsistent",
+            Self::ProviderFailure { .. } => "activation_provider_failure",
+            Self::Store(ActivationStoreFailure::RevisionConflict) => "retrieval_snapshot_conflict",
+            Self::Store(_) => "activation_store_error",
+        }
+    }
 }

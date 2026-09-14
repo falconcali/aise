@@ -2,6 +2,7 @@ use crate::domain::asset::character_card::AssetSpecVersion;
 use crate::domain::asset::ids::{FactKey, RumorKey, SemanticVersion, WorldBookKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::knowledge::activation::KnowledgeActivationRule;
+use crate::domain::knowledge::hint::RetrievalHint;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -37,7 +38,7 @@ pub struct FactSeed {
     pub proposition: Option<Proposition>,
     pub content: BoundedText,
     #[serde(default)]
-    pub retrieval_hint: Option<BoundedText>,
+    pub retrieval_hint: Option<RetrievalHint>,
     pub salience: u8,
     pub activation: KnowledgeActivationRule,
 }
@@ -48,7 +49,7 @@ pub struct RumorSeed {
     pub claim: Option<Proposition>,
     pub content: BoundedText,
     #[serde(default)]
-    pub retrieval_hint: Option<BoundedText>,
+    pub retrieval_hint: Option<RetrievalHint>,
     pub salience: u8,
     pub activation: KnowledgeActivationRule,
 }

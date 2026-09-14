@@ -3,7 +3,7 @@ use crate::domain::asset::validation::BoundedText;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanFragmentKind {
     PlayerContribution,

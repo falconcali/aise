@@ -1,7 +1,10 @@
 use crate::domain::asset::ids::{MemoryKind, NarrativeConditionKey, Sha256Digest};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::{FactId, MemoryId, RoleId, RumorId, TurnNumber};
-use crate::domain::knowledge::activation::{ActivationPattern, KnowledgeActivationRule, normalize_activation_literal};
+use crate::domain::knowledge::activation::{
+    ActivationPattern, ActivationRuleLimits, ActivationRuleVersion, KnowledgeActivationRule,
+    normalize_activation_literal,
+};
 use crate::domain::knowledge::hint::{RetrievalHint, normalize_static_retrieval_hint};
 use crate::domain::knowledge::query::{KnowledgeSourceId, allocate_knowledge_ids};
 use crate::domain::knowledge::rumor::TruthValue;
@@ -422,6 +425,7 @@ pub struct KnowledgeEnrichmentContext<'a> {
     pub max_content_bytes: usize,
     pub max_activation_terms: usize,
     pub max_activation_pattern_bytes: usize,
+    pub activation_rule_limits: ActivationRuleLimits,
 }
 
 pub fn enrich_extracted_knowledge(
@@ -455,10 +459,9 @@ pub fn enrich_extracted_knowledge(
             draft.exact_target_only,
             context.max_activation_terms,
             context.max_activation_pattern_bytes,
+            context.activation_rule_limits,
         )?;
-        let activation_rule_version = activation
-            .rule_version()
-            .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)?;
+        let activation_rule_version = ActivationRuleVersion::from_rule(&activation);
         operations.push(ValidatedKnowledgeOperation::Add(KnowledgeEntry::Fact(
             crate::domain::knowledge::fact::WorldFact {
                 id,
@@ -489,11 +492,10 @@ pub fn enrich_extracted_knowledge(
                 terms,
                 context.max_activation_terms,
                 context.max_activation_pattern_bytes,
+                context.activation_rule_limits,
             )?;
         }
-        let activation_rule_version = activation
-            .rule_version()
-            .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)?;
+        let activation_rule_version = ActivationRuleVersion::from_rule(&activation);
         operations.push(ValidatedKnowledgeOperation::Update {
             target: KnowledgeSourceId::Fact(target.clone()),
             value: KnowledgeEntry::Fact(crate::domain::knowledge::fact::WorldFact {
@@ -519,10 +521,9 @@ pub fn enrich_extracted_knowledge(
             draft.exact_target_only,
             context.max_activation_terms,
             context.max_activation_pattern_bytes,
+            context.activation_rule_limits,
         )?;
-        let activation_rule_version = activation
-            .rule_version()
-            .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)?;
+        let activation_rule_version = ActivationRuleVersion::from_rule(&activation);
         let id = next_rumor_id(&mut assigned)?;
         operations.push(ValidatedKnowledgeOperation::Add(KnowledgeEntry::Rumor(
             crate::domain::knowledge::rumor::SharedRumor {
@@ -557,11 +558,10 @@ pub fn enrich_extracted_knowledge(
                 terms,
                 context.max_activation_terms,
                 context.max_activation_pattern_bytes,
+                context.activation_rule_limits,
             )?;
         }
-        let activation_rule_version = activation
-            .rule_version()
-            .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)?;
+        let activation_rule_version = ActivationRuleVersion::from_rule(&activation);
         operations.push(ValidatedKnowledgeOperation::Update {
             target: KnowledgeSourceId::Rumor(target.clone()),
             value: KnowledgeEntry::Rumor(crate::domain::knowledge::rumor::SharedRumor {
@@ -714,11 +714,12 @@ fn dynamic_activation_rule(
     exact_target_only: bool,
     max_terms: usize,
     max_pattern_bytes: usize,
+    limits: ActivationRuleLimits,
 ) -> Result<KnowledgeActivationRule, ExtractionEnrichmentError> {
     let mut rule = KnowledgeActivationRule::disabled();
     rule.mode.enabled = true;
     rule.mode.exact_target_only = exact_target_only;
-    replace_activation_terms(&mut rule, terms, max_terms, max_pattern_bytes)?;
+    replace_activation_terms(&mut rule, terms, max_terms, max_pattern_bytes, limits)?;
     Ok(rule)
 }
 
@@ -727,6 +728,7 @@ fn replace_activation_terms(
     terms: &[String],
     max_terms: usize,
     max_pattern_bytes: usize,
+    limits: ActivationRuleLimits,
 ) -> Result<(), ExtractionEnrichmentError> {
     if terms.len() > max_terms {
         return Err(ExtractionEnrichmentError::InvalidActivationRule);
@@ -749,7 +751,7 @@ fn replace_activation_terms(
         patterns.push(ActivationPattern::Literal(normalized));
     }
     rule.match_rule.keys = patterns;
-    rule.validate(rule.selection.groups.len())
+    rule.validate(limits)
         .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)
 }
 
