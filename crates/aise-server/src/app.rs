@@ -3,11 +3,10 @@ use crate::trace::{NoopRedactor, TraceRedactor, TraceSinkError, TraceWriter, Tra
 use aise::AiseEngine;
 use aise::character::CharacterThinkPipeline;
 use aise::context::activation::{
-    ActivationPreviewLimits, ActivationPreviewServiceConfig, KnowledgeActivationPreviewService,
+    ActivationPreviewLimits, ActivationPreviewServiceConfig, KnowledgeActivationCoordinator,
+    KnowledgeActivationPreviewService,
 };
-use aise::context::{
-    BaselineContextBuilder, ContextRetrievalPipeline, EntityCandidateRetriever, TopicCandidateRetriever,
-};
+use aise::context::{BaselineContextBuilder, ContextRetrievalPipeline};
 use aise::engine::SystemClock;
 use aise::llm::{LlmGateway, LlmProvider, OpenAiCompatProvider};
 use aise::persistence::asset_store::AssetStore;
@@ -60,6 +59,14 @@ pub async fn build_services(
     let knowledge: Arc<dyn KnowledgeReadPort> = sqlite.clone();
     let activation_index: Arc<dyn ActivationIndexPort> = sqlite.clone();
     let activation_timed_state: Arc<dyn ActivationTimedStateReadPort> = sqlite.clone();
+    let activation_coordinator = Arc::new(KnowledgeActivationCoordinator::new(
+        knowledge.clone(),
+        activation_index.clone(),
+        activation_timed_state.clone(),
+        config.aise.activation.index,
+        config.aise.activation.rule,
+        config.aise.activation.domain_runtime_limits(),
+    ));
     let activation_preview = Arc::new(KnowledgeActivationPreviewService::new(
         store.clone(),
         knowledge.clone(),
@@ -87,12 +94,9 @@ pub async fn build_services(
 
     let retrieval = ContextRetrievalPipeline::new(
         config.aise.retrieval.clone(),
-        vec![
-            Arc::new(EntityCandidateRetriever::new(knowledge.clone())),
-            Arc::new(TopicCandidateRetriever::new(knowledge.clone())),
-        ],
-    )
-    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        config.aise.activation.clone(),
+        activation_coordinator.clone(),
+    );
 
     let pipeline_set = TurnPipelineSet::builder()
         .initializer(Box::<TurnInitializer>::default())
@@ -103,7 +107,8 @@ pub async fn build_services(
             config.aise.assets.clone(),
             config.aise.narrative.clone(),
             config.aise.retrieval.clone(),
-            knowledge,
+            config.aise.activation.clone(),
+            activation_coordinator,
         )))
         .writer_planner(Box::new(WriterPlanner::new(
             gateway.clone(),

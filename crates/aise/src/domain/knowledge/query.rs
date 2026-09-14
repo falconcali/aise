@@ -1,16 +1,8 @@
-pub use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{PackId, Sha256Digest};
 use crate::domain::error::KnowledgeIdError;
 use crate::domain::ids::{FactId, MemoryId, RumorId, TurnNumber};
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU64;
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "key", rename_all = "snake_case", deny_unknown_fields)]
-pub enum KnowledgeIndexMatch {
-    Entity(KnowledgeEntity),
-    Topic(crate::domain::asset::ids::TopicKey),
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

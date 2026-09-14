@@ -1,13 +1,13 @@
-use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::LocationKey;
 use crate::domain::asset::validation::BoundedText;
+use crate::domain::narrative_graph::participant::NarrativeParticipant;
 use crate::domain::narrative_graph::projector::NarrativePlan;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WorldEventIntentPromptView {
     pub category: BoundedText,
-    pub participants: Vec<KnowledgeEntity>,
+    pub participants: Vec<NarrativeParticipant>,
     pub location: Option<LocationKey>,
     pub description: BoundedText,
 }
@@ -73,7 +73,7 @@ fn render_world_event_intent(intent: &WorldEventIntentPromptView) -> String {
         let participants = intent
             .participants
             .iter()
-            .map(|entity| quoted(&entity_reference(entity)))
+            .map(|participant| quoted(&participant_reference(participant)))
             .collect::<Vec<_>>()
             .join(", ");
         lines.push(format!("  participants: [{participants}]"));
@@ -85,14 +85,10 @@ fn render_world_event_intent(intent: &WorldEventIntentPromptView) -> String {
     lines.join("\n")
 }
 
-fn entity_reference(entity: &KnowledgeEntity) -> String {
-    match entity {
-        KnowledgeEntity::World(key) => format!("world:{}", key.as_str()),
-        KnowledgeEntity::Role(id) => format!("role:{}", id.as_str()),
-        KnowledgeEntity::Location(key) => format!("location:{}", key.as_str()),
-        KnowledgeEntity::Scene(key) => format!("scene:{}", key.as_str()),
-        KnowledgeEntity::NarrativeNode(key) => format!("narrative_node:{}", key.as_str()),
-        KnowledgeEntity::Event(key) => format!("event:{}", key.as_str()),
+fn participant_reference(participant: &NarrativeParticipant) -> String {
+    match participant {
+        NarrativeParticipant::Role(id) => format!("role:{}", id.as_str()),
+        NarrativeParticipant::Location(key) => format!("location:{}", key.as_str()),
     }
 }
 

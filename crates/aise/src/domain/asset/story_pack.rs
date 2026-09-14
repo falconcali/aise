@@ -3,7 +3,7 @@ use crate::domain::asset::constraint::StoryConstraintDefinition;
 use crate::domain::asset::frozen_ref::{StaticAssetDescriptor, WorldBookSource};
 use crate::domain::asset::ids::{
     AssetId, AttributeKey, ConstraintKey, LocationKey, MemoryKey, RelationshipKind, SceneKey, SemanticVersion,
-    StoryPackKey, TopicKey,
+    StoryPackKey,
 };
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::RoleId;
@@ -102,8 +102,6 @@ pub struct MemorySeed {
     pub memory_key: MemoryKey,
     pub kind: crate::domain::asset::ids::MemoryKind,
     pub content: BoundedText,
-    #[serde(default)]
-    pub topics: Vec<TopicKey>,
     pub salience: u8,
 }
 

@@ -11,10 +11,6 @@ pub struct ContextPreparationConfig {
     pub max_relationships: usize,
     pub max_condition_event_keys: usize,
     pub max_condition_fact_values: usize,
-    pub max_entity_catalog: usize,
-    pub max_signal_entities: usize,
-    pub max_signal_topics: usize,
-    pub recent_segments_for_signals: usize,
 }
 
 impl Default for ContextPreparationConfig {
@@ -27,10 +23,6 @@ impl Default for ContextPreparationConfig {
             max_relationships: 64,
             max_condition_event_keys: 256,
             max_condition_fact_values: 256,
-            max_entity_catalog: 256,
-            max_signal_entities: 32,
-            max_signal_topics: 32,
-            recent_segments_for_signals: 2,
         }
     }
 }
@@ -62,20 +54,6 @@ impl ContextPreparationConfig {
         if self.max_condition_fact_values == 0 {
             return Err(ConfigError::Invalid(
                 "context.max_condition_fact_values must be positive".into(),
-            ));
-        }
-        if self.max_entity_catalog == 0 {
-            return Err(ConfigError::Invalid("context.max_entity_catalog must be positive".into()));
-        }
-        if self.max_signal_entities == 0 {
-            return Err(ConfigError::Invalid("context.max_signal_entities must be positive".into()));
-        }
-        if self.max_signal_topics == 0 {
-            return Err(ConfigError::Invalid("context.max_signal_topics must be positive".into()));
-        }
-        if self.recent_segments_for_signals == 0 {
-            return Err(ConfigError::Invalid(
-                "context.recent_segments_for_signals must be positive".into(),
             ));
         }
         Ok(())

@@ -1,5 +1,7 @@
 use super::*;
-use crate::config::{NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
+use crate::config::{
+    ActivationConfig, NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig,
+};
 use crate::domain::asset::character_card::CharacterProfile;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
 use crate::domain::asset::ids::{LocationKey, PackId, PlayerId, SemanticVersion, Sha256Digest, StoryPackKey};
@@ -15,7 +17,7 @@ use crate::domain::story_instance::snapshot::{KnowledgeSnapshotRef, StoryReadSna
 use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::turn::StoryGeneratorOutput;
 use crate::domain::turn::{
-    BaselineContext, NarrativeGraphStateIndex, RetrievalPlan, RetrievalSignals, RoleContextView, StoryCandidateVersion,
+    BaselineContext, NarrativeGraphStateIndex, RetrievalPlan, RoleContextView, StoryCandidateVersion,
     StoryStateExtractionDto, StoryStateExtractionEnvelope, WriterPlan, WriterStoryGoal,
 };
 use crate::turn::turn_budget::TurnBudget;
@@ -112,7 +114,6 @@ fn sample_baseline(player: &StoryRole, continuity: StoryContinuity) -> BaselineC
             graph_revision: 0,
             node_states: BTreeMap::new(),
         },
-        retrieval_signals: RetrievalSignals::default(),
     }
 }
 
@@ -145,8 +146,6 @@ fn sample_snapshot(player: &StoryRole, continuity: StoryContinuity) -> StoryRead
         fact_values: BTreeMap::new(),
         story_continuity: continuity,
         active_constraints: Vec::new(),
-        entity_catalog: Vec::new(),
-        topic_dictionary: BTreeMap::new(),
         knowledge_snapshot: KnowledgeSnapshotRef {
             story_id: StoryId::try_new("story-1").unwrap(),
             pack_digest: digest(),
@@ -258,6 +257,7 @@ fn story_repairer_reuses_story_continuity_prose() {
         &RetrievalConfig::default(),
         &StateExtractorConfig::default(),
         &NarrativeConfig::default(),
+        &ActivationConfig::default(),
     )
     .unwrap();
     let identity = TurnIdentity::new(
@@ -270,9 +270,20 @@ fn story_repairer_reuses_story_continuity_prose() {
     let trace = TraceRecorder::with_limits(budget.max_trace_spans());
     let mut ctx = TurnExecutionContext::new(identity, request, budget, control, trace).unwrap();
     ctx.complete_initialization().unwrap();
+    let snapshot = sample_snapshot(&player, continuity.clone());
+    let activation = crate::turn::turn_context::PreparedActivation::empty(
+        snapshot.knowledge_snapshot().clone(),
+        TurnNumber::try_new(1).unwrap(),
+    );
     ctx.set_prepared_context(
-        sample_snapshot(&player, continuity.clone()),
+        snapshot,
         sample_baseline(&player, continuity),
+        crate::domain::narrative_graph::projector::NarrativeProjection {
+            plan: crate::domain::narrative_graph::projector::NarrativePlan::empty(),
+            condition_queries: Vec::new(),
+            expected_graph_revision: 0,
+        },
+        activation,
     )
     .unwrap();
     let plan = WriterPlan {

@@ -1,12 +1,19 @@
 use super::*;
 use crate::domain::asset::character_card::CharacterProfile;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
-use crate::domain::asset::ids::{PackId, PlayerId, SemanticVersion, Sha256Digest, StoryPackKey};
+use crate::domain::asset::ids::{
+    CanonicalEventKey, NarrativeNodeKey, PackId, PlayerId, SemanticVersion, Sha256Digest, StoryPackKey,
+};
 use crate::domain::asset::story_pack::{StoryProfile, StoryStyle};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::{RoleId, StoryId, StoryRevision};
 use crate::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySummary};
-use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
+use crate::domain::narrative_graph::condition::NarrativeCondition;
+use crate::domain::narrative_graph::definition::{
+    NarrativeGraphDefinition, NarrativeNodeDefinition, NarrativeNodeEffects,
+};
+use crate::domain::narrative_graph::effect::{NarrativeEffectDefinition, WorldEventIntentDefinition};
+use crate::domain::narrative_graph::participant::NarrativeParticipant;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::role::{RoleController, StoryRole, StoryRoleState, StoryRoleView};
 use crate::domain::story_instance::snapshot::StoryReadSnapshotParts;
@@ -43,11 +50,43 @@ fn sample_role(id: &str, controller: RoleController, location: &str) -> StoryRol
     }
 }
 
-fn sample_snapshot(roles: &[StoryRole], entity_catalog: Vec<KnowledgeEntity>) -> StoryReadSnapshot {
+fn sample_snapshot(roles: &[StoryRole], participants: Vec<NarrativeParticipant>) -> StoryReadSnapshot {
     let mut role_map = BTreeMap::new();
     for role in roles {
         role_map.insert(role.role_id.clone(), StoryRoleView::from(role));
     }
+    let narrative_definition = if participants.is_empty() {
+        NarrativeGraphDefinition {
+            entry_nodes: Vec::new(),
+            nodes: BTreeMap::new(),
+            edges: Vec::new(),
+        }
+    } else {
+        let node_key = NarrativeNodeKey::try_new("node-location-reference").unwrap();
+        let node = NarrativeNodeDefinition {
+            title: bounded("Location Reference"),
+            dramatic_focus: None,
+            activate_when: NarrativeCondition::StoryStarted,
+            complete_when: NarrativeCondition::StoryStarted,
+            skip_when: None,
+            effects: NarrativeNodeEffects {
+                on_activate: vec![NarrativeEffectDefinition::WorldEvent(WorldEventIntentDefinition {
+                    event_key: CanonicalEventKey::try_new("location-reference").unwrap(),
+                    category: bounded("reference"),
+                    participants,
+                    location: None,
+                    description: bounded("A location reference."),
+                })],
+                on_complete: Vec::new(),
+            },
+            terminal: false,
+        };
+        NarrativeGraphDefinition {
+            entry_nodes: vec![node_key.clone()],
+            nodes: BTreeMap::from([(node_key, node)]),
+            edges: Vec::new(),
+        }
+    };
     StoryReadSnapshot::try_from_parts(StoryReadSnapshotParts {
         story_id: StoryId::try_new("story-1").unwrap(),
         base_revision: StoryRevision::new(0),
@@ -71,11 +110,7 @@ fn sample_snapshot(roles: &[StoryRole], entity_catalog: Vec<KnowledgeEntity>) ->
         instance_settings: InstanceSettings::default(),
         roles: role_map,
         relationships: Vec::new(),
-        narrative_definition: NarrativeGraphDefinition {
-            entry_nodes: Vec::new(),
-            nodes: BTreeMap::new(),
-            edges: Vec::new(),
-        },
+        narrative_definition,
         narrative_state: NarrativeRuntimeState::initial(),
         fact_values: BTreeMap::new(),
         story_continuity: StoryContinuity::try_new(
@@ -93,8 +128,6 @@ fn sample_snapshot(roles: &[StoryRole], entity_catalog: Vec<KnowledgeEntity>) ->
         )
         .unwrap(),
         active_constraints: Vec::new(),
-        entity_catalog,
-        topic_dictionary: BTreeMap::new(),
         knowledge_snapshot: crate::domain::story_instance::snapshot::KnowledgeSnapshotRef {
             story_id: StoryId::try_new("story-1").unwrap(),
             pack_digest: digest(),
@@ -107,7 +140,7 @@ fn sample_snapshot(roles: &[StoryRole], entity_catalog: Vec<KnowledgeEntity>) ->
 }
 
 #[test]
-fn location_key_resolves_against_role_state_or_catalog() {
+fn location_key_resolves_against_role_state_or_narrative_participant() {
     let roles = vec![
         sample_role(
             "protagonist",
@@ -116,7 +149,7 @@ fn location_key_resolves_against_role_state_or_catalog() {
         ),
         sample_role("npc", RoleController::Ai, "village"),
     ];
-    let snapshot = sample_snapshot(&roles, vec![KnowledgeEntity::Location(LocationKey::from("cave"))]);
+    let snapshot = sample_snapshot(&roles, vec![NarrativeParticipant::Location(LocationKey::from("cave"))]);
     assert!(location_key_resolves_str("village", &snapshot));
     assert!(location_key_resolves_str("cave", &snapshot));
     assert!(!location_key_resolves_str("unknown", &snapshot));

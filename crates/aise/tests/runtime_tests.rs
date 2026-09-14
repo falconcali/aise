@@ -1,7 +1,8 @@
-use aise::config::{NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
+use aise::config::{
+    ActivationConfig, NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig,
+};
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::RoleId;
-use aise::domain::knowledge::KnowledgeKind;
 use aise::domain::turn::{
     CharacterThinkRequest, KnowledgeDelivery, KnowledgeRetrievalRequest, RetrievalPlan, RetrievalRequestOrigin,
     WriterPlan, WriterStoryGoal,
@@ -19,13 +20,12 @@ fn sample_plan(with_requests: bool) -> WriterPlan {
     if with_requests {
         plan.retrieval_plan.knowledge_requests.push(KnowledgeRetrievalRequest {
             delivery: KnowledgeDelivery::Writer,
-            target_source_id: None,
-            knowledge_kinds: vec![KnowledgeKind::Fact],
-            entities: Vec::new(),
-            topics: Vec::new(),
+            target_source_id: aise::domain::knowledge::KnowledgeSourceId::Fact(
+                aise::domain::ids::FactId::try_new("fact_0001").unwrap(),
+            ),
             reason: BoundedText::try_new("need", "reason", 64).unwrap(),
             origin: RetrievalRequestOrigin::Automatic,
-            signal_priority: 0,
+            mandatory: false,
         });
         plan.character_think_requests.push(CharacterThinkRequest {
             role_id: RoleId::try_new("c-1").unwrap(),
@@ -62,6 +62,7 @@ fn turn_budget_from_config_uses_retrieval_totals() {
         &retrieval,
         &StateExtractorConfig::default(),
         &NarrativeConfig::default(),
+        &ActivationConfig::default(),
     )
     .unwrap();
     assert_eq!(budget.max_retrieved_tokens(), 2_000);

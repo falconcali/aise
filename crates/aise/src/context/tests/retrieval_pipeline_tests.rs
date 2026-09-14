@@ -1,10 +1,13 @@
-use crate::config::RetrievalConfig;
-use crate::context::error::ContextError;
-use crate::context::retrieval_pipeline::ContextRetrievalPipeline;
-use crate::context::{EntityCandidateRetriever, TopicCandidateRetriever};
+use super::*;
+use crate::config::{ActivationConfig, RetrievalConfig};
+use crate::context::activation::KnowledgeActivationCoordinator;
+use crate::domain::knowledge::activation::ActivationIndexSnapshot;
+use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
+use crate::persistence::activation_index_port::ActivationIndexPort;
+use crate::persistence::activation_timed_state_port::{ActivationTimedStateQuery, ActivationTimedStateReadPort};
 use crate::persistence::knowledge_read_port::{
-    EntityKnowledgeQuery, KnowledgeIndexQuery, KnowledgeIndexRecord, KnowledgeLookupHit, KnowledgeReadPort,
-    KnowledgeRecord, SourceKnowledgeQuery, TopicKnowledgeQuery,
+    KnowledgeIndexQuery, KnowledgeIndexRecord, KnowledgeReadPort, KnowledgeRecord, OwnerMemoryQuery,
+    SourceKnowledgeQuery,
 };
 use crate::persistence::store::StoreError;
 use async_trait::async_trait;
@@ -14,15 +17,11 @@ struct EmptyKnowledge;
 
 #[async_trait]
 impl KnowledgeReadPort for EmptyKnowledge {
-    async fn find_by_entities(&self, _query: EntityKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError> {
-        Ok(Vec::new())
-    }
-
-    async fn find_by_topics(&self, _query: TopicKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError> {
-        Ok(Vec::new())
-    }
-
     async fn find_by_source_ids(&self, _query: SourceKnowledgeQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn find_memories_by_owner(&self, _query: OwnerMemoryQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError> {
         Ok(Vec::new())
     }
 
@@ -31,17 +30,46 @@ impl KnowledgeReadPort for EmptyKnowledge {
     }
 }
 
+struct EmptyIndex;
+
+#[async_trait]
+impl ActivationIndexPort for EmptyIndex {
+    async fn load_snapshot(
+        &self,
+        knowledge: &KnowledgeSnapshotRef,
+        _limits: crate::config::ActivationIndexLimits,
+    ) -> Result<Arc<ActivationIndexSnapshot>, StoreError> {
+        Ok(Arc::new(ActivationIndexSnapshot::new(
+            crate::domain::knowledge::activation::ActivationIndexSnapshotRef::from_knowledge(knowledge, 0, 1),
+            std::collections::BTreeMap::new(),
+        )))
+    }
+}
+
+struct EmptyTimed;
+
+#[async_trait]
+impl ActivationTimedStateReadPort for EmptyTimed {
+    async fn load_timed_state(
+        &self,
+        _query: ActivationTimedStateQuery<'_>,
+    ) -> Result<Vec<crate::domain::knowledge::activation::ActivationTimedState>, StoreError> {
+        Ok(Vec::new())
+    }
+}
+
 #[test]
-fn retrieval_pipeline_requires_entity_and_topic_retrievers() {
+fn retrieval_pipeline_constructs_with_activation_coordinator() {
     let knowledge: Arc<dyn KnowledgeReadPort> = Arc::new(EmptyKnowledge);
-    let err = ContextRetrievalPipeline::new(RetrievalConfig::default(), Vec::new());
-    assert!(matches!(err, Err(ContextError::InvalidRetrieverSet { .. })));
-    let ok = ContextRetrievalPipeline::new(
-        RetrievalConfig::default(),
-        vec![
-            Arc::new(EntityCandidateRetriever::new(knowledge.clone())),
-            Arc::new(TopicCandidateRetriever::new(knowledge)),
-        ],
-    );
-    assert!(ok.is_ok());
+    let activation = ActivationConfig::default();
+    let coordinator = Arc::new(KnowledgeActivationCoordinator::new(
+        knowledge,
+        Arc::new(EmptyIndex),
+        Arc::new(EmptyTimed),
+        activation.index,
+        activation.rule,
+        activation.domain_runtime_limits(),
+    ));
+    let pipeline = ContextRetrievalPipeline::new(RetrievalConfig::default(), activation, coordinator);
+    assert_eq!(pipeline.stage(), TurnStage::ContextRetrieval);
 }

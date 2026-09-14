@@ -1,83 +1,25 @@
-use crate::domain::asset::entity::KnowledgeEntity;
-use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
+use crate::domain::knowledge::activation::{ActivationRuleVersion, ActivationSeedKind, KnowledgeActivationRule};
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::baseline::RoleContextView;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::BTreeMap;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RetrievalSignalOrigin {
-    PlayerContribution,
-    RoleState,
-    Narrative,
-    RecentStory,
-    Summary,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct EntitySignal {
-    pub entity: KnowledgeEntity,
-    pub origin: RetrievalSignalOrigin,
-    pub priority: u8,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct TopicSignal {
-    pub topic: TopicKey,
-    pub origin: RetrievalSignalOrigin,
-    pub priority: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Default)]
-pub struct RetrievalSignals {
-    pub entities: Vec<EntitySignal>,
-    pub topics: Vec<TopicSignal>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CandidateRetrieverKind {
-    Entity,
-    Topic,
-    Bm25,
-    Embedding,
-}
-
-pub use crate::domain::knowledge::KnowledgeIndexMatch as CandidateMatch;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MatchLevel {
-    Topic,
-    Entity,
-    EntityAndTopic,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct RelevanceRank {
-    pub match_level: MatchLevel,
-    pub signal_priority: u8,
-    pub salience: u8,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ProviderEvidence {
-    pub provider_rank: u32,
-    pub matches: Vec<crate::domain::knowledge::KnowledgeIndexMatch>,
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RetrievedKnowledgeItem {
     pub source_id: KnowledgeSourceId,
     pub content: BoundedText,
     pub source: KnowledgeSource,
-    pub relevance: RelevanceRank,
-    pub provider_evidence: BTreeMap<CandidateRetrieverKind, ProviderEvidence>,
+    pub activation_class: ActivationSeedKind,
+    pub rank: u32,
+    pub salience: u8,
     pub token_cost: u64,
+    #[serde(skip)]
+    pub activation: Option<KnowledgeActivationRule>,
+    #[serde(skip)]
+    pub activation_rule_version: Option<ActivationRuleVersion>,
 }
 
 impl RetrievedKnowledgeItem {
@@ -85,18 +27,32 @@ impl RetrievedKnowledgeItem {
         source_id: KnowledgeSourceId,
         content: BoundedText,
         source: KnowledgeSource,
-        relevance: RelevanceRank,
-        provider_evidence: BTreeMap<CandidateRetrieverKind, ProviderEvidence>,
+        activation_class: ActivationSeedKind,
+        rank: u32,
+        salience: u8,
     ) -> Self {
         let token_cost = estimate_text_tokens(content.as_str());
         Self {
             source_id,
             content,
             source,
-            relevance,
-            provider_evidence,
+            activation_class,
+            rank,
+            salience,
             token_cost,
+            activation: None,
+            activation_rule_version: None,
         }
+    }
+
+    pub fn with_activation(
+        mut self,
+        activation: KnowledgeActivationRule,
+        activation_rule_version: ActivationRuleVersion,
+    ) -> Self {
+        self.activation = Some(activation);
+        self.activation_rule_version = Some(activation_rule_version);
+        self
     }
 }
 

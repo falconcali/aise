@@ -6,7 +6,7 @@ impl SnapshotLimits {
     pub fn from_config(
         content: &TurnContentLimitsConfig,
         context: &ContextPreparationConfig,
-        assets: &AssetLimitsConfig,
+        _assets: &AssetLimitsConfig,
         narrative: &NarrativeConfig,
     ) -> Self {
         Self {
@@ -20,9 +20,6 @@ impl SnapshotLimits {
             max_condition_fact_values: context.max_condition_fact_values,
             max_constraints: content.max_constraints,
             max_constraint_bytes: content.max_constraint_bytes,
-            max_topics: assets.max_topics,
-            max_topic_aliases_per_topic: assets.max_topic_aliases_per_topic,
-            max_entity_catalog: context.max_entity_catalog,
             continuity: StoryContinuityLimits {
                 max_summary_bytes: content.max_summary_bytes,
                 max_recent_segments: content.max_recent_segments,

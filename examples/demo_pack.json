@@ -7,15 +7,24 @@
     "author": "aise",
     "version": "0.1.0",
     "description": "一个关于林间木屋的短篇探索故事包，用于演示前端故事包功能。",
-    "tags": ["demo", "mystery"],
+    "tags": [
+      "demo",
+      "mystery"
+    ],
     "cover_asset": null
   },
   "story": {
     "language": "zh-CN",
-    "genre": ["mystery"],
-    "themes": ["discovery"],
+    "genre": [
+      "mystery"
+    ],
+    "themes": [
+      "discovery"
+    ],
     "style": {
-      "tone": ["suspenseful"],
+      "tone": [
+        "suspenseful"
+      ],
       "point_of_view": "second",
       "tense": "present"
     }
@@ -34,7 +43,9 @@
       "background": "一个在林间木屋醒来的旅人，对昨晚的记忆模糊不清。",
       "initial_state": {
         "location": "lodge_hall",
-        "goals": ["查明自己为何在此"],
+        "goals": [
+          "查明自己为何在此"
+        ],
         "attributes": {
           "health": 10,
           "sanity": 8
@@ -46,11 +57,13 @@
   },
   "play": {
     "player_count": 1,
-    "playable_role_ids": ["protagonist"]
+    "playable_role_ids": [
+      "protagonist"
+    ]
   },
   "world_book": {
-    "spec": "aise_world_v4",
-    "spec_version": "4.0",
+    "spec": "aise_world_v5",
+    "spec_version": "5.0",
     "world_book_key": "lodge_world",
     "meta": {
       "name": "木屋世界",
@@ -60,7 +73,44 @@
       "lodge_is_remote": {
         "content": "木屋位于人迹罕至的密林深处。",
         "retrieval_hint": "木屋地理位置",
-        "salience": 5
+        "salience": 5,
+        "proposition": null,
+        "activation": {
+          "match": {
+            "keys": [
+              "木屋地理位置"
+            ],
+            "secondary_keys": [],
+            "scan_depth": null
+          },
+          "mode": {
+            "enabled": true,
+            "constant": false,
+            "exact_target_only": false
+          },
+          "recursion": {
+            "exclude_recursion": false,
+            "prevent_recursion": false,
+            "delay_until_recursion": null
+          },
+          "selection": {
+            "order": 0,
+            "probability": 100,
+            "groups": [],
+            "group_override": false,
+            "group_weight": 100,
+            "use_group_scoring": false
+          },
+          "timing": {
+            "sticky_turns": 0,
+            "cooldown_turns": 0,
+            "delay_turns": 0
+          },
+          "scope": {
+            "generation_triggers": []
+          },
+          "budget_class": "normal"
+        }
       }
     },
     "rumors": {}
@@ -73,15 +123,25 @@
     "opening": "你在一阵木柴爆裂声中睁开眼，发现自己靠坐在木屋的壁炉旁。火光将摇晃的影子投上墙壁，空气里混着松脂、泥土和淡淡的血腥味。你记不起昨夜发生了什么，只摸到外套口袋里一把冰冷的黄铜钥匙。窗外是浓得化不开的黑暗，风正拨弄屋檐下的铃铛。忽然，林间传来踩断枯枝的脆响，沉重的脚步穿过落叶，径直朝木门逼近。门闩随之轻轻震了一下。"
   },
   "narrative": {
-    "entry_nodes": ["node_wake"],
+    "entry_nodes": [
+      "node_wake"
+    ],
     "nodes": {
       "node_wake": {
         "title": "苏醒",
         "dramatic_focus": "探查木屋，弄清楚处境。",
-        "activate_when": { "type": "story_started" },
-        "complete_when": { "type": "turn_reaches", "turn": 2 },
+        "activate_when": {
+          "type": "story_started"
+        },
+        "complete_when": {
+          "type": "turn_reaches",
+          "turn": 2
+        },
         "skip_when": null,
-        "effects": { "on_activate": [], "on_complete": [] },
+        "effects": {
+          "on_activate": [],
+          "on_complete": []
+        },
         "terminal": false
       }
     },

@@ -61,8 +61,8 @@ fn valid_pack_json() -> String {
             "playable_role_ids": ["protagonist"]
         },
         "world_book": {
-            "spec": "aise_world_v4",
-            "spec_version": "4.0",
+            "spec": "aise_world_v5",
+            "spec_version": "5.0",
             "world_book_key": "demo_world",
             "meta": {"name": "Demo World", "version": "0.1.0"},
             "facts": {},
@@ -191,6 +191,7 @@ fn commit_spec(
         request_digest: RequestDigest::from_stored(format!("digest-{key}")),
         outbox: Vec::new(),
         llm_calls: Vec::new(),
+        activation_state_delta: aise::domain::knowledge::activation::PendingActivationStateDelta::default(),
     }
 }
 

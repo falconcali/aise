@@ -76,8 +76,8 @@ fn valid_pack_json() -> String {
             "playable_role_ids": ["protagonist"]
         },
         "world_book": {
-            "spec": "aise_world_v4",
-            "spec_version": "4.0",
+            "spec": "aise_world_v5",
+            "spec_version": "5.0",
             "world_book_key": "demo_world",
             "meta": {"name": "Demo World", "version": "0.1.0"},
             "facts": {},
@@ -114,7 +114,7 @@ fn valid_pack_json() -> String {
 fn valid_card_json(character_id: &str) -> String {
     serde_json::json!({
         "spec": "aise_char_v4",
-        "spec_version": "4.0",
+        "spec_version": "5.0",
         "character_id": character_id,
         "meta": {
             "creator": "aise-team",

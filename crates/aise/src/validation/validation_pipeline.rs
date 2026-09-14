@@ -200,11 +200,14 @@ fn build_change_set(ctx: &TurnExecutionContext) -> Result<ValidatedChangeSet, Tu
         })
         .collect::<Result<Vec<_>, TurnExecutionError>>()?;
 
+    let extraction_limits = ctx.budget().state_extraction_limits();
     let enrichment_context = KnowledgeEnrichmentContext {
         retrieved: ctx.retrieved(),
         turn_number,
         created_at_ms: ctx.identity().started_at_ms(),
         max_content_bytes: ctx.budget().max_knowledge_change_bytes(),
+        max_activation_terms: extraction_limits.max_activation_terms,
+        max_activation_pattern_bytes: extraction_limits.max_activation_pattern_bytes,
     };
     let (knowledge_mutations, knowledge_id_high_water) =
         enrich_extracted_knowledge(dto, snapshot, &new_roles, &enrichment_context)

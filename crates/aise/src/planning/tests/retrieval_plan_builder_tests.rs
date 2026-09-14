@@ -13,9 +13,7 @@ use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::role::{RoleController, StoryRoleState, StoryRoleView};
 use crate::domain::story_instance::snapshot::{KnowledgeSnapshotRef, StoryReadSnapshotParts};
 use crate::domain::story_instance::state::InstanceSettings;
-use crate::domain::turn::{
-    NarrativeGraphStateIndex, RelevantWorldKnowledge, RetrievalSignals, RoleContextView, RoleIndexEntry,
-};
+use crate::domain::turn::{NarrativeGraphStateIndex, RelevantWorldKnowledge, RoleContextView, RoleIndexEntry};
 use crate::planning::planner_output::{
     CharacterThinkRequestDto, PlannerCharacterContextGapDto, PlannerWriterContextGapDto, WriterPlannerOutputDto,
 };
@@ -96,7 +94,6 @@ fn baseline_with_roles(player_id: &str, indexed_ai_ids: &[&str]) -> BaselineCont
             graph_revision: 0,
             node_states: BTreeMap::new(),
         },
-        retrieval_signals: RetrievalSignals::default(),
     }
 }
 
@@ -196,8 +193,6 @@ fn sample_snapshot(player_id: &str, ai_ids: &[&str]) -> StoryReadSnapshot {
         )
         .unwrap(),
         active_constraints: Vec::new(),
-        entity_catalog: Vec::new(),
-        topic_dictionary: BTreeMap::new(),
         knowledge_snapshot: KnowledgeSnapshotRef {
             story_id: StoryId::try_new("story-1").unwrap(),
             pack_digest: digest(),
@@ -396,10 +391,7 @@ fn indexed_character_target_loads_role_context_bundle() {
     assert_eq!(request.role_id.as_str(), "npc-a");
     assert_eq!(request.origin, RetrievalRequestOrigin::Planner);
     assert_eq!(request.reason.as_str(), "recall the guard");
-    assert!(writer_plan.retrieval_plan.knowledge_requests.iter().any(|request| {
-        matches!(&request.delivery, KnowledgeDelivery::Character { role_id } if role_id.as_str() == "npc-a")
-            && request.entities == vec![KnowledgeEntity::Role(RoleId::try_new("npc-a").unwrap())]
-    }));
+    assert!(writer_plan.retrieval_plan.knowledge_requests.is_empty());
 }
 
 #[test]
@@ -421,20 +413,7 @@ fn character_think_automatically_retrieves_role_cognition() {
     let request = &writer_plan.retrieval_plan.character_requests[0];
     assert_eq!(request.role_id.as_str(), "npc-a");
     assert_eq!(request.origin, RetrievalRequestOrigin::Automatic);
-    let knowledge_request = writer_plan
-        .retrieval_plan
-        .knowledge_requests
-        .iter()
-        .find(|request| matches!(&request.delivery, KnowledgeDelivery::Character { role_id } if role_id.as_str() == "npc-a"))
-        .expect("automatic role cognition knowledge request");
-    assert_eq!(
-        knowledge_request.knowledge_kinds,
-        vec![KnowledgeKind::Rumor, KnowledgeKind::Memory]
-    );
-    assert_eq!(
-        knowledge_request.entities,
-        vec![KnowledgeEntity::Role(RoleId::try_new("npc-a").unwrap())]
-    );
+    assert!(writer_plan.retrieval_plan.knowledge_requests.is_empty());
 }
 
 #[test]
@@ -456,17 +435,11 @@ fn role_cognition_request_deduplicates_by_role() {
     let request = &writer_plan.retrieval_plan.character_requests[0];
     assert_eq!(request.origin, RetrievalRequestOrigin::Planner);
     assert_eq!(request.reason.as_str(), "planner target reason");
-    let cognition_knowledge_requests = writer_plan
-        .retrieval_plan
-        .knowledge_requests
-        .iter()
-        .filter(|request| matches!(&request.delivery, KnowledgeDelivery::Character { role_id } if role_id.as_str() == "npc-a"))
-        .count();
-    assert_eq!(cognition_knowledge_requests, 1);
+    assert!(writer_plan.retrieval_plan.knowledge_requests.is_empty());
 }
 
 #[test]
-fn invalid_character_context_gaps_are_dropped_without_aborting_plan() {
+fn invalid_character_context_gaps_are_rejected() {
     let baseline = baseline_with_roles("protagonist", &["npc-a"]);
     let snapshot = sample_snapshot("protagonist", &["npc-a"]);
     let plan = NarrativePlan::empty();
@@ -478,10 +451,10 @@ fn invalid_character_context_gaps_are_dropped_without_aborting_plan() {
         vec![character_gap("npc-a", "npc-a", "role target for character audience")],
         vec![think_request("npc-a", "think reason")],
     );
-    let writer_plan = builder()
+    let error = builder()
         .build(&baseline, &plan, role_to_character, &snapshot, &writer_context)
-        .unwrap();
-    assert_eq!(writer_plan.story_goal.summary.as_str(), "goal");
+        .unwrap_err();
+    assert!(matches!(error, PlanningError::KnowledgeAudienceViolation));
 
     let mut baseline_with_fact = baseline.clone();
     baseline_with_fact.knowledge_index = vec![crate::domain::turn::KnowledgeIndexEntry {
@@ -501,7 +474,7 @@ fn invalid_character_context_gaps_are_dropped_without_aborting_plan() {
         )],
         vec![think_request("npc-a", "think reason")],
     );
-    let writer_plan = builder()
+    let error = builder()
         .build(
             &baseline_with_fact,
             &plan,
@@ -509,14 +482,8 @@ fn invalid_character_context_gaps_are_dropped_without_aborting_plan() {
             &snapshot,
             &writer_context_with_fact,
         )
-        .unwrap();
-    assert_eq!(writer_plan.story_goal.summary.as_str(), "goal");
-    assert!(writer_plan.retrieval_plan.knowledge_requests.iter().all(|request| {
-        request.target_source_id
-            != Some(crate::domain::knowledge::KnowledgeSourceId::Fact(
-                crate::domain::ids::FactId::try_new("fact_0001").unwrap(),
-            ))
-    }));
+        .unwrap_err();
+    assert!(matches!(error, PlanningError::KnowledgeAudienceViolation));
 
     let mut baseline_with_rumor = baseline;
     baseline_with_rumor.knowledge_index = vec![crate::domain::turn::KnowledgeIndexEntry {
@@ -536,7 +503,7 @@ fn invalid_character_context_gaps_are_dropped_without_aborting_plan() {
         )],
         Vec::new(),
     );
-    let writer_plan = builder()
+    let error = builder()
         .build(
             &baseline_with_rumor,
             &plan,
@@ -544,18 +511,12 @@ fn invalid_character_context_gaps_are_dropped_without_aborting_plan() {
             &snapshot,
             &writer_context_with_rumor,
         )
-        .unwrap();
-    assert_eq!(writer_plan.story_goal.summary.as_str(), "goal");
-    assert!(writer_plan.retrieval_plan.knowledge_requests.iter().all(|request| {
-        request.target_source_id
-            != Some(crate::domain::knowledge::KnowledgeSourceId::Rumor(
-                crate::domain::ids::RumorId::try_new("rumor_0001").unwrap(),
-            ))
-    }));
+        .unwrap_err();
+    assert!(matches!(error, PlanningError::KnowledgeAudienceViolation));
 }
 
 #[test]
-fn unknown_writer_context_target_is_dropped_without_aborting_plan() {
+fn unknown_writer_context_target_is_rejected() {
     let baseline = baseline_with_roles("protagonist", &[]);
     let snapshot = sample_snapshot("protagonist", &[]);
     let plan = NarrativePlan::empty();
@@ -567,10 +528,10 @@ fn unknown_writer_context_target_is_dropped_without_aborting_plan() {
         Vec::new(),
     );
 
-    let writer_plan = builder().build(&baseline, &plan, output, &snapshot, &writer_context).unwrap();
-
-    assert_eq!(writer_plan.story_goal.summary.as_str(), "continue the conversation");
-    assert!(writer_plan.retrieval_plan.knowledge_requests.is_empty());
+    let error = builder()
+        .build(&baseline, &plan, output, &snapshot, &writer_context)
+        .unwrap_err();
+    assert!(matches!(error, PlanningError::UnknownRetrievalKey));
 }
 
 #[test]

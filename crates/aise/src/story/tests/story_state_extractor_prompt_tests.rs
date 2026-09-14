@@ -1,22 +1,30 @@
 use super::*;
-use crate::config::{NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
+use crate::config::{
+    ActivationConfig, NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig,
+};
 use crate::domain::asset::character_card::CharacterProfile;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
-use crate::domain::asset::ids::{PackId, PlayerId, SemanticVersion, Sha256Digest, StoryPackKey};
+use crate::domain::asset::ids::{
+    CanonicalEventKey, NarrativeNodeKey, PackId, PlayerId, SemanticVersion, Sha256Digest, StoryPackKey,
+};
 use crate::domain::asset::story_pack::{StoryProfile, StoryStyle};
 use crate::domain::ids::{FactId, RumorId, StoryId, StoryRevision, TurnKey, TurnNumber};
 use crate::domain::knowledge::KnowledgeSource;
 use crate::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySummary};
-use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
+use crate::domain::narrative_graph::condition::NarrativeCondition;
+use crate::domain::narrative_graph::definition::{
+    NarrativeGraphDefinition, NarrativeNodeDefinition, NarrativeNodeEffects,
+};
+use crate::domain::narrative_graph::effect::{NarrativeEffectDefinition, WorldEventIntentDefinition};
+use crate::domain::narrative_graph::participant::NarrativeParticipant;
 use crate::domain::narrative_graph::state::NarrativeRuntimeState;
 use crate::domain::story_instance::role::{RoleController, StoryRole, StoryRoleState, StoryRoleView};
 use crate::domain::story_instance::snapshot::{KnowledgeSnapshotRef, StoryReadSnapshot, StoryReadSnapshotParts};
 use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::turn::{
-    BaselineContext, CharacterThinkRequest, MatchLevel, NarrativeGraphStateIndex, RelevanceRank,
-    RelevantWorldKnowledge, RelevantWorldKnowledgeItem, RetrievalPlan, RetrievalSignals, RetrievedCharacterContext,
-    RetrievedContext, RetrievedContextLimits, RetrievedKnowledgeItem, RetrievedWorldKnowledge, RoleContextView,
-    WriterPlan, WriterStoryGoal,
+    BaselineContext, CharacterThinkRequest, NarrativeGraphStateIndex, RelevantWorldKnowledge,
+    RelevantWorldKnowledgeItem, RetrievalPlan, RetrievedCharacterContext, RetrievedContext, RetrievedContextLimits,
+    RetrievedKnowledgeItem, RetrievedWorldKnowledge, RoleContextView, WriterPlan, WriterStoryGoal,
 };
 use crate::turn::turn_budget::TurnBudget;
 use crate::turn::turn_contract::{IdempotencyKey, TurnCancellation, TurnControl, TurnIdentity, TurnRequest};
@@ -161,6 +169,32 @@ fn sample_snapshot(all_roles: &[&StoryRole]) -> StoryReadSnapshot {
         .iter()
         .map(|role| (role.role_id.clone(), StoryRoleView::from(*role)))
         .collect();
+    let node_key = NarrativeNodeKey::try_new("node-harbor").unwrap();
+    let narrative_definition = NarrativeGraphDefinition {
+        entry_nodes: vec![node_key.clone()],
+        nodes: BTreeMap::from([(
+            node_key,
+            NarrativeNodeDefinition {
+                title: bounded("Harbor"),
+                dramatic_focus: None,
+                activate_when: NarrativeCondition::StoryStarted,
+                complete_when: NarrativeCondition::StoryStarted,
+                skip_when: None,
+                effects: NarrativeNodeEffects {
+                    on_activate: vec![NarrativeEffectDefinition::WorldEvent(WorldEventIntentDefinition {
+                        event_key: CanonicalEventKey::try_new("harbor-event").unwrap(),
+                        category: bounded("arrival"),
+                        participants: vec![NarrativeParticipant::Location(LocationKey::from("harbor"))],
+                        location: None,
+                        description: bounded("A ship enters the harbor."),
+                    })],
+                    on_complete: Vec::new(),
+                },
+                terminal: false,
+            },
+        )]),
+        edges: Vec::new(),
+    };
     StoryReadSnapshot::try_from_parts(StoryReadSnapshotParts {
         story_id: StoryId::try_new("story-1").unwrap(),
         base_revision: StoryRevision::new(0),
@@ -184,11 +218,7 @@ fn sample_snapshot(all_roles: &[&StoryRole]) -> StoryReadSnapshot {
         instance_settings: InstanceSettings::default(),
         roles,
         relationships: Vec::new(),
-        narrative_definition: NarrativeGraphDefinition {
-            entry_nodes: Vec::new(),
-            nodes: BTreeMap::new(),
-            edges: Vec::new(),
-        },
+        narrative_definition,
         narrative_state: NarrativeRuntimeState::initial(),
         fact_values: BTreeMap::new(),
         story_continuity: StoryContinuity::try_new(
@@ -206,8 +236,6 @@ fn sample_snapshot(all_roles: &[&StoryRole]) -> StoryReadSnapshot {
         )
         .unwrap(),
         active_constraints: Vec::new(),
-        entity_catalog: Vec::new(),
-        topic_dictionary: BTreeMap::new(),
         knowledge_snapshot: KnowledgeSnapshotRef {
             story_id: StoryId::try_new("story-1").unwrap(),
             pack_digest: digest(),
@@ -217,6 +245,17 @@ fn sample_snapshot(all_roles: &[&StoryRole]) -> StoryReadSnapshot {
         role_id_high_water: crate::domain::ids::RoleIdHighWater::zero(),
     })
     .unwrap()
+}
+
+#[test]
+fn available_locations_include_narrative_participant_locations() {
+    let player = story_role("protagonist", RoleController::Player(PlayerId::try_new("player-1").unwrap()));
+    let snapshot = sample_snapshot(&[&player]);
+
+    assert_eq!(
+        available_location_keys(&snapshot),
+        vec![LocationKey::from("hall"), LocationKey::from("harbor")]
+    );
 }
 
 fn sample_baseline(player: &StoryRole, relevant_roles: &[&StoryRole]) -> BaselineContext {
@@ -259,7 +298,6 @@ fn sample_baseline(player: &StoryRole, relevant_roles: &[&StoryRole]) -> Baselin
             graph_revision: 0,
             node_states: BTreeMap::new(),
         },
-        retrieval_signals: RetrievalSignals::default(),
         role_index: Vec::new(),
         knowledge_index: Vec::new(),
     }
@@ -272,12 +310,9 @@ fn retrieved_item(source_id: crate::domain::knowledge::KnowledgeSourceId, body: 
         KnowledgeSource::CommittedTurn {
             turn_number: TurnNumber::try_new(1).unwrap(),
         },
-        RelevanceRank {
-            match_level: MatchLevel::Entity,
-            signal_priority: 0,
-            salience: 1,
-        },
-        BTreeMap::new(),
+        crate::domain::knowledge::activation::ActivationSeedKind::TextMatch,
+        1,
+        1,
     )
 }
 
@@ -292,6 +327,7 @@ fn build_context(
         &RetrievalConfig::default(),
         &StateExtractorConfig::default(),
         &NarrativeConfig::default(),
+        &ActivationConfig::default(),
     )
     .unwrap();
     let identity = TurnIdentity::new(
@@ -304,7 +340,22 @@ fn build_context(
     let trace = TraceRecorder::with_limits(budget.max_trace_spans());
     let mut ctx = TurnExecutionContext::new(identity, request, budget, control, trace).unwrap();
     ctx.complete_initialization().unwrap();
-    ctx.set_prepared_context(sample_snapshot(all_roles), baseline).unwrap();
+    ctx.set_prepared_context(
+        sample_snapshot(all_roles),
+        baseline,
+        crate::domain::narrative_graph::projector::NarrativeProjection {
+            plan: crate::domain::narrative_graph::projector::NarrativePlan::empty(),
+
+            condition_queries: Vec::new(),
+
+            expected_graph_revision: 0,
+        },
+        crate::turn::turn_context::PreparedActivation::empty(
+            sample_snapshot(all_roles).knowledge_snapshot().clone(),
+            crate::domain::ids::TurnNumber::try_new(1).unwrap(),
+        ),
+    )
+    .unwrap();
     let think_targets: Vec<_> = retrieved.characters().keys().cloned().collect();
     let plan = WriterPlan {
         story_goal: WriterStoryGoal {

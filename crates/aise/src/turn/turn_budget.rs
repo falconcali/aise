@@ -1,4 +1,6 @@
-use crate::config::{NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
+use crate::config::{
+    ActivationConfig, NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig,
+};
 use crate::domain::narrative_graph::definition::NarrativeLimits;
 use crate::domain::turn::StoryStateExtractionLimits;
 use crate::turn::turn_contract::{LlmBudgetReservation, LlmCallId, LlmCallUsage};
@@ -32,7 +34,6 @@ pub struct TurnBudgetLimits {
     pub max_input_tokens: u64,
     pub max_output_tokens: u64,
     pub max_total_tokens: u64,
-    pub max_candidates_per_retriever: usize,
     pub max_candidates_total: usize,
     pub max_items_per_audience: usize,
     pub max_tokens_per_audience: u64,
@@ -68,6 +69,7 @@ impl TurnBudgetLimits {
         retrieval: &RetrievalConfig,
         state_extractor: &StateExtractorConfig,
         narrative: &NarrativeConfig,
+        activation: &ActivationConfig,
     ) -> Self {
         Self {
             max_repair_rounds: turn.max_repair_rounds,
@@ -75,7 +77,6 @@ impl TurnBudgetLimits {
             max_input_tokens: turn.max_input_tokens,
             max_output_tokens: turn.max_output_tokens,
             max_total_tokens: turn.max_total_tokens,
-            max_candidates_per_retriever: retrieval.max_candidates_per_retriever,
             max_candidates_total: retrieval.max_candidates_total,
             max_items_per_audience: retrieval.max_items_per_audience,
             max_tokens_per_audience: retrieval.max_tokens_per_audience,
@@ -107,6 +108,8 @@ impl TurnBudgetLimits {
                 max_condition_queries: narrative.max_semantic_queries_per_turn,
                 max_condition_evidence_bytes: narrative.max_evidence_bytes,
                 max_condition_reason_bytes: narrative.max_result_reason_bytes,
+                max_activation_terms: activation.rule.max_primary_patterns_per_entry,
+                max_activation_pattern_bytes: activation.rule.max_pattern_bytes,
             },
             state_extractor_max_context_tokens: state_extractor.max_context_tokens,
             state_extractor_max_output_tokens: state_extractor.max_output_tokens,
@@ -138,6 +141,7 @@ impl TurnBudget {
         retrieval: &RetrievalConfig,
         state_extractor: &StateExtractorConfig,
         narrative: &NarrativeConfig,
+        activation: &ActivationConfig,
     ) -> Result<Self, TurnExecutionError> {
         turn.validate().map_err(|error| {
             TurnExecutionError::new(TurnFailureKind::InvalidRequest, "invalid_config", None, error.to_string())
@@ -154,8 +158,11 @@ impl TurnBudget {
         narrative.validate().map_err(|error| {
             TurnExecutionError::new(TurnFailureKind::InvalidRequest, "invalid_config", None, error.to_string())
         })?;
+        activation.validate().map_err(|error| {
+            TurnExecutionError::new(TurnFailureKind::InvalidRequest, "invalid_config", None, error.to_string())
+        })?;
         Ok(Self {
-            limits: TurnBudgetLimits::from(turn, content, retrieval, state_extractor, narrative),
+            limits: TurnBudgetLimits::from(turn, content, retrieval, state_extractor, narrative, activation),
             usage: TurnBudgetUsage::default(),
         })
     }
@@ -174,10 +181,6 @@ impl TurnBudget {
 
     pub fn max_tokens_per_audience(&self) -> u64 {
         self.limits.max_tokens_per_audience
-    }
-
-    pub fn max_candidates_per_retriever(&self) -> usize {
-        self.limits.max_candidates_per_retriever
     }
 
     pub fn max_candidates_total(&self) -> usize {

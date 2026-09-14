@@ -69,14 +69,6 @@ impl AiseConfig {
         self.state_extractor.validate()?;
         self.narrative.validate()?;
         self.activation.validate()?;
-        if self.context.recent_segments_for_signals > self.content.max_recent_segments {
-            return Err(ConfigError::Invalid(
-                "context.recent_segments_for_signals must be <= content.max_recent_segments".into(),
-            ));
-        }
-        if self.context.recent_segments_for_signals > 2 {
-            return Err(ConfigError::Invalid("context.recent_segments_for_signals must be <= 2".into()));
-        }
         if self.context.max_relevant_roles > self.content.max_roles {
             return Err(ConfigError::Invalid(
                 "context.max_relevant_roles must be <= content.max_roles".into(),

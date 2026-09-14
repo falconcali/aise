@@ -92,6 +92,7 @@ pub struct TurnCommitSpec {
     pub request_digest: RequestDigest,
     pub outbox: Vec<OutboxRecord>,
     pub llm_calls: Vec<crate::turn::turn_contract::LlmCallUsage>,
+    pub activation_state_delta: crate::domain::knowledge::activation::PendingActivationStateDelta,
 }
 
 #[derive(Debug, Clone)]

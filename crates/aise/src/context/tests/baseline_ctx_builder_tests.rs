@@ -1,10 +1,11 @@
 use super::*;
+use crate::config::RetrievalConfig;
 use crate::domain::asset::character_card::CharacterProfile;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
 use crate::domain::asset::ids::{LocationKey, PackId, SemanticVersion, Sha256Digest, StoryPackKey};
 use crate::domain::asset::story_pack::{StoryProfile, StoryStyle};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::ids::{FactId, StoryId, StoryRevision};
+use crate::domain::ids::{FactId, RoleId, StoryId, StoryRevision};
 use crate::domain::knowledge::{KnowledgeSourceId, RetrievalHint};
 use crate::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySummary};
 use crate::domain::narrative_graph::definition::NarrativeGraphDefinition;
@@ -14,12 +15,13 @@ use crate::domain::story_instance::snapshot::{KnowledgeSnapshotRef, StoryReadSna
 use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::turn::RelevantWorldKnowledgeItem;
 use crate::persistence::knowledge_read_port::{
-    EntityKnowledgeQuery, KnowledgeIndexRecord, KnowledgeLookupHit, KnowledgeRecord, SourceKnowledgeQuery,
-    TopicKnowledgeQuery,
+    KnowledgeIndexQuery, KnowledgeIndexRecord, KnowledgeReadPort, KnowledgeRecord, OwnerMemoryQuery,
+    SourceKnowledgeQuery,
 };
 use crate::persistence::store::StoreError;
 use async_trait::async_trait;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 fn bounded(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", 1024).unwrap()
@@ -45,6 +47,29 @@ fn sample_snapshot() -> StoryReadSnapshot {
             background: None,
             effective_profile: CharacterProfile {
                 name: bounded("Hero"),
+                appearance: None,
+                personality: None,
+                speaking_style: None,
+                dialogue_examples: Vec::new(),
+            },
+            source_character_id: None,
+            state: StoryRoleState {
+                location: LocationKey::from("hall"),
+                goals: Vec::new(),
+                attributes: BTreeMap::new(),
+            },
+        },
+    );
+    roles.insert(
+        RoleId::try_new("guard").unwrap(),
+        StoryRoleView {
+            role_id: RoleId::try_new("guard").unwrap(),
+            controller: RoleController::Ai,
+            role_label: bounded("Guard"),
+            narrative_function: bounded("watcher"),
+            background: None,
+            effective_profile: CharacterProfile {
+                name: bounded("Guard"),
                 appearance: None,
                 personality: None,
                 speaking_style: None,
@@ -103,8 +128,6 @@ fn sample_snapshot() -> StoryReadSnapshot {
         )
         .unwrap(),
         active_constraints: Vec::new(),
-        entity_catalog: Vec::new(),
-        topic_dictionary: BTreeMap::new(),
         knowledge_snapshot: KnowledgeSnapshotRef {
             story_id: StoryId::try_new("story-1").unwrap(),
             pack_digest: digest(),
@@ -122,15 +145,11 @@ struct FakeIndexPort {
 
 #[async_trait]
 impl KnowledgeReadPort for FakeIndexPort {
-    async fn find_by_entities(&self, _query: EntityKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError> {
-        Ok(Vec::new())
-    }
-
-    async fn find_by_topics(&self, _query: TopicKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError> {
-        Ok(Vec::new())
-    }
-
     async fn find_by_source_ids(&self, _query: SourceKnowledgeQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn find_memories_by_owner(&self, _query: OwnerMemoryQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError> {
         Ok(Vec::new())
     }
 
@@ -151,7 +170,7 @@ async fn provided_world_knowledge_is_not_indexed() {
         }],
         rumors: Vec::new(),
     };
-    let port: std::sync::Arc<dyn KnowledgeReadPort> = std::sync::Arc::new(FakeIndexPort {
+    let port: Arc<dyn KnowledgeReadPort> = Arc::new(FakeIndexPort {
         records: vec![
             KnowledgeIndexRecord {
                 source_id: fact_id("fact_0001"),
@@ -164,9 +183,7 @@ async fn provided_world_knowledge_is_not_indexed() {
         ],
     });
     let config = RetrievalConfig::default();
-
     let entries = load_knowledge_index(&snapshot, &relevant, &config, &port).await.unwrap();
-
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].source_id, fact_id("fact_0002"));
 }
@@ -201,4 +218,12 @@ fn role_context_projection_uses_one_story_role_view() {
     assert_eq!(projected.profile, role.effective_profile);
     assert_eq!(projected.state, role.state);
     assert_eq!(projected.controller, role.controller);
+}
+
+#[test]
+fn select_relevant_roles_uses_same_location() {
+    let snapshot = sample_snapshot();
+    let roles = select_relevant_roles(&snapshot, 8);
+    assert_eq!(roles.len(), 1);
+    assert_eq!(roles[0].role_id, RoleId::try_new("guard").unwrap());
 }

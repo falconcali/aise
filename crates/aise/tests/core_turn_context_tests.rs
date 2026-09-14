@@ -1,11 +1,13 @@
-use aise::config::{NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
+use aise::config::{
+    ActivationConfig, NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig,
+};
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::{FactId, RoleId, RumorId};
 use aise::domain::knowledge::{KnowledgeSource, KnowledgeSourceId};
 use aise::domain::text::estimate_text_tokens;
 use aise::domain::turn::{
-    MatchLevel, RelevanceRank, RetrievedCharacterContext, RetrievedContext, RetrievedContextLimits,
-    RetrievedKnowledgeItem, RetrievedWorldKnowledge,
+    RetrievedCharacterContext, RetrievedContext, RetrievedContextLimits, RetrievedKnowledgeItem,
+    RetrievedWorldKnowledge,
 };
 use aise::turn::turn_budget::TurnBudget;
 use std::collections::BTreeMap;
@@ -33,12 +35,9 @@ fn fact_item(text: &str, id: &str) -> RetrievedKnowledgeItem {
             )
             .unwrap(),
         },
-        RelevanceRank {
-            match_level: MatchLevel::Entity,
-            signal_priority: 0,
-            salience: 1,
-        },
-        BTreeMap::new(),
+        aise::domain::knowledge::activation::ActivationSeedKind::TextMatch,
+        1,
+        1,
     )
 }
 
@@ -54,12 +53,9 @@ fn rumor_item(text: &str, id: &str) -> RetrievedKnowledgeItem {
             )
             .unwrap(),
         },
-        RelevanceRank {
-            match_level: MatchLevel::Entity,
-            signal_priority: 0,
-            salience: 1,
-        },
-        BTreeMap::new(),
+        aise::domain::knowledge::activation::ActivationSeedKind::TextMatch,
+        1,
+        1,
     )
 }
 
@@ -123,6 +119,7 @@ fn turn_budget_from_config_accepts_retrieval_config() {
         &RetrievalConfig::default(),
         &StateExtractorConfig::default(),
         &NarrativeConfig::default(),
+        &ActivationConfig::default(),
     )
     .unwrap();
     assert!(budget.max_total_items() > 0 || budget.max_retrieved_tokens() > 0);

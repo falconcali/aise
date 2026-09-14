@@ -141,6 +141,39 @@ impl Default for ActivationConfig {
 }
 
 impl ActivationConfig {
+    pub fn domain_runtime_limits(&self) -> crate::domain::knowledge::activation::ActivationRuntimeLimits {
+        let source = self.runtime;
+        crate::domain::knowledge::activation::ActivationRuntimeLimits {
+            minimum_activations: source.minimum_activations,
+            initial_scan_depth: source.initial_scan_depth,
+            max_scan_depth: source.max_scan_depth,
+            include_summary_at_max_depth: source.include_summary_at_max_depth,
+            max_scan_fragments: source.max_scan_fragments,
+            max_scan_bytes: source.max_scan_bytes,
+            max_scan_tokens: source.max_scan_tokens,
+            max_literal_patterns: source.max_literal_patterns,
+            max_regex_patterns: source.max_regex_patterns,
+            max_pattern_matches: source.max_pattern_matches,
+            max_candidates_per_round: source.max_candidates_per_round,
+            max_recursion_steps: source.max_recursion_steps,
+            max_recursion_fragments: source.max_recursion_fragments,
+            max_recursion_bytes: source.max_recursion_bytes,
+            max_recursion_tokens: source.max_recursion_tokens,
+            max_activated_entries: source.max_activated_entries,
+            max_depth_expansions: source.max_depth_expansions,
+            max_external_candidates: source.max_external_candidates,
+            max_evidence_per_entry: source.max_evidence_per_entry,
+            max_evidence_bytes: source.max_evidence_bytes,
+            max_items_per_audience: source.max_items_per_audience,
+            max_tokens_per_audience: source.max_tokens_per_audience,
+            max_total_items: source.max_total_items,
+            max_total_tokens: source.max_total_tokens,
+            max_single_entry_bytes: source.max_single_entry_bytes,
+            reserved_tokens: source.reserved_tokens,
+            mandatory_tokens: source.mandatory_tokens,
+        }
+    }
+
     pub fn validate(&self) -> Result<(), ConfigError> {
         let positive = [
             self.rule.max_primary_patterns_per_entry,
@@ -195,8 +228,15 @@ impl ActivationConfig {
         }
         if self.runtime.reserved_tokens > self.runtime.max_total_tokens
             || self.runtime.mandatory_tokens > self.runtime.max_total_tokens
+            || self.runtime.reserved_tokens.saturating_add(self.runtime.mandatory_tokens)
+                > self.runtime.max_total_tokens
         {
             return Err(ConfigError::Invalid("activation reserved budgets exceed total budget".into()));
+        }
+        if self.runtime.max_items_per_audience > self.runtime.max_total_items
+            || self.runtime.max_tokens_per_audience > self.runtime.max_total_tokens
+        {
+            return Err(ConfigError::Invalid("activation audience budgets exceed total budget".into()));
         }
         Ok(())
     }

@@ -1,7 +1,5 @@
 use crate::config::{NarrativeConfig, PlannerConfig, RetrievalConfig};
 use crate::domain::asset::validation::BoundedText;
-use crate::domain::narrative_graph::projector::{NarrativeProjectionInput, NarrativeProjector};
-use crate::domain::narrative_graph::state_view::CommittedNarrativeStateView;
 use crate::llm::gateway::LlmGateway;
 use crate::planning::error::PlanningError;
 use crate::planning::planner_output::writer_planner_contract;
@@ -16,7 +14,6 @@ use std::sync::Arc;
 
 pub struct WriterPlanner {
     gateway: Arc<LlmGateway>,
-    narrative_projector: NarrativeProjector,
     plan_builder: RetrievalPlanBuilder,
     config: PlannerConfig,
 }
@@ -26,11 +23,10 @@ impl WriterPlanner {
         gateway: Arc<LlmGateway>,
         planner: PlannerConfig,
         retrieval: RetrievalConfig,
-        narrative: &NarrativeConfig,
+        _narrative: &NarrativeConfig,
     ) -> Self {
         Self {
             gateway,
-            narrative_projector: NarrativeProjector::new(narrative.as_limits()),
             plan_builder: RetrievalPlanBuilder::new(retrieval, planner.clone()),
             config: planner,
         }
@@ -60,41 +56,27 @@ impl TurnExecutionPipeline for WriterPlanner {
                 })
             })?
             .clone();
-        let pending = ctx.trace().begin_span("narrative.project", "narrative.project");
-        let committed_view = CommittedNarrativeStateView::new(&snapshot);
-        let current_turn = snapshot.base_revision().get().saturating_add(1);
-        let projection_result = self.narrative_projector.project(NarrativeProjectionInput {
-            definition: snapshot.narrative_definition(),
-            state: snapshot.narrative_state(),
-            committed_view: &committed_view,
-            current_turn,
+        let narrative_projection = ctx
+            .narrative_projection()
+            .ok_or_else(|| {
+                map_planning_error(PlanningError::InvalidOutput {
+                    code: "missing_narrative_projection",
+                })
+            })?
+            .clone();
+        let narrative_plan = narrative_projection.plan.clone();
+        let pending = ctx.trace().begin_span("narrative.project", "narrative.reuse");
+        let narrative_payload = serde_json::json!({
+            "story_id": ctx.story_id(),
+            "turn_number": ctx.turn_number().get(),
+            "graph_revision": snapshot.graph_revision(),
+            "active_node_count": narrative_plan.active_nodes.len(),
+            "condition_query_count": narrative_projection.condition_queries.len(),
+            "intent_count": narrative_plan.world_event_intents.len(),
+            "status": "ok",
+            "error_code": null,
         });
-        let narrative_payload = match &projection_result {
-            Ok(projection) => serde_json::json!({
-                "story_id": ctx.story_id(),
-                "turn_number": ctx.turn_number().get(),
-                "graph_revision": snapshot.graph_revision(),
-                "active_node_count": projection.plan.active_nodes.len(),
-                "condition_query_count": projection.condition_queries.len(),
-                "intent_count": projection.plan.world_event_intents.len(),
-                "status": "ok",
-                "error_code": null,
-            }),
-            Err(_) => serde_json::json!({
-                "story_id": ctx.story_id(),
-                "turn_number": ctx.turn_number().get(),
-                "graph_revision": snapshot.graph_revision(),
-                "active_node_count": 0,
-                "condition_query_count": 0,
-                "intent_count": 0,
-                "status": "error",
-                "error_code": "narrative_projection_failed",
-            }),
-        };
         ctx.trace().end_span_with(pending, &narrative_payload);
-        let projection = projection_result.map_err(PlanningError::from).map_err(map_planning_error)?;
-        let narrative_plan = projection.plan.clone();
-        ctx.set_narrative_projection(projection)?;
         let player_contribution = BoundedText::try_new(
             ctx.player_contribution().to_owned(),
             "player_contribution",
@@ -105,7 +87,7 @@ impl TurnExecutionPipeline for WriterPlanner {
                 limit: "player_contribution",
             })
         })?;
-        let projection = WriterPlannerPromptContextProjector
+        let prompt_projection = WriterPlannerPromptContextProjector
             .project(
                 &baseline,
                 &narrative_plan,
@@ -135,8 +117,8 @@ impl TurnExecutionPipeline for WriterPlanner {
             })?;
         let request = PromptCompositionInput {
             profile: PromptProfile::WriterPlanner,
-            rc_vars: projection.rc_vars,
-            fti_vars: projection.fti_vars,
+            rc_vars: prompt_projection.rc_vars,
+            fti_vars: prompt_projection.fti_vars,
         };
         let max_output_tokens = ctx.budget().remaining_output_tokens().min(u64::from(u32::MAX)) as u32;
         let scope = ctx.llm_call_scope(TurnStage::WriterPlanner);
@@ -161,7 +143,13 @@ impl TurnExecutionPipeline for WriterPlanner {
         let planner_output = structured.value;
         let plan = self
             .plan_builder
-            .build(&baseline, &narrative_plan, planner_output, &snapshot, &projection.context)
+            .build(
+                &baseline,
+                &narrative_plan,
+                planner_output,
+                &snapshot,
+                &prompt_projection.context,
+            )
             .map_err(map_planning_error)?;
         ctx.set_writer_plan(plan)
     }

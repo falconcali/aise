@@ -8,7 +8,7 @@ use crate::domain::narrative::{
 };
 use crate::domain::story_instance::role::{RoleController, StoryRoleState};
 use crate::domain::story_instance::state::InstanceSettings;
-use crate::domain::turn::{NarrativeGraphStateIndex, RetrievalSignals};
+use crate::domain::turn::NarrativeGraphStateIndex;
 
 fn bounded(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", 1024).unwrap()
@@ -161,7 +161,6 @@ fn minimal_baseline() -> BaselineContext {
             graph_revision: 0,
             node_states: BTreeMap::new(),
         },
-        retrieval_signals: RetrievalSignals::default(),
     }
 }
 

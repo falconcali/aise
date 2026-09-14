@@ -29,12 +29,9 @@ fn item(id: KnowledgeSourceId, body: &str) -> RetrievedKnowledgeItem {
         KnowledgeSource::CommittedTurn {
             turn_number: TurnNumber::try_new(1).unwrap(),
         },
-        RelevanceRank {
-            match_level: MatchLevel::Entity,
-            signal_priority: 0,
-            salience: 50,
-        },
-        BTreeMap::new(),
+        crate::domain::knowledge::activation::ActivationSeedKind::TextMatch,
+        1,
+        50,
     )
 }
 

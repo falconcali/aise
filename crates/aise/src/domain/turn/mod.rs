@@ -24,8 +24,7 @@ pub use planning::{
 };
 pub use proposal::ValidatedNarrativeResolution;
 pub use retrieval::{
-    CandidateMatch, CandidateRetrieverKind, EntitySignal, MatchLevel, ProviderEvidence, RelevanceRank,
-    RetrievalSignalOrigin, RetrievalSignals, RetrievedCharacterContext, RetrievedContext, RetrievedContextError,
-    RetrievedContextLimits, RetrievedKnowledgeItem, RetrievedWorldKnowledge, TopicSignal,
+    RetrievedCharacterContext, RetrievedContext, RetrievedContextError, RetrievedContextLimits, RetrievedKnowledgeItem,
+    RetrievedWorldKnowledge,
 };
 pub use story_generation::StoryGeneratorOutput;

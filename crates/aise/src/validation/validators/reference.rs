@@ -1,7 +1,8 @@
-use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::LocationKey;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
+use crate::domain::narrative_graph::effect::NarrativeEffectDefinition;
+use crate::domain::narrative_graph::participant::NarrativeParticipant;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::TurnExecutionError;
@@ -164,8 +165,21 @@ fn location_key_resolves_str(raw: &str, snapshot: &StoryReadSnapshot) -> bool {
     let Ok(key) = LocationKey::try_new(raw) else {
         return false;
     };
-    snapshot.entity_catalog().contains(&KnowledgeEntity::Location(key.clone()))
-        || snapshot.roles().values().any(|role| role.state.location == key)
+    snapshot.roles().values().any(|role| role.state.location == key)
+        || snapshot.narrative_definition().nodes.values().any(|node| {
+            node.effects.on_activate.iter().chain(&node.effects.on_complete).any(|effect| {
+                let NarrativeEffectDefinition::WorldEvent(intent) = effect else {
+                    return false;
+                };
+                intent.location.as_ref() == Some(&key)
+                    || intent.participants.iter().any(|participant| {
+                        matches!(
+                            participant,
+                            NarrativeParticipant::Location(location) if location == &key
+                        )
+                    })
+            })
+        })
 }
 
 fn issue(path: &str, index: usize, message: &str) -> ValidationIssue {

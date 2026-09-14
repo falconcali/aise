@@ -29,6 +29,45 @@ pub struct PreparedActivation {
     pub pending_timed_state: crate::domain::knowledge::activation::PendingActivationStateDelta,
 }
 
+impl PreparedActivation {
+    pub fn empty(
+        knowledge_snapshot: crate::domain::story_instance::snapshot::KnowledgeSnapshotRef,
+        turn_number: TurnNumber,
+    ) -> Self {
+        use crate::domain::knowledge::activation::{
+            ActivationIndexSnapshotRef, ActivationRuntimeLimits, ActivationWorkUsage, GenerationTrigger,
+            PendingActivationStateDelta,
+        };
+        Self {
+            continuation: ActivationContinuation {
+                turn_number,
+                generation_trigger: GenerationTrigger::Normal,
+                index_snapshot: ActivationIndexSnapshotRef::from_knowledge(&knowledge_snapshot, 0, 1),
+                knowledge_snapshot,
+                activated: std::collections::BTreeMap::new(),
+                terminal_rejections: std::collections::BTreeMap::new(),
+                failed_probability: std::collections::BTreeSet::new(),
+                group_winners: std::collections::BTreeMap::new(),
+                recursion_level: 0,
+                scan_depth: 1,
+                depth_expansions: 0,
+                recursion_sources: std::collections::BTreeSet::new(),
+                scanned_fragment_ids: std::collections::BTreeSet::new(),
+                audience_items: std::collections::BTreeMap::new(),
+                audience_tokens: std::collections::BTreeMap::new(),
+                total_delivery_items: 0,
+                normal_tokens: 0,
+                reserved_tokens: 0,
+                mandatory_tokens: 0,
+                consumed: ActivationWorkUsage::default(),
+                evidence_bytes: 0,
+                limits: ActivationRuntimeLimits::default(),
+            },
+            pending_timed_state: PendingActivationStateDelta::default(),
+        }
+    }
+}
+
 struct BoundStateExtraction {
     story_version: u32,
     envelope: StoryStateExtractionEnvelope,
@@ -268,6 +307,8 @@ impl TurnExecutionContext {
         &mut self,
         snapshot: StoryReadSnapshot,
         baseline: BaselineContext,
+        narrative_projection: NarrativeProjection,
+        activation: PreparedActivation,
     ) -> Result<(), TurnExecutionError> {
         self.expect_phase(TurnPhase::Initialized)?;
         let estimated = baseline.estimate_tokens();
@@ -284,6 +325,8 @@ impl TurnExecutionContext {
         }
         self.snapshot = Some(snapshot);
         self.baseline = Some(baseline);
+        self.narrative_projection = Some(narrative_projection);
+        self.activation = Some(activation);
         self.phase = TurnPhase::Prepared;
         Ok(())
     }

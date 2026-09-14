@@ -1,5 +1,7 @@
 use super::*;
-use crate::config::{NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig};
+use crate::config::{
+    ActivationConfig, NarrativeConfig, RetrievalConfig, StateExtractorConfig, TurnConfig, TurnContentLimitsConfig,
+};
 use crate::domain::asset::character_card::CharacterProfile;
 use crate::domain::asset::ids::{LocationKey, PackId, PlayerId, SemanticVersion, Sha256Digest, StoryPackKey};
 use crate::domain::asset::story_pack::{StoryProfile, StoryStyle};
@@ -12,7 +14,7 @@ use crate::domain::story_instance::role::{RoleController, StoryRole, StoryRoleSt
 use crate::domain::story_instance::snapshot::{KnowledgeSnapshotRef, StoryReadSnapshotParts};
 use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::turn::{
-    CharacterThinkRequest, NarrativeGraphStateIndex, RetrievalPlan, RetrievalSignals, RoleContextView, WriterStoryGoal,
+    CharacterThinkRequest, NarrativeGraphStateIndex, RetrievalPlan, RoleContextView, WriterStoryGoal,
 };
 use crate::turn::turn_contract::{IdempotencyKey, TurnCancellation};
 use std::collections::BTreeMap;
@@ -96,7 +98,6 @@ fn sample_baseline(player: &StoryRole) -> BaselineContext {
             graph_revision: 0,
             node_states: BTreeMap::new(),
         },
-        retrieval_signals: RetrievalSignals::default(),
     }
 }
 
@@ -129,8 +130,6 @@ fn sample_snapshot(player: &StoryRole) -> StoryReadSnapshot {
         fact_values: BTreeMap::new(),
         story_continuity: story_continuity(),
         active_constraints: Vec::new(),
-        entity_catalog: Vec::new(),
-        topic_dictionary: BTreeMap::new(),
         knowledge_snapshot: KnowledgeSnapshotRef {
             story_id: StoryId::try_new("story-1").unwrap(),
             pack_digest: digest(),
@@ -168,6 +167,7 @@ fn build_ready_context(
         &RetrievalConfig::default(),
         &StateExtractorConfig::default(),
         &NarrativeConfig::default(),
+        &ActivationConfig::default(),
     )
     .unwrap();
     let identity = TurnIdentity::new(
@@ -181,8 +181,19 @@ fn build_ready_context(
     let mut ctx = TurnExecutionContext::new(identity, request, budget, control, trace).unwrap();
     ctx.complete_initialization().unwrap();
     let player = player_role();
-    ctx.set_prepared_context(sample_snapshot(&player), sample_baseline(&player))
-        .unwrap();
+    let snapshot = sample_snapshot(&player);
+    let activation = PreparedActivation::empty(snapshot.knowledge_snapshot().clone(), TurnNumber::try_new(1).unwrap());
+    ctx.set_prepared_context(
+        snapshot,
+        sample_baseline(&player),
+        crate::domain::narrative_graph::projector::NarrativeProjection {
+            plan: crate::domain::narrative_graph::projector::NarrativePlan::empty(),
+            condition_queries: Vec::new(),
+            expected_graph_revision: 0,
+        },
+        activation,
+    )
+    .unwrap();
     let plan = WriterPlan {
         story_goal: WriterStoryGoal {
             summary: bounded("goal"),
@@ -323,6 +334,7 @@ fn renamed_configuration_values_flow_into_turn_budget() {
         &RetrievalConfig::default(),
         &StateExtractorConfig::default(),
         &NarrativeConfig::default(),
+        &ActivationConfig::default(),
     )
     .unwrap();
     assert_eq!(default_budget.max_character_decisions(), 8);
@@ -340,6 +352,7 @@ fn renamed_configuration_values_flow_into_turn_budget() {
         &RetrievalConfig::default(),
         &StateExtractorConfig::default(),
         &NarrativeConfig::default(),
+        &ActivationConfig::default(),
     )
     .unwrap();
     assert_eq!(explicit_budget.max_character_decisions(), 3);

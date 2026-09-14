@@ -1,8 +1,6 @@
-use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
-use crate::domain::asset::ids::{FactKey, PackId, Sha256Digest, TopicKey};
+use crate::domain::asset::ids::{FactKey, PackId, Sha256Digest};
 use crate::domain::asset::story_pack::StoryProfile;
-use crate::domain::asset::text_matcher::TopicDefinition;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::{RoleId, StoryId, StoryRevision, TurnNumber};
 use crate::domain::narrative::{StoryContinuity, StorySegment, StorySegmentOrigin, StorySummary};
@@ -19,9 +17,9 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 
 type StoryInstanceRow = (i64, String, String, String, String, String, String, String, String, i64, i64);
-type StoryPackRow = (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>, String);
+type StoryPackRow = (String, String, String, Vec<u8>, Vec<u8>, String);
 type InstanceProjectionLengths = (String, i64, i64, i64, i64, i64, i64, i64);
-type PackProjectionLengths = (i64, i64, i64, Option<i64>);
+type PackProjectionLengths = (i64, i64, Option<i64>);
 
 pub(crate) async fn load_story_snapshot(
     pool: &SqlitePool,
@@ -93,7 +91,7 @@ pub(crate) async fn load_story_snapshot(
         "active_constraints",
     )?;
     let pack_lengths: Option<PackProjectionLengths> = sqlx::query_as(
-        "SELECT length(story_profile_json), length(narrative_definition_json), length(topic_dictionary_json), \
+        "SELECT length(story_profile_json), length(narrative_definition_json), \
                 length(json_extract(pack_json, '$.meta.title')) \
          FROM story_packs WHERE pack_id = ?",
     )
@@ -101,7 +99,7 @@ pub(crate) async fn load_story_snapshot(
     .fetch_optional(&mut *tx)
     .await
     .map_err(SqliteStoreError::from)?;
-    let Some((profile_len, narrative_len, topics_len, title_len)) = pack_lengths else {
+    let Some((profile_len, narrative_len, title_len)) = pack_lengths else {
         return Err(StoreError::NotFound);
     };
     ensure_projection_length(profile_len, limits.max_story_profile_bytes, "story_profile_json")?;
@@ -113,24 +111,6 @@ pub(crate) async fn load_story_snapshot(
         narrative_len,
         projection_limit(limits.max_narrative_nodes, limits.max_role_bytes, 1024)?,
         "narrative_definition_json",
-    )?;
-    let topic_items = limits
-        .max_topics
-        .checked_mul(
-            limits
-                .max_topic_aliases_per_topic
-                .checked_add(1)
-                .ok_or(StoreError::LimitExceeded {
-                    limit: "topic_dictionary_json",
-                })?,
-        )
-        .ok_or(StoreError::LimitExceeded {
-            limit: "topic_dictionary_json",
-        })?;
-    ensure_projection_length(
-        topics_len,
-        projection_limit(topic_items, limits.max_role_bytes, 1024)?,
-        "topic_dictionary_json",
     )?;
     let row: Option<StoryInstanceRow> = sqlx::query_as(
         "SELECT s.revision, i.pack_id, i.settings_json, i.roles_json, \
@@ -163,7 +143,7 @@ pub(crate) async fn load_story_snapshot(
         return Err(StoreError::NotFound);
     };
     let pack_row: Option<StoryPackRow> = sqlx::query_as(
-        "SELECT pack_key, version, digest, story_profile_json, narrative_definition_json, topic_dictionary_json, \
+        "SELECT pack_key, version, digest, story_profile_json, narrative_definition_json, \
                 json_extract(pack_json, '$.meta.title') \
          FROM story_packs WHERE pack_id = ?",
     )
@@ -171,15 +151,8 @@ pub(crate) async fn load_story_snapshot(
     .fetch_optional(&mut *tx)
     .await
     .map_err(SqliteStoreError::from)?;
-    let Some((
-        pack_key,
-        pack_version,
-        digest_raw,
-        story_profile_json,
-        narrative_definition_json,
-        topic_dictionary_json,
-        story_title_raw,
-    )) = pack_row
+    let Some((pack_key, pack_version, digest_raw, story_profile_json, narrative_definition_json, story_title_raw)) =
+        pack_row
     else {
         tx.rollback().await.map_err(SqliteStoreError::from)?;
         return Err(StoreError::NotFound);
@@ -205,10 +178,6 @@ pub(crate) async fn load_story_snapshot(
     let narrative_definition: NarrativeGraphDefinition =
         serde_json::from_slice(&narrative_definition_json).map_err(|_| StoreError::Serialization {
             kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-        })?;
-    let topic_dictionary: BTreeMap<TopicKey, TopicDefinition> = serde_json::from_slice(&topic_dictionary_json)
-        .map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidWorldState,
         })?;
     let instance_settings: InstanceSettings =
         serde_json::from_str(&settings_json).map_err(|_| StoreError::Serialization {
@@ -322,43 +291,6 @@ pub(crate) async fn load_story_snapshot(
             constraint: "story_continuity".into(),
         }
     })?;
-    let entity_limit = limits.max_entity_catalog.checked_add(1).ok_or(StoreError::LimitExceeded {
-        limit: "max_entity_catalog",
-    })?;
-    let entity_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT DISTINCT entity_kind, entity_key FROM knowledge_entry_entities \
-         WHERE story_id = ? ORDER BY entity_kind ASC, entity_key ASC LIMIT ?",
-    )
-    .bind(story_id.as_str())
-    .bind(i64::try_from(entity_limit).map_err(|_| StoreError::LimitExceeded {
-        limit: "max_entity_catalog",
-    })?)
-    .fetch_all(&mut *tx)
-    .await
-    .map_err(SqliteStoreError::from)?;
-    if entity_rows.len() > limits.max_entity_catalog {
-        return Err(StoreError::LimitExceeded {
-            limit: "max_entity_catalog",
-        });
-    }
-    let mut entity_catalog = Vec::new();
-    for (kind, key) in entity_rows {
-        entity_catalog.push(parse_entity(&kind, &key)?);
-    }
-    entity_catalog.sort();
-    entity_catalog.dedup();
-    if topic_dictionary.len() > limits.max_topics {
-        return Err(StoreError::ConstraintViolation {
-            constraint: "max_topics".into(),
-        });
-    }
-    for definition in topic_dictionary.values() {
-        if definition.aliases.len() > limits.max_topic_aliases_per_topic {
-            return Err(StoreError::ConstraintViolation {
-                constraint: "max_topic_aliases_per_topic".into(),
-            });
-        }
-    }
     let pack_ref = FrozenStoryPackRef {
         pack_id: PackId::from(pack_id),
         pack_key: crate::domain::asset::ids::StoryPackKey::from(pack_key),
@@ -393,8 +325,6 @@ pub(crate) async fn load_story_snapshot(
         fact_values,
         story_continuity,
         active_constraints,
-        entity_catalog,
-        topic_dictionary,
         knowledge_snapshot,
         role_id_high_water: crate::domain::ids::RoleIdHighWater::new(role_id_high_water.max(0) as u64),
     })
@@ -422,22 +352,4 @@ fn ensure_projection_length(actual: i64, maximum: usize, limit: &'static str) ->
         return Err(StoreError::LimitExceeded { limit });
     }
     Ok(())
-}
-
-fn parse_entity(kind: &str, key: &str) -> Result<KnowledgeEntity, StoreError> {
-    Ok(match kind {
-        "world" => KnowledgeEntity::World(key.into()),
-        "role" => KnowledgeEntity::Role(RoleId::try_new(key.to_owned()).map_err(|_| StoreError::Serialization {
-            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-        })?),
-        "location" => KnowledgeEntity::Location(key.into()),
-        "scene" => KnowledgeEntity::Scene(key.into()),
-        "narrative_node" => KnowledgeEntity::NarrativeNode(key.into()),
-        "event" => KnowledgeEntity::Event(key.into()),
-        _ => {
-            return Err(StoreError::Serialization {
-                kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
-            });
-        }
-    })
 }

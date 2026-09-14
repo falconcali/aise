@@ -10,7 +10,6 @@ use crate::domain::story_instance::constraint::ActiveStoryConstraint;
 use crate::domain::story_instance::role::{RoleController, StoryRoleState, StoryRoleView};
 use crate::domain::story_instance::state::InstanceSettings;
 use crate::domain::text::estimate_text_tokens;
-use crate::domain::turn::retrieval::RetrievalSignals;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -26,9 +25,6 @@ pub struct SnapshotLimits {
     pub max_condition_fact_values: usize,
     pub max_constraints: usize,
     pub max_constraint_bytes: usize,
-    pub max_topics: usize,
-    pub max_topic_aliases_per_topic: usize,
-    pub max_entity_catalog: usize,
     pub continuity: StoryContinuityLimits,
 }
 
@@ -109,7 +105,6 @@ pub struct BaselineContext {
     pub story_continuity: StoryContinuity,
     pub active_story_constraints: Vec<ActiveStoryConstraint>,
     pub narrative_graph_state_index: NarrativeGraphStateIndex,
-    pub retrieval_signals: RetrievalSignals,
 }
 
 impl BaselineContext {

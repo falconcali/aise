@@ -20,7 +20,8 @@ pub use asset_store::{
     ValidatedStoryPack,
 };
 pub use knowledge_read_port::{
-    EntityKnowledgeQuery, KnowledgeFilter, KnowledgeReadPort, KnowledgeRecord, OwnerMemoryQuery, TopicKnowledgeQuery,
+    KnowledgeFilter, KnowledgeIndexQuery, KnowledgeIndexRecord, KnowledgeReadPort, KnowledgeRecord, OwnerMemoryQuery,
+    SourceKnowledgeQuery,
 };
 pub use sqlite_store::SqliteStore;
 pub use sqlite_story_history_reader::SqliteStoryHistoryReader;

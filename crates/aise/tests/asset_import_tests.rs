@@ -68,8 +68,8 @@ fn valid_pack_json() -> String {
             "playable_role_ids": ["protagonist"]
         },
         "world_book": {
-            "spec": "aise_world_v4",
-            "spec_version": "4.0",
+            "spec": "aise_world_v5",
+            "spec_version": "5.0",
             "world_book_key": "demo_world",
             "meta": {"name": "Demo World", "version": "0.1.0"},
             "facts": {},
@@ -632,7 +632,6 @@ async fn full_import_of_zero_character_card_pack_succeeds_and_round_trips() {
         aise::story::pack_service::PackExport::Json(bytes) => {
             let mut original: serde_json::Value = serde_json::from_str(&json).unwrap();
             original["roles"]["protagonist"]["initial_state"]["attributes"] = serde_json::json!({});
-            original["world_book"]["topics"] = serde_json::json!({});
             let round_tripped: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(original, round_tripped);
         }

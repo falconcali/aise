@@ -27,12 +27,9 @@ fn retrieved_item(source_id: KnowledgeSourceId, content: &str) -> RetrievedKnowl
             pack_digest: crate::domain::asset::ids::Sha256Digest::try_new(&format!("sha256:{}", "0".repeat(64)))
                 .unwrap(),
         },
-        crate::domain::turn::RelevanceRank {
-            match_level: crate::domain::turn::MatchLevel::Entity,
-            signal_priority: 0,
-            salience: 1,
-        },
-        std::collections::BTreeMap::new(),
+        crate::domain::knowledge::activation::ActivationSeedKind::TextMatch,
+        1,
+        1,
     )
 }
 

@@ -1,9 +1,7 @@
 use crate::config::{PlannerConfig, RetrievalConfig};
-use crate::domain::asset::entity::KnowledgeEntity;
-use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
-use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
+use crate::domain::knowledge::KnowledgeSourceId;
 use crate::domain::narrative_graph::effect::CharacterImpulse;
 use crate::domain::narrative_graph::projector::NarrativePlan;
 use crate::domain::story_instance::role::RoleController;
@@ -69,7 +67,6 @@ impl RetrievalPlanBuilder {
 
         let mut base_cognition: BTreeMap<RoleId, (BoundedText, RetrievalRequestOrigin)> = BTreeMap::new();
         let mut knowledge_requests = Vec::new();
-        knowledge_requests.extend(self.narrative_requests(narrative_plan)?);
 
         for gap in planner_output.writer_context_gaps {
             if let Some(outcome) = self.resolve_writer_gap(gap, prompt_context)? {
@@ -101,18 +98,6 @@ impl RetrievalPlanBuilder {
                 reason: reason.clone(),
                 origin: *origin,
             });
-            knowledge_requests.push(self.make_request(RequestDraft {
-                delivery: KnowledgeDelivery::Character {
-                    role_id: role_id.clone(),
-                },
-                target_source_id: None,
-                knowledge_kinds: vec![KnowledgeKind::Rumor, KnowledgeKind::Memory],
-                entities: vec![KnowledgeEntity::Role(role_id.clone())],
-                topics: Vec::new(),
-                reason: reason.as_str(),
-                origin: *origin,
-                signal_priority: 0,
-            })?);
         }
         character_requests.sort_by(|left, right| left.role_id.cmp(&right.role_id));
 
@@ -177,30 +162,6 @@ impl RetrievalPlanBuilder {
         Ok(out)
     }
 
-    fn narrative_requests(
-        &self,
-        narrative_plan: &NarrativePlan,
-    ) -> Result<Vec<KnowledgeRetrievalRequest>, PlanningError> {
-        let mut entities = BTreeSet::new();
-        for node in &narrative_plan.active_nodes {
-            entities.insert(KnowledgeEntity::NarrativeNode(node.clone()));
-        }
-        let mut requests = Vec::new();
-        for entity in entities {
-            requests.push(self.make_request(RequestDraft {
-                delivery: KnowledgeDelivery::Writer,
-                target_source_id: None,
-                knowledge_kinds: vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
-                entities: vec![entity],
-                topics: Vec::new(),
-                reason: "narrative reference",
-                origin: RetrievalRequestOrigin::Narrative,
-                signal_priority: 2,
-            })?);
-        }
-        Ok(requests)
-    }
-
     fn resolve_writer_gap(
         &self,
         gap: PlannerWriterContextGapDto,
@@ -218,10 +179,7 @@ impl RetrievalPlanBuilder {
         })?;
         let target = match prompt_context.indexed_targets.get(gap.target_id.as_str()) {
             Some(target) => target,
-            None => {
-                warn_dropped_gap("writer", None, &gap.target_id, &PlanningError::UnknownRetrievalKey);
-                return Ok(None);
-            }
+            None => return Err(PlanningError::UnknownRetrievalKey),
         };
         match target {
             IndexedRetrievalTarget::Role(role_id) => Ok(Some(GapOutcome::RoleCognition {
@@ -229,16 +187,13 @@ impl RetrievalPlanBuilder {
                 reason,
             })),
             IndexedRetrievalTarget::Knowledge(source_id) => {
-                let request = self.make_request(RequestDraft {
-                    delivery: KnowledgeDelivery::Writer,
-                    target_source_id: Some(source_id.clone()),
-                    knowledge_kinds: vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
-                    entities: Vec::new(),
-                    topics: Vec::new(),
-                    reason: reason.as_str(),
-                    origin: RetrievalRequestOrigin::Planner,
-                    signal_priority: 0,
-                })?;
+                let request = self.make_request(
+                    KnowledgeDelivery::Writer,
+                    source_id.clone(),
+                    reason.as_str(),
+                    RetrievalRequestOrigin::Planner,
+                    false,
+                )?;
                 Ok(Some(GapOutcome::Knowledge(request)))
             }
         }
@@ -260,124 +215,60 @@ impl RetrievalPlanBuilder {
                 limit: "max_reason_bytes",
             }
         })?;
-        let role_id = match RoleId::try_new(gap.role_id.clone()) {
-            Ok(role_id) => role_id,
-            Err(_) => {
-                warn_dropped_gap("character", Some(&gap.role_id), &gap.target_id, &PlanningError::UnknownRole);
-                return Ok(None);
-            }
-        };
+        let role_id = RoleId::try_new(gap.role_id.clone()).map_err(|_| PlanningError::UnknownRole)?;
         if !think_requests.iter().any(|request| request.role_id == role_id) {
-            warn_dropped_gap(
-                "character",
-                Some(&gap.role_id),
-                &gap.target_id,
-                &PlanningError::KnowledgeAudienceViolation,
-            );
-            return Ok(None);
+            return Err(PlanningError::KnowledgeAudienceViolation);
         }
         let target = match prompt_context.indexed_targets.get(gap.target_id.as_str()) {
             Some(target) => target,
-            None => {
-                warn_dropped_gap(
-                    "character",
-                    Some(&gap.role_id),
-                    &gap.target_id,
-                    &PlanningError::UnknownRetrievalKey,
-                );
-                return Ok(None);
-            }
+            None => return Err(PlanningError::UnknownRetrievalKey),
         };
         let source_id = match target {
             IndexedRetrievalTarget::Knowledge(source_id) => {
                 if matches!(source_id, KnowledgeSourceId::Fact(_)) {
-                    warn_dropped_gap(
-                        "character",
-                        Some(&gap.role_id),
-                        &gap.target_id,
-                        &PlanningError::KnowledgeAudienceViolation,
-                    );
-                    return Ok(None);
+                    return Err(PlanningError::KnowledgeAudienceViolation);
                 }
                 source_id.clone()
             }
-            IndexedRetrievalTarget::Role(_) => {
-                warn_dropped_gap(
-                    "character",
-                    Some(&gap.role_id),
-                    &gap.target_id,
-                    &PlanningError::KnowledgeAudienceViolation,
-                );
-                return Ok(None);
-            }
+            IndexedRetrievalTarget::Role(_) => return Err(PlanningError::KnowledgeAudienceViolation),
         };
-        self.make_request(RequestDraft {
-            delivery: KnowledgeDelivery::Character { role_id },
-            target_source_id: Some(source_id),
-            knowledge_kinds: vec![KnowledgeKind::Rumor, KnowledgeKind::Memory],
-            entities: Vec::new(),
-            topics: Vec::new(),
-            reason: reason.as_str(),
-            origin: RetrievalRequestOrigin::Planner,
-            signal_priority: 0,
-        })
+        self.make_request(
+            KnowledgeDelivery::Character { role_id },
+            source_id,
+            reason.as_str(),
+            RetrievalRequestOrigin::Planner,
+            false,
+        )
         .map(Some)
     }
 
-    fn make_request(&self, draft: RequestDraft<'_>) -> Result<KnowledgeRetrievalRequest, PlanningError> {
-        let mut knowledge_kinds = draft.knowledge_kinds;
-        let mut entities = draft.entities;
-        let mut topics = draft.topics;
-        knowledge_kinds.sort();
-        knowledge_kinds.dedup();
-        entities.sort();
-        entities.dedup();
-        topics.sort();
-        topics.dedup();
+    fn make_request(
+        &self,
+        delivery: KnowledgeDelivery,
+        target_source_id: KnowledgeSourceId,
+        reason: &str,
+        origin: RetrievalRequestOrigin,
+        mandatory: bool,
+    ) -> Result<KnowledgeRetrievalRequest, PlanningError> {
         let reason =
-            BoundedText::try_new(draft.reason.to_owned(), "reason", self.planner.max_reason_bytes).map_err(|_| {
+            BoundedText::try_new(reason.to_owned(), "reason", self.planner.max_reason_bytes).map_err(|_| {
                 PlanningError::LimitExceeded {
                     limit: "max_reason_bytes",
                 }
             })?;
         Ok(KnowledgeRetrievalRequest {
-            delivery: draft.delivery,
-            target_source_id: draft.target_source_id,
-            knowledge_kinds,
-            entities,
-            topics,
+            delivery,
+            target_source_id,
             reason,
-            origin: draft.origin,
-            signal_priority: draft.signal_priority,
+            origin,
+            mandatory,
         })
     }
-}
-
-fn warn_dropped_gap(gap_kind: &'static str, role_id: Option<&str>, target_id: &str, error: &PlanningError) {
-    tracing::warn!(
-        gap_kind,
-        role_id = role_id.unwrap_or(""),
-        target_id,
-        error_kind = std::any::type_name_of_val(error),
-        error = %error,
-        "writer planner context gap dropped"
-    );
 }
 
 enum GapOutcome {
     RoleCognition { role_id: RoleId, reason: BoundedText },
     Knowledge(KnowledgeRetrievalRequest),
-}
-
-struct RequestDraft<'a> {
-    delivery: KnowledgeDelivery,
-    target_source_id: Option<KnowledgeSourceId>,
-    knowledge_kinds: Vec<KnowledgeKind>,
-    entities: Vec<KnowledgeEntity>,
-    topics: Vec<TopicKey>,
-    reason: &'a str,
-    origin: RetrievalRequestOrigin,
-    signal_priority: u8,
 }
 
 pub fn merge_narrative_think_requests(
@@ -436,9 +327,9 @@ fn dedupe_and_sort(requests: Vec<KnowledgeRetrievalRequest>) -> Vec<KnowledgeRet
         let key = canonical_key(&request);
         match by_key.get(&key) {
             Some(existing) => {
-                let replace = request.signal_priority < existing.signal_priority
-                    || (request.signal_priority == existing.signal_priority
-                        && origin_rank(request.origin) < origin_rank(existing.origin));
+                let replace = request.mandatory && !existing.mandatory
+                    || request.mandatory == existing.mandatory
+                        && origin_rank(request.origin) < origin_rank(existing.origin);
                 if replace {
                     by_key.insert(key, request);
                 }
@@ -450,8 +341,9 @@ fn dedupe_and_sort(requests: Vec<KnowledgeRetrievalRequest>) -> Vec<KnowledgeRet
     }
     let mut out: Vec<_> = by_key.into_values().collect();
     out.sort_by(|left, right| {
-        left.signal_priority
-            .cmp(&right.signal_priority)
+        right
+            .mandatory
+            .cmp(&left.mandatory)
             .then_with(|| origin_rank(left.origin).cmp(&origin_rank(right.origin)))
             .then_with(|| canonical_key(left).cmp(&canonical_key(right)))
     });
@@ -461,19 +353,13 @@ fn dedupe_and_sort(requests: Vec<KnowledgeRetrievalRequest>) -> Vec<KnowledgeRet
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RetrievalRequestKey {
     delivery: KnowledgeDelivery,
-    target_source_id: Option<KnowledgeSourceId>,
-    knowledge_kinds: Vec<KnowledgeKind>,
-    entities: Vec<KnowledgeEntity>,
-    topics: Vec<TopicKey>,
+    target_source_id: KnowledgeSourceId,
 }
 
 fn canonical_key(request: &KnowledgeRetrievalRequest) -> RetrievalRequestKey {
     RetrievalRequestKey {
         delivery: request.delivery.clone(),
         target_source_id: request.target_source_id.clone(),
-        knowledge_kinds: request.knowledge_kinds.clone(),
-        entities: request.entities.clone(),
-        topics: request.topics.clone(),
     }
 }
 

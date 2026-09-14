@@ -15,6 +15,8 @@ fn limits() -> StoryStateExtractionLimits {
         max_condition_queries: 8,
         max_condition_evidence_bytes: 256,
         max_condition_reason_bytes: 256,
+        max_activation_terms: 8,
+        max_activation_pattern_bytes: 64,
     }
 }
 

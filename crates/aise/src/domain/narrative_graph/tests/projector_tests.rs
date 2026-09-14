@@ -1,4 +1,3 @@
-use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{CanonicalEventKey, FactKey, NarrativeConditionKey, NarrativeNodeKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::RoleId;
@@ -9,6 +8,7 @@ use crate::domain::narrative_graph::definition::{
 use crate::domain::narrative_graph::effect::{
     NarrativeEffectDefinition, NarrativeEffectId, NarrativeTransitionKind, WorldEventIntentDefinition,
 };
+use crate::domain::narrative_graph::participant::NarrativeParticipant;
 use crate::domain::narrative_graph::projector::{
     NarrativeEffectDisposition, NarrativeProjectionInput, NarrativeProjector,
 };
@@ -173,7 +173,7 @@ fn expired_pending_effect_is_marked_not_applicable() {
             definition: NarrativeEffectDefinition::WorldEvent(WorldEventIntentDefinition {
                 event_key: CanonicalEventKey::try_new("event.example").unwrap(),
                 category: BoundedText::try_new("category", "category", 128).unwrap(),
-                participants: Vec::<KnowledgeEntity>::new(),
+                participants: Vec::<NarrativeParticipant>::new(),
                 location: None,
                 description: BoundedText::try_new("something happens", "description", 256).unwrap(),
             }),

@@ -1,7 +1,7 @@
 use crate::domain::asset::ids::{MemoryKind, NarrativeConditionKey, Sha256Digest};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::{FactId, MemoryId, RoleId, RumorId, TurnNumber};
-use crate::domain::knowledge::activation::KnowledgeActivationRule;
+use crate::domain::knowledge::activation::{ActivationPattern, KnowledgeActivationRule, normalize_activation_literal};
 use crate::domain::knowledge::hint::{RetrievalHint, normalize_static_retrieval_hint};
 use crate::domain::knowledge::query::{KnowledgeSourceId, allocate_knowledge_ids};
 use crate::domain::knowledge::rumor::TruthValue;
@@ -12,7 +12,7 @@ use crate::domain::turn::retrieval::RetrievedContext;
 use crate::turn::turn_validation::{ValidatedKnowledgeMutation, ValidatedKnowledgeOperation};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const DEFAULT_RUNTIME_KNOWLEDGE_SALIENCE: u8 = 128;
@@ -39,6 +39,8 @@ pub struct StoryStateExtractionLimits {
     pub max_condition_queries: usize,
     pub max_condition_evidence_bytes: usize,
     pub max_condition_reason_bytes: usize,
+    pub max_activation_terms: usize,
+    pub max_activation_pattern_bytes: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +84,8 @@ pub struct RelationshipStateDto {
 pub struct FactDraftDto {
     pub content: String,
     pub retrieval_hint: String,
+    pub activation_terms: Vec<String>,
+    pub exact_target_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +94,7 @@ pub struct FactUpdateDto {
     pub id: String,
     pub content: String,
     pub retrieval_hint: String,
+    pub activation_terms: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,6 +102,8 @@ pub struct FactUpdateDto {
 pub struct RumorDraftDto {
     pub content: String,
     pub retrieval_hint: String,
+    pub activation_terms: Vec<String>,
+    pub exact_target_only: bool,
     pub source_role_id: String,
     pub truth_value: TruthValue,
 }
@@ -107,6 +114,7 @@ pub struct RumorUpdateDto {
     pub id: String,
     pub content: String,
     pub retrieval_hint: String,
+    pub activation_terms: Option<Vec<String>>,
     pub source_role_id: String,
     pub truth_value: TruthValue,
 }
@@ -223,10 +231,16 @@ impl StoryStateExtractionDto {
         let fact_draft = json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["content", "retrieval_hint"],
+            "required": ["content", "retrieval_hint", "activation_terms", "exact_target_only"],
             "properties": {
                 "content": text(limits.max_knowledge_change_bytes),
-                "retrieval_hint": text(RetrievalHint::MAX_BYTES)
+                "retrieval_hint": text(RetrievalHint::MAX_BYTES),
+                "activation_terms": {
+                    "type": "array",
+                    "maxItems": limits.max_activation_terms,
+                    "items": text(limits.max_activation_pattern_bytes)
+                },
+                "exact_target_only": {"type": "boolean"}
             }
         });
         let fact_update = json!({
@@ -236,17 +250,30 @@ impl StoryStateExtractionDto {
             "properties": {
                 "id": key(),
                 "content": text(limits.max_knowledge_change_bytes),
-                "retrieval_hint": text(RetrievalHint::MAX_BYTES)
+                "retrieval_hint": text(RetrievalHint::MAX_BYTES),
+                "activation_terms": {
+                    "type": ["array", "null"],
+                    "maxItems": limits.max_activation_terms,
+                    "items": text(limits.max_activation_pattern_bytes)
+                }
             }
         });
         let truth_value = json!({"enum": ["true", "false", "unverified"]});
         let rumor_draft = json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["content", "retrieval_hint", "source_role_id", "truth_value"],
+            "required": [
+                "content", "retrieval_hint", "activation_terms", "exact_target_only", "source_role_id", "truth_value"
+            ],
             "properties": {
                 "content": text(limits.max_knowledge_change_bytes),
                 "retrieval_hint": text(RetrievalHint::MAX_BYTES),
+                "activation_terms": {
+                    "type": "array",
+                    "maxItems": limits.max_activation_terms,
+                    "items": text(limits.max_activation_pattern_bytes)
+                },
+                "exact_target_only": {"type": "boolean"},
                 "source_role_id": text(limits.max_item_bytes),
                 "truth_value": truth_value
             }
@@ -259,6 +286,11 @@ impl StoryStateExtractionDto {
                 "id": key(),
                 "content": text(limits.max_knowledge_change_bytes),
                 "retrieval_hint": text(RetrievalHint::MAX_BYTES),
+                "activation_terms": {
+                    "type": ["array", "null"],
+                    "maxItems": limits.max_activation_terms,
+                    "items": text(limits.max_activation_pattern_bytes)
+                },
                 "source_role_id": text(limits.max_item_bytes),
                 "truth_value": truth_value
             }
@@ -388,6 +420,8 @@ pub struct KnowledgeEnrichmentContext<'a> {
     pub turn_number: TurnNumber,
     pub created_at_ms: i64,
     pub max_content_bytes: usize,
+    pub max_activation_terms: usize,
+    pub max_activation_pattern_bytes: usize,
 }
 
 pub fn enrich_extracted_knowledge(
@@ -416,7 +450,12 @@ pub fn enrich_extracted_knowledge(
         let content = bounded_content(&draft.content, context.max_content_bytes)?;
         let retrieval_hint = enriched_retrieval_hint(&draft.retrieval_hint, &content)?;
         let id = next_fact_id(&mut assigned)?;
-        let activation = KnowledgeActivationRule::disabled();
+        let activation = dynamic_activation_rule(
+            &draft.activation_terms,
+            draft.exact_target_only,
+            context.max_activation_terms,
+            context.max_activation_pattern_bytes,
+        )?;
         let activation_rule_version = activation
             .rule_version()
             .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)?;
@@ -436,11 +475,22 @@ pub fn enrich_extracted_knowledge(
     }
     for update in &dto.update_facts {
         let target = FactId::try_new(update.id.clone()).map_err(|_| ExtractionEnrichmentError::UnknownTarget)?;
-        let existing_salience =
-            existing_fact_salience(context.retrieved, &target).ok_or(ExtractionEnrichmentError::UnknownTarget)?;
+        let existing = existing_fact(context.retrieved, &target).ok_or(ExtractionEnrichmentError::UnknownTarget)?;
+        let existing_salience = existing.salience;
         let content = bounded_content(&update.content, context.max_content_bytes)?;
         let retrieval_hint = enriched_retrieval_hint(&update.retrieval_hint, &content)?;
-        let activation = KnowledgeActivationRule::disabled();
+        let mut activation = existing
+            .activation
+            .clone()
+            .ok_or(ExtractionEnrichmentError::InvalidActivationRule)?;
+        if let Some(terms) = &update.activation_terms {
+            replace_activation_terms(
+                &mut activation,
+                terms,
+                context.max_activation_terms,
+                context.max_activation_pattern_bytes,
+            )?;
+        }
         let activation_rule_version = activation
             .rule_version()
             .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)?;
@@ -464,7 +514,12 @@ pub fn enrich_extracted_knowledge(
         let content = bounded_content(&draft.content, context.max_content_bytes)?;
         let retrieval_hint = enriched_retrieval_hint(&draft.retrieval_hint, &content)?;
         let source_role_id = resolve_source_role(&draft.source_role_id, snapshot, accepted_new_roles)?;
-        let activation = KnowledgeActivationRule::disabled();
+        let activation = dynamic_activation_rule(
+            &draft.activation_terms,
+            draft.exact_target_only,
+            context.max_activation_terms,
+            context.max_activation_pattern_bytes,
+        )?;
         let activation_rule_version = activation
             .rule_version()
             .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)?;
@@ -487,12 +542,23 @@ pub fn enrich_extracted_knowledge(
     }
     for update in &dto.update_rumors {
         let target = RumorId::try_new(update.id.clone()).map_err(|_| ExtractionEnrichmentError::UnknownTarget)?;
-        let existing_salience =
-            existing_rumor_salience(context.retrieved, &target).ok_or(ExtractionEnrichmentError::UnknownTarget)?;
+        let existing = existing_rumor(context.retrieved, &target).ok_or(ExtractionEnrichmentError::UnknownTarget)?;
+        let existing_salience = existing.salience;
         let content = bounded_content(&update.content, context.max_content_bytes)?;
         let retrieval_hint = enriched_retrieval_hint(&update.retrieval_hint, &content)?;
         let source_role_id = resolve_source_role(&update.source_role_id, snapshot, accepted_new_roles)?;
-        let activation = KnowledgeActivationRule::disabled();
+        let mut activation = existing
+            .activation
+            .clone()
+            .ok_or(ExtractionEnrichmentError::InvalidActivationRule)?;
+        if let Some(terms) = &update.activation_terms {
+            replace_activation_terms(
+                &mut activation,
+                terms,
+                context.max_activation_terms,
+                context.max_activation_pattern_bytes,
+            )?;
+        }
         let activation_rule_version = activation
             .rule_version()
             .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)?;
@@ -515,7 +581,7 @@ pub fn enrich_extracted_knowledge(
     }
     for raw_id in &dto.delete_rumor_ids {
         let target = RumorId::try_new(raw_id.clone()).map_err(|_| ExtractionEnrichmentError::UnknownTarget)?;
-        if existing_rumor_salience(context.retrieved, &target).is_none() {
+        if existing_rumor(context.retrieved, &target).is_none() {
             return Err(ExtractionEnrichmentError::UnknownTarget);
         }
         operations.push(ValidatedKnowledgeOperation::Delete {
@@ -643,16 +709,65 @@ fn resolve_source_role(
     }
 }
 
-fn existing_fact_salience(retrieved: &RetrievedContext, id: &FactId) -> Option<u8> {
+fn dynamic_activation_rule(
+    terms: &[String],
+    exact_target_only: bool,
+    max_terms: usize,
+    max_pattern_bytes: usize,
+) -> Result<KnowledgeActivationRule, ExtractionEnrichmentError> {
+    let mut rule = KnowledgeActivationRule::disabled();
+    rule.mode.enabled = true;
+    rule.mode.exact_target_only = exact_target_only;
+    replace_activation_terms(&mut rule, terms, max_terms, max_pattern_bytes)?;
+    Ok(rule)
+}
+
+fn replace_activation_terms(
+    rule: &mut KnowledgeActivationRule,
+    terms: &[String],
+    max_terms: usize,
+    max_pattern_bytes: usize,
+) -> Result<(), ExtractionEnrichmentError> {
+    if terms.len() > max_terms {
+        return Err(ExtractionEnrichmentError::InvalidActivationRule);
+    }
+    let mut seen = BTreeSet::new();
+    let mut patterns = Vec::with_capacity(terms.len());
+    for term in terms {
+        if term.len() > max_pattern_bytes
+            || term.trim().is_empty()
+            || term.trim().starts_with('/')
+            || term.contains("{{")
+            || term.contains("}}")
+        {
+            return Err(ExtractionEnrichmentError::InvalidActivationRule);
+        }
+        let normalized = normalize_activation_literal(term, false);
+        if normalized.is_empty() || !seen.insert(normalized.clone()) {
+            return Err(ExtractionEnrichmentError::InvalidActivationRule);
+        }
+        patterns.push(ActivationPattern::Literal(normalized));
+    }
+    rule.match_rule.keys = patterns;
+    rule.validate(rule.selection.groups.len())
+        .map_err(|_| ExtractionEnrichmentError::InvalidActivationRule)
+}
+
+fn existing_fact<'a>(
+    retrieved: &'a RetrievedContext,
+    id: &FactId,
+) -> Option<&'a crate::domain::turn::retrieval::RetrievedKnowledgeItem> {
     retrieved
         .world()
         .facts
         .iter()
         .find(|item| matches!(&item.source_id, KnowledgeSourceId::Fact(existing) if existing == id))
-        .map(|item| item.relevance.salience)
 }
 
-fn existing_rumor_salience(retrieved: &RetrievedContext, id: &RumorId) -> Option<u8> {
+fn existing_rumor<'a>(
+    retrieved: &'a RetrievedContext,
+    id: &RumorId,
+) -> Option<&'a crate::domain::turn::retrieval::RetrievedKnowledgeItem> {
     retrieved
         .world()
         .rumors
@@ -664,7 +779,6 @@ fn existing_rumor_salience(retrieved: &RetrievedContext, id: &RumorId) -> Option
                 .flat_map(|character| character.known_rumors.iter()),
         )
         .find(|item| matches!(&item.source_id, KnowledgeSourceId::Rumor(existing) if existing == id))
-        .map(|item| item.relevance.salience)
 }
 
 fn existing_memory(retrieved: &RetrievedContext, id: &MemoryId) -> Option<(RoleId, u8)> {
@@ -673,7 +787,7 @@ fn existing_memory(retrieved: &RetrievedContext, id: &MemoryId) -> Option<(RoleI
             .memories
             .iter()
             .find(|item| matches!(&item.source_id, KnowledgeSourceId::Memory(existing) if existing == id))
-            .map(|item| (role_id.clone(), item.relevance.salience))
+            .map(|item| (role_id.clone(), item.salience))
     })
 }
 

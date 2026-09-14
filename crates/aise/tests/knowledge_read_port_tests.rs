@@ -1,21 +1,18 @@
 use aise::config::{AssetLimitsConfig, NarrativeConfig};
-use aise::domain::asset::entity::KnowledgeEntity;
-use aise::domain::asset::ids::{LocationKey, PlayerId, SceneKey, TopicKey};
-use aise::domain::ids::{RoleId, StoryId};
-use aise::domain::knowledge::KnowledgeKind;
+use aise::domain::asset::ids::PlayerId;
+use aise::domain::ids::RoleId;
+use aise::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use aise::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use aise::domain::turn::KnowledgeDelivery;
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::knowledge_read_port::{
-    EntityKnowledgeQuery, KnowledgeFilter, KnowledgeIndexQuery, KnowledgeIndexRecord, KnowledgeLookupHit,
-    KnowledgeReadPort, KnowledgeRecord, SourceKnowledgeQuery, TopicKnowledgeQuery,
+    KnowledgeFilter, KnowledgeIndexQuery, KnowledgeReadPort, OwnerMemoryQuery, SourceKnowledgeQuery,
 };
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
 use aise::persistence::{SqliteStore, Store};
 use aise::story::instance_factory::{CreateStoryInstanceSpec, StoryInstanceFactory, StoryInstantiationLimits};
 use aise::story::pack_service::{AssetInput, NativeAssetImporter, PackService};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_db_path(label: &str) -> String {
@@ -56,7 +53,31 @@ fn valid_pack_json() -> String {
                 "background": null,
                 "initial_state": {"location": "village", "goals": []},
                 "initial_relationships": [],
-                "seed_memories": []
+                "seed_memories": [{
+                    "memory_key": "private_arrival",
+                    "kind": "personal",
+                    "content": "I arrived before dawn.",
+                    "topics": [],
+                    "salience": 70
+                }]
+            },
+            "witness": {
+                "role_label": "Witness",
+                "narrative_function": "observer",
+                "default_profile": {
+                    "name": "Witness",
+                    "dialogue_examples": []
+                },
+                "background": null,
+                "initial_state": {"location": "village", "goals": []},
+                "initial_relationships": [],
+                "seed_memories": [{
+                    "memory_key": "private_bell",
+                    "kind": "observed",
+                    "content": "I heard the bell at midnight.",
+                    "topics": [],
+                    "salience": 60
+                }]
             }
         },
         "play": {
@@ -64,27 +85,74 @@ fn valid_pack_json() -> String {
             "playable_role_ids": ["protagonist"]
         },
         "world_book": {
-            "spec": "aise_world_v4",
-            "spec_version": "4.0",
+            "spec": "aise_world_v5",
+            "spec_version": "5.0",
             "world_book_key": "demo_world",
             "meta": {"name": "Demo World", "version": "0.1.0"},
-            "topics": {
-                "gate": {"label": "Gate", "aliases": ["the gate"]}
-            },
             "facts": {
                 "village_gate": {
                     "proposition": null,
                     "content": "The village gate is closed.",
                     "retrieval_hint": "Village gate status",
-                    "entities": [
-                        {"kind": "location", "key": "village"},
-                        {"kind": "scene", "key": "scene_1"}
-                    ],
-                    "topics": ["gate"],
-                    "salience": 80
+                    "salience": 80,
+                    "activation": {
+                        "match": {
+                            "keys": ["Village gate status"],
+                            "secondary_keys": [],
+                            "scan_depth": null
+                        },
+                        "mode": {"enabled": true, "constant": false, "exact_target_only": false},
+                        "recursion": {
+                            "exclude_recursion": false,
+                            "prevent_recursion": false,
+                            "delay_until_recursion": null
+                        },
+                        "selection": {
+                            "order": 0,
+                            "probability": 100,
+                            "groups": [],
+                            "group_override": false,
+                            "group_weight": 100,
+                            "use_group_scoring": false
+                        },
+                        "timing": {"sticky_turns": 0, "cooldown_turns": 0, "delay_turns": 0},
+                        "scope": {"generation_triggers": []},
+                        "budget_class": "normal"
+                    }
                 }
             },
-            "rumors": {}
+            "rumors": {
+                "midnight_bell": {
+                    "claim": null,
+                    "content": "The bell rings by itself at midnight.",
+                    "retrieval_hint": "Midnight bell rumor",
+                    "salience": 50,
+                    "activation": {
+                        "match": {
+                            "keys": ["Midnight bell rumor"],
+                            "secondary_keys": [],
+                            "scan_depth": null
+                        },
+                        "mode": {"enabled": true, "constant": false, "exact_target_only": false},
+                        "recursion": {
+                            "exclude_recursion": false,
+                            "prevent_recursion": false,
+                            "delay_until_recursion": null
+                        },
+                        "selection": {
+                            "order": 0,
+                            "probability": 100,
+                            "groups": [],
+                            "group_override": false,
+                            "group_weight": 100,
+                            "use_group_scoring": false
+                        },
+                        "timing": {"sticky_turns": 0, "cooldown_turns": 0, "delay_turns": 0},
+                        "scope": {"generation_triggers": []},
+                        "budget_class": "normal"
+                    }
+                }
+            }
         },
         "start": {
             "scene_key": "scene_1",
@@ -112,46 +180,6 @@ fn valid_pack_json() -> String {
         "assets": {}
     })
     .to_string()
-}
-
-struct CountingKnowledge {
-    inner: Arc<SqliteStore>,
-    calls: AtomicUsize,
-}
-
-#[async_trait::async_trait]
-impl KnowledgeReadPort for CountingKnowledge {
-    async fn find_by_entities(
-        &self,
-        query: EntityKnowledgeQuery<'_>,
-    ) -> Result<Vec<KnowledgeLookupHit>, aise::persistence::StoreError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        self.inner.find_by_entities(query).await
-    }
-
-    async fn find_by_topics(
-        &self,
-        query: TopicKnowledgeQuery<'_>,
-    ) -> Result<Vec<KnowledgeLookupHit>, aise::persistence::StoreError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        self.inner.find_by_topics(query).await
-    }
-
-    async fn find_by_source_ids(
-        &self,
-        query: SourceKnowledgeQuery<'_>,
-    ) -> Result<Vec<KnowledgeRecord>, aise::persistence::StoreError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        self.inner.find_by_source_ids(query).await
-    }
-
-    async fn list_index(
-        &self,
-        query: KnowledgeIndexQuery<'_>,
-    ) -> Result<Vec<KnowledgeIndexRecord>, aise::persistence::StoreError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        self.inner.list_index(query).await
-    }
 }
 
 async fn seeded_store(label: &str) -> (Arc<SqliteStore>, KnowledgeSnapshotRef, String) {
@@ -202,91 +230,8 @@ async fn seeded_store(label: &str) -> (Arc<SqliteStore>, KnowledgeSnapshotRef, S
 }
 
 #[tokio::test]
-async fn character_fact_request_is_rejected_before_store_lookup() {
-    let (sqlite, snapshot, db) = seeded_store("char_fact").await;
-    let counting = CountingKnowledge {
-        inner: sqlite,
-        calls: AtomicUsize::new(0),
-    };
-    let counting = Arc::new(counting);
-    let retriever = aise::context::EntityCandidateRetriever::new(counting.clone() as Arc<dyn KnowledgeReadPort>);
-    let request = aise::domain::turn::KnowledgeRetrievalRequest {
-        delivery: KnowledgeDelivery::Character {
-            role_id: RoleId::try_new("c-npc").unwrap(),
-        },
-        target_source_id: None,
-        knowledge_kinds: vec![KnowledgeKind::Fact],
-        entities: vec![KnowledgeEntity::Location(aise::domain::asset::ids::LocationKey::from(
-            "village",
-        ))],
-        topics: Vec::new(),
-        reason: aise::domain::asset::validation::BoundedText::try_new("x", "r", 32).unwrap(),
-        origin: aise::domain::turn::RetrievalRequestOrigin::Planner,
-        signal_priority: 0,
-    };
-    use aise::context::CandidateRetriever;
-    let err = retriever
-        .retrieve(aise::context::CandidateRetrievalRequest {
-            snapshot: &snapshot,
-            request: &request,
-            limit: 8,
-            max_item_bytes: 4096,
-        })
-        .await;
-    assert!(err.is_err());
-    assert_eq!(counting.calls.load(Ordering::SeqCst), 0);
-    let _ = std::fs::remove_file(&db);
-}
-
-#[tokio::test]
-async fn zero_result_request_never_falls_back_to_full_scan() {
-    let (sqlite, snapshot, db) = seeded_store("zero").await;
-    let filter = KnowledgeFilter {
-        delivery: KnowledgeDelivery::Writer,
-        knowledge_kinds: vec![KnowledgeKind::Fact],
-        max_item_bytes: 4096,
-    };
-    let records = sqlite
-        .find_by_topics(TopicKnowledgeQuery {
-            snapshot: &snapshot,
-            filter: &filter,
-            topics: &[TopicKey::from("missing")],
-            limit: 8,
-        })
-        .await
-        .expect("query");
-    assert!(records.is_empty());
-    let _ = std::fs::remove_file(&db);
-}
-
-#[tokio::test]
-async fn sqlite_entity_query_accepts_multiple_selectors() {
-    let (sqlite, snapshot, db) = seeded_store("entity_multiple").await;
-    let filter = KnowledgeFilter {
-        delivery: KnowledgeDelivery::Writer,
-        knowledge_kinds: vec![KnowledgeKind::Fact],
-        max_item_bytes: 4096,
-    };
-    let records = sqlite
-        .find_by_entities(EntityKnowledgeQuery {
-            snapshot: &snapshot,
-            filter: &filter,
-            entities: &[
-                KnowledgeEntity::Location(LocationKey::from("village")),
-                KnowledgeEntity::Scene(SceneKey::from("scene_1")),
-            ],
-            limit: 8,
-        })
-        .await
-        .expect("query");
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].matches.len(), 2);
-    let _ = std::fs::remove_file(&db);
-}
-
-#[tokio::test]
-async fn knowledge_index_targets_support_exact_lookup() {
-    let (sqlite, snapshot, db) = seeded_store("exact_index").await;
+async fn source_id_lookup_returns_only_requested_records_in_stable_order() {
+    let (sqlite, snapshot, db) = seeded_store("source_ids").await;
     let index = sqlite
         .list_index(KnowledgeIndexQuery {
             snapshot: &snapshot,
@@ -295,122 +240,283 @@ async fn knowledge_index_targets_support_exact_lookup() {
         })
         .await
         .expect("index");
-    assert!(!index.is_empty());
+    let requested = index.iter().rev().map(|record| record.source_id.clone()).collect::<Vec<_>>();
     let filter = KnowledgeFilter {
         delivery: KnowledgeDelivery::Writer,
-        knowledge_kinds: vec![index[0].source_id.kind()],
+        knowledge_kinds: vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
         max_item_bytes: 4096,
     };
     let records = sqlite
         .find_by_source_ids(SourceKnowledgeQuery {
             snapshot: &snapshot,
             filter: &filter,
-            source_ids: std::slice::from_ref(&index[0].source_id),
-            limit: 1,
+            source_ids: &requested,
+            limit: 16,
         })
         .await
         .expect("exact lookup");
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].source_id, index[0].source_id);
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].kind, KnowledgeKind::Fact);
+    assert_eq!(records[0].content.as_str(), "The village gate is closed.");
+    assert_eq!(records[1].kind, KnowledgeKind::Rumor);
+    assert_eq!(records[1].content.as_str(), "The bell rings by itself at midnight.");
     let _ = std::fs::remove_file(&db);
 }
 
 #[tokio::test]
-async fn knowledge_read_rejects_revision_or_digest_mismatch() {
-    let (sqlite, mut snapshot, db) = seeded_store("conflict").await;
-    snapshot.base_revision = aise::domain::ids::StoryRevision::new(999);
-    let filter = KnowledgeFilter {
-        delivery: KnowledgeDelivery::Writer,
+async fn source_id_lookup_enforces_delivery_authorization_before_limit() {
+    let (sqlite, snapshot, db) = seeded_store("authorization").await;
+    let protagonist = RoleId::try_new("protagonist").unwrap();
+    let witness = RoleId::try_new("witness").unwrap();
+    let protagonist_memories = sqlite
+        .find_memories_by_owner(OwnerMemoryQuery {
+            snapshot: &snapshot,
+            owner: &protagonist,
+            limit: 8,
+            max_item_bytes: 4096,
+        })
+        .await
+        .expect("protagonist memories");
+    let witness_memories = sqlite
+        .find_memories_by_owner(OwnerMemoryQuery {
+            snapshot: &snapshot,
+            owner: &witness,
+            limit: 8,
+            max_item_bytes: 4096,
+        })
+        .await
+        .expect("witness memories");
+    let memory_ids = vec![
+        protagonist_memories[0].source_id.clone(),
+        witness_memories[0].source_id.clone(),
+    ];
+    let character_memory_filter = KnowledgeFilter {
+        delivery: KnowledgeDelivery::Character {
+            role_id: witness.clone(),
+        },
+        knowledge_kinds: vec![KnowledgeKind::Memory],
+        max_item_bytes: 4096,
+    };
+    let authorized = sqlite
+        .find_by_source_ids(SourceKnowledgeQuery {
+            snapshot: &snapshot,
+            filter: &character_memory_filter,
+            source_ids: &memory_ids,
+            limit: 1,
+        })
+        .await
+        .expect("owner-filtered memories");
+    assert_eq!(authorized.len(), 1);
+    assert_eq!(authorized[0].memory_owner.as_ref(), Some(&witness));
+
+    let character_fact_filter = KnowledgeFilter {
+        delivery: KnowledgeDelivery::Character { role_id: witness },
         knowledge_kinds: vec![KnowledgeKind::Fact],
         max_item_bytes: 4096,
     };
-    let err = sqlite
-        .find_by_entities(EntityKnowledgeQuery {
+    let fact_error = sqlite
+        .find_by_source_ids(SourceKnowledgeQuery {
             snapshot: &snapshot,
-            filter: &filter,
-            entities: &[KnowledgeEntity::Location(aise::domain::asset::ids::LocationKey::from(
-                "village",
-            ))],
-            limit: 8,
+            filter: &character_fact_filter,
+            source_ids: &[],
+            limit: 1,
         })
-        .await;
-    assert!(matches!(err, Err(aise::persistence::StoreError::RevisionConflict)));
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        fact_error,
+        aise::persistence::StoreError::ConstraintViolation { constraint }
+            if constraint == "fact_forbidden_for_character_delivery"
+    ));
+
+    let writer_memory_filter = KnowledgeFilter {
+        delivery: KnowledgeDelivery::Writer,
+        knowledge_kinds: vec![KnowledgeKind::Memory],
+        max_item_bytes: 4096,
+    };
+    let memory_error = sqlite
+        .find_by_source_ids(SourceKnowledgeQuery {
+            snapshot: &snapshot,
+            filter: &writer_memory_filter,
+            source_ids: &memory_ids,
+            limit: 1,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        memory_error,
+        aise::persistence::StoreError::ConstraintViolation { constraint }
+            if constraint == "memory_forbidden_for_writer_delivery"
+    ));
     let _ = std::fs::remove_file(&db);
 }
 
 #[tokio::test]
-async fn knowledge_index_rejects_memory() {
-    let (sqlite, snapshot, db) = seeded_store("index_memory").await;
-    let pool = sqlite.pool_for_tests();
-    sqlx::query(
-        "INSERT INTO knowledge_entries (story_id, source_id, knowledge_kind, memory_owner_role_id, retrieval_hint, content, salience, source_json, payload_json) \
-         VALUES (?, 'memory_0001', 'memory', 'protagonist', NULL, 'a private memory', 10, '{}', '{}')",
-    )
-    .bind(snapshot.story_id.to_string())
-    .execute(pool)
-    .await
-    .expect("insert memory row");
+async fn source_id_lookup_allows_rumor_for_writer_and_character() {
+    let (sqlite, snapshot, db) = seeded_store("rumor_visibility").await;
+    let index = sqlite
+        .list_index(KnowledgeIndexQuery {
+            snapshot: &snapshot,
+            knowledge_kinds: &[KnowledgeKind::Rumor],
+            limit: 8,
+        })
+        .await
+        .expect("rumor index");
+    let rumor_id = index[0].source_id.clone();
+    for delivery in [
+        KnowledgeDelivery::Writer,
+        KnowledgeDelivery::Character {
+            role_id: RoleId::try_new("witness").unwrap(),
+        },
+    ] {
+        let filter = KnowledgeFilter {
+            delivery,
+            knowledge_kinds: vec![KnowledgeKind::Rumor],
+            max_item_bytes: 4096,
+        };
+        let records = sqlite
+            .find_by_source_ids(SourceKnowledgeQuery {
+                snapshot: &snapshot,
+                filter: &filter,
+                source_ids: std::slice::from_ref(&rumor_id),
+                limit: 1,
+            })
+            .await
+            .expect("authorized rumor");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].source_id, rumor_id);
+    }
+    let _ = std::fs::remove_file(&db);
+}
 
-    let error = sqlite
+#[tokio::test]
+async fn owner_memory_lookup_returns_only_exact_owner_records() {
+    let (sqlite, snapshot, db) = seeded_store("owner_memory").await;
+    let protagonist = RoleId::try_new("protagonist").unwrap();
+    let witness = RoleId::try_new("witness").unwrap();
+    let protagonist_records = sqlite
+        .find_memories_by_owner(OwnerMemoryQuery {
+            snapshot: &snapshot,
+            owner: &protagonist,
+            limit: 8,
+            max_item_bytes: 4096,
+        })
+        .await
+        .expect("protagonist memories");
+    let witness_records = sqlite
+        .find_memories_by_owner(OwnerMemoryQuery {
+            snapshot: &snapshot,
+            owner: &witness,
+            limit: 8,
+            max_item_bytes: 4096,
+        })
+        .await
+        .expect("witness memories");
+    assert_eq!(protagonist_records.len(), 1);
+    assert_eq!(protagonist_records[0].memory_owner.as_ref(), Some(&protagonist));
+    assert_eq!(protagonist_records[0].content.as_str(), "I arrived before dawn.");
+    assert_eq!(witness_records.len(), 1);
+    assert_eq!(witness_records[0].memory_owner.as_ref(), Some(&witness));
+    assert_eq!(witness_records[0].content.as_str(), "I heard the bell at midnight.");
+    assert_ne!(protagonist_records[0].source_id, witness_records[0].source_id);
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn knowledge_index_contains_only_fact_and_rumor_hints() {
+    let (sqlite, snapshot, db) = seeded_store("index").await;
+    let index = sqlite
         .list_index(KnowledgeIndexQuery {
             snapshot: &snapshot,
             knowledge_kinds: &[KnowledgeKind::Fact, KnowledgeKind::Rumor, KnowledgeKind::Memory],
             limit: 16,
         })
         .await
-        .unwrap_err();
-    assert!(matches!(error, aise::persistence::StoreError::Serialization { .. }));
+        .expect("index");
+    assert_eq!(index.len(), 2);
+    assert!(
+        index
+            .iter()
+            .all(|record| matches!(&record.source_id, KnowledgeSourceId::Fact(_) | KnowledgeSourceId::Rumor(_)))
+    );
+    assert!(index.iter().all(|record| !record.retrieval_hint.as_str().is_empty()));
     let _ = std::fs::remove_file(&db);
 }
 
 #[tokio::test]
-async fn sqlite_entity_and_topic_queries_use_indexes() {
-    let (sqlite, _snapshot, db) = seeded_store("explain").await;
-    let pool = sqlite.pool_for_tests();
-    let entity_rows = sqlx::query(
-        "EXPLAIN QUERY PLAN SELECT e.source_id FROM knowledge_entries e \
-         INNER JOIN knowledge_entry_entities m \
-           ON e.story_id = m.story_id AND e.knowledge_kind = m.knowledge_kind AND e.source_id = m.source_id \
-         WHERE e.story_id = ? AND m.entity_kind = ? AND m.entity_key = ?",
+async fn all_knowledge_reads_validate_snapshot_even_for_empty_queries() {
+    let (sqlite, mut snapshot, db) = seeded_store("snapshot").await;
+    snapshot.base_revision = aise::domain::ids::StoryRevision::new(999);
+    let filter = KnowledgeFilter {
+        delivery: KnowledgeDelivery::Writer,
+        knowledge_kinds: vec![KnowledgeKind::Fact],
+        max_item_bytes: 4096,
+    };
+    let source_result = sqlite
+        .find_by_source_ids(SourceKnowledgeQuery {
+            snapshot: &snapshot,
+            filter: &filter,
+            source_ids: &[],
+            limit: 0,
+        })
+        .await;
+    let owner = RoleId::try_new("protagonist").unwrap();
+    let memory_result = sqlite
+        .find_memories_by_owner(OwnerMemoryQuery {
+            snapshot: &snapshot,
+            owner: &owner,
+            limit: 0,
+            max_item_bytes: 4096,
+        })
+        .await;
+    let index_result = sqlite
+        .list_index(KnowledgeIndexQuery {
+            snapshot: &snapshot,
+            knowledge_kinds: &[],
+            limit: 0,
+        })
+        .await;
+    assert!(matches!(source_result, Err(aise::persistence::StoreError::RevisionConflict)));
+    assert!(matches!(memory_result, Err(aise::persistence::StoreError::RevisionConflict)));
+    assert!(matches!(index_result, Err(aise::persistence::StoreError::RevisionConflict)));
+    let _ = std::fs::remove_file(&db);
+}
+
+#[tokio::test]
+async fn body_lookup_rejects_noncanonical_materialized_payload() {
+    let (sqlite, snapshot, db) = seeded_store("materialize").await;
+    let index = sqlite
+        .list_index(KnowledgeIndexQuery {
+            snapshot: &snapshot,
+            knowledge_kinds: &[KnowledgeKind::Fact],
+            limit: 1,
+        })
+        .await
+        .expect("fact index");
+    let fact_id = index[0].source_id.clone();
+    sqlx::query(
+        "UPDATE knowledge_entries SET payload_json = '{}' \
+         WHERE story_id = ? AND knowledge_kind = 'fact' AND source_id = ?",
     )
-    .bind("story")
-    .bind("location")
-    .bind("village")
-    .fetch_all(pool)
+    .bind(snapshot.story_id.as_str())
+    .bind(fact_id.as_str())
+    .execute(sqlite.pool_for_tests())
     .await
-    .expect("entity explain");
-    let topic_rows = sqlx::query(
-        "EXPLAIN QUERY PLAN SELECT e.source_id FROM knowledge_entries e \
-         INNER JOIN knowledge_entry_topics m \
-           ON e.story_id = m.story_id AND e.knowledge_kind = m.knowledge_kind AND e.source_id = m.source_id \
-         WHERE e.story_id = ? AND m.topic_key = ?",
-    )
-    .bind("story")
-    .bind("gate")
-    .fetch_all(pool)
-    .await
-    .expect("topic explain");
-    use sqlx::Row;
-    let entity_plan = entity_rows
-        .iter()
-        .filter_map(|row| row.try_get::<String, _>("detail").ok())
-        .collect::<Vec<_>>()
-        .join("\n")
-        .to_lowercase();
-    let topic_plan = topic_rows
-        .iter()
-        .filter_map(|row| row.try_get::<String, _>("detail").ok())
-        .collect::<Vec<_>>()
-        .join("\n")
-        .to_lowercase();
-    assert!(
-        entity_plan.contains("knowledge_entry_entities") || entity_plan.contains("ix_knowledge_entry_entities"),
-        "entity plan: {entity_plan}"
-    );
-    assert!(
-        topic_plan.contains("knowledge_entry_topics") || topic_plan.contains("ix_knowledge_entry_topics"),
-        "topic plan: {topic_plan}"
-    );
-    let _ = StoryId::try_new("x");
+    .expect("corrupt payload");
+    let filter = KnowledgeFilter {
+        delivery: KnowledgeDelivery::Writer,
+        knowledge_kinds: vec![KnowledgeKind::Fact],
+        max_item_bytes: 4096,
+    };
+    let error = sqlite
+        .find_by_source_ids(SourceKnowledgeQuery {
+            snapshot: &snapshot,
+            filter: &filter,
+            source_ids: std::slice::from_ref(&fact_id),
+            limit: 1,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(error, aise::persistence::StoreError::Serialization { .. }));
     let _ = std::fs::remove_file(&db);
 }

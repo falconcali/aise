@@ -1,15 +1,15 @@
 use aise::domain::asset::character_card::CharacterProfile;
-use aise::domain::asset::entity::KnowledgeEntity;
 use aise::domain::asset::ids::{CanonicalEventKey, LocationKey, NarrativeNodeKey, PlayerId, Sha256Digest};
 use aise::domain::asset::story_pack::{StoryProfile, StoryStyle};
 use aise::domain::asset::validation::BoundedText;
 use aise::domain::ids::RoleId;
 use aise::domain::narrative::{StoryContinuity, StoryContinuityLimits, StorySummary};
 use aise::domain::narrative_graph::effect::{NarrativeEffectId, WorldEventIntent};
+use aise::domain::narrative_graph::participant::NarrativeParticipant;
 use aise::domain::narrative_graph::projector::{NarrativeDirection, NarrativePlan};
 use aise::domain::story_instance::role::{RoleController, StoryRoleState};
 use aise::domain::story_instance::state::InstanceSettings;
-use aise::domain::turn::{BaselineContext, NarrativeGraphStateIndex, RetrievalSignals, RoleContextView};
+use aise::domain::turn::{BaselineContext, NarrativeGraphStateIndex, RoleContextView};
 use aise::planning::WriterPlannerPromptContextProjector;
 use aise::prompt::profile::PromptProfile;
 use aise::prompt::{
@@ -84,7 +84,6 @@ fn minimal_baseline(adversarial: &str) -> BaselineContext {
             graph_revision: 0,
             node_states: BTreeMap::new(),
         },
-        retrieval_signals: RetrievalSignals::default(),
     }
 }
 
@@ -331,7 +330,7 @@ fn sample_narrative_plan() -> NarrativePlan {
         source_node: NarrativeNodeKey::try_new("node_gate").unwrap(),
         event_key: CanonicalEventKey::try_new("gate_creaks").unwrap(),
         category: bounded("ambience"),
-        participants: vec![KnowledgeEntity::Location(LocationKey::try_new("gate").unwrap())],
+        participants: vec![NarrativeParticipant::Location(LocationKey::try_new("gate").unwrap())],
         location: Some(LocationKey::try_new("gate").unwrap()),
         description: bounded("The gate creaks in the wind."),
     });

@@ -181,6 +181,8 @@ impl Store for SqliteStore {
                     content: entry.content().as_str(),
                     retrieval_hint: entry.retrieval_hint().map(|hint| hint.as_str()),
                     salience: entry.salience(),
+                    activation_rule_json: activation_rule_json(entry)?,
+                    activation_rule_version: activation_rule_version(entry)?,
                     source: entry.source(),
                     payload_json,
                 },
@@ -526,6 +528,22 @@ impl Store for SqliteStore {
         for mutation in commit.changes.knowledge_mutations() {
             apply_knowledge_mutation(&mut tx, &commit.story_id, mutation).await?;
         }
+        if commit
+            .changes
+            .knowledge_mutations()
+            .iter()
+            .any(knowledge_mutation_affects_activation)
+        {
+            sqlx::query(
+                "UPDATE story_instances SET activation_overlay_version = activation_overlay_version + 1 \
+                 WHERE story_id = ?",
+            )
+            .bind(commit.story_id.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(SqliteStoreError::from)?;
+        }
+        apply_activation_state_delta(&mut tx, &commit.story_id, &commit.activation_state_delta).await?;
 
         let updated = sqlx::query(
             "UPDATE stories SET revision = ?, last_turn_number = ? WHERE id = ? AND revision = ? AND last_turn_number = ?",
@@ -546,6 +564,70 @@ impl Store for SqliteStore {
         tx.commit().await.map_err(SqliteStoreError::from)?;
         Ok(result)
     }
+}
+
+fn knowledge_mutation_affects_activation(mutation: &crate::turn::turn_validation::ValidatedKnowledgeMutation) -> bool {
+    match &mutation.operation {
+        crate::turn::turn_validation::ValidatedKnowledgeOperation::Add(entry)
+        | crate::turn::turn_validation::ValidatedKnowledgeOperation::Update { value: entry, .. } => {
+            entry.kind() != crate::domain::knowledge::KnowledgeKind::Memory
+        }
+        crate::turn::turn_validation::ValidatedKnowledgeOperation::Delete { .. } => true,
+    }
+}
+
+async fn apply_activation_state_delta(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    story_id: &StoryId,
+    delta: &crate::domain::knowledge::activation::PendingActivationStateDelta,
+) -> Result<(), StoreError> {
+    for source_id in &delta.deletes {
+        sqlx::query("DELETE FROM knowledge_activation_timed_state WHERE story_id = ? AND source_id = ?")
+            .bind(story_id.as_str())
+            .bind(source_id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(SqliteStoreError::from)?;
+    }
+    for state in &delta.upserts {
+        if state.source_id.kind() == crate::domain::knowledge::KnowledgeKind::Memory {
+            return Err(StoreError::ConstraintViolation {
+                constraint: "activation_timed_state_memory".into(),
+            });
+        }
+        let sticky = state
+            .sticky_through_turn
+            .map(|turn| i64::try_from(turn.get()))
+            .transpose()
+            .map_err(|_| StoreError::LimitExceeded {
+                limit: "activation_sticky_turn",
+            })?;
+        let cooldown = state
+            .cooldown_through_turn
+            .map(|turn| i64::try_from(turn.get()))
+            .transpose()
+            .map_err(|_| StoreError::LimitExceeded {
+                limit: "activation_cooldown_turn",
+            })?;
+        sqlx::query(
+            "INSERT INTO knowledge_activation_timed_state \
+             (story_id, source_id, rule_version, sticky_through_turn, cooldown_through_turn) \
+             VALUES (?, ?, ?, ?, ?) \
+             ON CONFLICT(story_id, source_id) DO UPDATE SET \
+             rule_version = excluded.rule_version, \
+             sticky_through_turn = excluded.sticky_through_turn, \
+             cooldown_through_turn = excluded.cooldown_through_turn",
+        )
+        .bind(story_id.as_str())
+        .bind(state.source_id.as_str())
+        .bind(state.rule_version.0.to_string())
+        .bind(sticky)
+        .bind(cooldown)
+        .execute(&mut **tx)
+        .await
+        .map_err(SqliteStoreError::from)?;
+    }
+    Ok(())
 }
 
 fn aggregate_llm_usage(
@@ -629,6 +711,28 @@ fn knowledge_kind_str(kind: crate::domain::knowledge::KnowledgeKind) -> &'static
     }
 }
 
+fn activation_rule_json(entry: &crate::domain::knowledge::KnowledgeEntry) -> Result<Option<String>, StoreError> {
+    let rule = match entry {
+        crate::domain::knowledge::KnowledgeEntry::Fact(value) => Some(&value.activation),
+        crate::domain::knowledge::KnowledgeEntry::Rumor(value) => Some(&value.activation),
+        crate::domain::knowledge::KnowledgeEntry::Memory(_) => None,
+    };
+    rule.map(serde_json::to_string)
+        .transpose()
+        .map_err(|_| StoreError::Serialization {
+            kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
+        })
+}
+
+fn activation_rule_version(entry: &crate::domain::knowledge::KnowledgeEntry) -> Result<Option<String>, StoreError> {
+    let version = match entry {
+        crate::domain::knowledge::KnowledgeEntry::Fact(value) => Some(&value.activation_rule_version),
+        crate::domain::knowledge::KnowledgeEntry::Rumor(value) => Some(&value.activation_rule_version),
+        crate::domain::knowledge::KnowledgeEntry::Memory(_) => None,
+    };
+    Ok(version.map(|value| value.0.to_string()))
+}
+
 struct KnowledgeEntryWrite<'a> {
     story_id: &'a StoryId,
     knowledge_kind: &'a str,
@@ -637,6 +741,8 @@ struct KnowledgeEntryWrite<'a> {
     content: &'a str,
     retrieval_hint: Option<&'a str>,
     salience: u8,
+    activation_rule_json: Option<String>,
+    activation_rule_version: Option<String>,
     source: &'a crate::domain::knowledge::KnowledgeSource,
     payload_json: String,
 }
@@ -651,8 +757,8 @@ async fn insert_knowledge_entry(
     sqlx::query(
         "INSERT INTO knowledge_entries \
          (story_id, source_id, knowledge_kind, memory_owner_role_id, content, retrieval_hint, salience, \
-          source_json, payload_json) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          source_json, payload_json, activation_rule_json, activation_rule_version) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(entry.story_id.as_str())
     .bind(entry.source_id)
@@ -663,6 +769,8 @@ async fn insert_knowledge_entry(
     .bind(i64::from(entry.salience))
     .bind(&source_json)
     .bind(&entry.payload_json)
+    .bind(entry.activation_rule_json)
+    .bind(entry.activation_rule_version)
     .execute(&mut **tx)
     .await
     .map_err(SqliteStoreError::from)?;
@@ -691,6 +799,8 @@ async fn apply_knowledge_mutation(
                     content: entry.content().as_str(),
                     retrieval_hint: entry.retrieval_hint().map(|hint| hint.as_str()),
                     salience: entry.salience(),
+                    activation_rule_json: activation_rule_json(entry)?,
+                    activation_rule_version: activation_rule_version(entry)?,
                     source: entry.source(),
                     payload_json,
                 },
@@ -726,13 +836,16 @@ async fn apply_knowledge_mutation(
                 kind: crate::persistence::store::StoreSerializationErrorKind::InvalidStoryState,
             })?;
             let updated = sqlx::query(
-                "UPDATE knowledge_entries SET content = ?, salience = ?, source_json = ?, payload_json = ? \
+                "UPDATE knowledge_entries SET content = ?, salience = ?, source_json = ?, payload_json = ?, \
+                 activation_rule_json = ?, activation_rule_version = ? \
                  WHERE story_id = ? AND knowledge_kind = ? AND source_id = ?",
             )
             .bind(merged.content().as_str())
             .bind(i64::from(merged.salience()))
             .bind(&source_json)
             .bind(&payload_json)
+            .bind(activation_rule_json(&merged)?)
+            .bind(activation_rule_version(&merged)?)
             .bind(story_id.as_str())
             .bind(knowledge_kind)
             .bind(&source_id_str)

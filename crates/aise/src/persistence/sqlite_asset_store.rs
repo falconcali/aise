@@ -60,12 +60,11 @@ impl SqliteAssetStore {
         let narrative_definition_json = serde_json::to_vec(&pack.narrative).map_err(|_| StoreError::Serialization {
             kind: StoreSerializationErrorKind::InvalidStoryState,
         })?;
-        let topic_dictionary_json = b"{}".to_vec();
         sqlx::query(
             "INSERT INTO story_packs (pack_id, pack_key, version, digest, pack_json, manifest_json, \
              world_book_json, story_profile_json, role_definitions_json, \
-             narrative_definition_json, topic_dictionary_json) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             narrative_definition_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )
         .bind(pack_id.as_str())
         .bind(pack_key)
@@ -77,7 +76,6 @@ impl SqliteAssetStore {
         .bind(story_profile_json)
         .bind(role_definitions_json)
         .bind(narrative_definition_json)
-        .bind(topic_dictionary_json)
         .execute(&*self.pool)
         .await
         .map_err(sqlx_error_to_store)?;

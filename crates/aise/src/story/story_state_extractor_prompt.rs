@@ -1,8 +1,9 @@
-use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{AttributeKey, LocationKey};
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::{MemoryId, RoleId, allocate_dynamic_role_candidates};
 use crate::domain::knowledge::KnowledgeSourceId;
+use crate::domain::narrative_graph::effect::NarrativeEffectDefinition;
+use crate::domain::narrative_graph::participant::NarrativeParticipant;
 use crate::domain::story_instance::state::CastPolicy;
 use crate::domain::text::estimate_text_tokens;
 use crate::prompt::{FtiPromptVars, RcPromptVars};
@@ -269,16 +270,24 @@ impl StoryStateExtractorPromptContextProjector for DefaultStoryStateExtractorPro
 }
 
 fn available_location_keys(snapshot: &crate::domain::story_instance::snapshot::StoryReadSnapshot) -> Vec<LocationKey> {
-    let mut keys: BTreeSet<LocationKey> = snapshot
-        .entity_catalog()
-        .iter()
-        .filter_map(|entity| match entity {
-            KnowledgeEntity::Location(key) => Some(key.clone()),
-            _ => None,
-        })
-        .collect();
+    let mut keys = BTreeSet::new();
     for role in snapshot.roles().values() {
         keys.insert(role.state.location.clone());
+    }
+    for node in snapshot.narrative_definition().nodes.values() {
+        for effect in node.effects.on_activate.iter().chain(&node.effects.on_complete) {
+            let NarrativeEffectDefinition::WorldEvent(intent) = effect else {
+                continue;
+            };
+            if let Some(location) = &intent.location {
+                keys.insert(location.clone());
+            }
+            for participant in &intent.participants {
+                if let NarrativeParticipant::Location(location) = participant {
+                    keys.insert(location.clone());
+                }
+            }
+        }
     }
     keys.into_iter().collect()
 }

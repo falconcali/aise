@@ -7,10 +7,6 @@ pub struct AssetLimitsConfig {
     pub max_key_bytes: usize,
     pub max_text_bytes: usize,
     pub max_tags_per_item: usize,
-    pub max_topics: usize,
-    pub max_topic_aliases_per_topic: usize,
-    pub max_entities_per_entry: usize,
-    pub max_topics_per_entry: usize,
     pub max_roles: usize,
     pub max_profile_name_bytes: usize,
     pub max_profile_appearance_bytes: usize,
@@ -40,10 +36,6 @@ impl Default for AssetLimitsConfig {
             max_key_bytes: 128,
             max_text_bytes: 32 * 1024,
             max_tags_per_item: 32,
-            max_topics: 256,
-            max_topic_aliases_per_topic: 16,
-            max_entities_per_entry: 16,
-            max_topics_per_entry: 16,
             max_roles: 32,
             max_profile_name_bytes: 256,
             max_profile_appearance_bytes: 2_048,
@@ -84,20 +76,6 @@ impl AssetLimitsConfig {
         }
         if self.max_tags_per_item == 0 {
             return Err(ConfigError::Invalid("assets.max_tags_per_item must be positive".into()));
-        }
-        if self.max_topics == 0 {
-            return Err(ConfigError::Invalid("assets.max_topics must be positive".into()));
-        }
-        if self.max_topic_aliases_per_topic == 0 {
-            return Err(ConfigError::Invalid(
-                "assets.max_topic_aliases_per_topic must be positive".into(),
-            ));
-        }
-        if self.max_entities_per_entry == 0 {
-            return Err(ConfigError::Invalid("assets.max_entities_per_entry must be positive".into()));
-        }
-        if self.max_topics_per_entry == 0 {
-            return Err(ConfigError::Invalid("assets.max_topics_per_entry must be positive".into()));
         }
         if self.max_roles == 0 {
             return Err(ConfigError::Invalid("assets.max_roles must be positive".into()));

@@ -1,9 +1,9 @@
 use super::*;
-use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{CanonicalEventKey, LocationKey, NarrativeNodeKey};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
 use crate::domain::narrative_graph::effect::{NarrativeEffectId, WorldEventIntent};
+use crate::domain::narrative_graph::participant::NarrativeParticipant;
 use crate::domain::narrative_graph::projector::{NarrativeDirection, NarrativePlan};
 
 fn text(value: &str) -> BoundedText {
@@ -26,7 +26,7 @@ fn project_narrative_direction_maps_active_directions_and_world_event_intents() 
         source_node: node_key("node_climax"),
         event_key: CanonicalEventKey::try_new("storm_arrives").unwrap(),
         category: text("weather"),
-        participants: vec![KnowledgeEntity::Location(LocationKey::try_new("village").unwrap())],
+        participants: vec![NarrativeParticipant::Location(LocationKey::try_new("village").unwrap())],
         location: Some(LocationKey::try_new("village").unwrap()),
         description: text("A violent storm reaches the village."),
     });
@@ -67,8 +67,8 @@ fn render_narrative_direction_renders_world_event_intents_with_participants_and_
         world_event_intents: vec![WorldEventIntentPromptView {
             category: text("ambush"),
             participants: vec![
-                KnowledgeEntity::Role(RoleId::try_new("role_bandit_leader").unwrap()),
-                KnowledgeEntity::Location(LocationKey::try_new("forest_road").unwrap()),
+                NarrativeParticipant::Role(RoleId::try_new("role_bandit_leader").unwrap()),
+                NarrativeParticipant::Location(LocationKey::try_new("forest_road").unwrap()),
             ],
             location: Some(LocationKey::try_new("forest_road").unwrap()),
             description: text("Bandits ambush travelers on the forest road."),

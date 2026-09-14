@@ -1,8 +1,6 @@
-use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::frozen_ref::FrozenStoryPackRef;
-use crate::domain::asset::ids::{FactKey, Sha256Digest, TopicKey};
+use crate::domain::asset::ids::{FactKey, Sha256Digest};
 use crate::domain::asset::story_pack::StoryProfile;
-use crate::domain::asset::text_matcher::TopicDefinition;
 use crate::domain::asset::validation::{BoundedText, ScalarValue};
 use crate::domain::ids::{RoleId, RoleIdHighWater, StoryId, StoryRevision};
 use crate::domain::knowledge::KnowledgeIdHighWater;
@@ -44,8 +42,6 @@ pub struct StoryReadSnapshot {
     fact_values: BTreeMap<FactKey, ScalarValue>,
     story_continuity: StoryContinuity,
     active_constraints: Vec<ActiveStoryConstraint>,
-    entity_catalog: Vec<KnowledgeEntity>,
-    topic_dictionary: BTreeMap<TopicKey, TopicDefinition>,
     knowledge_snapshot: KnowledgeSnapshotRef,
     role_id_high_water: RoleIdHighWater,
 }
@@ -65,8 +61,6 @@ pub struct StoryReadSnapshotParts {
     pub fact_values: BTreeMap<FactKey, ScalarValue>,
     pub story_continuity: StoryContinuity,
     pub active_constraints: Vec<ActiveStoryConstraint>,
-    pub entity_catalog: Vec<KnowledgeEntity>,
-    pub topic_dictionary: BTreeMap<TopicKey, TopicDefinition>,
     pub knowledge_snapshot: KnowledgeSnapshotRef,
     pub role_id_high_water: RoleIdHighWater,
 }
@@ -87,8 +81,6 @@ impl StoryReadSnapshot {
             fact_values,
             story_continuity,
             active_constraints,
-            entity_catalog,
-            topic_dictionary,
             knowledge_snapshot,
             role_id_high_water,
         } = parts;
@@ -147,19 +139,6 @@ impl StoryReadSnapshot {
         {
             return inconsistent("narrative_pending_effect_reference_invalid");
         }
-        validate_sorted_unique(&entity_catalog, "entity_catalog_order")?;
-        for entity in &entity_catalog {
-            if let KnowledgeEntity::Role(role_id) = entity {
-                if !roles.contains_key(role_id) {
-                    return inconsistent("entity_role_missing");
-                }
-            }
-            if let KnowledgeEntity::NarrativeNode(key) = entity {
-                if !narrative_definition.nodes.contains_key(key) {
-                    return inconsistent("entity_narrative_node_missing");
-                }
-            }
-        }
         Ok(Self {
             story_id,
             base_revision,
@@ -175,8 +154,6 @@ impl StoryReadSnapshot {
             fact_values,
             story_continuity,
             active_constraints,
-            entity_catalog,
-            topic_dictionary,
             knowledge_snapshot,
             role_id_high_water,
         })
@@ -248,14 +225,6 @@ impl StoryReadSnapshot {
         &self.active_constraints
     }
 
-    pub fn entity_catalog(&self) -> &[KnowledgeEntity] {
-        &self.entity_catalog
-    }
-
-    pub fn topic_dictionary(&self) -> &BTreeMap<TopicKey, TopicDefinition> {
-        &self.topic_dictionary
-    }
-
     pub fn knowledge_snapshot(&self) -> &KnowledgeSnapshotRef {
         &self.knowledge_snapshot
     }
@@ -271,13 +240,6 @@ impl StoryReadSnapshot {
     pub fn graph_revision(&self) -> u64 {
         self.narrative_state.graph_revision
     }
-}
-
-fn validate_sorted_unique<T: Ord>(values: &[T], code: &'static str) -> Result<(), StorySnapshotError> {
-    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-        return inconsistent(code);
-    }
-    Ok(())
 }
 
 fn inconsistent<T>(code: &'static str) -> Result<T, StorySnapshotError> {

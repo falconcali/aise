@@ -60,6 +60,18 @@ impl TurnExecutionPipeline for TurnCommitter {
         let story_id = ctx.story_id().clone();
         let created_at = ctx.identity().started_at_ms();
         let llm_calls = ctx.llm_calls().to_vec();
+        let activation_state_delta = ctx
+            .activation()
+            .ok_or_else(|| {
+                TurnExecutionError::new(
+                    crate::turn::turn_error::TurnFailureKind::InvariantViolation,
+                    "missing_activation",
+                    Some(TurnStage::TurnCommitter),
+                    "committer requires prepared activation state",
+                )
+            })?
+            .pending_timed_state
+            .clone();
         let mut outbox = Vec::new();
         for (seq, event) in change_set.narrative_events().iter().enumerate() {
             outbox.push(OutboxRecord {
@@ -101,6 +113,7 @@ impl TurnExecutionPipeline for TurnCommitter {
             request_digest: ctx.request().request_digest().clone(),
             outbox,
             llm_calls,
+            activation_state_delta,
         };
         let pending = ctx.trace().begin_span("story.commit", "story.commit");
         let started = Instant::now();

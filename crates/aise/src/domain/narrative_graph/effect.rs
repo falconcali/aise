@@ -1,7 +1,7 @@
-use crate::domain::asset::entity::KnowledgeEntity;
 use crate::domain::asset::ids::{CanonicalEventKey, LocationKey};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
+use crate::domain::narrative_graph::participant::NarrativeParticipant;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::num::NonZeroU32;
@@ -94,7 +94,7 @@ pub struct WorldEventIntentDefinition {
     pub event_key: CanonicalEventKey,
     pub category: BoundedText,
     #[serde(default)]
-    pub participants: Vec<KnowledgeEntity>,
+    pub participants: Vec<NarrativeParticipant>,
     pub location: Option<LocationKey>,
     pub description: BoundedText,
 }
@@ -124,7 +124,7 @@ pub struct WorldEventIntent {
     pub source_node: NarrativeNodeKey,
     pub event_key: CanonicalEventKey,
     pub category: BoundedText,
-    pub participants: Vec<KnowledgeEntity>,
+    pub participants: Vec<NarrativeParticipant>,
     pub location: Option<LocationKey>,
     pub description: BoundedText,
 }

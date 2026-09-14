@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetrievalConfig {
     pub max_requests: usize,
-    pub max_candidate_retrievers: usize,
-    pub max_candidates_per_retriever: usize,
     pub max_candidates_total: usize,
     pub max_items_per_audience: usize,
     pub max_tokens_per_audience: u64,
@@ -18,8 +16,6 @@ impl Default for RetrievalConfig {
     fn default() -> Self {
         Self {
             max_requests: 16,
-            max_candidate_retrievers: 2,
-            max_candidates_per_retriever: 32,
             max_candidates_total: 64,
             max_items_per_audience: 10,
             max_tokens_per_audience: 2048,
@@ -35,26 +31,8 @@ impl RetrievalConfig {
         if self.max_requests == 0 {
             return Err(ConfigError::Invalid("retrieval.max_requests must be positive".into()));
         }
-        if self.max_candidate_retrievers == 0 {
-            return Err(ConfigError::Invalid(
-                "retrieval.max_candidate_retrievers must be positive".into(),
-            ));
-        }
-        if self.max_candidate_retrievers != 2 {
-            return Err(ConfigError::Invalid("retrieval.max_candidate_retrievers must be 2".into()));
-        }
-        if self.max_candidates_per_retriever == 0 {
-            return Err(ConfigError::Invalid(
-                "retrieval.max_candidates_per_retriever must be positive".into(),
-            ));
-        }
         if self.max_candidates_total == 0 {
             return Err(ConfigError::Invalid("retrieval.max_candidates_total must be positive".into()));
-        }
-        if self.max_candidates_total < self.max_candidates_per_retriever {
-            return Err(ConfigError::Invalid(
-                "retrieval.max_candidates_total must be >= retrieval.max_candidates_per_retriever".into(),
-            ));
         }
         if self.max_items_per_audience == 0 {
             return Err(ConfigError::Invalid("retrieval.max_items_per_audience must be positive".into()));

@@ -1,8 +1,6 @@
-use crate::domain::asset::entity::KnowledgeEntity;
-use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
-use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
+use crate::domain::knowledge::KnowledgeSourceId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -73,13 +71,10 @@ pub struct CharacterRetrievalRequest {
 #[serde(deny_unknown_fields)]
 pub struct KnowledgeRetrievalRequest {
     pub delivery: KnowledgeDelivery,
-    pub target_source_id: Option<KnowledgeSourceId>,
-    pub knowledge_kinds: Vec<KnowledgeKind>,
-    pub entities: Vec<KnowledgeEntity>,
-    pub topics: Vec<TopicKey>,
+    pub target_source_id: KnowledgeSourceId,
     pub reason: BoundedText,
     pub origin: RetrievalRequestOrigin,
-    pub signal_priority: u8,
+    pub mandatory: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

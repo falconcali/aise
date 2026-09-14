@@ -1,7 +1,6 @@
-use crate::domain::asset::entity::KnowledgeEntity;
-use crate::domain::asset::ids::TopicKey;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
+use crate::domain::knowledge::activation::{ActivationRuleVersion, KnowledgeActivationRule};
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId, RetrievalHint};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::domain::turn::KnowledgeDelivery;
@@ -23,28 +22,8 @@ pub struct KnowledgeRecord {
     pub salience: u8,
     pub source: KnowledgeSource,
     pub memory_owner: Option<RoleId>,
-}
-
-#[derive(Debug, Clone)]
-pub struct KnowledgeLookupHit {
-    pub record: KnowledgeRecord,
-    pub matches: Vec<crate::domain::knowledge::KnowledgeIndexMatch>,
-}
-
-#[derive(Debug, Clone)]
-pub struct EntityKnowledgeQuery<'a> {
-    pub snapshot: &'a KnowledgeSnapshotRef,
-    pub filter: &'a KnowledgeFilter,
-    pub entities: &'a [KnowledgeEntity],
-    pub limit: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct TopicKnowledgeQuery<'a> {
-    pub snapshot: &'a KnowledgeSnapshotRef,
-    pub filter: &'a KnowledgeFilter,
-    pub topics: &'a [TopicKey],
-    pub limit: usize,
+    pub activation: Option<KnowledgeActivationRule>,
+    pub activation_rule_version: Option<ActivationRuleVersion>,
 }
 
 #[derive(Debug, Clone)]
@@ -78,15 +57,9 @@ pub struct KnowledgeIndexRecord {
 
 #[async_trait]
 pub trait KnowledgeReadPort: Send + Sync {
-    async fn find_by_entities(&self, query: EntityKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError>;
-
-    async fn find_by_topics(&self, query: TopicKnowledgeQuery<'_>) -> Result<Vec<KnowledgeLookupHit>, StoreError>;
-
     async fn find_by_source_ids(&self, query: SourceKnowledgeQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError>;
 
-    async fn find_memories_by_owner(&self, _query: OwnerMemoryQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError> {
-        Ok(Vec::new())
-    }
+    async fn find_memories_by_owner(&self, query: OwnerMemoryQuery<'_>) -> Result<Vec<KnowledgeRecord>, StoreError>;
 
     async fn list_index(&self, query: KnowledgeIndexQuery<'_>) -> Result<Vec<KnowledgeIndexRecord>, StoreError>;
 }
