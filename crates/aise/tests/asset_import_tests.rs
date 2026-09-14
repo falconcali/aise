@@ -1,5 +1,14 @@
-use aise::config::{AssetLimitsConfig, NarrativeConfig};
+use aise::config::{ActivationConfig, AssetLimitsConfig, NarrativeConfig};
+use aise::domain::asset::frozen_ref::WorldBookSource;
+use aise::domain::asset::ids::Sha256Digest;
+use aise::domain::asset::story_pack::StoryPack;
 use aise::domain::asset::validation::AssetValidationCode;
+use aise::domain::ids::{FactId, RumorId};
+use aise::domain::knowledge::activation::{
+    ActivationEntryMetadata, ActivationMacroValues, ActivationRuleVersion, FrozenPackIndexKey, MATCHER_VERSION,
+    build_frozen_pack_index, macro_digest,
+};
+use aise::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
 use aise::persistence::sqlite_store::SqliteStore;
@@ -124,6 +133,68 @@ fn snake_pack_passes_validation() {
     let json = include_str!("../../../examples/snake_pack.json");
     let report = importer.parse(AssetInput::Json(json.as_bytes()));
     assert!(report.valid, "expected valid pack, got issues: {:?}", report.issues);
+}
+
+#[test]
+fn example_packs_activation_rules_satisfy_rule_limits_and_build_an_index() {
+    let limits = ActivationConfig::default().rule.limits();
+    for (label, json) in [
+        ("demo_pack", include_str!("../../../examples/demo_pack.json")),
+        ("snake_pack", include_str!("../../../examples/snake_pack.json")),
+    ] {
+        let pack: StoryPack = serde_json::from_str(json).expect("example pack must match the final schema");
+        let WorldBookSource::Embedded(book) = &pack.world_book else {
+            panic!("{label} must embed its world book");
+        };
+        let rules = book
+            .facts
+            .iter()
+            .map(|(key, seed)| (key.as_str().to_owned(), KnowledgeKind::Fact, &seed.activation))
+            .chain(
+                book.rumors
+                    .iter()
+                    .map(|(key, seed)| (key.as_str().to_owned(), KnowledgeKind::Rumor, &seed.activation)),
+            )
+            .collect::<Vec<_>>();
+        assert!(!rules.is_empty(), "{label} must define world book entries");
+        let mut metadata = Vec::new();
+        for (index, (key, kind, rule)) in rules.into_iter().enumerate() {
+            rule.validate(limits)
+                .unwrap_or_else(|error| panic!("{label}/{key} activation rule is invalid: {error:?}"));
+            let sequence = index + 1;
+            let source_id = match kind {
+                KnowledgeKind::Rumor => {
+                    KnowledgeSourceId::Rumor(RumorId::try_new(format!("rumor_{sequence:04}")).unwrap())
+                }
+                _ => KnowledgeSourceId::Fact(FactId::try_new(format!("fact_{sequence:04}")).unwrap()),
+            };
+            metadata.push(ActivationEntryMetadata {
+                source_id,
+                kind,
+                rule: rule.clone(),
+                rule_version: ActivationRuleVersion::from_rule(rule),
+                salience: 50,
+                from_pack: true,
+            });
+        }
+        let macros = ActivationMacroValues {
+            player_name: "许仙".to_owned(),
+            player_role_label: "书生".to_owned(),
+        };
+        let key = FrozenPackIndexKey {
+            pack_digest: Sha256Digest::from_bytes([0u8; 32]),
+            macro_digest: macro_digest(&macros),
+            matcher_version: MATCHER_VERSION,
+        };
+        build_frozen_pack_index(
+            key,
+            metadata.iter(),
+            &macros,
+            ActivationConfig::default().domain_index_limits(),
+            limits,
+        )
+        .unwrap_or_else(|error| panic!("{label} activation index must build: {error:?}"));
+    }
 }
 
 #[test]

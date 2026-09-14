@@ -6,7 +6,7 @@
     "title": "林间木屋",
     "author": "aise",
     "version": "0.1.0",
-    "description": "一个关于林间木屋的短篇探索故事包，用于演示前端故事包功能。",
+    "description": "一个关于林间木屋的短篇探索故事包，用于演示前端故事包功能与 World Info 条目激活配置。",
     "tags": [
       "demo",
       "mystery"
@@ -71,16 +71,64 @@
     },
     "facts": {
       "lodge_is_remote": {
-        "content": "木屋位于人迹罕至的密林深处。",
-        "retrieval_hint": "木屋地理位置",
-        "salience": 5,
         "proposition": null,
+        "content": "木屋位于人迹罕至的密林深处，最近的村落要走上大半天。",
+        "retrieval_hint": "木屋所处的地理环境与孤立程度",
+        "salience": 60,
+        "activation": {
+          "match": {
+            "keys": [],
+            "secondary_keys": [],
+            "secondary_logic": "and_any",
+            "case_sensitive": false,
+            "match_whole_words": false,
+            "scan_depth": null
+          },
+          "mode": {
+            "enabled": true,
+            "constant": true,
+            "exact_target_only": false
+          },
+          "recursion": {
+            "exclude_recursion": false,
+            "prevent_recursion": true,
+            "delay_until_recursion": null
+          },
+          "selection": {
+            "order": 50,
+            "probability": 100,
+            "groups": [],
+            "group_override": false,
+            "group_weight": 100,
+            "use_group_scoring": false
+          },
+          "timing": {
+            "sticky_turns": 0,
+            "cooldown_turns": 0,
+            "delay_turns": 0
+          },
+          "scope": {
+            "generation_triggers": []
+          },
+          "budget_class": "reserved"
+        }
+      },
+      "brass_key_opens_cellar": {
+        "proposition": null,
+        "content": "外套口袋里的黄铜钥匙配的是壁炉旁那扇地窖门，钥匙柄上刻着一个模糊的编号。",
+        "retrieval_hint": "黄铜钥匙的用途：打开壁炉旁的地窖门",
+        "salience": 80,
         "activation": {
           "match": {
             "keys": [
-              "木屋地理位置"
+              "黄铜钥匙",
+              "铜钥匙",
+              "钥匙"
             ],
             "secondary_keys": [],
+            "secondary_logic": "and_any",
+            "case_sensitive": false,
+            "match_whole_words": false,
             "scan_depth": null
           },
           "mode": {
@@ -94,7 +142,54 @@
             "delay_until_recursion": null
           },
           "selection": {
-            "order": 0,
+            "order": 30,
+            "probability": 100,
+            "groups": [],
+            "group_override": false,
+            "group_weight": 100,
+            "use_group_scoring": false
+          },
+          "timing": {
+            "sticky_turns": 2,
+            "cooldown_turns": 0,
+            "delay_turns": 0
+          },
+          "scope": {
+            "generation_triggers": []
+          },
+          "budget_class": "normal"
+        }
+      },
+      "cellar_holds_the_guest_log": {
+        "proposition": null,
+        "content": "地窖里堆着旧柴火和一本住客登记簿，最后一页的名字被人用刀刮去了。",
+        "retrieval_hint": "地窖中的住客登记簿与被刮去的名字",
+        "salience": 70,
+        "activation": {
+          "match": {
+            "keys": [
+              "地窖",
+              "登记簿",
+              "暗门"
+            ],
+            "secondary_keys": [],
+            "secondary_logic": "and_any",
+            "case_sensitive": false,
+            "match_whole_words": false,
+            "scan_depth": null
+          },
+          "mode": {
+            "enabled": true,
+            "constant": false,
+            "exact_target_only": false
+          },
+          "recursion": {
+            "exclude_recursion": false,
+            "prevent_recursion": false,
+            "delay_until_recursion": 1
+          },
+          "selection": {
+            "order": 25,
             "probability": 100,
             "groups": [],
             "group_override": false,
@@ -111,9 +206,162 @@
           },
           "budget_class": "normal"
         }
+      },
+      "footsteps_are_the_forest_warden": {
+        "proposition": null,
+        "content": "夜里逼近木门的脚步属于巡林人，他每隔几日会来查看木屋，随身带着猎枪和灯笼。",
+        "retrieval_hint": "屋外脚步声的来源：定期巡查的巡林人",
+        "salience": 75,
+        "activation": {
+          "match": {
+            "keys": [
+              "脚步声",
+              "脚步",
+              "门闩",
+              "敲门"
+            ],
+            "secondary_keys": [
+              "屋外",
+              "木门",
+              "林"
+            ],
+            "secondary_logic": "and_any",
+            "case_sensitive": false,
+            "match_whole_words": false,
+            "scan_depth": 2
+          },
+          "mode": {
+            "enabled": true,
+            "constant": false,
+            "exact_target_only": false
+          },
+          "recursion": {
+            "exclude_recursion": false,
+            "prevent_recursion": false,
+            "delay_until_recursion": null
+          },
+          "selection": {
+            "order": 20,
+            "probability": 100,
+            "groups": [],
+            "group_override": false,
+            "group_weight": 100,
+            "use_group_scoring": false
+          },
+          "timing": {
+            "sticky_turns": 1,
+            "cooldown_turns": 2,
+            "delay_turns": 0
+          },
+          "scope": {
+            "generation_triggers": []
+          },
+          "budget_class": "normal"
+        }
+      },
+      "lodge_was_a_ranger_station": {
+        "proposition": null,
+        "content": "木屋原本是护林站，二十年前因为一次山火被废弃，之后只作临时落脚处使用。",
+        "retrieval_hint": "木屋的来历：废弃的护林站",
+        "salience": 65,
+        "activation": {
+          "match": {
+            "keys": [
+              "护林站",
+              "来历",
+              "山火",
+              "这间木屋"
+            ],
+            "secondary_keys": [],
+            "secondary_logic": "and_any",
+            "case_sensitive": false,
+            "match_whole_words": false,
+            "scan_depth": null
+          },
+          "mode": {
+            "enabled": true,
+            "constant": false,
+            "exact_target_only": false
+          },
+          "recursion": {
+            "exclude_recursion": false,
+            "prevent_recursion": false,
+            "delay_until_recursion": null
+          },
+          "selection": {
+            "order": 10,
+            "probability": 100,
+            "groups": [
+              "lodge.origin"
+            ],
+            "group_override": false,
+            "group_weight": 100,
+            "use_group_scoring": true
+          },
+          "timing": {
+            "sticky_turns": 0,
+            "cooldown_turns": 0,
+            "delay_turns": 0
+          },
+          "scope": {
+            "generation_triggers": []
+          },
+          "budget_class": "normal"
+        }
       }
     },
-    "rumors": {}
+    "rumors": {
+      "rumor_lodge_is_cursed": {
+        "claim": null,
+        "content": "附近猎户说这间木屋受了诅咒，在里面过夜的人会忘掉前一天发生的事。",
+        "retrieval_hint": "关于木屋受诅咒、令人失忆的猎户传闻",
+        "salience": 50,
+        "activation": {
+          "match": {
+            "keys": [
+              "诅咒",
+              "凶宅",
+              "怪事",
+              "这间木屋"
+            ],
+            "secondary_keys": [],
+            "secondary_logic": "and_any",
+            "case_sensitive": false,
+            "match_whole_words": false,
+            "scan_depth": null
+          },
+          "mode": {
+            "enabled": true,
+            "constant": false,
+            "exact_target_only": false
+          },
+          "recursion": {
+            "exclude_recursion": true,
+            "prevent_recursion": false,
+            "delay_until_recursion": null
+          },
+          "selection": {
+            "order": 0,
+            "probability": 60,
+            "groups": [
+              "lodge.origin"
+            ],
+            "group_override": false,
+            "group_weight": 100,
+            "use_group_scoring": true
+          },
+          "timing": {
+            "sticky_turns": 0,
+            "cooldown_turns": 2,
+            "delay_turns": 0
+          },
+          "scope": {
+            "generation_triggers": []
+          },
+          "budget_class": "normal"
+        }
+      }
+    }
   },
   "start": {
     "scene_key": "scene_lodge",

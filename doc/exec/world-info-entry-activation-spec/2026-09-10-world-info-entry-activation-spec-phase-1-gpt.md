@@ -1285,7 +1285,7 @@ Production telemetry must not record Story text, Summary text, Player Contributi
 - [ ] `rg -n 'knowledge_entry_entities|knowledge_entry_topics|topic_dictionary_json' crates/aise/src crates/aise/assets/persistence/mig/0023_world_info_entry_activation.sql` returns only migration drop/assert statements.
 - [ ] `rg -n 'max_topics|max_topic_aliases_per_topic|max_entities_per_entry|max_topics_per_entry|max_entity_catalog|max_signal_entities|max_signal_topics|max_candidate_retrievers' crates/aise/src/config config` returns zero matches.
 - [ ] Deleted modules from §3.1 do not exist.
-- [ ] `examples/snake_pack.json`, `examples/demo_pack.json`, and all fixtures use Entry activation rules.
+- [x] `examples/snake_pack.json`, `examples/demo_pack.json`, and all fixtures use Entry activation rules.
 - [ ] Active architecture/context docs mark Entity/Topic retrieval contracts as superseded.
 
 ### 5.7 Toolchain
