@@ -15,6 +15,13 @@ use std::sync::Arc;
 
 pub const MATCHER_VERSION: u32 = 1;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CompiledPatternRef {
+    pub source_ordinal: u32,
+    pub pattern_kind: ActivationPatternKind,
+    pub pattern_ordinal: u16,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActivationIndexLimits {
     pub max_entries: usize,
@@ -111,8 +118,6 @@ impl FrozenLiteralIndex {
         if self.patterns.is_empty() {
             return;
         }
-        let sensitive = normalize_activation_literal(fragment.text.as_str(), true);
-        let insensitive = normalize_activation_literal(fragment.text.as_str(), false);
         for pattern in &self.patterns {
             let CompiledMatcher::Literal {
                 needle,
@@ -122,7 +127,7 @@ impl FrozenLiteralIndex {
             else {
                 continue;
             };
-            let haystack = if *case_sensitive { &sensitive } else { &insensitive };
+            let haystack = fragment.normalized_text(*case_sensitive);
             let count = literal_count(haystack, needle, *whole_words);
             if count == 0 {
                 continue;
@@ -170,6 +175,8 @@ pub struct FrozenPackIndex {
     pub key: FrozenPackIndexKey,
     pub literal_index: Arc<FrozenLiteralIndex>,
     pub regex_set: Arc<FrozenRegexSet>,
+    pub constant_entries: Vec<KnowledgeSourceId>,
+    pub metadata: BTreeMap<KnowledgeSourceId, ActivationEntryMetadata>,
     pub entry_count: usize,
 }
 
@@ -210,14 +217,14 @@ pub fn build_frozen_pack_index<'a>(
     let mut regex = Vec::new();
     let mut compiled_bytes = 0usize;
     let mut entry_count = 0usize;
+    let mut constant_entries = Vec::new();
+    let mut index_metadata = BTreeMap::new();
     for metadata in entries {
         entry_count = entry_count.saturating_add(1);
         if entry_count > limits.max_entries {
-            return Err(ActivationError::WorkLimitExceeded {
-                limit: "activation_index_entries",
-            });
+            return Err(ActivationError::WorkLimitExceeded { limit: "max_entries" });
         }
-        metadata.rule.validate(rule_limits).map_err(|error| match error {
+        metadata.rule.validate_for_index(rule_limits).map_err(|error| match error {
             ActivationRuleValidationError::InvalidRegex => ActivationError::InvalidRegex,
             ActivationRuleValidationError::RegexProgramTooLarge => ActivationError::InvalidRegex,
             _ => ActivationError::InvalidRule {
@@ -228,21 +235,25 @@ pub fn build_frozen_pack_index<'a>(
         compiled_bytes = compiled_bytes.saturating_add(compiled.compiled_bytes);
         if compiled_bytes > limits.max_compiled_bytes {
             return Err(ActivationError::WorkLimitExceeded {
-                limit: "activation_index_compiled_bytes",
+                limit: "max_compiled_bytes",
             });
         }
         literal.extend(compiled.literal);
         regex.extend(compiled.regex);
         if literal.len() > limits.max_literal_patterns {
             return Err(ActivationError::WorkLimitExceeded {
-                limit: "activation_index_literal_patterns",
+                limit: "max_literal_patterns",
             });
         }
         if regex.len() > limits.max_regex_patterns {
             return Err(ActivationError::WorkLimitExceeded {
-                limit: "activation_index_regex_patterns",
+                limit: "max_regex_patterns",
             });
         }
+        if metadata.rule.mode.constant {
+            constant_entries.push(metadata.source_id.clone());
+        }
+        index_metadata.insert(metadata.source_id.clone(), metadata.clone());
     }
     let literal_bytes = literal
         .iter()
@@ -260,6 +271,8 @@ pub fn build_frozen_pack_index<'a>(
             patterns: regex,
             compiled_bytes: regex_bytes,
         }),
+        constant_entries,
+        metadata: index_metadata,
         entry_count,
     })
 }
@@ -356,18 +369,19 @@ fn compile_patterns(
 }
 
 fn validate_index_limits(limits: ActivationIndexLimits) -> Result<(), ActivationError> {
-    if limits.max_entries == 0
-        || limits.max_overlay_entries == 0
-        || limits.max_tombstones == 0
-        || limits.max_literal_patterns == 0
-        || limits.max_regex_patterns == 0
-        || limits.max_compiled_bytes == 0
-        || limits.max_regex_program_bytes == 0
-        || limits.max_macro_expansion_bytes == 0
-    {
-        return Err(ActivationError::WorkLimitExceeded {
-            limit: "activation_index_limits",
-        });
+    for (value, limit) in [
+        (limits.max_entries, "max_entries"),
+        (limits.max_overlay_entries, "max_overlay_entries"),
+        (limits.max_tombstones, "max_tombstones"),
+        (limits.max_literal_patterns, "max_literal_patterns"),
+        (limits.max_regex_patterns, "max_regex_patterns"),
+        (limits.max_compiled_bytes, "max_compiled_bytes"),
+        (limits.max_regex_program_bytes, "max_regex_program_bytes"),
+        (limits.max_macro_expansion_bytes, "max_macro_expansion_bytes"),
+    ] {
+        if value == 0 {
+            return Err(ActivationError::WorkLimitExceeded { limit });
+        }
     }
     Ok(())
 }
@@ -438,21 +452,6 @@ impl ActivationFragmentMatches {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
-}
-
-pub fn match_fragment(
-    literal_index: &FrozenLiteralIndex,
-    regex_set: &FrozenRegexSet,
-    overlay_literal: &FrozenLiteralIndex,
-    overlay_regex: &FrozenRegexSet,
-    fragment: &ScanFragment,
-) -> Vec<FragmentPatternMatch> {
-    let mut matches = Vec::new();
-    literal_index.match_fragment(fragment, &mut matches);
-    regex_set.match_fragment(fragment, &mut matches);
-    overlay_literal.match_fragment(fragment, &mut matches);
-    overlay_regex.match_fragment(fragment, &mut matches);
-    matches
 }
 
 pub fn summary_visible(kind: ScanFragmentKind, depth: u16, include_summary_at_max_depth: bool, max_depth: u16) -> bool {

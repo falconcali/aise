@@ -7,7 +7,7 @@ use super::state::{
 use crate::domain::asset::ids::Sha256Digest;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::{StoryId, StoryRevision, TurnNumber};
-use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
+use crate::domain::knowledge::{KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::domain::turn::KnowledgeDelivery;
 use serde::Serialize;
@@ -48,6 +48,7 @@ pub struct ActivationEntryMetadata {
 #[derive(Debug, Clone)]
 pub struct ActivationIndexMetadata {
     pub reference: ActivationIndexSnapshotRef,
+    pub pack_entries: BTreeMap<KnowledgeSourceId, ActivationEntryMetadata>,
     pub entries: BTreeMap<KnowledgeSourceId, ActivationEntryMetadata>,
 }
 
@@ -96,13 +97,13 @@ impl ActivationIndexSnapshot {
     }
 
     pub fn match_fragment(&self, fragment: &ScanFragment) -> Vec<FragmentPatternMatch> {
-        super::index::match_fragment(
-            &self.literal_index,
-            &self.regex_set,
-            &self.overlay_literal_index,
-            &self.overlay_regex_set,
-            fragment,
-        )
+        let mut matches = Vec::new();
+        self.literal_index.match_fragment(fragment, &mut matches);
+        self.regex_set.match_fragment(fragment, &mut matches);
+        matches.retain(|item| self.metadata.get(&item.source_id).is_some_and(|metadata| metadata.from_pack));
+        self.overlay_literal_index.match_fragment(fragment, &mut matches);
+        self.overlay_regex_set.match_fragment(fragment, &mut matches);
+        matches
     }
 
     pub fn matches_snapshot(&self, snapshot: &KnowledgeSnapshotRef, matcher_version: u32) -> bool {
@@ -119,6 +120,15 @@ pub struct ActivationEntryBody {
     pub kind: KnowledgeKind,
     pub token_cost: u64,
     pub body: BoundedText,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoadedActivationEntry {
+    pub body: ActivationEntryBody,
+    pub salience: u8,
+    pub source: KnowledgeSource,
+    pub activation: Option<KnowledgeActivationRule>,
+    pub activation_rule_version: Option<ActivationRuleVersion>,
 }
 
 #[derive(Debug, Clone)]

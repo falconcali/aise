@@ -1,9 +1,10 @@
 use crate::harness::{
     ExecuteSpec, build_index, entry, execute, fact, fragment, ids, index_limits, macros, match_all, match_all_cached,
-    new_cache, rule, story_id,
+    new_cache, rule,
 };
-use aise::context::activation::index::{
-    FragmentMatchCache, FragmentMatchCacheValue, estimate_match_bytes, fragment_cache_key,
+use aise::config::ActivationConfig;
+use aise::context::activation::fragment_cache::{
+    FragmentMatchCache, FragmentMatchCacheValue, LruFragmentMatchCache, fragment_cache_key,
 };
 use aise::domain::knowledge::activation::{ActivationScanBuffer, ScanFragmentKind, macro_digest};
 use std::sync::Arc;
@@ -50,7 +51,7 @@ fn cache_returns_the_same_matches_as_direct_matching() {
 }
 
 #[test]
-fn cache_invalidation_by_story_drops_entries() {
+fn cache_overlay_version_change_misses() {
     let entries = vec![entry(fact(1), rule("alpha"), "one")];
     let index = build_index(&entries, index_limits()).unwrap();
     let buffer =
@@ -59,10 +60,9 @@ fn cache_invalidation_by_story_drops_entries() {
     let cache = new_cache();
     match_all_cached(&index, &buffer, &cache);
     let digest = macro_digest(&macros());
-    let story = story_id();
-    let key = fragment_cache_key(&story, &index.reference, &digest, &buffer.fragments()[0]);
+    let mut key = fragment_cache_key(&crate::harness::story_id(), &index.reference, &digest, &buffer.fragments()[0]);
     assert!(cache.get(&key).is_some());
-    cache.invalidate_story(&story);
+    key.overlay_version = key.overlay_version.saturating_add(1);
     assert!(cache.get(&key).is_none());
 }
 
@@ -73,26 +73,23 @@ fn oversized_fragment_values_are_not_cached() {
     let buffer =
         ActivationScanBuffer::try_new(vec![fragment(ScanFragmentKind::PlayerContribution, 1, 0, "alpha")], 16, 4096)
             .unwrap();
-    let cache = new_cache();
+    let mut limits = ActivationConfig::default().cache;
+    limits.max_matches_per_fragment = 1;
+    let cache = LruFragmentMatchCache::new(limits);
     let digest = macro_digest(&macros());
-    let story = story_id();
     let fragment_ref = &buffer.fragments()[0];
-    let key = fragment_cache_key(&story, &index.reference, &digest, fragment_ref);
-    let matches = Arc::new(index.match_fragment(fragment_ref));
-    cache.insert(
-        key.clone(),
-        FragmentMatchCacheValue {
-            matches: matches.clone(),
-            estimated_bytes: usize::MAX,
-        },
-    );
+    let key = fragment_cache_key(&crate::harness::story_id(), &index.reference, &digest, fragment_ref);
+    let matches = index.match_fragment(fragment_ref);
+    cache
+        .insert(
+            key.clone(),
+            FragmentMatchCacheValue {
+                matches: vec![matches[0].clone(), matches[0].clone()],
+            },
+        )
+        .unwrap();
     assert!(cache.get(&key).is_none());
-    cache.insert(
-        key.clone(),
-        FragmentMatchCacheValue {
-            matches: matches.clone(),
-            estimated_bytes: estimate_match_bytes(&matches),
-        },
-    );
+    cache.insert(key.clone(), FragmentMatchCacheValue { matches }).unwrap();
     assert!(cache.get(&key).is_some());
+    assert_eq!(cache.stats().insert_rejections, 1);
 }

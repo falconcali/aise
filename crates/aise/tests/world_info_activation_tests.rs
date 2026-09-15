@@ -11,7 +11,5 @@ mod errors_tests;
 mod index_tests;
 #[path = "activation/matching_tests.rs"]
 mod matching_tests;
-#[path = "activation/provider_tests.rs"]
-mod provider_tests;
 #[path = "activation/rounds_tests.rs"]
 mod rounds_tests;

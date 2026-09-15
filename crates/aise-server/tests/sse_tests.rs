@@ -97,7 +97,11 @@ async fn story_instance_snapshot_is_available_for_sse_recovery_path() {
     let store: Arc<dyn Store> = SqliteStore::connect(&db).await.unwrap();
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&db).await.unwrap();
     let pack_service = PackService::new(
-        NativeAssetImporter::new(AssetLimitsConfig::default(), NarrativeConfig::default()),
+        NativeAssetImporter::new(
+            AssetLimitsConfig::default(),
+            NarrativeConfig::default(),
+            aise::config::ActivationConfig::default().rule.limits(),
+        ),
         asset_store.clone(),
     );
     let pack = pack_service

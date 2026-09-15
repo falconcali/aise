@@ -42,6 +42,7 @@ pub enum AssetValidationCode {
     ArchiveSizeExceeded,
     ArchiveRatioExceeded,
     RetrievalHintRequired,
+    ActivationRuleInvalid,
 }
 
 impl AssetValidationCode {
@@ -74,6 +75,7 @@ impl AssetValidationCode {
             AssetValidationCode::ArchiveSizeExceeded => "archive_size_exceeded",
             AssetValidationCode::ArchiveRatioExceeded => "archive_ratio_exceeded",
             AssetValidationCode::RetrievalHintRequired => "retrieval_hint_required",
+            AssetValidationCode::ActivationRuleInvalid => "activation_rule_invalid",
         }
     }
 }

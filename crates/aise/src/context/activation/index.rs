@@ -1,207 +1,48 @@
-use crate::config::FragmentMatchCacheLimits;
 use crate::domain::asset::ids::Sha256Digest;
-use crate::domain::ids::StoryId;
 use crate::domain::knowledge::KnowledgeSourceId;
 use crate::domain::knowledge::activation::{
     ActivationEntryMetadata, ActivationError, ActivationIndexLimits, ActivationIndexSnapshot,
-    ActivationIndexSnapshotRef, ActivationMacroValues, ActivationRuleLimits, FragmentPatternMatch, FrozenLiteralIndex,
-    FrozenPackIndex, FrozenPackIndexKey, FrozenRegexSet, ScanFragment, ScanFragmentId, ScanFragmentKind,
-    build_frozen_pack_index,
+    ActivationIndexSnapshotRef, ActivationMacroValues, ActivationRuleLimits, build_frozen_pack_index,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
-pub use crate::domain::knowledge::activation::index::{MATCHER_VERSION, macro_digest};
+pub use crate::domain::knowledge::activation::index::{
+    CompiledPatternRef, FrozenLiteralIndex, FrozenPackIndex, FrozenPackIndexKey, FrozenRegexSet, MATCHER_VERSION,
+    macro_digest,
+};
 
 #[derive(Debug)]
 pub struct ActivationOverlayIndex {
     pub overlay_version: u64,
+    pub upserts: Vec<ActivationEntryMetadata>,
+    pub tombstones: BTreeSet<KnowledgeSourceId>,
     pub literal_index: Arc<FrozenLiteralIndex>,
     pub regex_set: Arc<FrozenRegexSet>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FragmentMatchCacheKey {
-    pub story_id: StoryId,
-    pub fragment_id: ScanFragmentId,
-    pub fragment_kind: ScanFragmentKind,
-    pub content_hash: Sha256Digest,
-    pub pack_digest: Sha256Digest,
-    pub overlay_version: u64,
-    pub matcher_version: u32,
-    pub macro_digest: Sha256Digest,
-}
-
-#[derive(Debug, Clone)]
-pub struct FragmentMatchCacheValue {
-    pub matches: Arc<Vec<FragmentPatternMatch>>,
-    pub estimated_bytes: usize,
-}
-
-pub trait FragmentMatchCache: Send + Sync {
-    fn get(&self, key: &FragmentMatchCacheKey) -> Option<FragmentMatchCacheValue>;
-    fn insert(&self, key: FragmentMatchCacheKey, value: FragmentMatchCacheValue);
-    fn invalidate_story(&self, story_id: &StoryId);
-}
-
-struct FragmentCacheState {
-    entries: HashMap<FragmentMatchCacheKey, (u64, FragmentMatchCacheValue)>,
-    order: BTreeMap<u64, FragmentMatchCacheKey>,
-    per_story: HashMap<StoryId, usize>,
-    total_bytes: usize,
-    tick: u64,
-}
-
-pub struct InMemoryFragmentMatchCache {
-    limits: FragmentMatchCacheLimits,
-    state: Mutex<FragmentCacheState>,
-}
-
-impl InMemoryFragmentMatchCache {
-    pub fn new(limits: FragmentMatchCacheLimits) -> Self {
-        Self {
-            limits,
-            state: Mutex::new(FragmentCacheState {
-                entries: HashMap::new(),
-                order: BTreeMap::new(),
-                per_story: HashMap::new(),
-                total_bytes: 0,
-                tick: 0,
-            }),
-        }
-    }
-
-    pub fn limits(&self) -> FragmentMatchCacheLimits {
-        self.limits
-    }
-
-    pub fn admits(&self, value: &FragmentMatchCacheValue) -> bool {
-        value.matches.len() <= self.limits.max_matches_per_fragment
-            && value.estimated_bytes <= self.limits.max_evidence_bytes_per_fragment
-    }
-}
-
-impl FragmentMatchCache for InMemoryFragmentMatchCache {
-    fn get(&self, key: &FragmentMatchCacheKey) -> Option<FragmentMatchCacheValue> {
-        let Ok(mut state) = self.state.lock() else {
-            return None;
-        };
-        let tick = state.tick.saturating_add(1);
-        state.tick = tick;
-        let previous = {
-            let (slot, value) = state.entries.get_mut(key)?;
-            let previous = *slot;
-            *slot = tick;
-            let value = value.clone();
-            state.order.remove(&previous);
-            state.order.insert(tick, key.clone());
-            value
-        };
-        Some(previous)
-    }
-
-    fn insert(&self, key: FragmentMatchCacheKey, value: FragmentMatchCacheValue) {
-        if !self.admits(&value) {
-            return;
-        }
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-        let tick = state.tick.saturating_add(1);
-        state.tick = tick;
-        if let Some((previous, old)) = state.entries.remove(&key) {
-            state.order.remove(&previous);
-            state.total_bytes = state.total_bytes.saturating_sub(old.estimated_bytes);
-            decrement_story(&mut state.per_story, &key.story_id);
-        }
-        state.total_bytes = state.total_bytes.saturating_add(value.estimated_bytes);
-        *state.per_story.entry(key.story_id.clone()).or_default() += 1;
-        state.order.insert(tick, key.clone());
-        state.entries.insert(key.clone(), (tick, value));
-        enforce_story_limit(&mut state, &key.story_id, self.limits.max_fragments_per_story);
-        enforce_global_limits(
-            &mut state,
-            self.limits.max_cached_stories,
-            self.limits.max_total_estimated_bytes,
-        );
-    }
-
-    fn invalidate_story(&self, story_id: &StoryId) {
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-        let doomed = state
-            .entries
-            .keys()
-            .filter(|key| &key.story_id == story_id)
-            .cloned()
-            .collect::<Vec<_>>();
-        for key in doomed {
-            remove_key(&mut state, &key);
-        }
-    }
-}
-
-fn decrement_story(per_story: &mut HashMap<StoryId, usize>, story_id: &StoryId) {
-    let Some(count) = per_story.get_mut(story_id) else {
-        return;
-    };
-    *count = count.saturating_sub(1);
-    if *count == 0 {
-        per_story.remove(story_id);
-    }
-}
-
-fn remove_key(state: &mut FragmentCacheState, key: &FragmentMatchCacheKey) {
-    let Some((tick, value)) = state.entries.remove(key) else {
-        return;
-    };
-    state.order.remove(&tick);
-    state.total_bytes = state.total_bytes.saturating_sub(value.estimated_bytes);
-    decrement_story(&mut state.per_story, &key.story_id);
-}
-
-fn enforce_story_limit(state: &mut FragmentCacheState, story_id: &StoryId, max_fragments: usize) {
-    while state.per_story.get(story_id).copied().unwrap_or_default() > max_fragments {
-        let Some(key) = state
-            .order
-            .iter()
-            .find(|(_, key)| &key.story_id == story_id)
-            .map(|(_, key)| key.clone())
-        else {
-            return;
-        };
-        remove_key(state, &key);
-    }
-}
-
-fn enforce_global_limits(state: &mut FragmentCacheState, max_stories: usize, max_bytes: usize) {
-    while state.per_story.len() > max_stories || state.total_bytes > max_bytes {
-        let Some(key) = state.order.values().next().cloned() else {
-            return;
-        };
-        remove_key(state, &key);
-    }
 }
 
 struct PackIndexCacheState {
     entries: HashMap<FrozenPackIndexKey, (u64, Arc<FrozenPackIndex>)>,
     order: BTreeMap<u64, FrozenPackIndexKey>,
+    total_estimated_bytes: usize,
     tick: u64,
 }
 
 pub struct FrozenPackIndexCache {
-    capacity: usize,
+    max_packs: usize,
+    max_total_estimated_bytes: usize,
     state: Mutex<PackIndexCacheState>,
 }
 
 impl FrozenPackIndexCache {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(max_packs: usize, max_total_estimated_bytes: usize) -> Self {
         Self {
-            capacity: capacity.max(1),
+            max_packs: max_packs.max(1),
+            max_total_estimated_bytes: max_total_estimated_bytes.max(1),
             state: Mutex::new(PackIndexCacheState {
                 entries: HashMap::new(),
                 order: BTreeMap::new(),
+                total_estimated_bytes: 0,
                 tick: 0,
             }),
         }
@@ -224,26 +65,36 @@ impl FrozenPackIndexCache {
         Some(index)
     }
 
-    pub fn insert(&self, index: Arc<FrozenPackIndex>) {
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
+    pub fn insert(&self, index: Arc<FrozenPackIndex>) -> Result<(), ActivationError> {
+        let estimated_bytes = index.estimated_bytes();
+        if estimated_bytes > self.max_total_estimated_bytes {
+            return Err(ActivationError::WorkLimitExceeded {
+                limit: "max_compiled_bytes",
+            });
+        }
+        let mut state = self.state.lock().map_err(|_| ActivationError::WorkLimitExceeded {
+            limit: "max_compiled_bytes",
+        })?;
         let key = index.key.clone();
         let tick = state.tick.saturating_add(1);
         state.tick = tick;
-        if let Some((previous, _)) = state.entries.remove(&key) {
+        if let Some((previous, replaced)) = state.entries.remove(&key) {
             state.order.remove(&previous);
+            state.total_estimated_bytes = state.total_estimated_bytes.saturating_sub(replaced.estimated_bytes());
         }
+        state.total_estimated_bytes = state.total_estimated_bytes.saturating_add(estimated_bytes);
         state.order.insert(tick, key.clone());
         state.entries.insert(key, (tick, index));
-        while state.entries.len() > self.capacity {
+        while state.entries.len() > self.max_packs || state.total_estimated_bytes > self.max_total_estimated_bytes {
             let Some(oldest) = state.order.values().next().cloned() else {
                 break;
             };
-            if let Some((previous, _)) = state.entries.remove(&oldest) {
+            if let Some((previous, removed)) = state.entries.remove(&oldest) {
                 state.order.remove(&previous);
+                state.total_estimated_bytes = state.total_estimated_bytes.saturating_sub(removed.estimated_bytes());
             }
         }
+        Ok(())
     }
 
     pub fn len(&self) -> usize {
@@ -258,10 +109,28 @@ impl FrozenPackIndexCache {
 pub fn build_overlay_index(
     overlay_version: u64,
     entries: &BTreeMap<KnowledgeSourceId, ActivationEntryMetadata>,
+    pack_index: &FrozenPackIndex,
     macros: &ActivationMacroValues,
     limits: ActivationIndexLimits,
     rule_limits: ActivationRuleLimits,
 ) -> Result<ActivationOverlayIndex, ActivationError> {
+    let upserts = entries.values().filter(|entry| !entry.from_pack).cloned().collect::<Vec<_>>();
+    if upserts.len() > limits.max_overlay_entries {
+        return Err(ActivationError::WorkLimitExceeded {
+            limit: "max_overlay_entries",
+        });
+    }
+    let tombstones = pack_index
+        .metadata
+        .keys()
+        .filter(|source_id| !entries.contains_key(*source_id))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if tombstones.len() > limits.max_tombstones {
+        return Err(ActivationError::WorkLimitExceeded {
+            limit: "max_tombstones",
+        });
+    }
     let overlay_limits = ActivationIndexLimits {
         max_entries: limits.max_overlay_entries,
         ..limits
@@ -271,15 +140,11 @@ pub fn build_overlay_index(
         macro_digest: macro_digest(macros),
         matcher_version: MATCHER_VERSION,
     };
-    let index = build_frozen_pack_index(
-        key,
-        entries.values().filter(|entry| !entry.from_pack),
-        macros,
-        overlay_limits,
-        rule_limits,
-    )?;
+    let index = build_frozen_pack_index(key, upserts.iter(), macros, overlay_limits, rule_limits)?;
     Ok(ActivationOverlayIndex {
         overlay_version,
+        upserts,
+        tombstones,
         literal_index: index.literal_index,
         regex_set: index.regex_set,
     })
@@ -287,38 +152,51 @@ pub fn build_overlay_index(
 
 pub fn compose_index_snapshot(
     reference: ActivationIndexSnapshotRef,
-    metadata: BTreeMap<KnowledgeSourceId, ActivationEntryMetadata>,
     pack_index: &FrozenPackIndex,
     overlay: &ActivationOverlayIndex,
-) -> ActivationIndexSnapshot {
-    ActivationIndexSnapshot::new(
+    limits: ActivationIndexLimits,
+) -> Result<ActivationIndexSnapshot, ActivationError> {
+    let literal_patterns = pack_index.literal_index.len().saturating_add(overlay.literal_index.len());
+    if literal_patterns > limits.max_literal_patterns {
+        return Err(ActivationError::WorkLimitExceeded {
+            limit: "max_literal_patterns",
+        });
+    }
+    let regex_patterns = pack_index.regex_set.len().saturating_add(overlay.regex_set.len());
+    if regex_patterns > limits.max_regex_patterns {
+        return Err(ActivationError::WorkLimitExceeded {
+            limit: "max_regex_patterns",
+        });
+    }
+    let compiled_bytes = pack_index
+        .estimated_bytes()
+        .saturating_add(overlay.literal_index.compiled_bytes())
+        .saturating_add(overlay.regex_set.compiled_bytes());
+    if compiled_bytes > limits.max_compiled_bytes {
+        return Err(ActivationError::WorkLimitExceeded {
+            limit: "max_compiled_bytes",
+        });
+    }
+    let mut metadata = pack_index.metadata.clone();
+    for source_id in &overlay.tombstones {
+        metadata.remove(source_id);
+    }
+    for entry in &overlay.upserts {
+        metadata.insert(entry.source_id.clone(), entry.clone());
+    }
+    if metadata.len() > limits.max_entries {
+        return Err(ActivationError::WorkLimitExceeded { limit: "max_entries" });
+    }
+    Ok(ActivationIndexSnapshot::new(
         reference,
         metadata,
         pack_index.literal_index.clone(),
         pack_index.regex_set.clone(),
         overlay.literal_index.clone(),
         overlay.regex_set.clone(),
-    )
+    ))
 }
 
-pub fn estimate_match_bytes(matches: &[FragmentPatternMatch]) -> usize {
-    matches.len().saturating_mul(std::mem::size_of::<FragmentPatternMatch>())
-}
-
-pub fn fragment_cache_key(
-    story_id: &StoryId,
-    reference: &ActivationIndexSnapshotRef,
-    macro_digest: &Sha256Digest,
-    fragment: &ScanFragment,
-) -> FragmentMatchCacheKey {
-    FragmentMatchCacheKey {
-        story_id: story_id.clone(),
-        fragment_id: fragment.id.clone(),
-        fragment_kind: fragment.kind,
-        content_hash: fragment.content_hash.clone(),
-        pack_digest: reference.pack_digest.clone(),
-        overlay_version: reference.overlay_version,
-        matcher_version: reference.matcher_version,
-        macro_digest: macro_digest.clone(),
-    }
-}
+#[cfg(test)]
+#[path = "tests/index_tests.rs"]
+mod tests;

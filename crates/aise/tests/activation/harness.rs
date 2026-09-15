@@ -1,5 +1,5 @@
-use aise::context::activation::index::{
-    FragmentMatchCache, FragmentMatchCacheValue, InMemoryFragmentMatchCache, estimate_match_bytes, fragment_cache_key,
+use aise::context::activation::fragment_cache::{
+    FragmentMatchCache, FragmentMatchCacheValue, LruFragmentMatchCache, fragment_cache_key,
 };
 use aise::domain::asset::ids::Sha256Digest;
 use aise::domain::asset::validation::BoundedText;
@@ -15,7 +15,6 @@ use aise::domain::knowledge::activation::{
 };
 use aise::domain::knowledge::{KnowledgeIdHighWater, KnowledgeKind, KnowledgeSourceId};
 use aise::domain::story_instance::snapshot::KnowledgeSnapshotRef;
-use aise::domain::turn::KnowledgeDelivery;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -199,29 +198,29 @@ pub fn match_all_cached(
     cache: &dyn FragmentMatchCache,
 ) -> ActivationFragmentMatches {
     let digest = macro_digest(&macros());
-    let story = story_id();
     let mut matches = ActivationFragmentMatches::new();
     for fragment in buffer.fragments() {
-        let key = fragment_cache_key(&story, &index.reference, &digest, fragment);
+        let key = fragment_cache_key(&story_id(), &index.reference, &digest, fragment);
         if let Some(cached) = cache.get(&key) {
-            matches.insert(fragment.id.clone(), cached.matches);
+            matches.insert(fragment.id.clone(), Arc::new(cached.matches.clone()));
             continue;
         }
-        let computed = Arc::new(index.match_fragment(fragment));
-        cache.insert(
-            key,
-            FragmentMatchCacheValue {
-                matches: computed.clone(),
-                estimated_bytes: estimate_match_bytes(&computed),
-            },
-        );
-        matches.insert(fragment.id.clone(), computed);
+        let computed = index.match_fragment(fragment);
+        cache
+            .insert(
+                key,
+                FragmentMatchCacheValue {
+                    matches: computed.clone(),
+                },
+            )
+            .unwrap();
+        matches.insert(fragment.id.clone(), Arc::new(computed));
     }
     matches
 }
 
-pub fn new_cache() -> InMemoryFragmentMatchCache {
-    InMemoryFragmentMatchCache::new(aise::config::ActivationConfig::default().cache)
+pub fn new_cache() -> LruFragmentMatchCache {
+    LruFragmentMatchCache::new(aise::config::ActivationConfig::default().cache)
 }
 
 pub struct ExecuteSpec {
@@ -232,7 +231,7 @@ pub struct ExecuteSpec {
     pub runtime_limits: ActivationRuntimeLimits,
     pub turn: u64,
     pub continuation: Option<ActivationContinuation>,
-    pub cache: Option<Arc<InMemoryFragmentMatchCache>>,
+    pub cache: Option<Arc<LruFragmentMatchCache>>,
 }
 
 impl ExecuteSpec {
@@ -269,7 +268,7 @@ impl ExecuteSpec {
         self
     }
 
-    pub fn with_cache(mut self, cache: Arc<InMemoryFragmentMatchCache>) -> Self {
+    pub fn with_cache(mut self, cache: Arc<LruFragmentMatchCache>) -> Self {
         self.cache = Some(cache);
         self
     }
@@ -349,8 +348,4 @@ pub fn run(
 
 pub fn ids(entries: &[ActivatedKnowledgeRef]) -> Vec<String> {
     entries.iter().map(|entry| entry.source_id.as_str().to_owned()).collect()
-}
-
-pub fn writer() -> KnowledgeDelivery {
-    KnowledgeDelivery::Writer
 }

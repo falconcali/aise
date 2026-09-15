@@ -146,6 +146,7 @@ impl ActivationIndexPort for FixtureIndex {
                 1,
                 aise::domain::knowledge::activation::MATCHER_VERSION,
             ),
+            pack_entries: self.entries.clone(),
             entries: self.entries.clone(),
         }))
     }
@@ -367,7 +368,11 @@ async fn repair_reuses_the_frozen_index_and_the_prior_continuation() {
     let index_loads = fixture.index.loads();
     let mut repair_spec = spec(&snapshot, &story, &buffer, GenerationTrigger::Normal);
     repair_spec.continuation = Some(first.result.continuation.clone());
-    let repaired = fixture.coordinator.run(repair_spec).await.unwrap();
+    let repaired = fixture
+        .coordinator
+        .run_with_index(repair_spec, first.index_snapshot.clone())
+        .await
+        .unwrap();
     assert_eq!(
         repaired
             .result
@@ -382,7 +387,7 @@ async fn repair_reuses_the_frozen_index_and_the_prior_continuation() {
             .map(|entry| entry.source_id.clone())
             .collect::<Vec<_>>()
     );
-    assert!(fixture.index.loads() > index_loads);
+    assert_eq!(fixture.index.loads(), index_loads);
 }
 
 #[tokio::test]

@@ -3,12 +3,12 @@ use crate::config::{
     TurnContentLimitsConfig,
 };
 use crate::context::activation::KnowledgeActivationCoordinator;
+use crate::context::activation::scan_builder::build_activation_scan_buffer;
 use crate::context::error::ContextError;
-use crate::domain::asset::validation::BoundedText;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::knowledge::activation::{
-    ActivationMacroValues, ActivationRunMode, ActivationScanBuffer, GenerationTrigger, ScanFragment, ScanFragmentKind,
+    ActivationMacroValues, ActivationRunMode, GenerationTrigger, LoadedActivationEntry,
 };
 use crate::domain::narrative_graph::projector::{NarrativeProjection, NarrativeProjectionInput, NarrativeProjector};
 use crate::domain::narrative_graph::state_view::CommittedNarrativeStateView;
@@ -17,16 +17,25 @@ use crate::domain::turn::{
     BaselineContext, KnowledgeDelivery, KnowledgeIndexEntry, NarrativeGraphStateIndex, RelevantWorldKnowledge,
     RelevantWorldKnowledgeItem, RoleContextView, RoleIndexEntry, SnapshotLimits,
 };
-use crate::persistence::knowledge_read_port::{KnowledgeFilter, KnowledgeIndexQuery, SourceKnowledgeQuery};
+use crate::persistence::knowledge_read_port::KnowledgeIndexQuery;
 use crate::persistence::store::Store;
 use crate::turn::turn_context::{PreparedActivation, TurnExecutionContext};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::turn::turn_trace::{SpanPayload, ToolCallData};
 use async_trait::async_trait;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Instant;
+
+pub struct BaselineContextBuilderConfig {
+    pub content_limits: TurnContentLimitsConfig,
+    pub context_config: ContextPreparationConfig,
+    pub asset_limits: AssetLimitsConfig,
+    pub narrative_config: NarrativeConfig,
+    pub retrieval_config: RetrievalConfig,
+    pub activation_config: ActivationConfig,
+}
 
 pub struct BaselineContextBuilder {
     store: Arc<dyn Store>,
@@ -43,23 +52,18 @@ pub struct BaselineContextBuilder {
 impl BaselineContextBuilder {
     pub fn new(
         store: Arc<dyn Store>,
-        content_limits: TurnContentLimitsConfig,
-        context_config: ContextPreparationConfig,
-        asset_limits: AssetLimitsConfig,
-        narrative_config: NarrativeConfig,
-        retrieval_config: RetrievalConfig,
-        activation_config: ActivationConfig,
+        config: BaselineContextBuilderConfig,
         coordinator: Arc<KnowledgeActivationCoordinator>,
     ) -> Self {
-        let narrative_projector = NarrativeProjector::new(narrative_config.as_limits());
+        let narrative_projector = NarrativeProjector::new(config.narrative_config.as_limits());
         Self {
             store,
-            content_limits,
-            context_config,
-            asset_limits,
-            narrative_config,
-            retrieval_config,
-            activation_config,
+            content_limits: config.content_limits,
+            context_config: config.context_config,
+            asset_limits: config.asset_limits,
+            narrative_config: config.narrative_config,
+            retrieval_config: config.retrieval_config,
+            activation_config: config.activation_config,
             coordinator,
             narrative_projector,
         }
@@ -102,17 +106,7 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
             outcome.map_err(TurnExecutionError::from)?
         };
         let pending = ctx.trace().begin_span("context.prepare", "context.prepare");
-        let prepared = prepare_baseline(
-            &snapshot,
-            ctx.player_contribution(),
-            ctx.turn_number(),
-            &self.context_config,
-            &self.retrieval_config,
-            &self.activation_config,
-            &self.coordinator,
-            &self.narrative_projector,
-        )
-        .await;
+        let prepared = prepare_baseline(self, &snapshot, ctx.player_contribution(), ctx.turn_number()).await;
         let payload = match &prepared {
             Ok((baseline, projection, activation)) => serde_json::json!({
                 "story_id": story_id,
@@ -144,14 +138,10 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
 }
 
 async fn prepare_baseline(
+    builder: &BaselineContextBuilder,
     snapshot: &StoryReadSnapshot,
     player_contribution: &str,
     turn_number: crate::domain::ids::TurnNumber,
-    context_config: &ContextPreparationConfig,
-    retrieval_config: &RetrievalConfig,
-    activation_config: &ActivationConfig,
-    coordinator: &KnowledgeActivationCoordinator,
-    narrative_projector: &NarrativeProjector,
 ) -> Result<(BaselineContext, NarrativeProjection, PreparedActivation), ContextError> {
     let player_role_view = snapshot
         .role(snapshot.player_role_id())
@@ -161,7 +151,8 @@ async fn prepare_baseline(
     let player_role = project_role_context(player_role_view);
     let committed_view = CommittedNarrativeStateView::new(snapshot);
     let current_turn = snapshot.base_revision().get().saturating_add(1);
-    let narrative_projection = narrative_projector
+    let narrative_projection = builder
+        .narrative_projector
         .project(NarrativeProjectionInput {
             definition: snapshot.narrative_definition(),
             state: snapshot.narrative_state(),
@@ -176,13 +167,14 @@ async fn prepare_baseline(
         &player_role,
         player_contribution,
         &narrative_projection,
-        activation_config,
+        &builder.activation_config,
     )?;
     let macros = ActivationMacroValues {
         player_name: player_role.profile.name.as_str().to_owned(),
         player_role_label: player_role.role_label.as_str().to_owned(),
     };
-    let activation_result = coordinator
+    let activation_outcome = builder
+        .coordinator
         .run(crate::context::activation::ActivationRunSpec {
             snapshot: snapshot.knowledge_snapshot(),
             scan_buffer: &scan_buffer,
@@ -194,13 +186,20 @@ async fn prepare_baseline(
             external_seeds: &[],
             continuation: None,
         })
-        .await?
-        .result;
-    let relevant_world_knowledge =
-        load_relevant_knowledge(snapshot, &activation_result, retrieval_config, coordinator.knowledge()).await?;
-    let knowledge_index =
-        load_knowledge_index(snapshot, &relevant_world_knowledge, retrieval_config, coordinator.knowledge()).await?;
-    let relevant_roles = select_relevant_roles(snapshot, context_config.max_relevant_roles);
+        .await?;
+    let relevant_world_knowledge = load_relevant_knowledge(
+        &activation_outcome.result,
+        &activation_outcome.loaded_entries,
+        &builder.retrieval_config,
+    )?;
+    let knowledge_index = load_knowledge_index(
+        snapshot,
+        &relevant_world_knowledge,
+        &builder.retrieval_config,
+        builder.coordinator.knowledge(),
+    )
+    .await?;
+    let relevant_roles = select_relevant_roles(snapshot, builder.context_config.max_relevant_roles);
     let selected: BTreeSet<RoleId> = std::iter::once(player_role.role_id.clone())
         .chain(relevant_roles.iter().map(|role| role.role_id.clone()))
         .collect();
@@ -215,11 +214,11 @@ async fn prepare_baseline(
         });
     }
     role_index.sort_by(|left, right| left.role_id.cmp(&right.role_id));
-    if role_index.len() > context_config.max_role_index {
+    if role_index.len() > builder.context_config.max_role_index {
         return Err(ContextError::IndexLimitExceeded {
             index: "role_index",
             actual: role_index.len(),
-            maximum: context_config.max_role_index,
+            maximum: builder.context_config.max_role_index,
         });
     }
     let baseline = BaselineContext {
@@ -240,93 +239,12 @@ async fn prepare_baseline(
         },
     };
     let activation = PreparedActivation {
-        continuation: activation_result.continuation,
-        pending_timed_state: activation_result.pending_timed_state,
+        continuation: activation_outcome.result.continuation,
+        pending_timed_state: activation_outcome.result.pending_timed_state,
+        index_snapshot: activation_outcome.index_snapshot,
+        loaded_entries: activation_outcome.loaded_entries,
     };
     Ok((baseline, narrative_projection, activation))
-}
-
-pub(crate) fn build_activation_scan_buffer(
-    snapshot: &StoryReadSnapshot,
-    player_role: &RoleContextView,
-    player_contribution: &str,
-    narrative_projection: &NarrativeProjection,
-    activation_config: &ActivationConfig,
-) -> Result<ActivationScanBuffer, ContextError> {
-    let max_item_bytes = activation_config.runtime.max_single_entry_bytes;
-    let mut fragments = Vec::new();
-    let contribution = BoundedText::try_new(player_contribution.to_owned(), "player_contribution", max_item_bytes)
-        .map_err(|_| ContextError::InvalidRecord {
-            code: "scan_player_contribution",
-        })?;
-    fragments.push(ScanFragment::new(ScanFragmentKind::PlayerContribution, 0, 0, contribution));
-    if !player_role.profile.name.as_str().is_empty() {
-        fragments.push(ScanFragment::new(
-            ScanFragmentKind::PlayerRoleName,
-            0,
-            0,
-            player_role.profile.name.clone(),
-        ));
-    }
-    if !player_role.role_label.as_str().is_empty() {
-        fragments.push(ScanFragment::new(
-            ScanFragmentKind::PlayerRoleLabel,
-            0,
-            0,
-            player_role.role_label.clone(),
-        ));
-    }
-    for (order, direction) in narrative_projection.plan.active_directions.iter().enumerate() {
-        let stable_order = u32::try_from(order).unwrap_or(u32::MAX);
-        fragments.push(ScanFragment::new(
-            ScanFragmentKind::NarrativeDirection,
-            0,
-            stable_order,
-            direction.dramatic_focus.clone(),
-        ));
-    }
-    for (order, event) in narrative_projection.plan.world_event_intents.iter().enumerate() {
-        let stable_order = u32::try_from(order).unwrap_or(u32::MAX);
-        fragments.push(ScanFragment::new(
-            ScanFragmentKind::NarrativeEvent,
-            0,
-            stable_order,
-            event.description.clone(),
-        ));
-    }
-    let recent = snapshot.story_continuity().recent_segments();
-    for (order, segment) in recent.iter().rev().enumerate() {
-        let depth = u16::try_from(order.saturating_add(1)).unwrap_or(u16::MAX);
-        let stable_order = u32::try_from(order).unwrap_or(u32::MAX);
-        fragments.push(ScanFragment::new(
-            ScanFragmentKind::RecentStory,
-            depth,
-            stable_order,
-            segment.text.clone(),
-        ));
-    }
-    let summary = snapshot.story_continuity().summary();
-    if !summary.text.as_str().is_empty() {
-        let summary_depth = if activation_config.runtime.include_summary_at_max_depth {
-            activation_config.runtime.max_scan_depth
-        } else {
-            u16::try_from(recent.len().saturating_add(1)).unwrap_or(u16::MAX)
-        };
-        fragments.push(ScanFragment::new(
-            ScanFragmentKind::StorySummary,
-            summary_depth,
-            0,
-            summary.text.clone(),
-        ));
-    }
-    ActivationScanBuffer::try_new(
-        fragments,
-        activation_config.runtime.max_scan_fragments,
-        activation_config.runtime.max_scan_bytes,
-    )
-    .map_err(|_| ContextError::InvalidRecord {
-        code: "activation_scan_buffer",
-    })
 }
 
 fn project_role_context(role: &crate::domain::story_instance::role::StoryRoleView) -> RoleContextView {
@@ -350,53 +268,27 @@ fn select_relevant_roles(snapshot: &StoryReadSnapshot, max_relevant_roles: usize
     roles
 }
 
-async fn load_relevant_knowledge(
-    snapshot: &StoryReadSnapshot,
+fn load_relevant_knowledge(
     activation: &crate::domain::knowledge::activation::ActivationResult,
+    loaded_entries: &BTreeMap<crate::domain::knowledge::KnowledgeSourceId, LoadedActivationEntry>,
     config: &RetrievalConfig,
-    knowledge: &Arc<dyn crate::persistence::knowledge_read_port::KnowledgeReadPort>,
 ) -> Result<RelevantWorldKnowledge, ContextError> {
-    let admitted = activation
-        .activated
-        .iter()
-        .filter(|entry| {
-            entry.deliveries.contains(&KnowledgeDelivery::Writer)
-                && matches!(entry.source_id.kind(), KnowledgeKind::Fact | KnowledgeKind::Rumor)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    if admitted.is_empty() {
-        return Ok(RelevantWorldKnowledge::default());
-    }
-    let source_ids = admitted.iter().map(|entry| entry.source_id.clone()).collect::<Vec<_>>();
-    let filter = KnowledgeFilter {
-        delivery: KnowledgeDelivery::Writer,
-        knowledge_kinds: vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
-        max_item_bytes: config.max_item_bytes,
-    };
-    let records = knowledge
-        .find_by_source_ids(SourceKnowledgeQuery {
-            snapshot: snapshot.knowledge_snapshot(),
-            filter: &filter,
-            source_ids: &source_ids,
-            limit: source_ids.len().min(config.max_items_per_audience),
-        })
-        .await?;
-    let mut by_id = records
-        .into_iter()
-        .map(|record| (record.source_id.clone(), record))
-        .collect::<std::collections::BTreeMap<_, _>>();
     let mut entries = Vec::new();
-    for activated in admitted {
-        let Some(record) = by_id.remove(&activated.source_id) else {
-            continue;
-        };
+    for activated in activation.activated.iter().filter(|entry| {
+        entry.deliveries.contains(&KnowledgeDelivery::Writer)
+            && matches!(entry.source_id.kind(), KnowledgeKind::Fact | KnowledgeKind::Rumor)
+    }) {
+        let loaded = loaded_entries
+            .get(&activated.source_id)
+            .ok_or(ContextError::SnapshotInconsistent {
+                code: "activation_body_missing",
+            })?;
         let source_priority = u8::try_from(activated.rank.min(u32::from(u8::MAX))).unwrap_or(u8::MAX);
         entries.push(RelevantWorldKnowledgeItem {
-            source_id: record.source_id,
-            content: record.content,
+            source_id: loaded.body.source_id.clone(),
+            content: loaded.body.body.clone(),
             source_priority,
-            salience: record.salience,
+            salience: loaded.salience,
         });
     }
     entries.sort_by(|left, right| {

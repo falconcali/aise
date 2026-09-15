@@ -21,10 +21,10 @@ fn key(salt: u8) -> FrozenPackIndexKey {
 fn frozen_pack_index_is_reused_across_lookups() {
     let entries = vec![entry(fact(1), rule("alpha"), "one")];
     let metadata = metadata_of(&entries);
-    let cache = FrozenPackIndexCache::new(2);
+    let cache = FrozenPackIndexCache::new(2, index_limits().max_compiled_bytes * 2);
     let built =
         Arc::new(build_frozen_pack_index(key(1), metadata.values(), &macros(), index_limits(), rule_limits()).unwrap());
-    cache.insert(built.clone());
+    cache.insert(built.clone()).unwrap();
     let fetched = cache.get(&key(1)).unwrap();
     assert!(Arc::ptr_eq(&built, &fetched));
     assert_eq!(cache.len(), 1);
@@ -34,13 +34,17 @@ fn frozen_pack_index_is_reused_across_lookups() {
 fn frozen_pack_index_cache_evicts_least_recently_used() {
     let entries = vec![entry(fact(1), rule("alpha"), "one")];
     let metadata = metadata_of(&entries);
-    let cache = FrozenPackIndexCache::new(1);
-    cache.insert(Arc::new(
-        build_frozen_pack_index(key(1), metadata.values(), &macros(), index_limits(), rule_limits()).unwrap(),
-    ));
-    cache.insert(Arc::new(
-        build_frozen_pack_index(key(2), metadata.values(), &macros(), index_limits(), rule_limits()).unwrap(),
-    ));
+    let cache = FrozenPackIndexCache::new(1, index_limits().max_compiled_bytes);
+    cache
+        .insert(Arc::new(
+            build_frozen_pack_index(key(1), metadata.values(), &macros(), index_limits(), rule_limits()).unwrap(),
+        ))
+        .unwrap();
+    cache
+        .insert(Arc::new(
+            build_frozen_pack_index(key(2), metadata.values(), &macros(), index_limits(), rule_limits()).unwrap(),
+        ))
+        .unwrap();
     assert_eq!(cache.len(), 1);
     assert!(cache.get(&key(1)).is_none());
     assert!(cache.get(&key(2)).is_some());
@@ -84,7 +88,7 @@ fn regex_patterns_count_against_the_regex_budget() {
     assert!(matches!(
         error,
         ActivationError::WorkLimitExceeded {
-            limit: "activation_index_regex_patterns"
+            limit: "max_regex_patterns"
         }
     ));
 }

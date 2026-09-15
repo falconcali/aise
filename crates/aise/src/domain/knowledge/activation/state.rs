@@ -45,3 +45,22 @@ pub struct PendingActivationStateDelta {
     pub upserts: Vec<ActivationTimedState>,
     pub deletes: BTreeSet<KnowledgeSourceId>,
 }
+
+impl PendingActivationStateDelta {
+    pub fn merge(&mut self, newer: Self) {
+        let mut upserts = self
+            .upserts
+            .drain(..)
+            .map(|state| (state.source_id.clone(), state))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for source_id in newer.deletes {
+            upserts.remove(&source_id);
+            self.deletes.insert(source_id);
+        }
+        for state in newer.upserts {
+            self.deletes.remove(&state.source_id);
+            upserts.insert(state.source_id.clone(), state);
+        }
+        self.upserts = upserts.into_values().collect();
+    }
+}

@@ -1,9 +1,12 @@
 use crate::domain::asset::ids::Sha256Digest;
+use crate::domain::asset::world_book::WorldBook;
 use crate::domain::knowledge::activation::{
     ActivationEntryMetadata, ActivationIndexLimits, ActivationIndexMetadata, ActivationIndexSnapshotRef,
     ActivationRuleVersion, ActivationTimedState, MATCHER_VERSION,
 };
-use crate::domain::knowledge::{KnowledgeEntry, KnowledgeKind, KnowledgeSource, KnowledgeSourceId};
+use crate::domain::knowledge::{
+    KnowledgeIdHighWater, KnowledgeKind, KnowledgeSource, KnowledgeSourceId, allocate_knowledge_ids,
+};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
 use crate::persistence::activation_index_port::ActivationIndexPort;
 use crate::persistence::activation_timed_state_port::{ActivationTimedStateQuery, ActivationTimedStateReadPort};
@@ -23,69 +26,178 @@ impl ActivationIndexPort for SqliteStore {
         limits: ActivationIndexLimits,
     ) -> Result<Arc<ActivationIndexMetadata>, StoreError> {
         let mut tx = self.pool().begin().await.map_err(SqliteStoreError::from)?;
-        let overlay_version: i64 =
-            sqlx::query_scalar("SELECT activation_overlay_version FROM story_instances WHERE story_id = ?1")
-                .bind(knowledge.story_id.as_str())
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(SqliteStoreError::from)?;
-        let rows = sqlx::query(
-            "SELECT payload_json FROM knowledge_entries WHERE story_id = ?1 AND knowledge_kind != 'memory'
-             ORDER BY source_id LIMIT ?2",
+        let snapshot_row: Option<(i64, String, i64, String)> = sqlx::query_as(
+            "SELECT s.revision, p.digest, i.activation_overlay_version, p.world_book_json
+             FROM stories s
+             INNER JOIN story_instances i ON i.story_id = s.id
+             INNER JOIN story_packs p ON p.pack_id = i.pack_id
+             WHERE s.id = ?1",
         )
         .bind(knowledge.story_id.as_str())
-        .bind(i64::try_from(limits.max_entries).map_err(|_| StoreError::LimitExceeded {
-            limit: "activation_index_entries",
-        })?)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(SqliteStoreError::from)?;
+        let Some((revision, digest, overlay_version, world_book_json)) = snapshot_row else {
+            return Err(StoreError::NotFound);
+        };
+        let revision = u64::try_from(revision).map_err(|_| invalid_activation_state())?;
+        if revision != knowledge.base_revision.get() || digest != knowledge.pack_digest.to_string() {
+            return Err(StoreError::RevisionConflict);
+        }
+        let pack_entries = canonical_pack_entries(&world_book_json, limits.max_entries)?;
+        let entry_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM knowledge_entries WHERE story_id = ?1 AND knowledge_kind != 'memory'",
+        )
+        .bind(knowledge.story_id.as_str())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(SqliteStoreError::from)?;
+        if entry_count < 0 || usize::try_from(entry_count).ok().is_none_or(|count| count > limits.max_entries) {
+            return Err(StoreError::LimitExceeded { limit: "max_entries" });
+        }
+        let rows = sqlx::query(
+            "SELECT source_id, knowledge_kind, salience, source_json, activation_rule_json, activation_rule_version
+             FROM knowledge_entries WHERE story_id = ?1 AND knowledge_kind != 'memory' ORDER BY source_id",
+        )
+        .bind(knowledge.story_id.as_str())
         .fetch_all(&mut *tx)
         .await
         .map_err(SqliteStoreError::from)?;
         let mut entries = BTreeMap::new();
         let mut overlay_entries = 0usize;
         for row in rows {
-            let payload: String = row.try_get("payload_json").map_err(SqliteStoreError::from)?;
-            let entry: KnowledgeEntry = serde_json::from_str(&payload).map_err(|_| StoreError::Serialization {
+            let source_id: String = row.try_get("source_id").map_err(SqliteStoreError::from)?;
+            let kind = match row
+                .try_get::<String, _>("knowledge_kind")
+                .map_err(SqliteStoreError::from)?
+                .as_str()
+            {
+                "fact" => KnowledgeKind::Fact,
+                "rumor" => KnowledgeKind::Rumor,
+                _ => {
+                    return Err(StoreError::Serialization {
+                        kind: StoreSerializationErrorKind::InvalidWorldState,
+                    });
+                }
+            };
+            let source_id =
+                KnowledgeSourceId::try_from_parts(kind, &source_id).map_err(|_| StoreError::Serialization {
+                    kind: StoreSerializationErrorKind::InvalidWorldState,
+                })?;
+            let source: KnowledgeSource =
+                serde_json::from_str(&row.try_get::<String, _>("source_json").map_err(SqliteStoreError::from)?)
+                    .map_err(|_| StoreError::Serialization {
+                        kind: StoreSerializationErrorKind::InvalidWorldState,
+                    })?;
+            let rule = serde_json::from_str(
+                &row.try_get::<String, _>("activation_rule_json")
+                    .map_err(SqliteStoreError::from)?,
+            )
+            .map_err(|_| StoreError::Serialization {
                 kind: StoreSerializationErrorKind::InvalidWorldState,
             })?;
-            let from_pack = matches!(
-                entry.source(),
-                KnowledgeSource::Seed { pack_digest, .. } if pack_digest == &knowledge.pack_digest
+            let rule_version = ActivationRuleVersion::from_digest(
+                Sha256Digest::try_new(
+                    &row.try_get::<String, _>("activation_rule_version")
+                        .map_err(SqliteStoreError::from)?,
+                )
+                .map_err(|_| StoreError::Serialization {
+                    kind: StoreSerializationErrorKind::InvalidWorldState,
+                })?,
             );
-            let metadata_entry = match &entry {
-                KnowledgeEntry::Fact(value) => ActivationEntryMetadata {
-                    source_id: entry.source_id(),
-                    kind: entry.kind(),
-                    rule: value.activation.clone(),
-                    rule_version: value.activation_rule_version.clone(),
-                    salience: value.salience,
-                    from_pack,
-                },
-                KnowledgeEntry::Rumor(value) => ActivationEntryMetadata {
-                    source_id: entry.source_id(),
-                    kind: entry.kind(),
-                    rule: value.activation.clone(),
-                    rule_version: value.activation_rule_version.clone(),
-                    salience: value.salience,
-                    from_pack,
-                },
-                KnowledgeEntry::Memory(_) => continue,
-            };
+            let salience =
+                u8::try_from(row.try_get::<i64, _>("salience").map_err(SqliteStoreError::from)?).map_err(|_| {
+                    StoreError::Serialization {
+                        kind: StoreSerializationErrorKind::InvalidWorldState,
+                    }
+                })?;
+            let from_pack = matches!(
+                source,
+                KnowledgeSource::Seed { pack_digest, .. } if pack_digest == knowledge.pack_digest
+            );
             if !from_pack {
                 overlay_entries = overlay_entries.saturating_add(1);
                 if overlay_entries > limits.max_overlay_entries {
                     return Err(StoreError::LimitExceeded {
-                        limit: "activation_overlay_entries",
+                        limit: "max_overlay_entries",
                     });
                 }
             }
-            entries.insert(metadata_entry.source_id.clone(), metadata_entry);
+            let metadata_entry = ActivationEntryMetadata {
+                source_id: source_id.clone(),
+                kind,
+                rule,
+                rule_version,
+                salience,
+                from_pack,
+            };
+            entries.insert(source_id, metadata_entry);
         }
         tx.commit().await.map_err(SqliteStoreError::from)?;
         let overlay_version = u64::try_from(overlay_version).map_err(|_| StoreError::Serialization {
             kind: StoreSerializationErrorKind::InvalidWorldState,
         })?;
         let reference = ActivationIndexSnapshotRef::from_knowledge(knowledge, overlay_version, MATCHER_VERSION);
-        Ok(Arc::new(ActivationIndexMetadata { reference, entries }))
+        Ok(Arc::new(ActivationIndexMetadata {
+            reference,
+            pack_entries,
+            entries,
+        }))
+    }
+}
+
+fn canonical_pack_entries(
+    world_book_json: &str,
+    max_entries: usize,
+) -> Result<BTreeMap<KnowledgeSourceId, ActivationEntryMetadata>, StoreError> {
+    let world_book: WorldBook = serde_json::from_str(world_book_json).map_err(|_| invalid_activation_state())?;
+    let count = world_book.facts.len().saturating_add(world_book.rumors.len());
+    if count > max_entries {
+        return Err(StoreError::LimitExceeded { limit: "max_entries" });
+    }
+    let kinds = std::iter::repeat_n(KnowledgeKind::Fact, world_book.facts.len())
+        .chain(std::iter::repeat_n(KnowledgeKind::Rumor, world_book.rumors.len()))
+        .collect::<Vec<_>>();
+    let allocation =
+        allocate_knowledge_ids(KnowledgeIdHighWater::zero(), &kinds).map_err(|_| invalid_activation_state())?;
+    let mut assigned = allocation.assigned.into_iter();
+    let mut entries = BTreeMap::new();
+    for seed in world_book.facts.into_values() {
+        let source_id = assigned.next().ok_or_else(invalid_activation_state)?;
+        let rule_version = ActivationRuleVersion::from_rule(&seed.activation);
+        entries.insert(
+            source_id.clone(),
+            ActivationEntryMetadata {
+                source_id,
+                kind: KnowledgeKind::Fact,
+                rule: seed.activation,
+                rule_version,
+                salience: seed.salience,
+                from_pack: true,
+            },
+        );
+    }
+    for seed in world_book.rumors.into_values() {
+        let source_id = assigned.next().ok_or_else(invalid_activation_state)?;
+        let rule_version = ActivationRuleVersion::from_rule(&seed.activation);
+        entries.insert(
+            source_id.clone(),
+            ActivationEntryMetadata {
+                source_id,
+                kind: KnowledgeKind::Rumor,
+                rule: seed.activation,
+                rule_version,
+                salience: seed.salience,
+                from_pack: true,
+            },
+        );
+    }
+    Ok(entries)
+}
+
+fn invalid_activation_state() -> StoreError {
+    StoreError::Serialization {
+        kind: StoreSerializationErrorKind::InvalidWorldState,
     }
 }
 
@@ -100,6 +212,30 @@ impl ActivationIndexPort for Arc<SqliteStore> {
     }
 }
 
+async fn verify_activation_snapshot(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    snapshot: &KnowledgeSnapshotRef,
+) -> Result<(), StoreError> {
+    let row: Option<(i64, String)> = sqlx::query_as(
+        "SELECT s.revision, p.digest FROM stories s
+         INNER JOIN story_instances i ON i.story_id = s.id
+         INNER JOIN story_packs p ON p.pack_id = i.pack_id
+         WHERE s.id = ?1",
+    )
+    .bind(snapshot.story_id.as_str())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(SqliteStoreError::from)?;
+    let Some((revision, digest)) = row else {
+        return Err(StoreError::NotFound);
+    };
+    let revision = u64::try_from(revision).map_err(|_| invalid_activation_state())?;
+    if revision != snapshot.base_revision.get() || digest != snapshot.pack_digest.to_string() {
+        return Err(StoreError::RevisionConflict);
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl ActivationTimedStateReadPort for SqliteStore {
     async fn load_timed_state(
@@ -107,20 +243,33 @@ impl ActivationTimedStateReadPort for SqliteStore {
         query: ActivationTimedStateQuery<'_>,
     ) -> Result<Vec<ActivationTimedState>, StoreError> {
         if query.limit == 0 {
-            return Ok(Vec::new());
+            return Err(StoreError::LimitExceeded {
+                limit: "activation_timed_state",
+            });
         }
+        let mut tx = self.pool().begin().await.map_err(SqliteStoreError::from)?;
+        verify_activation_snapshot(&mut tx, query.snapshot).await?;
+        let fetch_limit = query.limit.checked_add(1).ok_or(StoreError::LimitExceeded {
+            limit: "activation_timed_state",
+        })?;
         let rows = sqlx::query(
             "SELECT source_id, rule_version, sticky_through_turn, cooldown_through_turn
              FROM knowledge_activation_timed_state WHERE story_id = ?1 ORDER BY source_id LIMIT ?2",
         )
         .bind(query.snapshot.story_id.as_str())
-        .bind(i64::try_from(query.limit).map_err(|_| StoreError::LimitExceeded {
+        .bind(i64::try_from(fetch_limit).map_err(|_| StoreError::LimitExceeded {
             limit: "activation_timed_state",
         })?)
-        .fetch_all(self.pool())
+        .fetch_all(&mut *tx)
         .await
         .map_err(SqliteStoreError::from)?;
-        rows.into_iter()
+        if rows.len() > query.limit {
+            return Err(StoreError::LimitExceeded {
+                limit: "activation_timed_state",
+            });
+        }
+        let states = rows
+            .into_iter()
             .map(|row| {
                 let source_id: String = row.try_get("source_id").map_err(SqliteStoreError::from)?;
                 let rule_version: String = row.try_get("rule_version").map_err(SqliteStoreError::from)?;
@@ -160,7 +309,9 @@ impl ActivationTimedStateReadPort for SqliteStore {
                         .and_then(|value| crate::domain::ids::TurnNumber::try_new(value).ok()),
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        tx.commit().await.map_err(SqliteStoreError::from)?;
+        Ok(states)
     }
 }
 

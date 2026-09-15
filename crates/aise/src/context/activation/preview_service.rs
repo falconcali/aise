@@ -101,6 +101,8 @@ impl KnowledgeActivationPreviewService {
             .last_committed_turn_number
             .checked_add(1)
             .ok_or(ActivationPreviewError::InvalidLimits)?;
+        let turn_number = crate::domain::ids::TurnNumber::try_new(evaluated_turn_number)
+            .map_err(|_| ActivationPreviewError::InvalidLimits)?;
         let contribution = BoundedText::try_new(
             spec.player_contribution,
             "player_contribution",
@@ -127,7 +129,13 @@ impl KnowledgeActivationPreviewService {
         };
         let index = self
             .coordinator
-            .build_index_snapshot(snapshot.knowledge_snapshot(), &macros)
+            .prepare_index_for_run(
+                snapshot.knowledge_snapshot(),
+                &macros,
+                turn_number,
+                spec.generation_trigger,
+                ActivationRunMode::Preview,
+            )
             .await
             .map_err(ActivationPreviewError::Activation)?;
         let macro_digest = crate::domain::knowledge::activation::macro_digest(&macros);
@@ -138,7 +146,7 @@ impl KnowledgeActivationPreviewService {
             .timed_state
             .load_timed_state(ActivationTimedStateQuery {
                 snapshot: snapshot.knowledge_snapshot(),
-                limit: self.activation_config.runtime.max_activated_entries,
+                limit: self.activation_config.index.max_entries,
             })
             .await
             .map_err(ActivationPreviewError::Store)?;

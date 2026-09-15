@@ -57,7 +57,6 @@ fn valid_pack_json() -> String {
                     "memory_key": "private_arrival",
                     "kind": "personal",
                     "content": "I arrived before dawn.",
-                    "topics": [],
                     "salience": 70
                 }]
             },
@@ -75,7 +74,6 @@ fn valid_pack_json() -> String {
                     "memory_key": "private_bell",
                     "kind": "observed",
                     "content": "I heard the bell at midnight.",
-                    "topics": [],
                     "salience": 60
                 }]
             }
@@ -188,7 +186,11 @@ async fn seeded_store(label: &str) -> (Arc<SqliteStore>, KnowledgeSnapshotRef, S
     let store: Arc<dyn Store> = sqlite.clone();
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&db).await.unwrap();
     let pack_service = PackService::new(
-        NativeAssetImporter::new(AssetLimitsConfig::default(), NarrativeConfig::default()),
+        NativeAssetImporter::new(
+            AssetLimitsConfig::default(),
+            NarrativeConfig::default(),
+            aise::config::ActivationConfig::default().rule.limits(),
+        ),
         asset_store.clone(),
     );
     let pack = pack_service

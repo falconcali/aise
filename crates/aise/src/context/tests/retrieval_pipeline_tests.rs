@@ -43,6 +43,7 @@ impl ActivationIndexPort for EmptyIndex {
             reference: crate::domain::knowledge::activation::ActivationIndexSnapshotRef::from_knowledge(
                 knowledge, 0, 1,
             ),
+            pack_entries: std::collections::BTreeMap::new(),
             entries: std::collections::BTreeMap::new(),
         }))
     }

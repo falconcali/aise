@@ -1,13 +1,11 @@
-use aise::config::{AssetLimitsConfig, NarrativeConfig};
+use aise::config::{AssetLimitsConfig, NarrativeConfig, StoryHistoryConfig};
 use aise::domain::asset::frozen_ref::FrozenCharacterCardRef;
 use aise::domain::asset::ids::{PackId, PlayerId, SemanticVersion};
 use aise::domain::ids::RoleId;
 use aise::domain::narrative::StorySegmentOrigin;
 use aise::persistence::asset_store::AssetStore;
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
-use aise::persistence::{
-    SqliteStore, SqliteStoryHistoryReader, Store, StoryHistoryConfig, StoryHistoryQuery, StoryHistoryReadPort,
-};
+use aise::persistence::{SqliteStore, SqliteStoryHistoryReader, Store, StoryHistoryQuery, StoryHistoryReadPort};
 use aise::story::character_card_service::CharacterCardService;
 use aise::story::instance_factory::{CreateStoryInstanceSpec, StoryInstanceFactory, StoryInstantiationLimits};
 use aise::story::pack_service::{AssetInput, NativeAssetImporter, PackService};
@@ -114,7 +112,7 @@ fn valid_pack_json() -> String {
 fn valid_card_json(character_id: &str) -> String {
     serde_json::json!({
         "spec": "aise_char_v4",
-        "spec_version": "5.0",
+        "spec_version": "4.0",
         "character_id": character_id,
         "meta": {
             "creator": "aise-team",
@@ -144,7 +142,11 @@ async fn runtime_services(label: &str) -> RuntimeServices {
     let sqlite = SqliteStore::connect(&db_url).await.unwrap();
     let store: Arc<dyn Store> = sqlite.clone();
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&db_url).await.unwrap();
-    let importer = NativeAssetImporter::new(AssetLimitsConfig::default(), NarrativeConfig::default());
+    let importer = NativeAssetImporter::new(
+        AssetLimitsConfig::default(),
+        NarrativeConfig::default(),
+        aise::config::ActivationConfig::default().rule.limits(),
+    );
     let pack_service = Arc::new(PackService::new(importer, asset_store.clone()));
     let character_card_service = Arc::new(CharacterCardService::new(asset_store.clone(), AssetLimitsConfig::default()));
     let instance_factory = Arc::new(StoryInstanceFactory::new(

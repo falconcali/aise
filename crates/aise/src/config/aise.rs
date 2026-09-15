@@ -12,8 +12,8 @@ use super::prompt::PromptModuleConfig;
 use super::retrieval::RetrievalConfig;
 use super::state_extractor::StateExtractorConfig;
 use super::storage::StorageConfig;
+use super::story_history::StoryHistoryConfig;
 use super::turn::TurnConfig;
-use crate::persistence::story_history_read_port::StoryHistoryConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

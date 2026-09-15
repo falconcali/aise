@@ -1,3 +1,4 @@
+use super::rule::normalize_activation_literal;
 use crate::domain::asset::ids::Sha256Digest;
 use crate::domain::asset::validation::BoundedText;
 use serde::Serialize;
@@ -27,6 +28,8 @@ pub struct ScanFragment {
     pub stable_order: u32,
     pub content_hash: Sha256Digest,
     pub text: BoundedText,
+    normalized_sensitive: String,
+    normalized_insensitive: String,
 }
 
 impl ScanFragment {
@@ -35,6 +38,8 @@ impl ScanFragment {
         let mut hasher = Sha256::new();
         hasher.update(format!("{kind:?}:{recency_depth}:{stable_order}:").as_bytes());
         hasher.update(text.as_str().as_bytes());
+        let normalized_sensitive = normalize_activation_literal(text.as_str(), true);
+        let normalized_insensitive = normalize_activation_literal(text.as_str(), false);
         Self {
             id: ScanFragmentId(Sha256Digest::from_bytes(hasher.finalize().into())),
             kind,
@@ -42,6 +47,16 @@ impl ScanFragment {
             stable_order,
             content_hash,
             text,
+            normalized_sensitive,
+            normalized_insensitive,
+        }
+    }
+
+    pub fn normalized_text(&self, case_sensitive: bool) -> &str {
+        if case_sensitive {
+            &self.normalized_sensitive
+        } else {
+            &self.normalized_insensitive
         }
     }
 }
@@ -108,3 +123,7 @@ fn source_priority(kind: ScanFragmentKind) -> u8 {
         ScanFragmentKind::RecursionContent => 5,
     }
 }
+
+#[cfg(test)]
+#[path = "tests/scan_tests.rs"]
+mod tests;

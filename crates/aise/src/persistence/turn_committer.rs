@@ -7,6 +7,7 @@ use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Instant;
+use tracing::{Instrument, info_span};
 
 pub struct TurnCommitter {
     store: Arc<dyn Store>,
@@ -60,18 +61,16 @@ impl TurnExecutionPipeline for TurnCommitter {
         let story_id = ctx.story_id().clone();
         let created_at = ctx.identity().started_at_ms();
         let llm_calls = ctx.llm_calls().to_vec();
-        let activation_state_delta = ctx
-            .activation()
-            .ok_or_else(|| {
-                TurnExecutionError::new(
-                    crate::turn::turn_error::TurnFailureKind::InvariantViolation,
-                    "missing_activation",
-                    Some(TurnStage::TurnCommitter),
-                    "committer requires prepared activation state",
-                )
-            })?
-            .pending_timed_state
-            .clone();
+        let prepared_activation = ctx.activation().ok_or_else(|| {
+            TurnExecutionError::new(
+                crate::turn::turn_error::TurnFailureKind::InvariantViolation,
+                "missing_activation",
+                Some(TurnStage::TurnCommitter),
+                "committer requires prepared activation state",
+            )
+        })?;
+        let activation_state_delta = prepared_activation.pending_timed_state.clone();
+        let overlay_version_before = prepared_activation.index_snapshot.reference.overlay_version;
         let mut outbox = Vec::new();
         for (seq, event) in change_set.narrative_events().iter().enumerate() {
             outbox.push(OutboxRecord {
@@ -90,6 +89,17 @@ impl TurnExecutionPipeline for TurnCommitter {
                 created_at,
             });
         }
+        let timed_upserts = activation_state_delta.upserts.len();
+        let timed_deletes = activation_state_delta.deletes.len();
+        let overlay_version_after = if change_set
+            .knowledge_mutations()
+            .iter()
+            .any(knowledge_mutation_affects_activation)
+        {
+            overlay_version_before.saturating_add(1)
+        } else {
+            overlay_version_before
+        };
         let commit = TurnCommitSpec {
             story_id: story_id.clone(),
             turn: StoryTurn {
@@ -117,7 +127,27 @@ impl TurnExecutionPipeline for TurnCommitter {
         };
         let pending = ctx.trace().begin_span("story.commit", "story.commit");
         let started = Instant::now();
-        let outcome = self.store.commit_turn(&commit).await;
+        let activation_span = info_span!(
+            "knowledge.activation.commit",
+            story_id = %story_id,
+            turn_number = turn_number.get(),
+            timed_upserts,
+            timed_deletes,
+            overlay_version_before,
+            overlay_version_after,
+            status = tracing::field::Empty,
+            error_code = tracing::field::Empty,
+        );
+        let outcome = self.store.commit_turn(&commit).instrument(activation_span.clone()).await;
+        match &outcome {
+            Ok(_) => {
+                activation_span.record("status", "ok");
+            }
+            Err(error) => {
+                activation_span.record("status", "error");
+                activation_span.record("error_code", store_error_code(error));
+            }
+        }
         let latency_ms = started.elapsed().as_millis() as u64;
         let payload = match &outcome {
             Ok(result) => serde_json::json!({
@@ -146,6 +176,16 @@ impl TurnExecutionPipeline for TurnCommitter {
         ctx.trace().end_span_with(pending, &payload);
         let result = outcome?;
         ctx.set_committed_result(result)
+    }
+}
+
+fn knowledge_mutation_affects_activation(mutation: &crate::turn::turn_validation::ValidatedKnowledgeMutation) -> bool {
+    match &mutation.operation {
+        crate::turn::turn_validation::ValidatedKnowledgeOperation::Add(entry)
+        | crate::turn::turn_validation::ValidatedKnowledgeOperation::Update { value: entry, .. } => {
+            entry.kind() != crate::domain::knowledge::KnowledgeKind::Memory
+        }
+        crate::turn::turn_validation::ValidatedKnowledgeOperation::Delete { .. } => true,
     }
 }
 

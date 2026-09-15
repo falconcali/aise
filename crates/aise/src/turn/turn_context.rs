@@ -1,7 +1,7 @@
 use crate::domain::asset::ids::Sha256Digest;
 use crate::domain::ids::{RoleIdHighWater, StoryId, TurnKey, TurnNumber};
 use crate::domain::knowledge::KnowledgeIdHighWater;
-use crate::domain::knowledge::activation::ActivationContinuation;
+use crate::domain::knowledge::activation::{ActivationContinuation, ActivationIndexSnapshot, LoadedActivationEntry};
 use crate::domain::narrative_graph::projector::NarrativeProjection;
 use crate::domain::story_instance::snapshot::StoryReadSnapshot;
 use crate::domain::turn::{
@@ -21,12 +21,16 @@ use crate::turn::turn_validation::{
     ValidationResult,
 };
 use serde::Serialize;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub struct PreparedActivation {
     pub continuation: ActivationContinuation,
     pub pending_timed_state: crate::domain::knowledge::activation::PendingActivationStateDelta,
+    pub index_snapshot: Arc<ActivationIndexSnapshot>,
+    pub loaded_entries: BTreeMap<crate::domain::knowledge::KnowledgeSourceId, LoadedActivationEntry>,
 }
 
 impl PreparedActivation {
@@ -35,14 +39,23 @@ impl PreparedActivation {
         turn_number: TurnNumber,
     ) -> Self {
         use crate::domain::knowledge::activation::{
-            ActivationIndexSnapshotRef, ActivationRuntimeLimits, ActivationWorkUsage, GenerationTrigger,
-            PendingActivationStateDelta,
+            ActivationIndexSnapshotRef, ActivationRuntimeLimits, ActivationWorkUsage, FrozenLiteralIndex,
+            FrozenRegexSet, GenerationTrigger, PendingActivationStateDelta,
         };
+        let index_reference = ActivationIndexSnapshotRef::from_knowledge(&knowledge_snapshot, 0, 1);
+        let index_snapshot = Arc::new(ActivationIndexSnapshot::new(
+            index_reference.clone(),
+            BTreeMap::new(),
+            Arc::new(FrozenLiteralIndex::default()),
+            Arc::new(FrozenRegexSet::default()),
+            Arc::new(FrozenLiteralIndex::default()),
+            Arc::new(FrozenRegexSet::default()),
+        ));
         Self {
             continuation: ActivationContinuation {
                 turn_number,
                 generation_trigger: GenerationTrigger::Normal,
-                index_snapshot: ActivationIndexSnapshotRef::from_knowledge(&knowledge_snapshot, 0, 1),
+                index_snapshot: index_reference,
                 knowledge_snapshot,
                 activated: std::collections::BTreeMap::new(),
                 terminal_rejections: std::collections::BTreeMap::new(),
@@ -64,6 +77,8 @@ impl PreparedActivation {
                 limits: ActivationRuntimeLimits::default(),
             },
             pending_timed_state: PendingActivationStateDelta::default(),
+            index_snapshot,
+            loaded_entries: BTreeMap::new(),
         }
     }
 }

@@ -19,25 +19,19 @@ fn enabled_rule(key: &str) -> KnowledgeActivationRule {
 #[test]
 fn every_activation_error_maps_to_a_stable_turn_code() {
     let cases = [
-        (ActivationError::InvalidRule { code: "any" }, "activation_invalid_rule"),
-        (ActivationError::InvalidRegex, "activation_invalid_regex"),
-        (ActivationError::IndexVersionMismatch, "activation_index_version_mismatch"),
-        (ActivationError::SnapshotMismatch, "activation_snapshot_mismatch"),
+        (ActivationError::InvalidRule { code: "any" }, "activation_rule_invalid"),
+        (ActivationError::InvalidRegex, "activation_regex_invalid"),
+        (ActivationError::IndexVersionMismatch, "activation_index_mismatch"),
+        (ActivationError::SnapshotMismatch, "activation_snapshot_conflict"),
         (ActivationError::ContinuationMismatch, "activation_continuation_mismatch"),
-        (
-            ActivationError::WorkLimitExceeded { limit: "any" },
-            "activation_work_limit_exceeded",
-        ),
-        (ActivationError::RecursionLimitReached, "activation_recursion_limit_reached"),
-        (ActivationError::MandatoryBudgetExceeded, "activation_mandatory_budget_exceeded"),
-        (
-            ActivationError::ExternalTargetUnauthorized,
-            "activation_external_target_unauthorized",
-        ),
-        (ActivationError::TimedStateInconsistent, "activation_timed_state_inconsistent"),
+        (ActivationError::WorkLimitExceeded { limit: "any" }, "activation_work_limit"),
+        (ActivationError::RecursionLimitReached, "activation_recursion_limit"),
+        (ActivationError::MandatoryBudgetExceeded, "activation_mandatory_budget"),
+        (ActivationError::ExternalTargetUnauthorized, "activation_target_unauthorized"),
+        (ActivationError::TimedStateInconsistent, "activation_timed_state_invalid"),
         (
             ActivationError::ProviderFailure { provider: "any" },
-            "activation_provider_failure",
+            "activation_provider_failed",
         ),
     ];
     for (error, expected) in cases {
@@ -50,11 +44,11 @@ fn every_activation_error_maps_to_a_stable_turn_code() {
 fn store_failures_reuse_the_existing_store_codes() {
     assert_eq!(
         ContextError::Activation(ActivationError::Store(ActivationStoreFailure::RevisionConflict)).turn_code(),
-        "retrieval_snapshot_conflict"
+        "store_unavailable"
     );
     assert_eq!(
         ContextError::Activation(ActivationError::Store(ActivationStoreFailure::Unavailable)).turn_code(),
-        "store_error"
+        "store_unavailable"
     );
 }
 
@@ -98,6 +92,25 @@ fn rule_limits_are_enforced_field_by_field() {
     assert_eq!(
         rule.validate(rule_limits()).unwrap_err(),
         ActivationRuleValidationError::InvalidRegex
+    );
+
+    let mut rule = enabled_rule("alpha");
+    rule.selection.groups = vec![
+        aise::domain::knowledge::activation::ActivationGroupKey::try_new("group-a").unwrap(),
+        aise::domain::knowledge::activation::ActivationGroupKey::try_new("group-b").unwrap(),
+    ];
+    let mut limits = rule_limits();
+    limits.max_groups_per_entry = 1;
+    assert_eq!(rule.validate(limits).unwrap_err(), ActivationRuleValidationError::TooManyGroups);
+
+    let mut rule = enabled_rule("alpha");
+    rule.selection.groups =
+        vec![aise::domain::knowledge::activation::ActivationGroupKey::try_new("long-group").unwrap()];
+    let mut limits = rule_limits();
+    limits.max_group_key_bytes = 4;
+    assert_eq!(
+        rule.validate(limits).unwrap_err(),
+        ActivationRuleValidationError::GroupKeyTooLong
     );
 
     let mut limits = rule_limits();

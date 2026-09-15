@@ -13,11 +13,16 @@ use aise::persistence::asset_store::AssetStore;
 use aise::persistence::sqlite_asset_store::SqliteAssetStore;
 use aise::persistence::sqlite_store::SqliteStore;
 use aise::story::pack_service::{AssetImportError, AssetInput, NativeAssetImporter, PackService};
+use sqlx::SqlitePool;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn importer() -> NativeAssetImporter {
-    NativeAssetImporter::new(AssetLimitsConfig::default(), NarrativeConfig::default())
+    NativeAssetImporter::new(
+        AssetLimitsConfig::default(),
+        NarrativeConfig::default(),
+        ActivationConfig::default().rule.limits(),
+    )
 }
 
 fn temp_db_path(label: &str) -> String {
@@ -658,6 +663,38 @@ fn rejects_missing_manifest_in_pack_container() {
             .iter()
             .any(|issue| issue.code == AssetValidationCode::MissingReference)
     );
+}
+
+#[tokio::test]
+async fn invalid_activation_regex_is_rejected_before_any_pack_rows_are_written() {
+    let (service, db) = pack_service("invalid_activation_regex").await;
+    let mut value: serde_json::Value = serde_json::from_str(include_str!("../../../examples/demo_pack.json")).unwrap();
+    value["world_book"]["facts"]["lodge_is_remote"]["activation"]["match"]["keys"] = serde_json::json!(["/(/i"]);
+    value["world_book"]["facts"]["lodge_is_remote"]["activation"]["mode"]["constant"] = serde_json::json!(false);
+    let error = service
+        .import(AssetInput::Json(value.to_string().as_bytes()))
+        .await
+        .expect_err("invalid activation regex must fail import");
+    let AssetImportError::Invalid(report) = error else {
+        panic!("invalid activation regex must be an asset validation failure");
+    };
+    assert!(report.issues.iter().any(|issue| {
+        issue.code == AssetValidationCode::ActivationRuleInvalid
+            && issue.path == "/world_book/facts/lodge_is_remote/activation"
+    }));
+    let pool = SqlitePool::connect(&db).await.unwrap();
+    let packs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM story_packs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let entries: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM knowledge_entries")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(packs, 0);
+    assert_eq!(entries, 0);
+    pool.close().await;
+    let _ = std::fs::remove_file(&db);
 }
 
 #[tokio::test]

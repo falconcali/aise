@@ -1,10 +1,11 @@
+use crate::config::StoryHistoryConfig;
 use crate::domain::ids::{StoryId, TurnNumber};
 use crate::domain::story_sequence::StorySequence;
 use crate::persistence::sqlite_error::SqliteStoreError;
 use crate::persistence::sqlite_store::SqliteStore;
 use crate::persistence::store::{StoreError, StoreSerializationErrorKind};
 use crate::persistence::story_history_read_port::{
-    StoryHistoryConfig, StoryHistoryPage, StoryHistoryQuery, StoryHistoryReadPort, StoryOpeningView, StoryTurnView,
+    StoryHistoryPage, StoryHistoryQuery, StoryHistoryReadPort, StoryOpeningView, StoryTurnView,
 };
 use async_trait::async_trait;
 use std::sync::Arc;

@@ -1,4 +1,4 @@
-use crate::domain::knowledge::activation::{ActivationError, ActivationStoreFailure};
+use crate::domain::knowledge::activation::ActivationError;
 use crate::persistence::store::StoreError;
 use thiserror::Error;
 
@@ -14,8 +14,6 @@ pub enum ContextError {
     KnowledgeAudienceViolation,
     #[error("retrieval record is invalid: {code}")]
     InvalidRecord { code: &'static str },
-    #[error("retrieval candidate limit exceeded")]
-    CandidateLimitExceeded,
     #[error("retrieved context budget exceeded: {limit}")]
     RetrievedBudgetExceeded { limit: &'static str },
     #[error("index limit exceeded: {index} actual {actual} maximum {maximum}")]
@@ -38,13 +36,8 @@ impl ContextError {
             }
             ContextError::InvalidPlan { .. } | ContextError::KnowledgeAudienceViolation => "writer_plan_invalid",
             ContextError::InvalidRecord { .. } => "retrieval_record_invalid",
-            ContextError::CandidateLimitExceeded => "retrieval_candidate_limit",
             ContextError::RetrievedBudgetExceeded { .. } => "retrieval_context_limit",
             ContextError::IndexLimitExceeded { .. } => "context_index_limit_exceeded",
-            ContextError::Activation(ActivationError::Store(ActivationStoreFailure::RevisionConflict)) => {
-                "retrieval_snapshot_conflict"
-            }
-            ContextError::Activation(ActivationError::Store(_)) => "store_error",
             ContextError::Activation(error) => error.code(),
             ContextError::Store(StoreError::RevisionConflict) => "retrieval_snapshot_conflict",
             ContextError::Store(_) => "store_error",

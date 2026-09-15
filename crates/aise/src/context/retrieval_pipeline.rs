@@ -1,10 +1,11 @@
 use crate::config::{ActivationConfig, RetrievalConfig};
 use crate::context::activation::KnowledgeActivationCoordinator;
-use crate::context::baseline_ctx_builder::build_activation_scan_buffer;
+use crate::context::activation::scan_builder::build_activation_scan_buffer;
 use crate::context::error::ContextError;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::activation::{
     ActivationMacroValues, ActivationRunMode, ActivationSeedKind, ExternalActivationSeed, GenerationTrigger,
+    LoadedActivationEntry,
 };
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use crate::domain::turn::{
@@ -104,11 +105,7 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
             player_name: baseline.player_role.profile.name.as_str().to_owned(),
             player_role_label: baseline.player_role.role_label.as_str().to_owned(),
         };
-        let index = self
-            .coordinator
-            .build_index_snapshot(snapshot.knowledge_snapshot(), &macros)
-            .await
-            .map_err(|error| map_context_error(ContextError::from(error)))?;
+        let index = prepared.index_snapshot.clone();
         let mut seeds = Vec::new();
         let mut memory_targets: BTreeMap<RoleId, Vec<KnowledgeSourceId>> = BTreeMap::new();
         for request in &plan.retrieval_plan.knowledge_requests {
@@ -135,9 +132,9 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
                         .coordinator
                         .authorize_seed(&index, &request.target_source_id, &request.delivery)
                     {
-                        return Err(map_context_error(ContextError::InvalidPlan {
-                            code: "unauthorized_activation_target",
-                        }));
+                        return Err(map_context_error(ContextError::from(
+                            crate::domain::knowledge::activation::ActivationError::ExternalTargetUnauthorized,
+                        )));
                     }
                     seeds.push(ExternalActivationSeed {
                         source_id: request.target_source_id.clone(),
@@ -150,24 +147,36 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
             }
         }
         if seeds.len() > self.activation_config.runtime.max_external_candidates {
-            return Err(map_context_error(ContextError::CandidateLimitExceeded));
+            return Err(map_context_error(ContextError::from(
+                crate::domain::knowledge::activation::ActivationError::WorkLimitExceeded {
+                    limit: "external_candidates",
+                },
+            )));
         }
-        let activation_result = self
+        let activation_outcome = self
             .coordinator
-            .run(crate::context::activation::ActivationRunSpec {
-                snapshot: snapshot.knowledge_snapshot(),
-                scan_buffer: &scan_buffer,
-                macros,
-                story_id: ctx.story_id(),
-                turn_number: ctx.turn_number(),
-                generation_trigger: GenerationTrigger::Normal,
-                mode: ActivationRunMode::CommitEligible,
-                external_seeds: &seeds,
-                continuation: Some(prepared.continuation.clone()),
-            })
+            .run_with_index(
+                crate::context::activation::ActivationRunSpec {
+                    snapshot: snapshot.knowledge_snapshot(),
+                    scan_buffer: &scan_buffer,
+                    macros,
+                    story_id: ctx.story_id(),
+                    turn_number: ctx.turn_number(),
+                    generation_trigger: GenerationTrigger::Normal,
+                    mode: ActivationRunMode::CommitEligible,
+                    external_seeds: &seeds,
+                    continuation: Some(prepared.continuation.clone()),
+                },
+                index.clone(),
+            )
             .await
-            .map_err(|error| map_context_error(ContextError::from(error)))?
-            .result;
+            .map_err(|error| map_context_error(ContextError::from(error)))?;
+        let mut loaded_entries = prepared.loaded_entries.clone();
+        loaded_entries.extend(activation_outcome.loaded_entries);
+        let mut activation_result = activation_outcome.result;
+        let mut pending_timed_state = prepared.pending_timed_state.clone();
+        pending_timed_state.merge(activation_result.pending_timed_state);
+        activation_result.pending_timed_state = pending_timed_state;
         let baseline_ids = baseline
             .relevant_world_knowledge
             .facts
@@ -185,15 +194,9 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
             })
             .cloned()
             .collect::<Vec<_>>();
-        let writer_items = load_activated_items(
-            &snapshot,
-            &newly_writer,
-            KnowledgeDelivery::Writer,
-            &self.config,
-            self.coordinator.knowledge(),
-        )
-        .await
-        .map_err(map_context_error)?;
+        let writer_items =
+            load_activated_items(&newly_writer, KnowledgeDelivery::Writer, &self.config, &loaded_entries)
+                .map_err(map_context_error)?;
         let mut world = RetrievedWorldKnowledge::default();
         for item in writer_items {
             match item.source_id.kind() {
@@ -209,23 +212,20 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
                 .iter()
                 .filter(|entry| {
                     entry.source_id.kind() == KnowledgeKind::Rumor
-                        && (entry.deliveries.contains(&KnowledgeDelivery::Writer)
-                            || entry.deliveries.contains(&KnowledgeDelivery::Character {
-                                role_id: role_id.clone(),
-                            }))
+                        && entry.deliveries.contains(&KnowledgeDelivery::Character {
+                            role_id: role_id.clone(),
+                        })
                 })
                 .cloned()
                 .collect::<Vec<_>>();
             let known_rumors = load_activated_items(
-                &snapshot,
                 &rumor_refs,
                 KnowledgeDelivery::Character {
                     role_id: role_id.clone(),
                 },
                 &self.config,
-                self.coordinator.knowledge(),
+                &loaded_entries,
             )
-            .await
             .map_err(map_context_error)?;
             let memories = if let Some(targets) = memory_targets.get(role_id) {
                 let filter = KnowledgeFilter {
@@ -322,57 +322,45 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
         ctx.replace_activation(crate::turn::turn_context::PreparedActivation {
             continuation: activation_result.continuation,
             pending_timed_state: activation_result.pending_timed_state,
+            index_snapshot: index,
+            loaded_entries,
         })?;
         ctx.set_retrieved_context(context)
     }
 }
 
-async fn load_activated_items(
-    snapshot: &crate::domain::story_instance::snapshot::StoryReadSnapshot,
+fn load_activated_items(
     activated: &[crate::domain::knowledge::activation::ActivatedKnowledgeRef],
     delivery: KnowledgeDelivery,
     config: &RetrievalConfig,
-    knowledge: &Arc<dyn crate::persistence::knowledge_read_port::KnowledgeReadPort>,
+    loaded_entries: &BTreeMap<KnowledgeSourceId, LoadedActivationEntry>,
 ) -> Result<Vec<RetrievedKnowledgeItem>, ContextError> {
-    if activated.is_empty() {
-        return Ok(Vec::new());
-    }
-    let source_ids = activated.iter().map(|entry| entry.source_id.clone()).collect::<Vec<_>>();
-    let kinds = match delivery {
-        KnowledgeDelivery::Writer => vec![KnowledgeKind::Fact, KnowledgeKind::Rumor],
-        KnowledgeDelivery::Character { .. } => vec![KnowledgeKind::Rumor],
-    };
-    let filter = KnowledgeFilter {
-        delivery,
-        knowledge_kinds: kinds,
-        max_item_bytes: config.max_item_bytes,
-    };
-    let records = knowledge
-        .find_by_source_ids(SourceKnowledgeQuery {
-            snapshot: snapshot.knowledge_snapshot(),
-            filter: &filter,
-            source_ids: &source_ids,
-            limit: source_ids.len().min(config.max_items_per_audience),
-        })
-        .await?;
-    let by_id = records
-        .into_iter()
-        .map(|record| (record.source_id.clone(), record))
-        .collect::<BTreeMap<_, _>>();
     let mut items = Vec::new();
     for entry in activated {
-        let Some(record) = by_id.get(&entry.source_id) else {
-            continue;
+        if !entry.deliveries.contains(&delivery) {
+            return Err(ContextError::KnowledgeAudienceViolation);
+        }
+        let loaded = loaded_entries.get(&entry.source_id).ok_or(ContextError::SnapshotInconsistent {
+            code: "activation_body_missing",
+        })?;
+        let allowed = match &delivery {
+            KnowledgeDelivery::Writer => matches!(loaded.body.kind, KnowledgeKind::Fact | KnowledgeKind::Rumor),
+            KnowledgeDelivery::Character { .. } => loaded.body.kind == KnowledgeKind::Rumor,
         };
+        if !allowed || loaded.body.body.as_str().len() > config.max_item_bytes {
+            return Err(ContextError::SnapshotInconsistent {
+                code: "activation_body_mismatch",
+            });
+        }
         let mut item = RetrievedKnowledgeItem::from_parts(
-            record.source_id.clone(),
-            record.content.clone(),
-            record.source.clone(),
+            loaded.body.source_id.clone(),
+            loaded.body.body.clone(),
+            loaded.source.clone(),
             entry.activation_class,
             entry.rank,
-            record.salience,
+            loaded.salience,
         );
-        if let (Some(activation), Some(version)) = (&record.activation, &record.activation_rule_version) {
+        if let (Some(activation), Some(version)) = (&loaded.activation, &loaded.activation_rule_version) {
             item = item.with_activation(activation.clone(), version.clone());
         }
         items.push(item);

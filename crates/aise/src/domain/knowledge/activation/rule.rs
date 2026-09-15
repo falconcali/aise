@@ -352,6 +352,18 @@ impl KnowledgeActivationRule {
     }
 
     pub fn validate(&self, limits: ActivationRuleLimits) -> Result<(), ActivationRuleValidationError> {
+        self.validate_inner(limits, true)
+    }
+
+    pub(crate) fn validate_for_index(&self, limits: ActivationRuleLimits) -> Result<(), ActivationRuleValidationError> {
+        self.validate_inner(limits, false)
+    }
+
+    fn validate_inner(
+        &self,
+        limits: ActivationRuleLimits,
+        compile_regex: bool,
+    ) -> Result<(), ActivationRuleValidationError> {
         if limits.max_primary_patterns_per_entry == 0
             || limits.max_secondary_patterns_per_entry == 0
             || limits.max_pattern_bytes == 0
@@ -380,7 +392,7 @@ impl KnowledgeActivationRule {
             return Err(ActivationRuleValidationError::TooManyGroups);
         }
         for pattern in self.match_rule.keys.iter().chain(self.match_rule.secondary_keys.iter()) {
-            validate_pattern(pattern, limits)?;
+            validate_pattern(pattern, limits, compile_regex)?;
         }
         for group in &self.selection.groups {
             if group.as_str().len() > limits.max_group_key_bytes {
@@ -402,6 +414,7 @@ impl KnowledgeActivationRule {
 fn validate_pattern(
     pattern: &ActivationPattern,
     limits: ActivationRuleLimits,
+    compile_regex: bool,
 ) -> Result<(), ActivationRuleValidationError> {
     let ActivationPattern::Literal(raw) = pattern;
     if raw.len() > limits.max_pattern_bytes {
@@ -418,7 +431,9 @@ fn validate_pattern(
         if value.contains("{{") {
             return Err(ActivationRuleValidationError::InvalidMacro);
         }
-        compile_activation_regex(expression, flags, limits.max_regex_program_bytes)?;
+        if compile_regex {
+            compile_activation_regex(expression, flags, limits.max_regex_program_bytes)?;
+        }
     }
     Ok(())
 }
@@ -510,3 +525,7 @@ fn default_probability() -> u8 {
 fn default_group_weight() -> u32 {
     100
 }
+
+#[cfg(test)]
+#[path = "tests/rule_tests.rs"]
+mod tests;

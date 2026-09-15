@@ -13,6 +13,7 @@ mod prompt;
 mod retrieval;
 mod state_extractor;
 mod storage;
+mod story_history;
 mod turn;
 
 pub use activation::{
@@ -36,4 +37,5 @@ pub use prompt::{PromptCatalogSourceConfig, PromptModuleConfig};
 pub use retrieval::RetrievalConfig;
 pub use state_extractor::StateExtractorConfig;
 pub use storage::StorageConfig;
+pub use story_history::StoryHistoryConfig;
 pub use turn::TurnConfig;

@@ -5,6 +5,7 @@ use crate::domain::asset::ids::{PackId, SemanticVersion, Sha256Digest, StoryPack
 use crate::domain::asset::story_pack::StoryPack;
 use crate::domain::asset::validation::{AssetValidationCode, AssetValidationIssue, BoundedText, ValidationReport};
 use crate::domain::ids::RoleId;
+use crate::domain::knowledge::activation::ActivationRuleLimits;
 use crate::persistence::asset_store::{AssetStore, PackInfo, ValidatedStoryPack};
 use crate::persistence::store::StoreError;
 use sha2::{Digest, Sha256};
@@ -211,11 +212,20 @@ fn validate_optional_profile_text(
 pub struct NativeAssetImporter {
     limits: AssetLimitsConfig,
     narrative: NarrativeConfig,
+    activation_rule_limits: ActivationRuleLimits,
 }
 
 impl NativeAssetImporter {
-    pub fn new(limits: AssetLimitsConfig, narrative: NarrativeConfig) -> Self {
-        Self { limits, narrative }
+    pub fn new(
+        limits: AssetLimitsConfig,
+        narrative: NarrativeConfig,
+        activation_rule_limits: ActivationRuleLimits,
+    ) -> Self {
+        Self {
+            limits,
+            narrative,
+            activation_rule_limits,
+        }
     }
 
     pub fn limits(&self) -> &AssetLimitsConfig {
@@ -447,12 +457,13 @@ impl NativeAssetImporter {
             ));
             return;
         }
-        if serde_json::from_value::<StoryPack>(value.clone()).is_err() {
-            report.push(AssetValidationIssue::new(
+        match serde_json::from_value::<StoryPack>(value.clone()) {
+            Ok(pack) => self.validate_activation_rules(&pack, report),
+            Err(_) => report.push(AssetValidationIssue::new(
                 AssetValidationCode::SchemaInvalid,
                 "/",
                 "pack JSON does not match the final schema",
-            ));
+            )),
         }
         self.check_forbidden_fields(value, "/", report, 0);
         let role_ids = self.validate_roles(value, report);
@@ -460,6 +471,30 @@ impl NativeAssetImporter {
         self.validate_narrative_role_references(value, &role_ids, report);
         self.validate_graph(value, report);
         self.validate_salience(value, report);
+    }
+
+    fn validate_activation_rules(&self, pack: &StoryPack, report: &mut ValidationReport) {
+        let WorldBookSource::Embedded(book) = &pack.world_book else {
+            return;
+        };
+        for (key, seed) in &book.facts {
+            if let Err(error) = seed.activation.validate(self.activation_rule_limits) {
+                report.push(AssetValidationIssue::new(
+                    AssetValidationCode::ActivationRuleInvalid,
+                    format!("/world_book/facts/{}/activation", key.as_str()),
+                    error.to_string(),
+                ));
+            }
+        }
+        for (key, seed) in &book.rumors {
+            if let Err(error) = seed.activation.validate(self.activation_rule_limits) {
+                report.push(AssetValidationIssue::new(
+                    AssetValidationCode::ActivationRuleInvalid,
+                    format!("/world_book/rumors/{}/activation", key.as_str()),
+                    error.to_string(),
+                ));
+            }
+        }
     }
 
     fn validate_roles(&self, value: &serde_json::Value, report: &mut ValidationReport) -> BTreeSet<String> {

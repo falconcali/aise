@@ -6,7 +6,7 @@ use aise::context::activation::{
     ActivationPreviewLimits, ActivationPreviewServiceConfig, KnowledgeActivationCoordinator,
     KnowledgeActivationPreviewService,
 };
-use aise::context::{BaselineContextBuilder, ContextRetrievalPipeline};
+use aise::context::{BaselineContextBuilder, BaselineContextBuilderConfig, ContextRetrievalPipeline};
 use aise::engine::SystemClock;
 use aise::llm::{LlmGateway, LlmProvider, OpenAiCompatProvider};
 use aise::persistence::asset_store::AssetStore;
@@ -103,12 +103,14 @@ pub async fn build_services(
         .initializer(Box::<TurnInitializer>::default())
         .baseline_builder(Box::new(BaselineContextBuilder::new(
             store.clone(),
-            config.aise.content.clone(),
-            config.aise.context.clone(),
-            config.aise.assets.clone(),
-            config.aise.narrative.clone(),
-            config.aise.retrieval.clone(),
-            config.aise.activation.clone(),
+            BaselineContextBuilderConfig {
+                content_limits: config.aise.content.clone(),
+                context_config: config.aise.context.clone(),
+                asset_limits: config.aise.assets.clone(),
+                narrative_config: config.aise.narrative.clone(),
+                retrieval_config: config.aise.retrieval.clone(),
+                activation_config: config.aise.activation.clone(),
+            },
             activation_coordinator,
         )))
         .writer_planner(Box::new(WriterPlanner::new(
@@ -137,7 +139,11 @@ pub async fn build_services(
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&config.aise.storage.database_url)
         .await
         .map_err(|error| anyhow::anyhow!("asset store connect failed: {error}"))?;
-    let importer = NativeAssetImporter::new(config.aise.assets.clone(), config.aise.narrative.clone());
+    let importer = NativeAssetImporter::new(
+        config.aise.assets.clone(),
+        config.aise.narrative.clone(),
+        config.aise.activation.rule.limits(),
+    );
     let pack_service = Arc::new(PackService::new(importer, asset_store.clone()));
     let character_card_service = Arc::new(CharacterCardService::new(asset_store.clone(), config.aise.assets.clone()));
     let instance_factory = Arc::new(StoryInstanceFactory::new(

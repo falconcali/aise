@@ -206,6 +206,8 @@ impl ActivationConfig {
             self.cache.max_matches_per_fragment,
             self.cache.max_evidence_bytes_per_fragment,
             self.cache.max_total_estimated_bytes,
+            self.runtime.initial_scan_depth as usize,
+            self.runtime.max_scan_depth as usize,
             self.runtime.max_scan_fragments,
             self.runtime.max_scan_bytes,
             self.runtime.max_scan_tokens as usize,
