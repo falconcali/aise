@@ -664,8 +664,9 @@ impl ActivationRuleVersion {
 ```
 
 `replace_activation` (currently `crates/aise/src/turn/turn_context.rs:247`) takes
-`PreparedActivation`, validates the phase with `expect_phase(TurnPhase::Prepared)`, and returns
-`Result`. Its call site in `crates/aise/src/context/retrieval_pipeline.rs` propagates the error.
+`PreparedActivation`, validates the post-Planner retrieval phase with
+`expect_phase(TurnPhase::Planned)`, and returns `Result`. Its call site in
+`crates/aise/src/context/retrieval_pipeline.rs` propagates the error.
 
 `FactSeed.retrieval_hint` and `RumorSeed.retrieval_hint`
 (`crates/aise/src/domain/asset/world_book.rs:40,51`) change from `Option<BoundedText>` to
@@ -741,7 +742,7 @@ Rules below extend `WIA1-01` … `WIA1-30`, which remain in force unchanged.
     or `use crate::persistence::…` import. Activation limit types live in `config`; activation
     runtime types live in `domain` and `context`.
 23. **WIA1R-23 — Phase Guard**: `replace_activation` rejects a call outside
-    `TurnPhase::Prepared` with `TurnExecutionError` and its caller propagates it.
+    `TurnPhase::Planned` with `TurnExecutionError` and its caller propagates it.
 24. **WIA1R-24 — Semantic Neutrality**: For an identical Story, Pack, overlay, timed state, scan
     buffer, trigger, seeds, and configuration, activated IDs, deliveries, order, ranks, token
     costs, evidence, rejection summary, stop reason, and pending delta are byte-identical before
@@ -914,8 +915,8 @@ Rules below extend `WIA1-01` … `WIA1-30`, which remain in force unchanged.
 
 - [ ] `TurnExecutionContext::replace_activation(&mut self, PreparedActivation) -> Result<(), TurnExecutionError>`
       matches §3.9 and its `retrieval_pipeline.rs` caller propagates the error with `?`.
-- [ ] A phase test asserts `replace_activation` outside `TurnPhase::Prepared` returns
-      `TurnExecutionError`.
+- [ ] A phase test asserts `replace_activation` succeeds during `TurnPhase::Planned` and rejects
+      calls outside that phase with `TurnExecutionError`.
 - [ ] `ActivationRuleVersion` derives `PartialOrd` and `Ord`, has a private field, and exposes
       `from_rule` and `as_digest`.
 - [ ] `FactSeed.retrieval_hint` and `RumorSeed.retrieval_hint` are `Option<RetrievalHint>` and

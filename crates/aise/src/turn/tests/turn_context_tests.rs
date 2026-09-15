@@ -206,12 +206,27 @@ fn build_ready_context(
 }
 
 #[test]
-fn replace_activation_outside_prepared_phase_is_rejected() {
+fn replace_activation_during_planned_phase_succeeds() {
     let mut ctx = build_ready_context(
         TurnConfig::default(),
         TurnContentLimitsConfig::default(),
         vec![think_request("npc-1")],
     );
+    let snapshot = sample_snapshot(&player_role());
+    let activation = PreparedActivation::empty(snapshot.knowledge_snapshot().clone(), TurnNumber::try_new(1).unwrap());
+    assert!(ctx.replace_activation(activation).is_ok());
+    assert_eq!(ctx.phase(), TurnPhase::Planned);
+}
+
+#[test]
+fn replace_activation_outside_planned_phase_is_rejected() {
+    let mut ctx = build_ready_context(
+        TurnConfig::default(),
+        TurnContentLimitsConfig::default(),
+        vec![think_request("npc-1")],
+    );
+    ctx.set_character_decisions(vec![decision("npc-1", "act now")]).unwrap();
+    ctx.complete_context_preparation().unwrap();
     let snapshot = sample_snapshot(&player_role());
     let activation = PreparedActivation::empty(snapshot.knowledge_snapshot().clone(), TurnNumber::try_new(1).unwrap());
     let error = ctx.replace_activation(activation).unwrap_err();

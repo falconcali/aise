@@ -245,7 +245,7 @@ impl TurnExecutionContext {
     }
 
     pub fn replace_activation(&mut self, activation: PreparedActivation) -> Result<(), TurnExecutionError> {
-        self.expect_phase(TurnPhase::Prepared)?;
+        self.expect_phase(TurnPhase::Planned)?;
         self.activation = Some(activation);
         Ok(())
     }
