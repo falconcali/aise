@@ -49,9 +49,9 @@ impl KnowledgeActivationPreviewService {
             knowledge,
             index,
             timed_state.clone(),
-            config.activation_config.domain_index_limits(),
+            crate::turn::turn_budget::activation_index_limits(&config.activation_config),
             config.activation_config.rule,
-            config.activation_config.domain_runtime_limits(),
+            crate::turn::turn_budget::activation_runtime_limits(&config.activation_config),
             config.activation_config.cache,
         );
         Self {
@@ -180,7 +180,7 @@ impl KnowledgeActivationPreviewService {
                     timed_state: &timed_state,
                     external_seeds: &seeds,
                     continuation: None,
-                    limits: self.activation_config.domain_runtime_limits(),
+                    limits: crate::turn::turn_budget::activation_runtime_limits(&self.activation_config),
                 },
                 snapshot.knowledge_snapshot(),
             )

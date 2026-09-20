@@ -21,7 +21,7 @@ fn importer() -> NativeAssetImporter {
     NativeAssetImporter::new(
         AssetLimitsConfig::default(),
         NarrativeConfig::default(),
-        ActivationConfig::default().rule.limits(),
+        aise::turn::turn_budget::activation_rule_limits(&ActivationConfig::default()),
     )
 }
 
@@ -142,7 +142,7 @@ fn snake_pack_passes_validation() {
 
 #[test]
 fn example_packs_activation_rules_satisfy_rule_limits_and_build_an_index() {
-    let limits = ActivationConfig::default().rule.limits();
+    let limits = aise::turn::turn_budget::activation_rule_limits(&ActivationConfig::default());
     for (label, json) in [
         ("demo_pack", include_str!("../../../examples/demo_pack.json")),
         ("snake_pack", include_str!("../../../examples/snake_pack.json")),
@@ -195,7 +195,7 @@ fn example_packs_activation_rules_satisfy_rule_limits_and_build_an_index() {
             key,
             metadata.iter(),
             &macros,
-            ActivationConfig::default().domain_index_limits(),
+            aise::turn::turn_budget::activation_index_limits(&ActivationConfig::default()),
             limits,
         )
         .unwrap_or_else(|error| panic!("{label} activation index must build: {error:?}"));

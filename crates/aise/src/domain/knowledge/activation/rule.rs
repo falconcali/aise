@@ -274,6 +274,7 @@ pub struct ActivationRuleLimits {
     pub max_regex_program_bytes: usize,
     pub max_groups_per_entry: usize,
     pub max_group_key_bytes: usize,
+    pub max_scan_depth: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -308,6 +309,8 @@ pub enum ActivationRuleValidationError {
     RegexProgramTooLarge,
     #[error("activation group key exceeds its byte budget")]
     GroupKeyTooLong,
+    #[error("activation scan depth exceeds its configured maximum")]
+    ScanDepthTooLarge,
 }
 
 impl KnowledgeActivationRule {
@@ -370,6 +373,7 @@ impl KnowledgeActivationRule {
             || limits.max_regex_program_bytes == 0
             || limits.max_groups_per_entry == 0
             || limits.max_group_key_bytes == 0
+            || limits.max_scan_depth == 0
         {
             return Err(ActivationRuleValidationError::InvalidLimit);
         }
@@ -381,6 +385,13 @@ impl KnowledgeActivationRule {
         }
         if self.selection.probability > 100 {
             return Err(ActivationRuleValidationError::InvalidProbability);
+        }
+        if self
+            .match_rule
+            .scan_depth
+            .is_some_and(|depth| depth > limits.max_scan_depth)
+        {
+            return Err(ActivationRuleValidationError::ScanDepthTooLarge);
         }
         if self.match_rule.keys.len() > limits.max_primary_patterns_per_entry {
             return Err(ActivationRuleValidationError::TooManyPrimaryPatterns);
@@ -456,15 +467,14 @@ pub fn compile_activation_regex(
         .case_insensitive(flags.contains('i'))
         .multi_line(flags.contains('m'))
         .dot_matches_new_line(flags.contains('s'))
-        .unicode(true);
+        .unicode(true)
+        .size_limit(max_program_bytes);
     builder
-        .clone()
         .build()
-        .map_err(|_| ActivationRuleValidationError::InvalidRegex)?;
-    builder
-        .size_limit(max_program_bytes)
-        .build()
-        .map_err(|_| ActivationRuleValidationError::RegexProgramTooLarge)
+        .map_err(|error| match error {
+            regex::Error::CompiledTooBig(_) => ActivationRuleValidationError::RegexProgramTooLarge,
+            _ => ActivationRuleValidationError::InvalidRegex,
+        })
 }
 
 fn validate_macro_pattern(value: &str) -> Result<(), ActivationRuleValidationError> {

@@ -544,6 +544,7 @@ impl Store for SqliteStore {
             .map_err(SqliteStoreError::from)?;
         }
         apply_activation_state_delta(&mut tx, &commit.story_id, &commit.activation_state_delta).await?;
+        reconcile_activation_state(&mut tx, &commit.story_id).await?;
 
         let updated = sqlx::query(
             "UPDATE stories SET revision = ?, last_turn_number = ? WHERE id = ? AND revision = ? AND last_turn_number = ?",
@@ -572,7 +573,9 @@ fn knowledge_mutation_affects_activation(mutation: &crate::turn::turn_validation
         | crate::turn::turn_validation::ValidatedKnowledgeOperation::Update { value: entry, .. } => {
             entry.kind() != crate::domain::knowledge::KnowledgeKind::Memory
         }
-        crate::turn::turn_validation::ValidatedKnowledgeOperation::Delete { .. } => true,
+        crate::turn::turn_validation::ValidatedKnowledgeOperation::Delete { target } => {
+            matches!(target, crate::domain::turn::DeletableKnowledgeId::Rumor(_))
+        }
     }
 }
 
@@ -627,6 +630,28 @@ async fn apply_activation_state_delta(
         .await
         .map_err(SqliteStoreError::from)?;
     }
+    Ok(())
+}
+
+async fn reconcile_activation_state(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    story_id: &StoryId,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "DELETE FROM knowledge_activation_timed_state AS timed
+         WHERE timed.story_id = ?1
+         AND NOT EXISTS (
+             SELECT 1 FROM knowledge_entries AS entry
+             WHERE entry.story_id = timed.story_id
+             AND entry.source_id = timed.source_id
+             AND entry.knowledge_kind != 'memory'
+             AND entry.activation_rule_version = timed.rule_version
+         )",
+    )
+    .bind(story_id.as_str())
+    .execute(&mut **tx)
+    .await
+    .map_err(SqliteStoreError::from)?;
     Ok(())
 }
 

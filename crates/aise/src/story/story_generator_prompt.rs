@@ -229,12 +229,12 @@ fn project_role(
     config: &ContextPreparationConfig,
     retrieved: Option<&RetrievedCharacterContext>,
 ) -> Result<StoryGeneratorRolePromptView, StoryGeneratorProjectionError> {
-    if let Some(retrieved_role) = retrieved.and_then(|character| character.role.as_ref())
-        && (retrieved_role.role_label != role.role_label || retrieved_role.profile.name != role.profile.name)
-    {
-        return Err(StoryGeneratorProjectionError::Invariant {
-            code: "character_role_view_conflict",
-        });
+    if let Some(retrieved_role) = retrieved.and_then(|character| character.role.as_ref()) {
+        if retrieved_role.role_label != role.role_label || retrieved_role.profile.name != role.profile.name {
+            return Err(StoryGeneratorProjectionError::Invariant {
+                code: "character_role_view_conflict",
+            });
+        }
     }
     let knowledge = retrieved
         .map(|character| RoleKnowledgePromptView {

@@ -10,9 +10,9 @@ use crate::domain::ids::{StoryId, TurnNumber};
 use crate::domain::knowledge::activation::{
     ActivationContinuation, ActivationEntryBody, ActivationError, ActivationFragmentMatches, ActivationIndexLimits,
     ActivationIndexSnapshot, ActivationMacroValues, ActivationRecursionInput, ActivationRequest, ActivationResult,
-    ActivationRunMode, ActivationRuntimeLimits, ActivationScanBuffer, ActivationStoreFailure, ExternalActivationSeed,
-    FrozenPackIndex, FrozenPackIndexKey, GenerationTrigger, KnowledgeActivationSession, LoadedActivationEntry,
-    MATCHER_VERSION, build_frozen_pack_index, macro_digest,
+    ActivationRejectionCounts, ActivationRunMode, ActivationRuntimeLimits, ActivationScanBuffer,
+    ActivationStoreFailure, ExternalActivationSeed, FrozenPackIndex, FrozenPackIndexKey, GenerationTrigger,
+    KnowledgeActivationSession, LoadedActivationEntry, MATCHER_VERSION, build_frozen_pack_index, macro_digest,
 };
 use crate::domain::knowledge::{KnowledgeKind, KnowledgeSourceId};
 use crate::domain::story_instance::snapshot::KnowledgeSnapshotRef;
@@ -30,6 +30,12 @@ pub struct ActivationRunOutcome {
     pub result: ActivationResult,
     pub index_snapshot: Arc<ActivationIndexSnapshot>,
     pub loaded_entries: BTreeMap<KnowledgeSourceId, LoadedActivationEntry>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct FragmentMatchRunStats {
+    hits: usize,
+    misses: usize,
 }
 
 pub fn activation_provider_span(
@@ -218,7 +224,7 @@ impl KnowledgeActivationCoordinator {
                         metadata.pack_entries.values(),
                         macros,
                         self.index_limits,
-                        self.rule_limits.limits(),
+                        activation_rule_limits(&self.rule_limits, self.runtime_limits.max_scan_depth),
                     )?);
                     self.pack_cache.insert(built.clone())?;
                     (built, false)
@@ -230,7 +236,7 @@ impl KnowledgeActivationCoordinator {
                 &pack_index,
                 macros,
                 self.index_limits,
-                self.rule_limits.limits(),
+                activation_rule_limits(&self.rule_limits, self.runtime_limits.max_scan_depth),
             )?;
             let current = tracing::Span::current();
             current.record("overlay_version", metadata.reference.overlay_version);
@@ -282,6 +288,17 @@ impl KnowledgeActivationCoordinator {
         macro_digest: &Sha256Digest,
         scan_buffer: &ActivationScanBuffer,
     ) -> ActivationFragmentMatches {
+        self.match_fragments_observed(story_id, index, macro_digest, scan_buffer)
+            .0
+    }
+
+    fn match_fragments_observed(
+        &self,
+        story_id: &StoryId,
+        index: &ActivationIndexSnapshot,
+        macro_digest: &Sha256Digest,
+        scan_buffer: &ActivationScanBuffer,
+    ) -> (ActivationFragmentMatches, FragmentMatchRunStats) {
         let span = info_span!(
             "knowledge.activation.scan",
             story_id = %story_id,
@@ -309,7 +326,11 @@ impl KnowledgeActivationCoordinator {
             matches.insert(fragment.id.clone(), Arc::new(computed));
         }
         tracing::debug!(cache_hits, total = matches.len(), "activation fragment matching complete");
-        matches
+        let stats = FragmentMatchRunStats {
+            hits: cache_hits,
+            misses: matches.len().saturating_sub(cache_hits),
+        };
+        (matches, stats)
     }
 
     pub async fn run(&self, spec: ActivationRunSpec<'_>) -> Result<ActivationRunOutcome, ActivationError> {
@@ -364,7 +385,8 @@ impl KnowledgeActivationCoordinator {
             .in_scope(|| ());
         }
         let digest = macro_digest(&macros);
-        let fragment_matches = self.match_fragments(story_id, &index, &digest, scan_buffer);
+        let (fragment_matches, match_stats) =
+            self.match_fragments_observed(story_id, &index, &digest, scan_buffer);
         let timed_state = self
             .timed_state
             .load_timed_state(ActivationTimedStateQuery {
@@ -392,7 +414,7 @@ impl KnowledgeActivationCoordinator {
             continuation,
             limits: self.runtime_limits,
         };
-        let (result, mut loaded_entries) = self.drive_with_loaded(request, snapshot).await?;
+        let (result, mut loaded_entries) = self.drive_with_loaded(request, snapshot, match_stats).await?;
         loaded_entries.retain(|source_id, _| result.activated.iter().any(|item| &item.source_id == source_id));
         Ok(ActivationRunOutcome {
             result,
@@ -406,13 +428,16 @@ impl KnowledgeActivationCoordinator {
         request: ActivationRequest<'_>,
         snapshot: &KnowledgeSnapshotRef,
     ) -> Result<ActivationResult, ActivationError> {
-        self.drive_with_loaded(request, snapshot).await.map(|outcome| outcome.0)
+        self.drive_with_loaded(request, snapshot, FragmentMatchRunStats::default())
+            .await
+            .map(|outcome| outcome.0)
     }
 
     async fn drive_with_loaded(
         &self,
         request: ActivationRequest<'_>,
         snapshot: &KnowledgeSnapshotRef,
+        match_stats: FragmentMatchRunStats,
     ) -> Result<(ActivationResult, BTreeMap<KnowledgeSourceId, LoadedActivationEntry>), ActivationError> {
         let span = info_span!(
             "knowledge.activation.rounds",
@@ -428,6 +453,7 @@ impl KnowledgeActivationCoordinator {
             let mut loaded_entries = BTreeMap::new();
             while let Some(outcome) = session.next_round()? {
                 rounds = rounds.saturating_add(1);
+                let activated_before = session.activated_count();
                 let round_span = info_span!(
                     "knowledge.activation.round",
                     story_id = %story_id,
@@ -444,7 +470,7 @@ impl KnowledgeActivationCoordinator {
                     pattern_matches = tracing::field::Empty,
                     cache_hits = tracing::field::Empty,
                     cache_misses = tracing::field::Empty,
-                    candidates = outcome.admitted.len(),
+                    candidates = outcome.candidates,
                     activated = tracing::field::Empty,
                     rejected = tracing::field::Empty,
                     rejected_disabled = tracing::field::Empty,
@@ -478,6 +504,42 @@ impl KnowledgeActivationCoordinator {
                 .await;
                 match &round_result {
                     Ok(_) => {
+                        let usage = session.work_usage();
+                        let counts = ActivationRejectionCounts::from_summary(session.rejection_summary());
+                        let (literal_matches, regex_matches) = session.pattern_kind_match_counts();
+                        let rejected = session
+                            .rejection_summary()
+                            .values()
+                            .fold(0u32, |total, count| total.saturating_add(*count));
+                        round_span.record("recursion_level", outcome.recursion_level);
+                        round_span.record("scan_depth", outcome.scan_depth);
+                        round_span.record("scan_fragments", usage.scan_fragments);
+                        round_span.record("scan_bytes", usage.scan_bytes);
+                        round_span.record("scan_tokens", usage.scan_tokens);
+                        round_span.record("literal_matches", literal_matches);
+                        round_span.record("regex_matches", regex_matches);
+                        round_span.record("pattern_matches", usage.pattern_matches);
+                        round_span.record("cache_hits", match_stats.hits);
+                        round_span.record("cache_misses", match_stats.misses);
+                        round_span.record(
+                            "activated",
+                            session.activated_count().saturating_sub(activated_before),
+                        );
+                        round_span.record("rejected", rejected);
+                        round_span.record("rejected_disabled", counts.disabled);
+                        round_span.record("rejected_scope_mismatch", counts.scope_mismatch);
+                        round_span.record("rejected_delayed", counts.delayed);
+                        round_span.record("rejected_cooldown", counts.cooldown);
+                        round_span.record("rejected_recursion_excluded", counts.recursion_excluded);
+                        round_span.record("rejected_recursion_level_locked", counts.recursion_level_locked);
+                        round_span.record("rejected_secondary_condition", counts.secondary_condition);
+                        round_span.record("rejected_group_loser", counts.group_loser);
+                        round_span.record("rejected_probability", counts.probability);
+                        round_span.record("rejected_budget", counts.budget);
+                        round_span.record("rejected_duplicate", counts.duplicate);
+                        round_span.record("rejected_work_limit", counts.work_limit);
+                        round_span.record("knowledge_tokens", usage.knowledge_tokens);
+                        round_span.record("stop_reason", "continue");
                         round_span.record("status", "ok");
                     }
                     Err(error) => {
@@ -579,6 +641,21 @@ fn map_store_error(error: StoreError) -> ActivationError {
         StoreError::Serialization { .. } => ActivationStoreFailure::Serialization,
         _ => ActivationStoreFailure::Unavailable,
     })
+}
+
+fn activation_rule_limits(
+    config: &ActivationRuleLimitsConfig,
+    max_scan_depth: u16,
+) -> crate::domain::knowledge::activation::ActivationRuleLimits {
+    crate::domain::knowledge::activation::ActivationRuleLimits {
+        max_primary_patterns_per_entry: config.max_primary_patterns_per_entry,
+        max_secondary_patterns_per_entry: config.max_secondary_patterns_per_entry,
+        max_pattern_bytes: config.max_pattern_bytes,
+        max_regex_program_bytes: config.max_regex_program_bytes,
+        max_groups_per_entry: config.max_groups_per_entry,
+        max_group_key_bytes: config.max_group_key_bytes,
+        max_scan_depth,
+    }
 }
 
 #[cfg(test)]

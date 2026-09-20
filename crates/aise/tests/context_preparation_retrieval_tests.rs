@@ -233,9 +233,9 @@ fn fixture() -> Fixture {
         knowledge.clone(),
         index.clone(),
         timed,
-        activation.domain_index_limits(),
+        aise::turn::turn_budget::activation_index_limits(&activation),
         activation.rule,
-        activation.domain_runtime_limits(),
+        aise::turn::turn_budget::activation_runtime_limits(&activation),
         activation.cache,
     );
     Fixture {

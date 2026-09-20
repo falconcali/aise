@@ -5,7 +5,7 @@ use crate::domain::knowledge::activation::{
     ActivationPattern, ActivationRuleLimits, ActivationRuleVersion, KnowledgeActivationRule,
     normalize_activation_literal,
 };
-use crate::domain::knowledge::hint::{RetrievalHint, normalize_static_retrieval_hint};
+use crate::domain::knowledge::hint::RetrievalHint;
 use crate::domain::knowledge::query::{KnowledgeSourceId, allocate_knowledge_ids};
 use crate::domain::knowledge::rumor::TruthValue;
 use crate::domain::knowledge::{KnowledgeEntry, KnowledgeKind, KnowledgeSource};
@@ -452,7 +452,7 @@ pub fn enrich_extracted_knowledge(
 
     for draft in &dto.add_facts {
         let content = bounded_content(&draft.content, context.max_content_bytes)?;
-        let retrieval_hint = enriched_retrieval_hint(&draft.retrieval_hint, &content)?;
+        let retrieval_hint = enriched_retrieval_hint(&draft.retrieval_hint)?;
         let id = next_fact_id(&mut assigned)?;
         let activation = dynamic_activation_rule(
             &draft.activation_terms,
@@ -481,7 +481,7 @@ pub fn enrich_extracted_knowledge(
         let existing = existing_fact(context.retrieved, &target).ok_or(ExtractionEnrichmentError::UnknownTarget)?;
         let existing_salience = existing.salience;
         let content = bounded_content(&update.content, context.max_content_bytes)?;
-        let retrieval_hint = enriched_retrieval_hint(&update.retrieval_hint, &content)?;
+        let retrieval_hint = enriched_retrieval_hint(&update.retrieval_hint)?;
         let mut activation = existing
             .activation
             .clone()
@@ -514,7 +514,7 @@ pub fn enrich_extracted_knowledge(
 
     for draft in &dto.add_rumors {
         let content = bounded_content(&draft.content, context.max_content_bytes)?;
-        let retrieval_hint = enriched_retrieval_hint(&draft.retrieval_hint, &content)?;
+        let retrieval_hint = enriched_retrieval_hint(&draft.retrieval_hint)?;
         let source_role_id = resolve_source_role(&draft.source_role_id, snapshot, accepted_new_roles)?;
         let activation = dynamic_activation_rule(
             &draft.activation_terms,
@@ -546,7 +546,7 @@ pub fn enrich_extracted_knowledge(
         let existing = existing_rumor(context.retrieved, &target).ok_or(ExtractionEnrichmentError::UnknownTarget)?;
         let existing_salience = existing.salience;
         let content = bounded_content(&update.content, context.max_content_bytes)?;
-        let retrieval_hint = enriched_retrieval_hint(&update.retrieval_hint, &content)?;
+        let retrieval_hint = enriched_retrieval_hint(&update.retrieval_hint)?;
         let source_role_id = resolve_source_role(&update.source_role_id, snapshot, accepted_new_roles)?;
         let mut activation = existing
             .activation
@@ -680,13 +680,8 @@ fn bounded_content(value: &str, max_bytes: usize) -> Result<BoundedText, Extract
         .map_err(|_| ExtractionEnrichmentError::ContentExceedsBudget)
 }
 
-fn enriched_retrieval_hint(raw: &str, content: &BoundedText) -> Result<RetrievalHint, ExtractionEnrichmentError> {
-    let configured = if raw.trim().is_empty() {
-        None
-    } else {
-        Some(RetrievalHint::try_new(raw.trim()).map_err(|_| ExtractionEnrichmentError::InvalidRetrievalHint)?)
-    };
-    normalize_static_retrieval_hint(content, configured).map_err(|_| ExtractionEnrichmentError::InvalidRetrievalHint)
+fn enriched_retrieval_hint(raw: &str) -> Result<RetrievalHint, ExtractionEnrichmentError> {
+    RetrievalHint::try_new(raw.trim()).map_err(|_| ExtractionEnrichmentError::InvalidRetrievalHint)
 }
 
 fn role_is_known(role_id: &RoleId, snapshot: &StoryReadSnapshot, accepted_new_roles: &[StoryRole]) -> bool {
@@ -744,7 +739,7 @@ fn replace_activation_terms(
         {
             return Err(ExtractionEnrichmentError::InvalidActivationRule);
         }
-        let normalized = normalize_activation_literal(term, false);
+        let normalized = normalize_activation_literal(term, rule.match_rule.case_sensitive);
         if normalized.is_empty() || !seen.insert(normalized.clone()) {
             return Err(ExtractionEnrichmentError::InvalidActivationRule);
         }

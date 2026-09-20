@@ -69,9 +69,9 @@ fn retrieval_pipeline_constructs_with_activation_coordinator() {
         knowledge,
         Arc::new(EmptyIndex),
         Arc::new(EmptyTimed),
-        activation.domain_index_limits(),
+        crate::turn::turn_budget::activation_index_limits(&activation),
         activation.rule,
-        activation.domain_runtime_limits(),
+        crate::turn::turn_budget::activation_runtime_limits(&activation),
         activation.cache,
     ));
     let pipeline = ContextRetrievalPipeline::new(RetrievalConfig::default(), activation, coordinator);

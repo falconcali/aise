@@ -63,9 +63,9 @@ pub async fn build_services(
         knowledge.clone(),
         activation_index.clone(),
         activation_timed_state.clone(),
-        config.aise.activation.domain_index_limits(),
+        aise::turn::turn_budget::activation_index_limits(&config.aise.activation),
         config.aise.activation.rule,
-        config.aise.activation.domain_runtime_limits(),
+        aise::turn::turn_budget::activation_runtime_limits(&config.aise.activation),
         config.aise.activation.cache,
     ));
     let activation_preview = Arc::new(KnowledgeActivationPreviewService::new(
@@ -142,7 +142,7 @@ pub async fn build_services(
     let importer = NativeAssetImporter::new(
         config.aise.assets.clone(),
         config.aise.narrative.clone(),
-        config.aise.activation.rule.limits(),
+        aise::turn::turn_budget::activation_rule_limits(&config.aise.activation),
     );
     let pack_service = Arc::new(PackService::new(importer, asset_store.clone()));
     let character_card_service = Arc::new(CharacterCardService::new(asset_store.clone(), config.aise.assets.clone()));
@@ -157,9 +157,9 @@ pub async fn build_services(
             max_memories: config.aise.assets.max_seed_memories_per_role,
             max_relationships: config.aise.assets.max_relationships_per_role,
             max_opening_bytes: config.aise.content.max_recent_segment_bytes,
-            activation_rule_limits: config.aise.activation.rule.limits(),
+            activation_rule_limits: aise::turn::turn_budget::activation_rule_limits(&config.aise.activation),
         },
-        config.aise.narrative.as_limits(),
+        aise::turn::turn_budget::narrative_limits(&config.aise.narrative),
     ));
 
     Ok(EngineServices {

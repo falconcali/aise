@@ -185,7 +185,9 @@ fn knowledge_mutation_affects_activation(mutation: &crate::turn::turn_validation
         | crate::turn::turn_validation::ValidatedKnowledgeOperation::Update { value: entry, .. } => {
             entry.kind() != crate::domain::knowledge::KnowledgeKind::Memory
         }
-        crate::turn::turn_validation::ValidatedKnowledgeOperation::Delete { .. } => true,
+        crate::turn::turn_validation::ValidatedKnowledgeOperation::Delete { target } => {
+            matches!(target, crate::domain::turn::DeletableKnowledgeId::Rumor(_))
+        }
     }
 }
 

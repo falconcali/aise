@@ -7,6 +7,87 @@ use crate::domain::turn::StoryStateExtractionLimits;
 use crate::turn::turn_contract::{LlmBudgetReservation, LlmCallId, LlmCallUsage};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
+pub fn activation_rule_limits(config: &ActivationConfig) -> ActivationRuleLimits {
+    ActivationRuleLimits {
+        max_primary_patterns_per_entry: config.rule.max_primary_patterns_per_entry,
+        max_secondary_patterns_per_entry: config.rule.max_secondary_patterns_per_entry,
+        max_pattern_bytes: config.rule.max_pattern_bytes,
+        max_regex_program_bytes: config.rule.max_regex_program_bytes,
+        max_groups_per_entry: config.rule.max_groups_per_entry,
+        max_group_key_bytes: config.rule.max_group_key_bytes,
+        max_scan_depth: config.runtime.max_scan_depth,
+    }
+}
+
+pub fn activation_index_limits(
+    config: &ActivationConfig,
+) -> crate::domain::knowledge::activation::ActivationIndexLimits {
+    crate::domain::knowledge::activation::ActivationIndexLimits {
+        max_entries: config.index.max_entries,
+        max_overlay_entries: config.index.max_overlay_entries,
+        max_tombstones: config.index.max_tombstones,
+        max_literal_patterns: config.index.max_literal_patterns,
+        max_regex_patterns: config.index.max_regex_patterns,
+        max_compiled_bytes: config.index.max_compiled_bytes,
+        max_regex_program_bytes: config.rule.max_regex_program_bytes,
+        max_macro_expansion_bytes: config.rule.max_macro_expansion_bytes,
+    }
+}
+
+pub fn activation_runtime_limits(
+    config: &ActivationConfig,
+) -> crate::domain::knowledge::activation::ActivationRuntimeLimits {
+    let source = config.runtime;
+    crate::domain::knowledge::activation::ActivationRuntimeLimits {
+        minimum_activations: source.minimum_activations,
+        initial_scan_depth: source.initial_scan_depth,
+        max_scan_depth: source.max_scan_depth,
+        include_summary_at_max_depth: source.include_summary_at_max_depth,
+        max_scan_fragments: source.max_scan_fragments,
+        max_scan_bytes: source.max_scan_bytes,
+        max_scan_tokens: source.max_scan_tokens,
+        max_literal_patterns: source.max_literal_patterns,
+        max_regex_patterns: source.max_regex_patterns,
+        max_pattern_matches: source.max_pattern_matches,
+        max_candidates_per_round: source.max_candidates_per_round,
+        max_recursion_steps: source.max_recursion_steps,
+        max_recursion_fragments: source.max_recursion_fragments,
+        max_recursion_bytes: source.max_recursion_bytes,
+        max_recursion_tokens: source.max_recursion_tokens,
+        max_activated_entries: source.max_activated_entries,
+        max_depth_expansions: source.max_depth_expansions,
+        max_external_candidates: source.max_external_candidates,
+        max_evidence_per_entry: source.max_evidence_per_entry,
+        max_evidence_bytes: source.max_evidence_bytes,
+        max_items_per_audience: source.max_items_per_audience,
+        max_tokens_per_audience: source.max_tokens_per_audience,
+        max_total_items: source.max_total_items,
+        max_total_tokens: source.max_total_tokens,
+        max_single_entry_bytes: source.max_single_entry_bytes,
+        reserved_tokens: source.reserved_tokens,
+        mandatory_tokens: source.mandatory_tokens,
+    }
+}
+
+pub fn narrative_limits(config: &NarrativeConfig) -> NarrativeLimits {
+    NarrativeLimits {
+        max_graph_nodes: config.max_graph_nodes,
+        max_graph_edges: config.max_graph_edges,
+        max_condition_depth: config.max_condition_depth,
+        max_conditions_per_node: config.max_conditions_per_node,
+        max_effects_per_node: config.max_effects_per_node,
+        max_semantic_conditions: config.max_semantic_conditions,
+        max_semantic_criterion_bytes: config.max_semantic_criterion_bytes,
+        max_frontier_nodes: config.max_frontier_nodes,
+        max_semantic_queries_per_turn: config.max_semantic_queries_per_turn,
+        max_semantic_query_bytes: config.max_semantic_query_bytes,
+        max_evidence_bytes: config.max_evidence_bytes,
+        max_result_reason_bytes: config.max_result_reason_bytes,
+        max_transitions_per_turn: config.max_transitions_per_turn,
+        max_pending_effects: config.max_pending_effects,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CorrectionKind {
     StoryRepair,
@@ -117,11 +198,11 @@ impl TurnBudgetLimits {
             state_extractor_max_output_tokens: state_extractor.max_output_tokens,
             state_extractor_max_knowledge_context_items: state_extractor.max_knowledge_context_items,
             state_extractor_max_knowledge_context_tokens: state_extractor.max_knowledge_context_tokens,
-            narrative: narrative.as_limits(),
+            narrative: narrative_limits(narrative),
             max_condition_queries: narrative.max_semantic_queries_per_turn,
             max_condition_evidence_bytes: narrative.max_evidence_bytes,
             max_condition_reason_bytes: narrative.max_result_reason_bytes,
-            activation_rule_limits: activation.rule.limits(),
+            activation_rule_limits: activation_rule_limits(activation),
         }
     }
 }

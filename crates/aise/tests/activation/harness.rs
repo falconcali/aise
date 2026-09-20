@@ -115,7 +115,7 @@ pub fn index_limits() -> ActivationIndexLimits {
 }
 
 pub fn rule_limits() -> aise::domain::knowledge::activation::ActivationRuleLimits {
-    aise::config::ActivationConfig::default().rule.limits()
+    aise::turn::turn_budget::activation_rule_limits(&aise::config::ActivationConfig::default())
 }
 
 pub fn story_id() -> StoryId {

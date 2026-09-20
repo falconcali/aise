@@ -55,7 +55,8 @@ impl BaselineContextBuilder {
         config: BaselineContextBuilderConfig,
         coordinator: Arc<KnowledgeActivationCoordinator>,
     ) -> Self {
-        let narrative_projector = NarrativeProjector::new(config.narrative_config.as_limits());
+        let narrative_projector =
+            NarrativeProjector::new(crate::turn::turn_budget::narrative_limits(&config.narrative_config));
         Self {
             store,
             content_limits: config.content_limits,

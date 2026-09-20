@@ -2,7 +2,7 @@ use crate::harness::{ExecuteSpec, constant_rule, entry, execute, fact, fragment,
 use aise::domain::ids::TurnNumber;
 use aise::domain::knowledge::activation::{
     ActivationGroupKey, ActivationPattern, ActivationRejectionReason, ActivationRuleVersion, ActivationStopReason,
-    ActivationTimedState, ScanFragmentKind,
+    ActivationTimedState, ScanFragmentKind, SecondaryLogic,
 };
 
 #[test]
@@ -141,6 +141,58 @@ fn groups_use_sticky_score_override_order_and_stable_ties() {
     )
     .unwrap();
     assert_eq!(ids(&sticky.activated), vec!["fact_0001"]);
+}
+
+#[test]
+fn negative_secondary_matches_do_not_increase_group_score() {
+    let group = ActivationGroupKey::try_new("exclusive").unwrap();
+    let mut preferred = rule("alpha");
+    preferred.selection.groups = vec![group.clone()];
+    preferred.selection.use_group_scoring = true;
+    preferred.selection.group_weight = 0;
+    preferred.selection.order = 10;
+    let mut negative = rule("alpha");
+    negative.match_rule.secondary_logic = SecondaryLogic::NotAll;
+    negative.match_rule.secondary_keys = vec![
+        ActivationPattern::Literal("x".to_owned()),
+        ActivationPattern::Literal("y".to_owned()),
+    ];
+    negative.selection.groups = vec![group];
+    negative.selection.use_group_scoring = true;
+    negative.selection.group_weight = 0;
+    let result = execute(ExecuteSpec::new(
+        vec![entry(fact(1), preferred, "one"), entry(fact(2), negative, "two")],
+        vec![fragment(ScanFragmentKind::PlayerContribution, 1, 0, "alpha x")],
+        4,
+    ))
+    .unwrap();
+    assert_eq!(ids(&result.activated), vec!["fact_0001"]);
+}
+
+#[test]
+fn depth_expansion_counts_only_new_fragment_matches() {
+    let mut runtime_limits = limits();
+    runtime_limits.minimum_activations = 2;
+    runtime_limits.initial_scan_depth = 1;
+    runtime_limits.max_scan_depth = 2;
+    runtime_limits.max_pattern_matches = 2;
+    let result = execute(
+        ExecuteSpec::new(
+            vec![
+                entry(fact(1), rule("alpha"), "one"),
+                entry(fact(2), rule("beta"), "two"),
+            ],
+            vec![
+                fragment(ScanFragmentKind::PlayerContribution, 1, 0, "alpha"),
+                fragment(ScanFragmentKind::RecentStory, 2, 1, "beta"),
+            ],
+            4,
+        )
+        .with_limits(runtime_limits),
+    )
+    .unwrap();
+    assert_eq!(ids(&result.activated), vec!["fact_0001", "fact_0002"]);
+    assert_eq!(result.continuation.consumed.pattern_matches, 2);
 }
 
 #[test]

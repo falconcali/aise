@@ -189,7 +189,7 @@ async fn seeded_store(label: &str) -> (Arc<SqliteStore>, KnowledgeSnapshotRef, S
         NativeAssetImporter::new(
             AssetLimitsConfig::default(),
             NarrativeConfig::default(),
-            aise::config::ActivationConfig::default().rule.limits(),
+            aise::turn::turn_budget::activation_rule_limits(&aise::config::ActivationConfig::default()),
         ),
         asset_store.clone(),
     );
@@ -208,9 +208,11 @@ async fn seeded_store(label: &str) -> (Arc<SqliteStore>, KnowledgeSnapshotRef, S
             max_memories: 128,
             max_relationships: 64,
             max_opening_bytes: 8192,
-            activation_rule_limits: aise::config::ActivationConfig::default().rule.limits(),
+            activation_rule_limits: aise::turn::turn_budget::activation_rule_limits(
+                &aise::config::ActivationConfig::default(),
+            ),
         },
-        NarrativeConfig::default().as_limits(),
+        aise::turn::turn_budget::narrative_limits(&NarrativeConfig::default()),
     );
     let story = factory
         .create(CreateStoryInstanceSpec {

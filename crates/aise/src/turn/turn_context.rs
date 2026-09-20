@@ -66,6 +66,8 @@ impl PreparedActivation {
                 depth_expansions: 0,
                 recursion_sources: std::collections::BTreeSet::new(),
                 scanned_fragment_ids: std::collections::BTreeSet::new(),
+                matched_fragment_ids: std::collections::BTreeSet::new(),
+                accumulated_matches: std::collections::BTreeMap::new(),
                 audience_items: std::collections::BTreeMap::new(),
                 audience_tokens: std::collections::BTreeMap::new(),
                 total_delivery_items: 0,

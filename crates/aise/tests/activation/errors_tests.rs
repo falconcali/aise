@@ -6,7 +6,7 @@ use aise::domain::knowledge::activation::{
 };
 
 fn rule_limits() -> ActivationRuleLimits {
-    ActivationConfig::default().rule.limits()
+    aise::turn::turn_budget::activation_rule_limits(&ActivationConfig::default())
 }
 
 fn enabled_rule(key: &str) -> KnowledgeActivationRule {

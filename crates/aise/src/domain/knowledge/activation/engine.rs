@@ -74,6 +74,7 @@ pub struct KnowledgeActivationSession<'a> {
     pending: BTreeMap<KnowledgeSourceId, Candidate>,
     stage: Stage,
     state: ActivationMachineState,
+    last_candidate_count: usize,
     budget_trimmed: bool,
     recursion_exhausted: bool,
 }
@@ -120,6 +121,7 @@ impl<'a> KnowledgeActivationSession<'a> {
             } else {
                 ActivationMachineState::Initial
             },
+            last_candidate_count: 0,
             budget_trimmed: false,
             recursion_exhausted: false,
         })
@@ -127,6 +129,43 @@ impl<'a> KnowledgeActivationSession<'a> {
 
     pub fn state(&self) -> ActivationMachineState {
         self.state
+    }
+
+    pub fn activated_count(&self) -> usize {
+        self.continuation.activated.len()
+    }
+
+    pub fn work_usage(&self) -> ActivationWorkUsage {
+        let mut usage = self.continuation.consumed;
+        usage.knowledge_tokens = self
+            .budget
+            .normal_tokens
+            .saturating_add(self.budget.reserved_tokens)
+            .saturating_add(self.budget.mandatory_tokens);
+        usage
+    }
+
+    pub fn rejection_summary(&self) -> &BTreeMap<ActivationRejectionReason, u32> {
+        &self.rejections
+    }
+
+    pub fn pattern_kind_match_counts(&self) -> (usize, usize) {
+        self.continuation
+            .accumulated_matches
+            .values()
+            .flatten()
+            .fold((0usize, 0usize), |(literal, regex), item| {
+                let count = usize::from(item.match_count);
+                match item.pattern_kind {
+                    ActivationPatternKind::PrimaryLiteral | ActivationPatternKind::SecondaryLiteral => {
+                        (literal.saturating_add(count), regex)
+                    }
+                    ActivationPatternKind::PrimaryRegex | ActivationPatternKind::SecondaryRegex => {
+                        (literal, regex.saturating_add(count))
+                    }
+                    _ => (literal, regex),
+                }
+            })
     }
 
     pub fn next_round(&mut self) -> Result<Option<ActivationRoundOutcome>, ActivationError> {
@@ -262,7 +301,15 @@ impl<'a> KnowledgeActivationSession<'a> {
     fn run_round(&mut self, state: ActivationMachineState) -> Result<ActivationRoundOutcome, ActivationError> {
         self.state = state;
         let admitted = self.select_round()?;
-        Ok(ActivationRoundOutcome { admitted, state })
+        Ok(ActivationRoundOutcome {
+            admitted,
+            state,
+            candidates: self.last_candidate_count,
+            scan_depth: self.continuation.scan_depth,
+            recursion_level: self.continuation.recursion_level,
+            consumed: self.continuation.consumed,
+            rejection_summary: self.rejections.clone(),
+        })
     }
 
     fn account_scan_fragments(&mut self) -> Result<(), ActivationError> {
@@ -299,6 +346,7 @@ impl<'a> KnowledgeActivationSession<'a> {
 
     fn select_round(&mut self) -> Result<Vec<KnowledgeSourceId>, ActivationError> {
         let mut candidates = self.collect_candidates()?;
+        self.last_candidate_count = candidates.len();
         if candidates.len() > self.request.limits.max_candidates_per_round {
             let mut ordered = candidates.values().cloned().collect::<Vec<_>>();
             ordered.sort_by(|left, right| {
@@ -770,24 +818,23 @@ impl<'a> KnowledgeActivationSession<'a> {
             .depth_expansions
             .saturating_add(self.continuation.recursion_level);
         let recursion_level = self.continuation.recursion_level;
-        let mut by_source: BTreeMap<KnowledgeSourceId, Vec<FragmentPatternMatch>> = BTreeMap::new();
+        let mut fragments = Vec::new();
         for fragment in visible_base_fragments(&self.request, self.continuation.scan_depth) {
             let matches = self
                 .request
                 .fragment_matches
                 .get(&fragment.id)
                 .ok_or(ActivationError::IndexVersionMismatch)?;
-            for entry in matches.iter() {
-                by_source.entry(entry.source_id.clone()).or_default().push(entry.clone());
-            }
+            fragments.push((fragment.id.clone(), matches.as_ref().clone()));
         }
         for fragment in &self.recursion_fragments {
             let Some(matches) = self.recursion_matches.get(&fragment.id) else {
                 return Err(ActivationError::IndexVersionMismatch);
             };
-            for entry in matches {
-                by_source.entry(entry.source_id.clone()).or_default().push(entry.clone());
-            }
+            fragments.push((fragment.id.clone(), matches.clone()));
+        }
+        for (fragment_id, matches) in fragments {
+            self.ingest_fragment_matches(fragment_id, matches)?;
         }
         let limits = self.request.limits;
         for (source_id, metadata) in &self.request.index_snapshot.metadata {
@@ -800,12 +847,12 @@ impl<'a> KnowledgeActivationSession<'a> {
                 .scan_depth
                 .unwrap_or(self.continuation.scan_depth)
                 .min(self.continuation.scan_depth);
-            let Some(entry_matches) = by_source.get(source_id) else {
+            let Some(entry_matches) = self.continuation.accumulated_matches.get(source_id) else {
                 continue;
             };
-            let mut match_count_total = 0usize;
             let mut primary_ordinals = BTreeSet::new();
             let mut secondary_ordinals = BTreeSet::new();
+            let mut positive_secondary_ordinals = BTreeSet::new();
             let mut evidence = Vec::new();
             for item in entry_matches {
                 if item.fragment_kind != ScanFragmentKind::RecursionContent {
@@ -821,13 +868,15 @@ impl<'a> KnowledgeActivationSession<'a> {
                         continue;
                     }
                 }
-                match_count_total = match_count_total.saturating_add(usize::from(item.match_count));
                 match item.pattern_kind {
                     ActivationPatternKind::PrimaryLiteral | ActivationPatternKind::PrimaryRegex => {
                         primary_ordinals.insert(item.pattern_ordinal);
                     }
                     ActivationPatternKind::SecondaryLiteral | ActivationPatternKind::SecondaryRegex => {
                         secondary_ordinals.insert(item.pattern_ordinal);
+                        if item.group_score_contribution > 0 {
+                            positive_secondary_ordinals.insert(item.pattern_ordinal);
+                        }
                     }
                     _ => {}
                 }
@@ -843,19 +892,7 @@ impl<'a> KnowledgeActivationSession<'a> {
                     recursion_level,
                 });
             }
-            self.continuation.consumed.pattern_matches =
-                self.continuation.consumed.pattern_matches.saturating_add(match_count_total);
-            if self.continuation.consumed.pattern_matches > limits.max_pattern_matches {
-                if metadata.rule.budget_class == ActivationBudgetClass::Mandatory {
-                    return Err(ActivationError::MandatoryBudgetExceeded);
-                }
-                reject(
-                    &mut self.continuation,
-                    &mut self.rejections,
-                    source_id.clone(),
-                    ActivationRejectionReason::WorkLimit,
-                );
-                self.budget_trimmed = true;
+            if self.continuation.terminal_rejections.contains_key(source_id) {
                 continue;
             }
             if primary_ordinals.is_empty() {
@@ -887,8 +924,12 @@ impl<'a> KnowledgeActivationSession<'a> {
                     } else {
                         ActivationSeedKind::TextMatch
                     },
-                    score: u16::try_from(primary_ordinals.len().saturating_add(secondary_ordinals.len()))
-                        .unwrap_or(u16::MAX),
+                    score: u16::try_from(
+                        primary_ordinals
+                            .len()
+                            .saturating_add(positive_secondary_ordinals.len()),
+                    )
+                    .unwrap_or(u16::MAX),
                     evidence,
                     provider_rank: None,
                     mandatory: metadata.rule.budget_class == ActivationBudgetClass::Mandatory,
@@ -897,6 +938,52 @@ impl<'a> KnowledgeActivationSession<'a> {
                     deliveries: Vec::new(),
                 },
             );
+        }
+        Ok(())
+    }
+
+    fn ingest_fragment_matches(
+        &mut self,
+        fragment_id: super::scan::ScanFragmentId,
+        matches: Vec<FragmentPatternMatch>,
+    ) -> Result<(), ActivationError> {
+        if !self.continuation.matched_fragment_ids.insert(fragment_id) {
+            return Ok(());
+        }
+        for item in matches {
+            if self.continuation.terminal_rejections.contains_key(&item.source_id) {
+                continue;
+            }
+            let metadata = self
+                .request
+                .index_snapshot
+                .metadata
+                .get(&item.source_id)
+                .ok_or(ActivationError::IndexVersionMismatch)?;
+            let next = self
+                .continuation
+                .consumed
+                .pattern_matches
+                .saturating_add(usize::from(item.match_count));
+            if next > self.request.limits.max_pattern_matches {
+                if metadata.rule.budget_class == ActivationBudgetClass::Mandatory {
+                    return Err(ActivationError::MandatoryBudgetExceeded);
+                }
+                reject(
+                    &mut self.continuation,
+                    &mut self.rejections,
+                    item.source_id,
+                    ActivationRejectionReason::WorkLimit,
+                );
+                self.budget_trimmed = true;
+                continue;
+            }
+            self.continuation.consumed.pattern_matches = next;
+            self.continuation
+                .accumulated_matches
+                .entry(item.source_id.clone())
+                .or_default()
+                .push(item);
         }
         Ok(())
     }
@@ -997,6 +1084,8 @@ fn new_continuation(request: &ActivationRequest<'_>) -> ActivationContinuation {
         depth_expansions: 0,
         recursion_sources: BTreeSet::new(),
         scanned_fragment_ids: BTreeSet::new(),
+        matched_fragment_ids: BTreeSet::new(),
+        accumulated_matches: BTreeMap::new(),
         audience_items: BTreeMap::new(),
         audience_tokens: BTreeMap::new(),
         total_delivery_items: 0,

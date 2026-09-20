@@ -140,6 +140,11 @@ pub struct ActivationRecursionInput {
 pub struct ActivationRoundOutcome {
     pub admitted: Vec<KnowledgeSourceId>,
     pub state: ActivationMachineState,
+    pub candidates: usize,
+    pub scan_depth: u16,
+    pub recursion_level: u16,
+    pub consumed: ActivationWorkUsage,
+    pub rejection_summary: BTreeMap<ActivationRejectionReason, u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -277,6 +282,8 @@ pub struct ActivationContinuation {
     pub depth_expansions: u16,
     pub recursion_sources: BTreeSet<KnowledgeSourceId>,
     pub scanned_fragment_ids: BTreeSet<ScanFragmentId>,
+    pub matched_fragment_ids: BTreeSet<ScanFragmentId>,
+    pub accumulated_matches: BTreeMap<KnowledgeSourceId, Vec<FragmentPatternMatch>>,
     pub audience_items: BTreeMap<KnowledgeDelivery, usize>,
     pub audience_tokens: BTreeMap<KnowledgeDelivery, u64>,
     pub total_delivery_items: usize,

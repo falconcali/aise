@@ -1,5 +1,4 @@
 use super::error::ConfigError;
-use crate::domain::narrative_graph::definition::NarrativeLimits;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,22 +101,4 @@ impl NarrativeConfig {
         Ok(())
     }
 
-    pub fn as_limits(&self) -> NarrativeLimits {
-        NarrativeLimits {
-            max_graph_nodes: self.max_graph_nodes,
-            max_graph_edges: self.max_graph_edges,
-            max_condition_depth: self.max_condition_depth,
-            max_conditions_per_node: self.max_conditions_per_node,
-            max_effects_per_node: self.max_effects_per_node,
-            max_semantic_conditions: self.max_semantic_conditions,
-            max_semantic_criterion_bytes: self.max_semantic_criterion_bytes,
-            max_frontier_nodes: self.max_frontier_nodes,
-            max_semantic_queries_per_turn: self.max_semantic_queries_per_turn,
-            max_semantic_query_bytes: self.max_semantic_query_bytes,
-            max_evidence_bytes: self.max_evidence_bytes,
-            max_result_reason_bytes: self.max_result_reason_bytes,
-            max_transitions_per_turn: self.max_transitions_per_turn,
-            max_pending_effects: self.max_pending_effects,
-        }
-    }
 }

@@ -209,6 +209,23 @@ fn validate_optional_profile_text(
     }
 }
 
+fn validate_world_book_text(text: &BoundedText, path: &str, max_bytes: usize, report: &mut ValidationReport) {
+    if text.as_str().trim().is_empty() {
+        report.push(AssetValidationIssue::new(
+            AssetValidationCode::EmptyText,
+            path,
+            "text must not be empty",
+        ));
+    }
+    if text.as_str().len() > max_bytes {
+        report.push(AssetValidationIssue::new(
+            AssetValidationCode::LimitExceeded,
+            path,
+            "text exceeds limit",
+        ));
+    }
+}
+
 pub struct NativeAssetImporter {
     limits: AssetLimitsConfig,
     narrative: NarrativeConfig,
@@ -477,20 +494,76 @@ impl NativeAssetImporter {
         let WorldBookSource::Embedded(book) = &pack.world_book else {
             return;
         };
+        if book.facts.len() > self.limits.max_world_facts {
+            report.push(AssetValidationIssue::new(
+                AssetValidationCode::LimitExceeded,
+                "/world_book/facts",
+                "world fact count exceeds limit",
+            ));
+        }
+        if book.rumors.len() > self.limits.max_world_rumors {
+            report.push(AssetValidationIssue::new(
+                AssetValidationCode::LimitExceeded,
+                "/world_book/rumors",
+                "world rumor count exceeds limit",
+            ));
+        }
         for (key, seed) in &book.facts {
+            let path = format!("/world_book/facts/{}", key.as_str());
+            validate_world_book_text(
+                &seed.content,
+                &format!("{path}/content"),
+                self.limits.max_text_bytes,
+                report,
+            );
+            if let Some(proposition) = &seed.proposition {
+                validate_world_book_text(
+                    &proposition.subject,
+                    &format!("{path}/proposition/subject"),
+                    self.limits.max_text_bytes,
+                    report,
+                );
+                validate_world_book_text(
+                    &proposition.predicate,
+                    &format!("{path}/proposition/predicate"),
+                    self.limits.max_text_bytes,
+                    report,
+                );
+            }
             if let Err(error) = seed.activation.validate(self.activation_rule_limits) {
                 report.push(AssetValidationIssue::new(
                     AssetValidationCode::ActivationRuleInvalid,
-                    format!("/world_book/facts/{}/activation", key.as_str()),
+                    format!("{path}/activation"),
                     error.to_string(),
                 ));
             }
         }
         for (key, seed) in &book.rumors {
+            let path = format!("/world_book/rumors/{}", key.as_str());
+            validate_world_book_text(
+                &seed.content,
+                &format!("{path}/content"),
+                self.limits.max_text_bytes,
+                report,
+            );
+            if let Some(claim) = &seed.claim {
+                validate_world_book_text(
+                    &claim.subject,
+                    &format!("{path}/claim/subject"),
+                    self.limits.max_text_bytes,
+                    report,
+                );
+                validate_world_book_text(
+                    &claim.predicate,
+                    &format!("{path}/claim/predicate"),
+                    self.limits.max_text_bytes,
+                    report,
+                );
+            }
             if let Err(error) = seed.activation.validate(self.activation_rule_limits) {
                 report.push(AssetValidationIssue::new(
                     AssetValidationCode::ActivationRuleInvalid,
-                    format!("/world_book/rumors/{}/activation", key.as_str()),
+                    format!("{path}/activation"),
                     error.to_string(),
                 ));
             }

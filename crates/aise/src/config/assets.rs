@@ -1,6 +1,7 @@
 use super::error::ConfigError;
-use crate::domain::ids::RoleId;
 use serde::{Deserialize, Serialize};
+
+const MAX_ROLE_ID_BYTES: usize = 128;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetLimitsConfig {
@@ -66,7 +67,7 @@ impl AssetLimitsConfig {
         if self.max_key_bytes == 0 {
             return Err(ConfigError::Invalid("assets.max_key_bytes must be positive".into()));
         }
-        if self.max_key_bytes > RoleId::MAX_BYTES {
+        if self.max_key_bytes > MAX_ROLE_ID_BYTES {
             return Err(ConfigError::Invalid(
                 "assets.max_key_bytes must be at most RoleId::MAX_BYTES".into(),
             ));

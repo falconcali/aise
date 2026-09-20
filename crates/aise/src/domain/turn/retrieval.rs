@@ -139,10 +139,10 @@ impl RetrievedContext {
         validate_partition_bounds(&world.facts, limits)?;
         validate_partition_bounds(&world.rumors, limits)?;
         for (role_id, character) in &characters {
-            if let Some(role) = &character.role
-                && role.role_id != *role_id
-            {
-                return Err(RetrievedContextError::InvalidRole);
+            if let Some(role) = &character.role {
+                if role.role_id != *role_id {
+                    return Err(RetrievedContextError::InvalidRole);
+                }
             }
             validate_kind_only(&character.known_rumors, KnowledgeKind::Rumor)?;
             validate_kind_only(&character.memories, KnowledgeKind::Memory)?;

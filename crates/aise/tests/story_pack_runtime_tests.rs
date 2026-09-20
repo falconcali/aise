@@ -145,7 +145,7 @@ async fn runtime_services(label: &str) -> RuntimeServices {
     let importer = NativeAssetImporter::new(
         AssetLimitsConfig::default(),
         NarrativeConfig::default(),
-        aise::config::ActivationConfig::default().rule.limits(),
+        aise::turn::turn_budget::activation_rule_limits(&aise::config::ActivationConfig::default()),
     );
     let pack_service = Arc::new(PackService::new(importer, asset_store.clone()));
     let character_card_service = Arc::new(CharacterCardService::new(asset_store.clone(), AssetLimitsConfig::default()));
@@ -160,9 +160,11 @@ async fn runtime_services(label: &str) -> RuntimeServices {
             max_memories: 32,
             max_relationships: 32,
             max_opening_bytes: 8192,
-            activation_rule_limits: aise::config::ActivationConfig::default().rule.limits(),
+            activation_rule_limits: aise::turn::turn_budget::activation_rule_limits(
+                &aise::config::ActivationConfig::default(),
+            ),
         },
-        NarrativeConfig::default().as_limits(),
+        aise::turn::turn_budget::narrative_limits(&NarrativeConfig::default()),
     ));
     RuntimeServices {
         pack_service,
