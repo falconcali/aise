@@ -510,12 +510,7 @@ impl NativeAssetImporter {
         }
         for (key, seed) in &book.facts {
             let path = format!("/world_book/facts/{}", key.as_str());
-            validate_world_book_text(
-                &seed.content,
-                &format!("{path}/content"),
-                self.limits.max_text_bytes,
-                report,
-            );
+            validate_world_book_text(&seed.content, &format!("{path}/content"), self.limits.max_text_bytes, report);
             if let Some(proposition) = &seed.proposition {
                 validate_world_book_text(
                     &proposition.subject,
@@ -540,12 +535,7 @@ impl NativeAssetImporter {
         }
         for (key, seed) in &book.rumors {
             let path = format!("/world_book/rumors/{}", key.as_str());
-            validate_world_book_text(
-                &seed.content,
-                &format!("{path}/content"),
-                self.limits.max_text_bytes,
-                report,
-            );
+            validate_world_book_text(&seed.content, &format!("{path}/content"), self.limits.max_text_bytes, report);
             if let Some(claim) = &seed.claim {
                 validate_world_book_text(
                     &claim.subject,

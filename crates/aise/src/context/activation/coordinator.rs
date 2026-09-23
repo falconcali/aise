@@ -9,8 +9,8 @@ use crate::domain::asset::ids::Sha256Digest;
 use crate::domain::ids::{StoryId, TurnNumber};
 use crate::domain::knowledge::activation::{
     ActivationContinuation, ActivationEntryBody, ActivationError, ActivationFragmentMatches, ActivationIndexLimits,
-    ActivationIndexSnapshot, ActivationMacroValues, ActivationRecursionInput, ActivationRequest, ActivationResult,
-    ActivationRejectionCounts, ActivationRunMode, ActivationRuntimeLimits, ActivationScanBuffer,
+    ActivationIndexSnapshot, ActivationMacroValues, ActivationRecursionInput, ActivationRejectionCounts,
+    ActivationRequest, ActivationResult, ActivationRunMode, ActivationRuntimeLimits, ActivationScanBuffer,
     ActivationStoreFailure, ExternalActivationSeed, FrozenPackIndex, FrozenPackIndexKey, GenerationTrigger,
     KnowledgeActivationSession, LoadedActivationEntry, MATCHER_VERSION, build_frozen_pack_index, macro_digest,
 };
@@ -288,8 +288,7 @@ impl KnowledgeActivationCoordinator {
         macro_digest: &Sha256Digest,
         scan_buffer: &ActivationScanBuffer,
     ) -> ActivationFragmentMatches {
-        self.match_fragments_observed(story_id, index, macro_digest, scan_buffer)
-            .0
+        self.match_fragments_observed(story_id, index, macro_digest, scan_buffer).0
     }
 
     fn match_fragments_observed(
@@ -385,8 +384,7 @@ impl KnowledgeActivationCoordinator {
             .in_scope(|| ());
         }
         let digest = macro_digest(&macros);
-        let (fragment_matches, match_stats) =
-            self.match_fragments_observed(story_id, &index, &digest, scan_buffer);
+        let (fragment_matches, match_stats) = self.match_fragments_observed(story_id, &index, &digest, scan_buffer);
         let timed_state = self
             .timed_state
             .load_timed_state(ActivationTimedStateQuery {
@@ -521,10 +519,7 @@ impl KnowledgeActivationCoordinator {
                         round_span.record("pattern_matches", usage.pattern_matches);
                         round_span.record("cache_hits", match_stats.hits);
                         round_span.record("cache_misses", match_stats.misses);
-                        round_span.record(
-                            "activated",
-                            session.activated_count().saturating_sub(activated_before),
-                        );
+                        round_span.record("activated", session.activated_count().saturating_sub(activated_before));
                         round_span.record("rejected", rejected);
                         round_span.record("rejected_disabled", counts.disabled);
                         round_span.record("rejected_scope_mismatch", counts.scope_mismatch);

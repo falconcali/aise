@@ -924,12 +924,8 @@ impl<'a> KnowledgeActivationSession<'a> {
                     } else {
                         ActivationSeedKind::TextMatch
                     },
-                    score: u16::try_from(
-                        primary_ordinals
-                            .len()
-                            .saturating_add(positive_secondary_ordinals.len()),
-                    )
-                    .unwrap_or(u16::MAX),
+                    score: u16::try_from(primary_ordinals.len().saturating_add(positive_secondary_ordinals.len()))
+                        .unwrap_or(u16::MAX),
                     evidence,
                     provider_rank: None,
                     mandatory: metadata.rule.budget_class == ActivationBudgetClass::Mandatory,

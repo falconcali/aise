@@ -1,6 +1,7 @@
 use crate::config::ServerConfig;
 use crate::session::SessionRegistry;
 use crate::tasks::TurnTaskSupervisor;
+use crate::turn_submission::TurnSubmissionService;
 use aise::AiseEngine;
 use aise::context::activation::KnowledgeActivationPreviewService;
 use aise::persistence::StoryHistoryReadPort;
@@ -13,6 +14,7 @@ pub struct AppState {
     pub engine: Arc<AiseEngine>,
     pub registry: Arc<SessionRegistry>,
     pub tasks: Arc<TurnTaskSupervisor>,
+    pub turn_submission: Arc<TurnSubmissionService>,
     pub config: ServerConfig,
     pub pack_service: Option<Arc<PackService>>,
     pub character_card_service: Option<Arc<CharacterCardService>>,
@@ -28,10 +30,12 @@ impl AppState {
         tasks: Arc<TurnTaskSupervisor>,
         config: ServerConfig,
     ) -> Self {
+        let turn_submission = Arc::new(TurnSubmissionService::new(engine.clone(), registry.clone(), tasks.clone()));
         Self {
             engine,
             registry,
             tasks,
+            turn_submission,
             config,
             pack_service: None,
             character_card_service: None,

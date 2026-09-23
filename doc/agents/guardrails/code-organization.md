@@ -150,3 +150,20 @@ use crate::domain::ids::CharacterId;
 
 use serde::{Deserialize, Serialize};
 ```
+
+---
+
+## R-CODE-08 - Orchestration functions stay at one abstraction level
+
+**Level: MUST**
+
+- Functions that coordinate multiple business steps MUST present the primary
+  control flow in execution order and at one abstraction level.
+- Multi-step supporting mechanics such as tracing, metrics, logging, timing,
+  serialization, and observability-only outcome mapping MUST live behind
+  named helpers or owned abstractions.
+- Call sites MAY retain concise lifecycle operations such as starting and
+  ending a span, but MUST NOT inline supporting payload construction or other
+  details that obscure the primary control flow.
+- Extraction MUST preserve explicit business decisions, state changes, and
+  error semantics.

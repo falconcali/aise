@@ -57,6 +57,10 @@ Code organization:
   consecutive `use` statements; the import block is one contiguous group at
   the top of the file. Sorting within the group is left to `rustfmt`
   (`R-LINT-01`).
+- `R-CODE-08` MUST keep orchestration functions at one abstraction level;
+  multi-step supporting mechanics such as tracing, metrics, logging, timing,
+  serialization, and observability-only outcome mapping MUST live behind
+  named helpers or owned abstractions.
 
 Toolchain:
 - `R-LINT-01` MUST pass `cargo fmt` and `clippy`; CI treats warnings as errors;

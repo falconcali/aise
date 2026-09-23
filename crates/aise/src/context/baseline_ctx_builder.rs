@@ -86,53 +86,17 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
             &self.narrative_config,
         );
         let snapshot = {
-            let pending = ctx.trace().begin_span("aise.tool_call", "store.load_story_snapshot");
-            let started = Instant::now();
+            let trace_span = ctx.trace().begin_span("aise.tool_call", "store.load_story_snapshot");
             let outcome = self.store.load_story_snapshot(&story_id, limits).await;
-            let latency_ms = started.elapsed().as_millis() as u64;
-            let (ok, result) = match &outcome {
-                Ok(snapshot) => (true, serde_json::json!({ "revision": snapshot.base_revision().get() })),
-                Err(error) => (false, serde_json::json!({ "error": error.to_string() })),
-            };
-            ctx.trace().end_span_with(
-                pending,
-                &SpanPayload::ToolCall(ToolCallData {
-                    tool: "store.load_story_snapshot".into(),
-                    args: serde_json::json!({ "story_id": story_id.to_string() }),
-                    result,
-                    ok,
-                    latency_ms,
-                }),
-            );
+            trance_span.end_span(outcome);
+
             outcome.map_err(TurnExecutionError::from)?
         };
-        let pending = ctx.trace().begin_span("context.prepare", "context.prepare");
+
+        let trace_span = ctx.trace().begin_span("context.prepare", "context.prepare");
         let prepared = prepare_baseline(self, &snapshot, ctx.player_contribution(), ctx.turn_number()).await;
-        let payload = match &prepared {
-            Ok((baseline, projection, activation)) => serde_json::json!({
-                "story_id": story_id,
-                "turn_number": ctx.turn_number().get(),
-                "base_revision": snapshot.base_revision().get(),
-                "relevant_role_count": baseline.relevant_roles.len(),
-                "constraint_count": baseline.active_story_constraints.len(),
-                "activated_count": activation.continuation.activated.len(),
-                "active_node_count": projection.plan.active_nodes.len(),
-                "status": "ok",
-                "error_code": null,
-            }),
-            Err(error) => serde_json::json!({
-                "story_id": story_id,
-                "turn_number": ctx.turn_number().get(),
-                "base_revision": snapshot.base_revision().get(),
-                "relevant_role_count": 0,
-                "constraint_count": 0,
-                "activated_count": 0,
-                "active_node_count": 0,
-                "status": "error",
-                "error_code": error.turn_code(),
-            }),
-        };
-        ctx.trace().end_span_with(pending, &payload);
+        trace_span.end_span(prepared);
+
         let (baseline, narrative_projection, activation) = prepared.map_err(map_baseline_error)?;
         ctx.set_prepared_context(snapshot, baseline, narrative_projection, activation)
     }

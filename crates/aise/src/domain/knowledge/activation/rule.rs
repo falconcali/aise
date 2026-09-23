@@ -386,11 +386,7 @@ impl KnowledgeActivationRule {
         if self.selection.probability > 100 {
             return Err(ActivationRuleValidationError::InvalidProbability);
         }
-        if self
-            .match_rule
-            .scan_depth
-            .is_some_and(|depth| depth > limits.max_scan_depth)
-        {
+        if self.match_rule.scan_depth.is_some_and(|depth| depth > limits.max_scan_depth) {
             return Err(ActivationRuleValidationError::ScanDepthTooLarge);
         }
         if self.match_rule.keys.len() > limits.max_primary_patterns_per_entry {
@@ -469,12 +465,10 @@ pub fn compile_activation_regex(
         .dot_matches_new_line(flags.contains('s'))
         .unicode(true)
         .size_limit(max_program_bytes);
-    builder
-        .build()
-        .map_err(|error| match error {
-            regex::Error::CompiledTooBig(_) => ActivationRuleValidationError::RegexProgramTooLarge,
-            _ => ActivationRuleValidationError::InvalidRegex,
-        })
+    builder.build().map_err(|error| match error {
+        regex::Error::CompiledTooBig(_) => ActivationRuleValidationError::RegexProgramTooLarge,
+        _ => ActivationRuleValidationError::InvalidRegex,
+    })
 }
 
 fn validate_macro_pattern(value: &str) -> Result<(), ActivationRuleValidationError> {

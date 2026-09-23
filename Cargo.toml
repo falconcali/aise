@@ -20,6 +20,9 @@ base64 = "0.22.1"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
 minijinja = "2"
+opentelemetry = { version = "0.32.0", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.32.0", default-features = false, features = ["trace", "internal-logs"] }
+opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client", "reqwest-rustls", "internal-logs"] }
 regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
@@ -38,6 +41,7 @@ toml = "0.8"
 tower-http = { version = "0.6", features = ["fs", "trace", "cors"] }
 tracing = "0.1"
 tracing-appender = "0.2"
+tracing-opentelemetry = { version = "0.33.0", default-features = false, features = ["tracing-log"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 uuid = { version = "1", features = ["v4"] }

@@ -103,20 +103,12 @@ impl LangfuseConfig {
         if self.base_url.trim().is_empty() {
             return Err(ConfigError::Invalid("langfuse.base_url must not be empty".into()));
         }
-        if self
-            .public_key
-            .as_deref()
-            .is_none_or(|value| value.trim().is_empty())
-        {
+        if self.public_key.as_deref().is_none_or(|value| value.trim().is_empty()) {
             return Err(ConfigError::Invalid(
                 "langfuse.public_key is required when Langfuse is enabled".into(),
             ));
         }
-        if self
-            .secret_key
-            .as_deref()
-            .is_none_or(|value| value.trim().is_empty())
-        {
+        if self.secret_key.as_deref().is_none_or(|value| value.trim().is_empty()) {
             return Err(ConfigError::Invalid(
                 "langfuse.secret_key is required when Langfuse is enabled".into(),
             ));
@@ -136,9 +128,7 @@ impl LangfuseConfig {
             return Err(ConfigError::Invalid("Langfuse timeouts and delays must be positive".into()));
         }
         if self.max_request_bytes == 0 {
-            return Err(ConfigError::Invalid(
-                "langfuse.max_request_bytes must be positive".into(),
-            ));
+            return Err(ConfigError::Invalid("langfuse.max_request_bytes must be positive".into()));
         }
         Ok(())
     }

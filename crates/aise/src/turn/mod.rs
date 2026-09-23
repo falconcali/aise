@@ -1,3 +1,4 @@
+pub mod observability;
 pub mod turn_budget;
 pub mod turn_context;
 pub mod turn_contract;

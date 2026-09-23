@@ -100,5 +100,4 @@ impl NarrativeConfig {
         }
         Ok(())
     }
-
 }
