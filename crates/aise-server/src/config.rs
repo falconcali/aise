@@ -45,7 +45,135 @@ pub struct ServerConfig {
     pub trace_shutdown_grace_ms: u64,
 
     #[serde(default)]
+    pub langfuse: LangfuseConfig,
+
+    #[serde(default)]
     pub aise: AiseConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LangfuseConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_langfuse_base_url")]
+    pub base_url: String,
+    #[serde(default)]
+    pub public_key: Option<String>,
+    #[serde(default)]
+    pub secret_key: Option<String>,
+    #[serde(default = "default_langfuse_environment")]
+    pub environment: String,
+    #[serde(default = "default_langfuse_max_queue_size")]
+    pub max_queue_size: usize,
+    #[serde(default = "default_langfuse_max_export_batch_size")]
+    pub max_export_batch_size: usize,
+    #[serde(default = "default_langfuse_scheduled_delay_ms")]
+    pub scheduled_delay_ms: u64,
+    #[serde(default = "default_langfuse_export_timeout_ms")]
+    pub export_timeout_ms: u64,
+    #[serde(default = "default_langfuse_shutdown_timeout_ms")]
+    pub shutdown_timeout_ms: u64,
+    #[serde(default = "default_langfuse_max_request_bytes")]
+    pub max_request_bytes: usize,
+}
+
+impl Default for LangfuseConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: default_langfuse_base_url(),
+            public_key: None,
+            secret_key: None,
+            environment: default_langfuse_environment(),
+            max_queue_size: default_langfuse_max_queue_size(),
+            max_export_batch_size: default_langfuse_max_export_batch_size(),
+            scheduled_delay_ms: default_langfuse_scheduled_delay_ms(),
+            export_timeout_ms: default_langfuse_export_timeout_ms(),
+            shutdown_timeout_ms: default_langfuse_shutdown_timeout_ms(),
+            max_request_bytes: default_langfuse_max_request_bytes(),
+        }
+    }
+}
+
+impl LangfuseConfig {
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.base_url.trim().is_empty() {
+            return Err(ConfigError::Invalid("langfuse.base_url must not be empty".into()));
+        }
+        if self
+            .public_key
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            return Err(ConfigError::Invalid(
+                "langfuse.public_key is required when Langfuse is enabled".into(),
+            ));
+        }
+        if self
+            .secret_key
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            return Err(ConfigError::Invalid(
+                "langfuse.secret_key is required when Langfuse is enabled".into(),
+            ));
+        }
+        if self.environment.trim().is_empty() {
+            return Err(ConfigError::Invalid("langfuse.environment must not be empty".into()));
+        }
+        if self.max_queue_size == 0 {
+            return Err(ConfigError::Invalid("langfuse.max_queue_size must be positive".into()));
+        }
+        if self.max_export_batch_size == 0 || self.max_export_batch_size > self.max_queue_size {
+            return Err(ConfigError::Invalid(
+                "langfuse.max_export_batch_size must be positive and no larger than max_queue_size".into(),
+            ));
+        }
+        if self.scheduled_delay_ms == 0 || self.export_timeout_ms == 0 || self.shutdown_timeout_ms == 0 {
+            return Err(ConfigError::Invalid("Langfuse timeouts and delays must be positive".into()));
+        }
+        if self.max_request_bytes == 0 {
+            return Err(ConfigError::Invalid(
+                "langfuse.max_request_bytes must be positive".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn default_langfuse_base_url() -> String {
+    "https://cloud.langfuse.com".into()
+}
+
+fn default_langfuse_environment() -> String {
+    "development".into()
+}
+
+fn default_langfuse_max_queue_size() -> usize {
+    2_048
+}
+
+fn default_langfuse_max_export_batch_size() -> usize {
+    32
+}
+
+fn default_langfuse_scheduled_delay_ms() -> u64 {
+    1_000
+}
+
+fn default_langfuse_export_timeout_ms() -> u64 {
+    5_000
+}
+
+fn default_langfuse_shutdown_timeout_ms() -> u64 {
+    5_000
+}
+
+fn default_langfuse_max_request_bytes() -> usize {
+    8 * 1024 * 1024
 }
 
 fn default_listen_addr() -> SocketAddr {
@@ -116,6 +244,7 @@ impl Default for ServerConfig {
             trace_rotation_bytes: default_trace_rotation_bytes(),
             trace_retention_files: default_trace_retention_files(),
             trace_shutdown_grace_ms: default_trace_shutdown_grace_ms(),
+            langfuse: LangfuseConfig::default(),
             aise: AiseConfig::default(),
         }
     }
@@ -199,6 +328,7 @@ impl ServerConfig {
         self.trace_writer_config()
             .validate()
             .map_err(|error| ConfigError::Invalid(error.to_string()))?;
+        self.langfuse.validate()?;
         self.aise.validate().map_err(ConfigError::from)
     }
 
@@ -283,6 +413,60 @@ impl ServerConfig {
         if let Some(v) = get("AISE_TRACE_SHUTDOWN_GRACE_MS") {
             self.trace_shutdown_grace_ms = v.parse::<u64>().map_err(|e| ConfigError::Env {
                 env: "AISE_TRACE_SHUTDOWN_GRACE_MS",
+                message: e.to_string(),
+            })?;
+        }
+        if let Some(v) = get("LANGFUSE_ENABLED") {
+            self.langfuse.enabled = v.parse::<bool>().map_err(|e| ConfigError::Env {
+                env: "LANGFUSE_ENABLED",
+                message: e.to_string(),
+            })?;
+        }
+        if let Some(v) = get("LANGFUSE_BASE_URL") {
+            self.langfuse.base_url = v;
+        }
+        if let Some(v) = get("LANGFUSE_PUBLIC_KEY") {
+            self.langfuse.public_key = Some(v);
+        }
+        if let Some(v) = get("LANGFUSE_SECRET_KEY") {
+            self.langfuse.secret_key = Some(v);
+        }
+        if let Some(v) = get("LANGFUSE_ENVIRONMENT") {
+            self.langfuse.environment = v;
+        }
+        if let Some(v) = get("LANGFUSE_MAX_QUEUE_SIZE") {
+            self.langfuse.max_queue_size = v.parse::<usize>().map_err(|e| ConfigError::Env {
+                env: "LANGFUSE_MAX_QUEUE_SIZE",
+                message: e.to_string(),
+            })?;
+        }
+        if let Some(v) = get("LANGFUSE_MAX_EXPORT_BATCH_SIZE") {
+            self.langfuse.max_export_batch_size = v.parse::<usize>().map_err(|e| ConfigError::Env {
+                env: "LANGFUSE_MAX_EXPORT_BATCH_SIZE",
+                message: e.to_string(),
+            })?;
+        }
+        if let Some(v) = get("LANGFUSE_SCHEDULED_DELAY_MS") {
+            self.langfuse.scheduled_delay_ms = v.parse::<u64>().map_err(|e| ConfigError::Env {
+                env: "LANGFUSE_SCHEDULED_DELAY_MS",
+                message: e.to_string(),
+            })?;
+        }
+        if let Some(v) = get("LANGFUSE_EXPORT_TIMEOUT_MS") {
+            self.langfuse.export_timeout_ms = v.parse::<u64>().map_err(|e| ConfigError::Env {
+                env: "LANGFUSE_EXPORT_TIMEOUT_MS",
+                message: e.to_string(),
+            })?;
+        }
+        if let Some(v) = get("LANGFUSE_SHUTDOWN_TIMEOUT_MS") {
+            self.langfuse.shutdown_timeout_ms = v.parse::<u64>().map_err(|e| ConfigError::Env {
+                env: "LANGFUSE_SHUTDOWN_TIMEOUT_MS",
+                message: e.to_string(),
+            })?;
+        }
+        if let Some(v) = get("LANGFUSE_MAX_REQUEST_BYTES") {
+            self.langfuse.max_request_bytes = v.parse::<usize>().map_err(|e| ConfigError::Env {
+                env: "LANGFUSE_MAX_REQUEST_BYTES",
                 message: e.to_string(),
             })?;
         }

@@ -13,6 +13,17 @@ max_sessions = 64
 
 trace_dir = "trace"
 
+[langfuse]
+enabled = false
+base_url = "https://cloud.langfuse.com"
+environment = "development"
+max_queue_size = 2048
+max_export_batch_size = 32
+scheduled_delay_ms = 1000
+export_timeout_ms = 5000
+shutdown_timeout_ms = 5000
+max_request_bytes = 8388608
+
 # 前端静态资源目录；留空则使用 aise-server crate 内置的 assets/
 # assets_dir = ""
 

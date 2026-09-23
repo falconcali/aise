@@ -183,15 +183,14 @@ async fn canonical_pack_entries(
     let kinds = rows
         .iter()
         .map(|row| {
-            row.try_get::<String, _>("knowledge_kind")
-                .map_err(SqliteStoreError::from)
-                .and_then(|kind| match kind.as_str() {
-                    "fact" => Ok(KnowledgeKind::Fact),
-                    "rumor" => Ok(KnowledgeKind::Rumor),
-                    _ => Err(invalid_activation_state()),
-                })
+            let kind = row.try_get::<String, _>("knowledge_kind").map_err(SqliteStoreError::from)?;
+            match kind.as_str() {
+                "fact" => Ok(KnowledgeKind::Fact),
+                "rumor" => Ok(KnowledgeKind::Rumor),
+                _ => Err(invalid_activation_state()),
+            }
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, StoreError>>()?;
     let allocation =
         allocate_knowledge_ids(KnowledgeIdHighWater::zero(), &kinds).map_err(|_| invalid_activation_state())?;
     let mut assigned = allocation.assigned.into_iter();

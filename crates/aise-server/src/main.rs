@@ -3,6 +3,7 @@ use aise_server::app::build_services;
 use aise_server::session::SessionRegistry;
 use aise_server::shutdown::wait_for_shutdown_signal;
 use aise_server::tasks;
+use aise_server::trace::{CompositeTraceSink, LangfuseTraceSink};
 use aise_server::{AppState, ServerConfig, new_trace_writer, router};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -26,7 +27,13 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let trace_writer = new_trace_writer(&config)?;
-    let trace_sink: Arc<dyn TraceSpanSink> = trace_writer.clone();
+    let langfuse_sink =
+        LangfuseTraceSink::from_config(&config.langfuse, config.aise.llm.trace_content)?;
+    let mut trace_sinks: Vec<Arc<dyn TraceSpanSink>> = vec![trace_writer.clone()];
+    if let Some(sink) = &langfuse_sink {
+        trace_sinks.push(sink.clone());
+    }
+    let trace_sink: Arc<dyn TraceSpanSink> = CompositeTraceSink::new(trace_sinks);
     let services = build_services(&config, trace_sink).await?;
     let registry = SessionRegistry::new(config.max_sessions);
     let task_supervisor = tasks::TurnTaskSupervisor::new(config.turn_tasks())?;
@@ -45,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(
         addr = %config.listen_addr,
         trace_dir = %config.trace_dir.display(),
+        langfuse_enabled = config.langfuse.enabled,
         "aise-server listening"
     );
     let server_shutdown = CancellationToken::new();
@@ -66,9 +74,14 @@ async fn main() -> anyhow::Result<()> {
             if let Err(error) = task_supervisor.shutdown_with_grace().await {
                 tracing::warn!(error = %error, "turn task supervisor shutdown reported an error");
             }
-            trace_writer.shutdown_with_grace().await;
             server_shutdown.cancel();
             let _ = server_shutdown.cancelled().await;
+        }
+    }
+    trace_writer.shutdown_with_grace().await;
+    if let Some(sink) = langfuse_sink {
+        if let Err(error) = sink.shutdown_with_grace().await {
+            tracing::warn!(error = %error, "Langfuse exporter shutdown reported an error");
         }
     }
     Ok(())

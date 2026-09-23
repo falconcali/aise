@@ -11,4 +11,4 @@ pub mod trace;
 
 pub use api::{AppState, router};
 pub use app::{build_engine, build_services, new_trace_writer};
-pub use config::ServerConfig;
+pub use config::{LangfuseConfig, ServerConfig};
