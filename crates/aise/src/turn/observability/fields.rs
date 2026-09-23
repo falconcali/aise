@@ -61,20 +61,15 @@ pub const METADATA_OUTPUT_CAPTURED_BYTES: &str = "aise.observation.metadata.outp
 pub const METADATA_OUTPUT_TRUNCATED: &str = "aise.observation.metadata.output_truncated";
 pub const METADATA_OUTPUT_SHA256: &str = "aise.observation.metadata.output_sha256";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ObservationStatus {
     Ok,
     Error,
     Cancelled,
     DeadlineExceeded,
     Conflict,
+    #[default]
     Incomplete,
-}
-
-impl Default for ObservationStatus {
-    fn default() -> Self {
-        Self::Incomplete
-    }
 }
 
 impl ObservationStatus {
@@ -258,8 +253,16 @@ impl BoundedContentEncoder {
     }
 
     pub fn encode<T: Serialize>(&self, value: &T, remaining_observation_bytes: usize) -> Option<BoundedContent> {
+        self.encode_with_status(value, remaining_observation_bytes).0
+    }
+
+    pub fn encode_with_status<T: Serialize>(
+        &self,
+        value: &T,
+        remaining_observation_bytes: usize,
+    ) -> (Option<BoundedContent>, bool) {
         if self.policy == ContentCapturePolicy::MetadataOnly {
-            return None;
+            return (None, false);
         }
 
         let field_limit = self.limits.max_field_bytes.saturating_add(self.limits.detector_overlap_bytes);
@@ -267,8 +270,10 @@ impl BoundedContentEncoder {
             .min(self.limits.max_observation_bytes)
             .saturating_add(self.limits.detector_overlap_bytes);
         let mut writer = BoundedHashWriter::new(field_limit.min(observation_limit));
-        serde_json::to_writer(&mut writer, value).ok()?;
-        Some(writer.finish())
+        match serde_json::to_writer(&mut writer, value) {
+            Ok(()) => (Some(writer.finish()), false),
+            Err(_) => (None, true),
+        }
     }
 }
 

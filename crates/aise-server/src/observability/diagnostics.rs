@@ -4,6 +4,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 const RATE_LIMIT: Duration = Duration::from_secs(60);
+const MAX_RATE_LIMIT_KEYS: usize = 128;
 static LAST_EMITTED: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Default)]
@@ -86,6 +87,15 @@ fn should_emit(error_kind: &str) -> bool {
     match entries.get(error_kind) {
         Some(last) if now.duration_since(*last) < RATE_LIMIT => false,
         _ => {
+            if entries.len() >= MAX_RATE_LIMIT_KEYS {
+                if let Some(oldest) = entries
+                    .iter()
+                    .min_by_key(|(_, emitted_at)| **emitted_at)
+                    .map(|(key, _)| key.clone())
+                {
+                    entries.remove(&oldest);
+                }
+            }
             entries.insert(error_kind.to_owned(), now);
             true
         }

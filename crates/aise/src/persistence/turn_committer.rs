@@ -1,5 +1,9 @@
 use crate::domain::narrative::StoryTurn;
 use crate::persistence::store::{OutboxRecord, Store, TurnCommitSpec};
+use crate::turn::observability::{
+    METADATA_COMMIT_STATUS, METADATA_GRAPH_REVISION, METADATA_STORY_ID, METADATA_TURN_NUMBER, ObservationAttribute,
+    ObservationError, ObservationFields, ObservationFinish, ObservationSpan, ObservationStatus, ObservationStep,
+};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::TurnPhase;
 use crate::turn::turn_error::TurnExecutionError;
@@ -126,6 +130,8 @@ impl TurnExecutionPipeline for TurnCommitter {
             activation_state_delta,
         };
         let pending = ctx.trace().begin_span("story.commit", "story.commit");
+        let persistence_observation =
+            ObservationSpan::begin(ObservationStep::PersistTurn, ObservationFields::default());
         let started = Instant::now();
         let activation_span = info_span!(
             "knowledge.activation.commit",
@@ -139,6 +145,41 @@ impl TurnExecutionPipeline for TurnCommitter {
             error_code = tracing::field::Empty,
         );
         let outcome = self.store.commit_turn(&commit).instrument(activation_span.clone()).await;
+        persistence_observation.finish(match &outcome {
+            Ok(result) => ObservationFinish {
+                status: ObservationStatus::Ok,
+                metadata: vec![
+                    ObservationAttribute::string(METADATA_STORY_ID, story_id.as_str()),
+                    ObservationAttribute::u64(METADATA_TURN_NUMBER, turn_number.get()),
+                    ObservationAttribute::string(METADATA_COMMIT_STATUS, "committed"),
+                    ObservationAttribute::u64(METADATA_GRAPH_REVISION, result.story_revision.get()),
+                ],
+                ..ObservationFinish::default()
+            },
+            Err(error) => ObservationFinish {
+                status: if matches!(
+                    error,
+                    crate::persistence::store::StoreError::RevisionConflict
+                        | crate::persistence::store::StoreError::IdempotencyConflict
+                ) {
+                    ObservationStatus::Conflict
+                } else {
+                    ObservationStatus::Error
+                },
+                metadata: vec![
+                    ObservationAttribute::string(METADATA_STORY_ID, story_id.as_str()),
+                    ObservationAttribute::u64(METADATA_TURN_NUMBER, turn_number.get()),
+                    ObservationAttribute::string(METADATA_COMMIT_STATUS, "failed"),
+                ],
+                error: Some(ObservationError {
+                    code: store_error_code(error).into(),
+                    failure_kind: "store".into(),
+                    stage: Some(TurnStage::TurnCommitter.as_str().into()),
+                    message: error.to_string(),
+                }),
+                ..ObservationFinish::default()
+            },
+        });
         match &outcome {
             Ok(_) => {
                 activation_span.record("status", "ok");

@@ -144,7 +144,9 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                 .budget()
                 .remaining_output_tokens()
                 .min(u64::from(self.config.max_output_tokens)) as u32;
-            let scope = ctx.llm_call_scope(TurnStage::CharacterThink);
+            let scope = ctx
+                .llm_call_scope(TurnStage::CharacterThink)
+                .with_character_id(request.role_id.to_string());
             let structured = self
                 .gateway
                 .complete_structured_composed(

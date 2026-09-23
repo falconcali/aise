@@ -21,10 +21,7 @@ pub async fn run_turn(
     Json(req): Json<TurnRequest>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let include_trace = req.include_trace;
-    let raw_idempotency_key = headers
-        .get("Idempotency-Key")
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
+    let raw_idempotency_key = idempotency_key_header(&headers)?;
 
     let (progress_tx, progress_rx) = mpsc::channel(SSE_CHANNEL_CAPACITY);
     let (terminal_tx, terminal_rx) = mpsc::channel(1);
@@ -58,6 +55,18 @@ fn submission_api_error(error: TurnSubmissionError) -> ApiError {
     }
 }
 
+fn idempotency_key_header(headers: &HeaderMap) -> Result<Option<String>, ApiError> {
+    headers
+        .get("Idempotency-Key")
+        .map(|value| {
+            value
+                .to_str()
+                .map(str::to_owned)
+                .map_err(|_| ApiError::BadRequest("invalid Idempotency-Key header".into()))
+        })
+        .transpose()
+}
+
 pub async fn get_turn_result(
     State(state): State<Arc<AppState>>,
     Path((story_id, idempotency_key)): Path<(String, String)>,
@@ -72,3 +81,7 @@ pub async fn get_turn_result(
         Err(_) => Err(ApiError::Backpressure("store_unavailable".into())),
     }
 }
+
+#[cfg(test)]
+#[path = "tests/turn_tests.rs"]
+mod tests;

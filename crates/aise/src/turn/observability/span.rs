@@ -67,6 +67,10 @@ impl ObservationSpan {
         self.span.clone()
     }
 
+    pub(crate) fn context(&self) -> Context {
+        self.span.context()
+    }
+
     pub(crate) fn record_attribute(&mut self, attribute: ObservationAttribute) {
         if !self.is_recording() {
             return;
@@ -179,12 +183,12 @@ impl ObservationSpan {
             ObservationStatus::Ok => {
                 self.span.record("otel.status_code", "OK");
             }
-            ObservationStatus::Cancelled | ObservationStatus::Incomplete => {
+            ObservationStatus::Cancelled | ObservationStatus::Conflict | ObservationStatus::Incomplete => {
                 self.span.record("otel.status_message", status.as_str());
                 self.span.set_attribute(OBSERVATION_LEVEL, "WARNING");
                 self.span.set_attribute(OBSERVATION_STATUS_MESSAGE, status.as_str());
             }
-            ObservationStatus::Error | ObservationStatus::DeadlineExceeded | ObservationStatus::Conflict => {
+            ObservationStatus::Error | ObservationStatus::DeadlineExceeded => {
                 self.span.record("otel.status_code", "ERROR");
                 self.span.record("otel.status_message", status.as_str());
                 self.span.set_attribute(OBSERVATION_LEVEL, "ERROR");
@@ -192,10 +196,18 @@ impl ObservationSpan {
             }
         }
         if let Some(error) = error {
+            let message = bounded_message(error.message.as_str());
             self.span.record("otel.status_code", "ERROR");
-            self.span.record("otel.status_message", error.message.as_str());
-            self.span.set_attribute(OBSERVATION_LEVEL, "ERROR");
-            self.span.set_attribute(OBSERVATION_STATUS_MESSAGE, error.message);
+            self.span.record("otel.status_message", message.as_str());
+            self.span.set_attribute(
+                OBSERVATION_LEVEL,
+                if status == ObservationStatus::Conflict {
+                    "WARNING"
+                } else {
+                    "ERROR"
+                },
+            );
+            self.span.set_attribute(OBSERVATION_STATUS_MESSAGE, message);
             self.span.set_attribute(METADATA_ERROR_CODE, error.code);
             self.span.set_attribute(METADATA_FAILURE_KIND, error.failure_kind);
             if let Some(stage) = error.stage {
@@ -203,6 +215,10 @@ impl ObservationSpan {
             }
         }
     }
+}
+
+fn bounded_message(message: &str) -> String {
+    message.chars().take(1024).collect()
 }
 
 impl Drop for ObservationSpan {

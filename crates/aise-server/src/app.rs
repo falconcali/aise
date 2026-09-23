@@ -1,4 +1,5 @@
 use crate::config::ServerConfig;
+use crate::observability::ObservabilityConfig;
 use crate::trace::{NoopRedactor, TraceRedactor, TraceSinkError, TraceWriter, TraceWriterConfig};
 use aise::AiseEngine;
 use aise::character::CharacterThinkPipeline;
@@ -49,7 +50,17 @@ pub async fn build_services(
         CatalogPromptSource::from_config(&config.aise.prompt)
             .map_err(|error| anyhow::anyhow!("trusted prompt source failed: {error}"))?,
     );
-    let gateway = Arc::new(LlmGateway::new(provider, prompt_source, config.aise.llm.clone())?);
+    let observation_config = ObservabilityConfig::load_from_env().config;
+    let gateway = Arc::new(
+        LlmGateway::new(provider, prompt_source, config.aise.llm.clone())?.with_observation_capture(
+            observation_config.content_policy,
+            aise::turn::observability::ContentCaptureLimits {
+                max_field_bytes: observation_config.max_field_bytes,
+                max_observation_bytes: observation_config.max_observation_bytes,
+                detector_overlap_bytes: 512,
+            },
+        ),
+    );
 
     let sqlite = SqliteStore::connect(&config.aise.storage.database_url).await?;
     let story_history_reader: Arc<dyn StoryHistoryReadPort> = Arc::new(

@@ -346,7 +346,7 @@ fn shared_narrative_direction_projection_is_stage_consistent() {
     assert!(definition_site.contains("pub fn render_narrative_direction"));
 
     let writer_planner = include_str!("../src/planning/writer_planner_prompt.rs");
-    let story_generator = include_str!("../src/story/story_generator_prompt.rs");
+    let story_generator = include_str!("../src/story/story_generator_prompt.rs").replace("\r\n", "\n");
     let story_repairer = include_str!("../src/story/story_repairer_prompt.rs");
     let character_think = include_str!("../src/character/character_think_prompt.rs");
 
@@ -357,7 +357,12 @@ fn shared_narrative_direction_projection_is_stage_consistent() {
     assert!(story_repairer.contains("StoryGeneratorPromptContext"));
     assert!(story_repairer.contains("DefaultStoryGeneratorPromptContextProjector"));
 
-    for source in [writer_planner, story_generator, story_repairer, character_think] {
+    for source in [
+        writer_planner,
+        story_generator.as_str(),
+        story_repairer,
+        character_think,
+    ] {
         assert!(!source.contains("struct NarrativeDirectionPromptView"));
         assert!(!source.contains("struct WorldEventIntentPromptView"));
     }
@@ -386,7 +391,7 @@ fn writer_planner_and_generator_share_narrative_direction_body() {
         .expect("narrative_direction rendered");
     assert_eq!(writer_rendered, expected);
 
-    let story_generator = include_str!("../src/story/story_generator_prompt.rs");
+    let story_generator = include_str!("../src/story/story_generator_prompt.rs").replace("\r\n", "\n");
     assert!(story_generator.contains(
         "let narrative_direction = ctx\n            .narrative_projection()\n            .map(|projection| project_narrative_direction(&projection.plan))"
     ));

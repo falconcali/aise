@@ -30,18 +30,17 @@ impl SessionRegistry {
         Ok(session)
     }
 
-    pub async fn bind_story(&self, session_id: &SessionId, story_id: StoryId) -> bool {
+    pub async fn bind_story(&self, session_id: &SessionId, story_id: StoryId) -> Option<Arc<Session>> {
         let mut map = self.sessions.lock().await;
-        let rebound = map
-            .get(session_id)
-            .map(|session| Session::new(session.id.clone(), session.name.clone(), story_id, session.created_at));
-        match rebound {
-            Some(rebound) => {
-                map.insert(session_id.clone(), rebound);
-                true
-            }
-            None => false,
+        let session = map.get(session_id)?.clone();
+        if session.story_id == story_id {
+            return Some(session);
         }
+        let rotated_id = SessionId::new(Uuid::new_v4().to_string());
+        let rotated = Session::new(rotated_id, session.name.clone(), story_id, now_millis());
+        map.remove(session_id);
+        map.insert(rotated.id.clone(), rotated.clone());
+        Some(rotated)
     }
 
     pub async fn get(&self, id: &SessionId) -> Option<Arc<Session>> {

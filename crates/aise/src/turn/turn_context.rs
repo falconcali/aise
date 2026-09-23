@@ -9,6 +9,7 @@ use crate::domain::turn::{
     ValidatedNarrativeResolution, WriterPlan,
 };
 use crate::domain::turn::{StoryGeneratorOutput, StoryStateExtractionDto, StoryStateExtractionEnvelope};
+use crate::turn::observability::ObservationStep;
 use crate::turn::turn_budget::{CorrectionKind, TurnBudget};
 use crate::turn::turn_contract::{
     CommittedTurnResult, LlmBudgetReservation, LlmCallUsage, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
@@ -113,6 +114,8 @@ pub struct TurnExecutionContext {
     terminal_kind: Option<crate::turn::turn_error::TurnTerminalKind>,
     terminal_error: Option<TurnExecutionError>,
     llm_calls: Vec<LlmCallUsage>,
+    retrieval_skipped: bool,
+    character_thinking_skipped: bool,
 }
 
 impl TurnExecutionContext {
@@ -154,6 +157,8 @@ impl TurnExecutionContext {
             terminal_kind: None,
             terminal_error: None,
             llm_calls: Vec::new(),
+            retrieval_skipped: false,
+            character_thinking_skipped: false,
         })
     }
 
@@ -530,6 +535,7 @@ impl TurnExecutionContext {
     pub fn skip_retrieval(&mut self) -> Result<(), TurnExecutionError> {
         self.expect_phase(TurnPhase::Planned)?;
         self.retrieved = RetrievedContext::default();
+        self.retrieval_skipped = true;
         Ok(())
     }
 
@@ -565,7 +571,16 @@ impl TurnExecutionContext {
             ));
         }
         self.character_decisions = Vec::new();
+        self.character_thinking_skipped = true;
         Ok(())
+    }
+
+    pub fn retrieval_skipped(&self) -> bool {
+        self.retrieval_skipped
+    }
+
+    pub fn character_thinking_skipped(&self) -> bool {
+        self.character_thinking_skipped
     }
 
     fn ensure_story_bound(&self, story: &StoryGeneratorOutput, stage: TurnStage) -> Result<(), TurnExecutionError> {
@@ -886,6 +901,10 @@ impl TurnExecutionContext {
             trace: &mut self.trace,
             llm_calls: &mut self.llm_calls,
             stage,
+            observation_step: observation_step_for_stage(stage),
+            attempt: 1,
+            correction_round: None,
+            character_id: None,
         }
     }
 }
@@ -897,6 +916,10 @@ pub struct TurnLlmCallScope<'a> {
     trace: &'a mut TraceRecorder,
     llm_calls: &'a mut Vec<LlmCallUsage>,
     stage: TurnStage,
+    observation_step: ObservationStep,
+    attempt: u32,
+    correction_round: Option<u32>,
+    character_id: Option<String>,
 }
 
 impl TurnLlmCallScope<'_> {
@@ -914,6 +937,32 @@ impl TurnLlmCallScope<'_> {
 
     pub fn stage(&self) -> TurnStage {
         self.stage
+    }
+
+    pub fn with_character_id(mut self, character_id: impl Into<String>) -> Self {
+        self.character_id = Some(character_id.into());
+        self
+    }
+
+    pub fn with_correction_round(mut self, correction_round: u32) -> Self {
+        self.correction_round = Some(correction_round);
+        self
+    }
+
+    pub fn observation_step(&self) -> ObservationStep {
+        self.observation_step
+    }
+
+    pub fn attempt(&self) -> u32 {
+        self.attempt
+    }
+
+    pub fn correction_round(&self) -> Option<u32> {
+        self.correction_round
+    }
+
+    pub fn character_id(&self) -> Option<&str> {
+        self.character_id.as_deref()
     }
 
     pub fn deadline(&self) -> Instant {
@@ -952,6 +1001,22 @@ impl TurnLlmCallScope<'_> {
 
     pub fn end_llm_span<S: Serialize>(&mut self, span: PendingSpan, payload: &S) {
         self.trace.end_span_with(span, payload);
+    }
+}
+
+fn observation_step_for_stage(stage: TurnStage) -> ObservationStep {
+    match stage {
+        TurnStage::WriterPlanner => ObservationStep::GenerateWriterPlan,
+        TurnStage::ContextRetrieval => ObservationStep::RetrieveContext,
+        TurnStage::CharacterThink => ObservationStep::ThinkCharacter,
+        TurnStage::StoryGenerator => ObservationStep::DraftStoryText,
+        TurnStage::StoryStateExtractor => ObservationStep::InferStoryState,
+        TurnStage::StoryRepairer => ObservationStep::ReviseStoryText,
+        TurnStage::TurnInitializer => ObservationStep::InitializeTurn,
+        TurnStage::BaselineBuilder => ObservationStep::PrepareContext,
+        TurnStage::Context => ObservationStep::PrepareContext,
+        TurnStage::Validation => ObservationStep::ValidateStory,
+        TurnStage::TurnCommitter => ObservationStep::CommitTurn,
     }
 }
 

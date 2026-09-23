@@ -1,11 +1,16 @@
 ﻿use crate::runtime::turn_pipeline_set::TurnPipelineSet;
 //use crate::turn::turn_budget::CorrectionKind;
+use crate::turn::observability::{
+    METADATA_CHARACTER_THINKING_SKIPPED, METADATA_RETRIEVAL_SKIPPED, METADATA_SKIP_REASON, ObservationAttribute,
+    ObservationError, ObservationFields, ObservationFinish, ObservationSpan, ObservationStatus, ObservationStep,
+};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::TurnPhase;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_event::{TurnEvent, TurnEventSink};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use crate::turn::turn_trace::{PipelineData, SpanPayload};
+use opentelemetry::Context;
 use std::time::Instant;
 
 pub struct TurnRuntime {
@@ -21,25 +26,66 @@ impl TurnRuntime {
         &self,
         ctx: &mut TurnExecutionContext,
         sink: &dyn TurnEventSink,
+        parent: &Context,
     ) -> Result<(), TurnExecutionError> {
-        self.execute(self.pipeline_set.initializer(), ctx, sink).await?;
-        self.execute(self.pipeline_set.baseline_builder(), ctx, sink).await?;
-        self.execute(self.pipeline_set.writer_planner(), ctx, sink).await?;
+        let run_span =
+            ObservationSpan::begin_with_parent(ObservationStep::RunTurnPipelines, ObservationFields::default(), parent);
+        let run_context = run_span.context();
+        let result = run_span.in_scope(self.run_inner(ctx, sink, &run_context)).await;
+        let mut metadata = vec![
+            ObservationAttribute::bool(METADATA_RETRIEVAL_SKIPPED, ctx.retrieval_skipped()),
+            ObservationAttribute::bool(METADATA_CHARACTER_THINKING_SKIPPED, ctx.character_thinking_skipped()),
+        ];
+        if ctx.retrieval_skipped() || ctx.character_thinking_skipped() {
+            let mut reasons = Vec::new();
+            if ctx.retrieval_skipped() {
+                reasons.push("retrieval:not_required".to_owned());
+            }
+            if ctx.character_thinking_skipped() {
+                reasons.push("character_thinking:not_required".to_owned());
+            }
+            metadata.push(ObservationAttribute::string_list(METADATA_SKIP_REASON, reasons));
+        }
+        run_span.finish(match &result {
+            Ok(()) => ObservationFinish {
+                status: ObservationStatus::Ok,
+                metadata,
+                ..ObservationFinish::default()
+            },
+            Err(error) => ObservationFinish {
+                status: runtime_status(error),
+                metadata,
+                error: Some(runtime_error(error)),
+                ..ObservationFinish::default()
+            },
+        });
+        result
+    }
+
+    async fn run_inner(
+        &self,
+        ctx: &mut TurnExecutionContext,
+        sink: &dyn TurnEventSink,
+        parent: &Context,
+    ) -> Result<(), TurnExecutionError> {
+        self.execute(self.pipeline_set.initializer(), ctx, sink, parent).await?;
+        self.execute(self.pipeline_set.baseline_builder(), ctx, sink, parent).await?;
+        self.execute(self.pipeline_set.writer_planner(), ctx, sink, parent).await?;
 
         if ctx.requires_retrieval()? {
-            self.execute(self.pipeline_set.retrieval(), ctx, sink).await?;
+            self.execute(self.pipeline_set.retrieval(), ctx, sink, parent).await?;
         } else {
             ctx.skip_retrieval()?;
         }
 
         if ctx.requires_character_thinking()? {
-            self.execute(self.pipeline_set.character_think(), ctx, sink).await?;
+            self.execute(self.pipeline_set.character_think(), ctx, sink, parent).await?;
         } else {
             ctx.skip_character_thinking()?;
         }
 
         ctx.complete_context_preparation()?;
-        self.execute(self.pipeline_set.story_generator(), ctx, sink).await?;
+        self.execute(self.pipeline_set.story_generator(), ctx, sink, parent).await?;
 
         // loop {
         //     if matches!(ctx.phase(), TurnPhase::StoryReady | TurnPhase::StateReextractionRequired) {
@@ -80,7 +126,7 @@ impl TurnRuntime {
         ctx.set_pahse(TurnPhase::ReadyToCommit); // TODO : Debug Code
         ctx.construct_changeset()?; // TODO : Debug Code
 
-        self.execute(self.pipeline_set.committer(), ctx, sink).await?;
+        self.execute(self.pipeline_set.committer(), ctx, sink, parent).await?;
         ctx.committed_result()
             .map(|_| ())
             .ok_or_else(|| invariant("committed turn missing committed result".to_string()))
@@ -91,6 +137,7 @@ impl TurnRuntime {
         pipeline: &dyn TurnExecutionPipeline,
         ctx: &mut TurnExecutionContext,
         sink: &dyn TurnEventSink,
+        parent: &Context,
     ) -> Result<(), TurnExecutionError> {
         let stage = pipeline.stage();
         if let Some(entries) = stage_entry_phases(stage) {
@@ -112,8 +159,10 @@ impl TurnRuntime {
             turn_number: Some(ctx.turn_number()),
             stage,
         });
+        let observation =
+            ObservationSpan::begin_with_parent(observation_step(stage), ObservationFields::default(), parent);
         let pending = ctx.trace().begin_span("aise.pipeline", stage.as_str());
-        let outcome = pipeline.execute(ctx).await;
+        let outcome = observation.in_scope(pipeline.execute(ctx)).await;
         let payload = match &outcome {
             Ok(()) => SpanPayload::Pipeline(PipelineData {
                 stage: stage.as_str().to_owned(),
@@ -127,6 +176,17 @@ impl TurnRuntime {
             }),
         };
         ctx.trace().end_span_with(pending, &payload);
+        observation.finish(match &outcome {
+            Ok(()) => ObservationFinish {
+                status: ObservationStatus::Ok,
+                ..ObservationFinish::default()
+            },
+            Err(error) => ObservationFinish {
+                status: runtime_status(error),
+                error: Some(runtime_error(error)),
+                ..ObservationFinish::default()
+            },
+        });
         if outcome.is_ok() {
             if let Some(exits) = stage_exit_phases(stage) {
                 if !exits.contains(&ctx.phase()) {
@@ -139,6 +199,40 @@ impl TurnRuntime {
             }
         }
         outcome
+    }
+}
+
+pub const fn observation_step(stage: TurnStage) -> ObservationStep {
+    match stage {
+        TurnStage::TurnInitializer => ObservationStep::InitializeTurn,
+        TurnStage::BaselineBuilder => ObservationStep::PrepareContext,
+        TurnStage::WriterPlanner => ObservationStep::PlanTurn,
+        TurnStage::ContextRetrieval => ObservationStep::RetrieveContext,
+        TurnStage::CharacterThink => ObservationStep::ThinkCharacters,
+        TurnStage::StoryGenerator => ObservationStep::GenerateStory,
+        TurnStage::StoryStateExtractor => ObservationStep::ExtractStoryState,
+        TurnStage::Validation => ObservationStep::ValidateStory,
+        TurnStage::StoryRepairer => ObservationStep::RepairStory,
+        TurnStage::TurnCommitter => ObservationStep::CommitTurn,
+        TurnStage::Context => ObservationStep::PrepareContext,
+    }
+}
+
+fn runtime_error(error: &TurnExecutionError) -> ObservationError {
+    ObservationError {
+        code: error.code().into(),
+        failure_kind: format!("{:?}", error.kind()).to_lowercase(),
+        stage: error.stage().map(|stage| stage.as_str().into()),
+        message: error.to_string(),
+    }
+}
+
+fn runtime_status(error: &TurnExecutionError) -> ObservationStatus {
+    match error.kind() {
+        TurnFailureKind::Cancelled => ObservationStatus::Cancelled,
+        TurnFailureKind::DeadlineExceeded => ObservationStatus::DeadlineExceeded,
+        TurnFailureKind::RevisionConflict | TurnFailureKind::IdempotencyConflict => ObservationStatus::Conflict,
+        _ => ObservationStatus::Error,
     }
 }
 

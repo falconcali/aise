@@ -62,7 +62,10 @@ impl TurnExecutionPipeline for StoryRepairer {
             issue_codes,
             "story repairer prompt projected"
         );
-        let scope = ctx.llm_call_scope(TurnStage::StoryRepairer);
+        let correction_round = ctx.budget().correction_rounds();
+        let scope = ctx
+            .llm_call_scope(TurnStage::StoryRepairer)
+            .with_correction_round(correction_round);
         let span = tracing::info_span!(
             "story_repairer.repair",
             prompt_profile = "story_repairer",

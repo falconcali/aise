@@ -29,12 +29,9 @@ pub async fn bind_story(
         return Err(ApiError::NotFound("story".into()));
     }
     let session_id = SessionId::new(session_id);
-    if !state.registry.bind_story(&session_id, story_id).await {
-        return Err(ApiError::NotFound("session".into()));
-    }
     let session = state
         .registry
-        .get(&session_id)
+        .bind_story(&session_id, story_id)
         .await
         .ok_or_else(|| ApiError::NotFound("session".into()))?;
     Ok((StatusCode::OK, Json(session.info())))

@@ -1,9 +1,12 @@
 use super::*;
-use opentelemetry::Context;
+use opentelemetry::baggage::BaggageExt;
+use opentelemetry::trace::{Tracer as _, TracerProvider as _};
+use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
-use opentelemetry_sdk::trace::{Span, SpanData};
+use opentelemetry_sdk::trace::{SdkTracerProvider, Span, SpanData};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -62,4 +65,53 @@ fn lifecycle_operations_delegate_to_the_single_inner_processor() {
     assert!(processor.shutdown_with_timeout(Duration::from_millis(10)).is_ok());
     assert_eq!(flushes.load(Ordering::SeqCst), 1);
     assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[derive(Debug)]
+struct CapturingProcessor {
+    attributes: Arc<Mutex<Vec<String>>>,
+}
+
+impl SpanProcessor for CapturingProcessor {
+    fn on_start(&self, _span: &mut Span, _context: &Context) {}
+
+    fn on_end(&self, span: SpanData) {
+        self.attributes
+            .lock()
+            .unwrap()
+            .extend(span.attributes.into_iter().map(|attribute| attribute.key.to_string()));
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        Ok(())
+    }
+
+    fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+        Ok(())
+    }
+
+    fn set_resource(&mut self, _resource: &Resource) {}
+}
+
+#[test]
+fn on_start_copies_only_the_fixed_baggage_allowlist() {
+    let attributes = Arc::new(Mutex::new(Vec::new()));
+    let processor = TraceAttributePropagationProcessor::new(CapturingProcessor {
+        attributes: attributes.clone(),
+    });
+    let provider = SdkTracerProvider::builder().with_span_processor(processor).build();
+    let tracer = provider.tracer("test");
+    let context = Context::new().with_baggage(vec![
+        KeyValue::new("aise.trace.name", "allowed"),
+        KeyValue::new("langfuse.session.id", "session"),
+        KeyValue::new("aise.unknown", "dropped"),
+    ]);
+
+    tracer.span_builder("child").start_with_context(&tracer, &context).end();
+    let _ = provider.shutdown();
+
+    let attributes = attributes.lock().unwrap();
+    assert!(attributes.iter().any(|key| key == "aise.trace.name"));
+    assert!(attributes.iter().any(|key| key == "langfuse.session.id"));
+    assert!(!attributes.iter().any(|key| key == "aise.unknown"));
 }

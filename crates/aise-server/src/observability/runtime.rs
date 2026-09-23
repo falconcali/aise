@@ -15,6 +15,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tracing_subscriber::Layer as _;
 
+#[cfg(test)]
+use crate::observability::config::ObservabilityConfigIssue;
+
 pub const EXPORT_CHAIN: &str = "SdkTracerProvider->TraceAttributePropagationProcessor->BatchSpanProcessor->LangfuseExportAdapter->OTLP HTTP/protobuf";
 
 pub type ObservationLayer = Box<dyn tracing_subscriber::Layer<tracing_subscriber::Registry> + Send + Sync>;
@@ -44,12 +47,10 @@ impl ObservabilityRuntime {
             build_provider(&config, diagnostics.clone())
         })) {
             Ok(Ok(provider)) => provider,
-            Ok(Err(error_kind)) => {
-                diagnostics.initialization(error_kind, endpoint_host.as_deref());
+            Ok(Err(_)) => {
                 return disabled(config.shutdown_timeout_ms);
             }
             Err(_) => {
-                diagnostics.initialization("provider_build_panicked", endpoint_host.as_deref());
                 return disabled(config.shutdown_timeout_ms);
             }
         };
@@ -60,7 +61,6 @@ impl ObservabilityRuntime {
                 metadata.target() == "aise::observation"
             }))
             .boxed();
-
         tracing::info!(
             target: "aise::telemetry",
             enabled = true,
@@ -87,7 +87,7 @@ impl ObservabilityRuntime {
     }
 
     pub fn shutdown_with_timeout(mut self) -> ShutdownReport {
-        let report = match self.provider.take() {
+        match self.provider.take() {
             Some(provider) => match provider.shutdown_with_timeout(self.shutdown_timeout) {
                 Ok(()) => ShutdownReport {
                     completed: true,
@@ -105,8 +105,7 @@ impl ObservabilityRuntime {
                 dropped_span_count: 0,
                 error_kind: None,
             },
-        };
-        report
+        }
     }
 }
 
@@ -161,7 +160,9 @@ fn build_provider(
         .with_attributes([
             KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
             KeyValue::new("deployment.environment.name", config.environment.clone()),
+            KeyValue::new("langfuse.environment", config.environment.clone()),
             KeyValue::new("langfuse.release", config.release.clone()),
+            KeyValue::new("aise.schema.version", "1"),
             KeyValue::new("langfuse.version", "1"),
         ])
         .build();

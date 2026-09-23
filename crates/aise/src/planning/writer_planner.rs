@@ -6,6 +6,10 @@ use crate::planning::planner_output::writer_planner_contract;
 use crate::planning::retrieval_plan_builder::RetrievalPlanBuilder;
 use crate::planning::writer_planner_prompt::WriterPlannerPromptContextProjector;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
+use crate::turn::observability::{
+    METADATA_GRAPH_REVISION, METADATA_PROJECTED_EDGE_COUNT, METADATA_PROJECTED_NODE_COUNT, ObservationAttribute,
+    ObservationFields, ObservationFinish, ObservationSpan, ObservationStatus,
+};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
@@ -65,6 +69,10 @@ impl TurnExecutionPipeline for WriterPlanner {
             })?
             .clone();
         let narrative_plan = narrative_projection.plan.clone();
+        let projection_observation = ObservationSpan::begin(
+            crate::turn::observability::ObservationStep::ProjectNarrative,
+            ObservationFields::default(),
+        );
         let pending = ctx.trace().begin_span("narrative.project", "narrative.reuse");
         let narrative_payload = serde_json::json!({
             "story_id": ctx.story_id(),
@@ -77,6 +85,18 @@ impl TurnExecutionPipeline for WriterPlanner {
             "error_code": null,
         });
         ctx.trace().end_span_with(pending, &narrative_payload);
+        projection_observation.finish(ObservationFinish {
+            status: ObservationStatus::Ok,
+            metadata: vec![
+                ObservationAttribute::u64(METADATA_GRAPH_REVISION, snapshot.graph_revision()),
+                ObservationAttribute::u64(METADATA_PROJECTED_NODE_COUNT, narrative_plan.active_nodes.len() as u64),
+                ObservationAttribute::u64(
+                    METADATA_PROJECTED_EDGE_COUNT,
+                    narrative_plan.world_event_intents.len() as u64,
+                ),
+            ],
+            ..ObservationFinish::default()
+        });
         let player_contribution = BoundedText::try_new(
             ctx.player_contribution().to_owned(),
             "player_contribution",

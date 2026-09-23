@@ -1,4 +1,4 @@
-use crate::config::{LlmConfig, TraceContentPolicy};
+use crate::config::{LlmConfig, ThinkingMode, TraceContentPolicy};
 use crate::domain::text::estimate_text_tokens;
 use crate::llm::accounting::{FinishReason, LlmCompletion, TokenAccountant};
 use crate::llm::error::LlmError;
@@ -12,6 +12,14 @@ use crate::llm::output_contract::{
 };
 use crate::llm::provider::{DeltaSink, LlmProvider};
 use crate::prompt::{PromptComposition, PromptCompositionInput, TrustedPromptSource};
+use crate::turn::observability::{
+    BoundedContentEncoder, ContentCaptureLimits, ContentCapturePolicy, GenerationUsage, METADATA_ATTEMPT,
+    METADATA_CALL_ID, METADATA_CHARACTER_ID, METADATA_CONTENT_ENCODE_FAILED, METADATA_CORRECTION_ROUND,
+    METADATA_FINISH_REASON, METADATA_PROVIDER, METADATA_PROVIDER_LATENCY_MS, METADATA_QUEUE_WAIT_MS,
+    METADATA_REASONING_CONTENT_AVAILABLE, METADATA_TOTAL_LATENCY_MS, METADATA_USAGE_ACCURACY, OBSERVATION_MODEL_NAME,
+    OBSERVATION_MODEL_PARAMETERS, ObservationAttribute, ObservationError, ObservationFields, ObservationFinish,
+    ObservationSpan, ObservationStatus,
+};
 use crate::turn::turn_context::TurnLlmCallScope;
 use crate::turn::turn_contract::{LlmBudgetReservation, LlmCallPurpose, LlmCallStatus, LlmCallUsage, UsageAccuracy};
 use crate::turn::turn_error::TurnExecutionError;
@@ -30,6 +38,16 @@ pub struct LlmGateway {
     limiter: LlmLimiter,
     config: LlmConfig,
     accountant: TokenAccountant,
+    observation_policy: ContentCapturePolicy,
+    observation_limits: ContentCaptureLimits,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LlmObservation<'a> {
+    pub step: crate::turn::observability::ObservationStep,
+    pub attempt: u32,
+    pub correction_round: Option<u32>,
+    pub character_id: Option<&'a str>,
 }
 
 #[derive(Debug, Clone)]
@@ -81,7 +99,19 @@ impl LlmGateway {
             limiter,
             config,
             accountant,
+            observation_policy: ContentCapturePolicy::MetadataOnly,
+            observation_limits: ContentCaptureLimits {
+                max_field_bytes: 16_384,
+                max_observation_bytes: 32_768,
+                detector_overlap_bytes: 512,
+            },
         })
+    }
+
+    pub fn with_observation_capture(mut self, policy: ContentCapturePolicy, limits: ContentCaptureLimits) -> Self {
+        self.observation_policy = policy;
+        self.observation_limits = limits;
+        self
     }
 
     pub async fn complete_text_composed(
@@ -301,6 +331,7 @@ impl LlmGateway {
                 return Err(error);
             }
         };
+        let call_id = reservation.call_id().clone();
         let span = scope.begin_llm_span();
         let queue_wait_ms = call_started.elapsed().as_millis() as u64;
 
@@ -323,24 +354,33 @@ impl LlmGateway {
             model: self.config.model.clone(),
             inputs,
         };
-        let provider_outcome = {
-            let call = self.provider.embed(&request);
-            async {
-                tokio::select! {
-                    result = call => result.map_err(LlmError::from),
-                    _ = scope.cancellation().token().cancelled() => Err(LlmError::Cancelled),
-                    _ = tokio::time::sleep_until(provider_deadline.into()) => {
-                        if hits_turn_deadline {
-                            Err(LlmError::TurnDeadlineExceeded)
-                        } else {
-                            Err(LlmError::ProviderTimeout)
+        let generation = begin_embedding_generation(
+            self.observation_policy,
+            &self.observation_limits,
+            self.provider.provider_name(),
+            &scope,
+            &request,
+        );
+        let provider_outcome = generation
+            .in_scope(async {
+                let call = self.provider.embed(&request);
+                async {
+                    tokio::select! {
+                        result = call => result.map_err(LlmError::from),
+                        _ = scope.cancellation().token().cancelled() => Err(LlmError::Cancelled),
+                        _ = tokio::time::sleep_until(provider_deadline.into()) => {
+                            if hits_turn_deadline {
+                                Err(LlmError::TurnDeadlineExceeded)
+                            } else {
+                                Err(LlmError::ProviderTimeout)
+                            }
                         }
                     }
                 }
-            }
-            .instrument(tracing_span)
-            .await
-        };
+                .instrument(tracing_span)
+                .await
+            })
+            .await;
         let total_latency_ms = call_started.elapsed().as_millis() as u64;
         let provider_latency_ms = total_latency_ms.saturating_sub(queue_wait_ms);
 
@@ -374,7 +414,8 @@ impl LlmGateway {
             .as_ref()
             .and_then(|output| output.charge.as_ref())
             .and_then(|charge| serde_json::to_value(charge).ok());
-        let call_usage = self.usage_to_call_usage(LlmCallPurpose::Embedding, &usage, &charge_value, None);
+        let call_usage = self.usage_to_call_usage(call_id, LlmCallPurpose::Embedding, &usage, &charge_value, None);
+        let observation_call_id = call_usage.call_id.as_str().to_owned();
         let settle = scope.settle_llm(reservation, call_usage);
         let status = if let Some(error) = &provider_error {
             llm_status_from_error(error)
@@ -386,6 +427,21 @@ impl LlmGateway {
             LlmCallStatus::ProviderRejected
         };
         let error_kind = provider_error.as_ref().map(|error| error.kind().to_owned());
+        let mut generation = generation;
+        generation.record_attribute(ObservationAttribute::string(METADATA_CALL_ID, observation_call_id));
+        generation.record_attribute(ObservationAttribute::u64(METADATA_QUEUE_WAIT_MS, queue_wait_ms));
+        generation.record_attribute(ObservationAttribute::u64(METADATA_PROVIDER_LATENCY_MS, provider_latency_ms));
+        generation.record_attribute(ObservationAttribute::u64(METADATA_TOTAL_LATENCY_MS, total_latency_ms));
+        generation.record_attribute(ObservationAttribute::string(METADATA_USAGE_ACCURACY, usage.accuracy.as_str()));
+        generation.finish(ObservationFinish {
+            status: provider_error
+                .as_ref()
+                .map(llm_observation_status)
+                .unwrap_or(ObservationStatus::Ok),
+            error: provider_error.as_ref().map(llm_observation_error),
+            usage: Some(generation_usage(&usage)),
+            ..ObservationFinish::default()
+        });
         let payload = SpanPayload::LlmCall(Box::new(LlmCallData {
             provider: self.provider.provider_name().to_owned(),
             model: request.model.clone(),
@@ -458,6 +514,15 @@ impl LlmGateway {
             Some((meta, check)) => (Some(meta), Some(check)),
             None => (None, None),
         };
+        let call_id = reservation.call_id().clone();
+        let mut generation = begin_generation(
+            self.observation_policy,
+            &self.observation_limits,
+            self.provider.provider_name(),
+            thinking_mode(self.config.thinking),
+            scope,
+            &request,
+        );
         let span = scope.begin_llm_span();
         let call_started = Instant::now();
 
@@ -470,6 +535,11 @@ impl LlmGateway {
                 estimated_input: 0,
                 queue_wait_ms: 0,
                 structured_meta: structured_meta.as_ref(),
+            });
+            generation.finish(ObservationFinish {
+                status: ObservationStatus::Cancelled,
+                error: Some(llm_observation_error(&LlmError::Cancelled)),
+                ..ObservationFinish::default()
             });
             scope.end_llm_span(span, &payload);
             scope.release_llm(reservation);
@@ -484,6 +554,11 @@ impl LlmGateway {
                 estimated_input: 0,
                 queue_wait_ms: 0,
                 structured_meta: structured_meta.as_ref(),
+            });
+            generation.finish(ObservationFinish {
+                status: ObservationStatus::DeadlineExceeded,
+                error: Some(llm_observation_error(&LlmError::TurnDeadlineExceeded)),
+                ..ObservationFinish::default()
             });
             scope.end_llm_span(span, &payload);
             scope.release_llm(reservation);
@@ -505,6 +580,11 @@ impl LlmGateway {
                 estimated_input: 0,
                 queue_wait_ms: 0,
                 structured_meta: structured_meta.as_ref(),
+            });
+            generation.finish(ObservationFinish {
+                status: llm_observation_status(&error),
+                error: Some(llm_observation_error(&error)),
+                ..ObservationFinish::default()
             });
             scope.end_llm_span(span, &payload);
             scope.release_llm(reservation);
@@ -533,6 +613,11 @@ impl LlmGateway {
                     queue_wait_ms: call_started.elapsed().as_millis() as u64,
                     structured_meta: structured_meta.as_ref(),
                 });
+                generation.finish(ObservationFinish {
+                    status: llm_observation_status(&error),
+                    error: Some(llm_observation_error(&error)),
+                    ..ObservationFinish::default()
+                });
                 scope.end_llm_span(span, &payload);
                 scope.release_llm(reservation);
                 return Err(error);
@@ -556,44 +641,48 @@ impl LlmGateway {
             provider = %self.provider.provider_name(),
             model = %self.config.model,
         );
-        let provider_outcome: Result<LlmCompletion, LlmError> = match stream {
-            false => {
-                let call = self.provider.complete(&request);
-                async {
-                    tokio::select! {
-                        result = call => result.map_err(LlmError::from),
-                        _ = scope.cancellation().token().cancelled() => Err(LlmError::Cancelled),
-                        _ = tokio::time::sleep_until(provider_deadline.into()) => {
-                            if hits_turn_deadline {
-                                Err(LlmError::TurnDeadlineExceeded)
-                            } else {
-                                Err(LlmError::ProviderTimeout)
+        let provider_outcome: Result<LlmCompletion, LlmError> = generation
+            .in_scope(async {
+                match stream {
+                    false => {
+                        let call = self.provider.complete(&request);
+                        async {
+                            tokio::select! {
+                                result = call => result.map_err(LlmError::from),
+                                _ = scope.cancellation().token().cancelled() => Err(LlmError::Cancelled),
+                                _ = tokio::time::sleep_until(provider_deadline.into()) => {
+                                    if hits_turn_deadline {
+                                        Err(LlmError::TurnDeadlineExceeded)
+                                    } else {
+                                        Err(LlmError::ProviderTimeout)
+                                    }
+                                }
                             }
                         }
+                        .instrument(tracing_span)
+                        .await
                     }
-                }
-                .instrument(tracing_span)
-                .await
-            }
-            true => {
-                let call = self.provider.complete_stream(&request, sink.expect("stream sink checked"));
-                async {
-                    tokio::select! {
-                        result = call => result.map_err(LlmError::from),
-                        _ = scope.cancellation().token().cancelled() => Err(LlmError::Cancelled),
-                        _ = tokio::time::sleep_until(provider_deadline.into()) => {
-                            if hits_turn_deadline {
-                                Err(LlmError::TurnDeadlineExceeded)
-                            } else {
-                                Err(LlmError::ProviderTimeout)
+                    true => {
+                        let call = self.provider.complete_stream(&request, sink.expect("stream sink checked"));
+                        async {
+                            tokio::select! {
+                                result = call => result.map_err(LlmError::from),
+                                _ = scope.cancellation().token().cancelled() => Err(LlmError::Cancelled),
+                                _ = tokio::time::sleep_until(provider_deadline.into()) => {
+                                    if hits_turn_deadline {
+                                        Err(LlmError::TurnDeadlineExceeded)
+                                    } else {
+                                        Err(LlmError::ProviderTimeout)
+                                    }
+                                }
                             }
                         }
+                        .instrument(tracing_span)
+                        .await
                     }
                 }
-                .instrument(tracing_span)
-                .await
-            }
-        };
+            })
+            .await;
         let total_latency_ms = call_started.elapsed().as_millis() as u64;
         let provider_latency_ms = total_latency_ms.saturating_sub(queue_wait_ms);
 
@@ -669,7 +758,8 @@ impl LlmGateway {
             .and_then(|c| serde_json::to_value(c).ok());
         let finish_reason_owned = completion.as_ref().and_then(|c| c.finish_reason.clone());
         let finish_reason_string = finish_reason_owned.as_ref().map(|reason| reason.as_str().to_owned());
-        let call_usage = self.usage_to_call_usage(request.purpose, &usage, &charge_value, finish_reason_owned);
+        let call_usage = self.usage_to_call_usage(call_id, request.purpose, &usage, &charge_value, finish_reason_owned);
+        let observation_call_id = call_usage.call_id.as_str().to_owned();
         let settle = scope.settle_llm(reservation, call_usage);
         let usage_accuracy = usage.accuracy.as_str().to_owned();
         let status = if let Some(error) = &provider_error {
@@ -682,6 +772,18 @@ impl LlmGateway {
             LlmCallStatus::ProviderRejected
         };
         let error_kind = provider_error.as_ref().map(|error| error.kind().to_owned());
+        generation.record_attribute(ObservationAttribute::string(METADATA_CALL_ID, observation_call_id));
+        generation.record_attribute(ObservationAttribute::u64(METADATA_QUEUE_WAIT_MS, queue_wait_ms));
+        generation.record_attribute(ObservationAttribute::u64(METADATA_PROVIDER_LATENCY_MS, provider_latency_ms));
+        generation.record_attribute(ObservationAttribute::u64(METADATA_TOTAL_LATENCY_MS, total_latency_ms));
+        generation.record_attribute(ObservationAttribute::string(METADATA_USAGE_ACCURACY, usage.accuracy.as_str()));
+        generation.record_attribute(ObservationAttribute::bool(
+            METADATA_REASONING_CONTENT_AVAILABLE,
+            usage.reasoning_tokens.unwrap_or_default() > 0,
+        ));
+        if let Some(reason) = &finish_reason_string {
+            generation.record_attribute(ObservationAttribute::string(METADATA_FINISH_REASON, reason));
+        }
         let content = match self.config.trace_content {
             TraceContentPolicy::MetadataOnly => None,
             TraceContentPolicy::RedactedContent => Some(LlmCallContent {
@@ -740,6 +842,14 @@ impl LlmGateway {
             content,
             structured_output,
         }));
+        finish_generation(
+            self.observation_policy,
+            &self.observation_limits,
+            generation,
+            completion.as_ref(),
+            provider_error.as_ref(),
+            &usage,
+        );
         scope.end_llm_span(span, &payload);
         drop(permit);
         settle.map_err(budget_to_llm)?;
@@ -795,6 +905,7 @@ impl LlmGateway {
 
     fn usage_to_call_usage(
         &self,
+        call_id: crate::turn::turn_contract::LlmCallId,
         purpose: LlmCallPurpose,
         usage: &crate::llm::accounting::LlmTokenUsage,
         charge_value: &Option<serde_json::Value>,
@@ -804,7 +915,7 @@ impl LlmGateway {
             .as_ref()
             .and_then(|value| serde_json::from_value(value.clone()).ok());
         LlmCallUsage {
-            call_id: crate::turn::turn_contract::LlmCallId::new(),
+            call_id,
             purpose,
             provider: self.provider.provider_name().to_owned(),
             model: self.config.model.clone(),
@@ -817,6 +928,157 @@ impl LlmGateway {
             charge,
             finish_reason,
         }
+    }
+}
+
+fn begin_generation(
+    policy: ContentCapturePolicy,
+    limits: &ContentCaptureLimits,
+    provider: &str,
+    thinking: &'static str,
+    scope: &TurnLlmCallScope<'_>,
+    request: &CompletionRequest,
+) -> crate::turn::observability::ObservationSpan {
+    let encoder = BoundedContentEncoder::new(policy, limits.clone());
+    let parameters = serde_json::json!({
+        "temperature": request.temperature,
+        "max_tokens": request.max_tokens,
+        "thinking": thinking,
+    })
+    .to_string();
+    let mut metadata = vec![
+        ObservationAttribute::string(METADATA_PROVIDER, provider),
+        ObservationAttribute::u64(METADATA_ATTEMPT, scope.attempt() as u64),
+        ObservationAttribute::u64(METADATA_QUEUE_WAIT_MS, 0),
+        ObservationAttribute::u64(METADATA_PROVIDER_LATENCY_MS, 0),
+        ObservationAttribute::u64(METADATA_TOTAL_LATENCY_MS, 0),
+        ObservationAttribute::string(OBSERVATION_MODEL_NAME, request.model.clone()),
+        ObservationAttribute::string(OBSERVATION_MODEL_PARAMETERS, parameters),
+    ];
+    if let Some(round) = scope.correction_round() {
+        metadata.push(ObservationAttribute::u64(METADATA_CORRECTION_ROUND, round as u64));
+    }
+    if let Some(character_id) = scope.character_id() {
+        metadata.push(ObservationAttribute::string(METADATA_CHARACTER_ID, character_id));
+    }
+    let mut observation = ObservationSpan::begin(scope.observation_step(), ObservationFields { metadata, input: None });
+    if observation.is_recording() {
+        let (input, encoding_failed) = encoder.encode_with_status(&request.messages, limits.max_observation_bytes);
+        if encoding_failed {
+            observation.record_attribute(ObservationAttribute::bool(METADATA_CONTENT_ENCODE_FAILED, true));
+        }
+        observation.record_fields(ObservationFields {
+            metadata: Vec::new(),
+            input,
+        });
+    }
+    observation
+}
+
+fn begin_embedding_generation(
+    policy: ContentCapturePolicy,
+    limits: &ContentCaptureLimits,
+    provider: &str,
+    scope: &TurnLlmCallScope<'_>,
+    request: &EmbeddingRequest,
+) -> crate::turn::observability::ObservationSpan {
+    let encoder = BoundedContentEncoder::new(policy, limits.clone());
+    let mut metadata = vec![
+        ObservationAttribute::string(METADATA_PROVIDER, provider),
+        ObservationAttribute::u64(METADATA_ATTEMPT, scope.attempt() as u64),
+        ObservationAttribute::string(OBSERVATION_MODEL_NAME, request.model.clone()),
+        ObservationAttribute::string(
+            OBSERVATION_MODEL_PARAMETERS,
+            serde_json::json!({"thinking": "provider_default"}).to_string(),
+        ),
+    ];
+    if let Some(round) = scope.correction_round() {
+        metadata.push(ObservationAttribute::u64(METADATA_CORRECTION_ROUND, round as u64));
+    }
+    let mut observation = ObservationSpan::begin(scope.observation_step(), ObservationFields { metadata, input: None });
+    if observation.is_recording() {
+        let (input, encoding_failed) = encoder.encode_with_status(&request.inputs, limits.max_observation_bytes);
+        if encoding_failed {
+            observation.record_attribute(ObservationAttribute::bool(METADATA_CONTENT_ENCODE_FAILED, true));
+        }
+        observation.record_fields(ObservationFields {
+            metadata: Vec::new(),
+            input,
+        });
+    }
+    observation
+}
+
+fn finish_generation(
+    policy: ContentCapturePolicy,
+    limits: &ContentCaptureLimits,
+    generation: crate::turn::observability::ObservationSpan,
+    completion: Option<&LlmCompletion>,
+    error: Option<&LlmError>,
+    usage: &crate::llm::accounting::LlmTokenUsage,
+) {
+    let encoder = BoundedContentEncoder::new(policy, limits.clone());
+    let (output, encoding_failed) = if generation.is_recording() {
+        completion
+            .map(|completion| encoder.encode_with_status(&completion.text, limits.max_observation_bytes))
+            .unwrap_or((None, false))
+    } else {
+        (None, false)
+    };
+    let status = error.map(llm_observation_status).unwrap_or(ObservationStatus::Ok);
+    let error = error.map(llm_observation_error);
+    let metadata = if encoding_failed {
+        vec![ObservationAttribute::bool(METADATA_CONTENT_ENCODE_FAILED, true)]
+    } else {
+        Vec::new()
+    };
+    generation.finish(ObservationFinish {
+        status,
+        metadata,
+        output,
+        error,
+        usage: Some(generation_usage(usage)),
+        ..ObservationFinish::default()
+    });
+}
+
+fn generation_usage(usage: &crate::llm::accounting::LlmTokenUsage) -> GenerationUsage {
+    let cached = usage.cached_input_tokens.unwrap_or_default().min(usage.input_tokens);
+    let reasoning = usage.reasoning_tokens.unwrap_or_default().min(usage.output_tokens);
+    let input = usage.input_tokens.saturating_sub(cached);
+    let output = usage.output_tokens.saturating_sub(reasoning);
+    let total = input.saturating_add(cached).saturating_add(output).saturating_add(reasoning);
+    GenerationUsage {
+        input,
+        input_cached_tokens: cached,
+        output,
+        output_reasoning_tokens: reasoning,
+        total,
+    }
+}
+
+fn llm_observation_status(error: &LlmError) -> ObservationStatus {
+    match error {
+        LlmError::Cancelled => ObservationStatus::Cancelled,
+        LlmError::TurnDeadlineExceeded | LlmError::ProviderTimeout => ObservationStatus::DeadlineExceeded,
+        _ => ObservationStatus::Error,
+    }
+}
+
+fn llm_observation_error(error: &LlmError) -> ObservationError {
+    ObservationError {
+        code: error.kind().to_owned(),
+        failure_kind: "llm".into(),
+        stage: None,
+        message: error.to_string(),
+    }
+}
+
+const fn thinking_mode(mode: Option<ThinkingMode>) -> &'static str {
+    match mode {
+        Some(ThinkingMode::Enabled) => "enabled",
+        Some(ThinkingMode::Disabled) => "disabled",
+        None => "provider_default",
     }
 }
 

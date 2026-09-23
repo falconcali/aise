@@ -116,3 +116,32 @@ fn generation_cost_requires_usd_and_non_negative_finite_values() {
     assert!(!wrong_currency.is_exportable());
     assert!(!invalid_total.is_exportable());
 }
+
+#[test]
+fn encoder_reports_serialization_failure_without_panicking() {
+    let encoder = BoundedContentEncoder::new(
+        ContentCapturePolicy::FullContent,
+        ContentCaptureLimits {
+            max_field_bytes: 16,
+            max_observation_bytes: 16,
+            detector_overlap_bytes: 4,
+        },
+    );
+
+    let (content, failed) = encoder.encode_with_status(&FailingSerialize, 16);
+
+    assert!(content.is_none());
+    assert!(failed);
+    assert_eq!(encoder.encode(&FailingSerialize, 16), None);
+}
+
+struct FailingSerialize;
+
+impl serde::Serialize for FailingSerialize {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Err(serde::ser::Error::custom("serialization failed"))
+    }
+}

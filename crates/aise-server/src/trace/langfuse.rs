@@ -295,8 +295,7 @@ fn otlp_spans(trace: &TurnTrace, capture_content: bool, environment: &str) -> Ve
         &root_span_id,
         None,
         "execute-story-turn",
-        trace.started_at_ms,
-        trace.ended_at_ms,
+        (trace.started_at_ms, trace.ended_at_ms),
         root_attributes,
         payload_error(root_payload.as_ref()),
     ));
@@ -314,8 +313,7 @@ fn otlp_spans(trace: &TurnTrace, capture_content: bool, environment: &str) -> Ve
             &otlp_span_id(&source.span_id),
             Some(&parent_span_id),
             &observation_name(source, payload.as_ref()),
-            source.started_at_ms,
-            source.ended_at_ms,
+            (source.started_at_ms, source.ended_at_ms),
             span_attributes(source, payload.as_ref(), capture_content),
             payload_error(payload.as_ref()),
         ));
@@ -328,8 +326,7 @@ fn otlp_span(
     span_id: &str,
     parent_span_id: Option<&str>,
     name: &str,
-    started_at_ms: u64,
-    ended_at_ms: u64,
+    timestamps: (u64, u64),
     attributes: Vec<Value>,
     error: Option<String>,
 ) -> Value {
@@ -338,8 +335,8 @@ fn otlp_span(
         "spanId": span_id,
         "name": name,
         "kind": 1,
-        "startTimeUnixNano": nanos(started_at_ms),
-        "endTimeUnixNano": nanos(ended_at_ms),
+        "startTimeUnixNano": nanos(timestamps.0),
+        "endTimeUnixNano": nanos(timestamps.1),
         "attributes": attributes,
     });
     if let Some(parent_span_id) = parent_span_id {
@@ -563,7 +560,7 @@ fn trace_output(trace: &TurnTrace) -> Option<String> {
             }
             _ => None,
         })
-        .last()
+        .next_back()
 }
 
 fn usage_json(data: &LlmCallData) -> String {

@@ -66,69 +66,73 @@ async fn main() -> anyhow::Result<()> {
         "OpenTelemetry configured"
     );
 
-    let trace_writer = new_trace_writer(&config)?;
-    let langfuse_sink = LangfuseTraceSink::from_config(&config.langfuse, config.aise.llm.trace_content)?;
-    let mut trace_sinks: Vec<Arc<dyn TraceSpanSink>> = vec![trace_writer.clone()];
-    if let Some(sink) = &langfuse_sink {
-        trace_sinks.push(sink.clone());
-    }
-    let trace_sink: Arc<dyn TraceSpanSink> = CompositeTraceSink::new(trace_sinks);
-    let services = build_services(&config, trace_sink).await?;
-    let registry = SessionRegistry::new(config.max_sessions);
-    let task_supervisor = tasks::TurnTaskSupervisor::new(config.turn_tasks())?;
-    let state = Arc::new(
-        AppState::new(services.engine, registry, task_supervisor.clone(), config.clone()).with_services(
-            services.pack_service,
-            services.character_card_service,
-            services.instance_factory,
-            services.story_history_reader,
-            services.activation_preview,
-        ),
-    );
-    let app = router(state, &config);
+    let server_result = async {
+        let trace_writer = new_trace_writer(&config)?;
+        let langfuse_sink = LangfuseTraceSink::from_config(&config.langfuse, config.aise.llm.trace_content)?;
+        let mut trace_sinks: Vec<Arc<dyn TraceSpanSink>> = vec![trace_writer.clone()];
+        if let Some(sink) = &langfuse_sink {
+            trace_sinks.push(sink.clone());
+        }
+        let trace_sink: Arc<dyn TraceSpanSink> = CompositeTraceSink::new(trace_sinks);
+        let services = build_services(&config, trace_sink).await?;
+        let registry = SessionRegistry::new(config.max_sessions);
+        let task_supervisor = tasks::TurnTaskSupervisor::new(config.turn_tasks())?;
+        let state = Arc::new(
+            AppState::new(services.engine, registry, task_supervisor.clone(), config.clone()).with_services(
+                services.pack_service,
+                services.character_card_service,
+                services.instance_factory,
+                services.story_history_reader,
+                services.activation_preview,
+            ),
+        );
+        let app = router(state, &config);
 
-    let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;
-    tracing::info!(
-        addr = %config.listen_addr,
-        trace_dir = %config.trace_dir.display(),
-        langfuse_enabled = config.langfuse.enabled,
-        observation_enabled,
-        "aise-server listening"
-    );
-    let server_shutdown = CancellationToken::new();
-    let shutdown_signal = {
-        let token = server_shutdown.clone();
-        async move { token.cancelled().await }
-    };
-    let mut server = tokio::spawn(axum::serve(listener, app).with_graceful_shutdown(shutdown_signal).into_future());
-    tokio::select! {
-        result = &mut server => {
-            match result {
-                Ok(Ok(())) => tracing::info!("http server stopped"),
-                Ok(Err(error)) => tracing::error!(error = %error, "http server failed"),
-                Err(error) => tracing::error!(error = %error, "http server task failed"),
+        let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;
+        tracing::info!(
+            addr = %config.listen_addr,
+            trace_dir = %config.trace_dir.display(),
+            langfuse_enabled = config.langfuse.enabled,
+            observation_enabled,
+            "aise-server listening"
+        );
+        let server_shutdown = CancellationToken::new();
+        let shutdown_signal = {
+            let token = server_shutdown.clone();
+            async move { token.cancelled().await }
+        };
+        let mut server = tokio::spawn(axum::serve(listener, app).with_graceful_shutdown(shutdown_signal).into_future());
+        tokio::select! {
+            result = &mut server => {
+                match result {
+                    Ok(Ok(())) => tracing::info!("http server stopped"),
+                    Ok(Err(error)) => tracing::error!(error = %error, "http server failed"),
+                    Err(error) => tracing::error!(error = %error, "http server task failed"),
+                }
+            }
+            _ = wait_for_shutdown_signal() => {
+                tracing::info!("shutdown signal received");
+                server_shutdown.cancel();
+                match (&mut server).await {
+                    Ok(Ok(())) => tracing::info!("http server stopped"),
+                    Ok(Err(error)) => tracing::error!(error = %error, "http server failed"),
+                    Err(error) => tracing::error!(error = %error, "http server task failed"),
+                }
             }
         }
-        _ = wait_for_shutdown_signal() => {
-            tracing::info!("shutdown signal received");
-            server_shutdown.cancel();
-            match (&mut server).await {
-                Ok(Ok(())) => tracing::info!("http server stopped"),
-                Ok(Err(error)) => tracing::error!(error = %error, "http server failed"),
-                Err(error) => tracing::error!(error = %error, "http server task failed"),
+        if let Err(error) = task_supervisor.shutdown_with_grace().await {
+            tracing::warn!(error = %error, "turn task supervisor shutdown reported an error");
+        }
+        trace_writer.shutdown_with_grace().await;
+        if let Some(sink) = langfuse_sink {
+            if let Err(error) = sink.shutdown_with_grace().await {
+                tracing::warn!(error = %error, "Langfuse exporter shutdown reported an error");
             }
         }
+        Ok::<(), anyhow::Error>(())
     }
-    if let Err(error) = task_supervisor.shutdown_with_grace().await {
-        tracing::warn!(error = %error, "turn task supervisor shutdown reported an error");
-    }
-    trace_writer.shutdown_with_grace().await;
-    if let Some(sink) = langfuse_sink {
-        if let Err(error) = sink.shutdown_with_grace().await {
-            tracing::warn!(error = %error, "Langfuse exporter shutdown reported an error");
-        }
-    }
+    .await;
     let shutdown_report = tokio::task::spawn_blocking(move || observation_runtime.shutdown_with_timeout()).await?;
     TelemetryDiagnostics.shutdown(&shutdown_report);
-    Ok(())
+    server_result
 }
