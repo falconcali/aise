@@ -9,7 +9,7 @@ use crate::domain::turn::{
     ValidatedNarrativeResolution, WriterPlan,
 };
 use crate::domain::turn::{StoryGeneratorOutput, StoryStateExtractionDto, StoryStateExtractionEnvelope};
-use crate::turn::observability::ObservationStep;
+use crate::turn::observability::{BoundedContentEncoder, ObservationStep};
 use crate::turn::turn_budget::{CorrectionKind, TurnBudget};
 use crate::turn::turn_contract::{
     CommittedTurnResult, LlmBudgetReservation, LlmCallUsage, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
@@ -113,6 +113,7 @@ pub struct TurnExecutionContext {
     llm_calls: Vec<LlmCallUsage>,
     retrieval_skipped: bool,
     character_thinking_skipped: bool,
+    observation_encoder: Option<BoundedContentEncoder>,
 }
 
 impl TurnExecutionContext {
@@ -154,6 +155,7 @@ impl TurnExecutionContext {
             llm_calls: Vec::new(),
             retrieval_skipped: false,
             character_thinking_skipped: false,
+            observation_encoder: None,
         })
     }
 
@@ -219,6 +221,14 @@ impl TurnExecutionContext {
 
     pub fn budget_mut(&mut self) -> &mut TurnBudget {
         &mut self.budget
+    }
+
+    pub(crate) fn set_observation_encoder(&mut self, encoder: BoundedContentEncoder) {
+        self.observation_encoder = Some(encoder);
+    }
+
+    pub(crate) fn observation_encoder(&self) -> Option<&BoundedContentEncoder> {
+        self.observation_encoder.as_ref()
     }
 
     pub fn story_id(&self) -> &StoryId {

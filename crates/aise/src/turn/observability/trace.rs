@@ -1,11 +1,13 @@
 use super::fields::{
-    ObservationAttribute, ObservationFields, ObservationFinish, ObservationStatus, ObservationValue, SCHEMA_VERSION,
-    SESSION_ID, TRACE_ENVIRONMENT, TRACE_METADATA_IDEMPOTENCY_KEY_DIGEST, TRACE_METADATA_STORY_ID,
-    TRACE_METADATA_TURN_NUMBER, TRACE_NAME, TRACE_RELEASE, TRACE_TAGS,
+    BoundedContent, BoundedContentEncoder, ContentCaptureLimits, ContentCapturePolicy, ObservationAttribute,
+    ObservationFields, ObservationFinish, ObservationStatus, ObservationValue, SCHEMA_VERSION, SESSION_ID,
+    TRACE_ENVIRONMENT, TRACE_METADATA_IDEMPOTENCY_KEY_DIGEST, TRACE_METADATA_STORY_ID, TRACE_METADATA_TURN_NUMBER,
+    TRACE_NAME, TRACE_RELEASE, TRACE_TAGS,
 };
 use super::span::ObservationSpan;
 use super::step::ObservationStep;
 use opentelemetry::{Context, KeyValue, baggage::BaggageExt};
+use serde::Serialize;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -14,10 +16,30 @@ pub struct ObservationTrace {
     context: Context,
     finished: bool,
     baggage: Vec<KeyValue>,
+    output_encoder: Option<BoundedContentEncoder>,
+    remaining_content_bytes: usize,
 }
 
 impl ObservationTrace {
     pub fn begin(fields: ObservationFields) -> Self {
+        Self::begin_inner(fields, None)
+    }
+
+    pub fn begin_with_content_capture(
+        fields: ObservationFields,
+        policy: ContentCapturePolicy,
+        limits: ContentCaptureLimits,
+    ) -> Self {
+        let remaining_content_bytes = limits
+            .max_observation_bytes
+            .saturating_sub(fields.input.as_ref().map_or(0, |input| input.captured_bytes));
+        Self::begin_inner(
+            fields,
+            Some((BoundedContentEncoder::new(policy, limits), remaining_content_bytes)),
+        )
+    }
+
+    fn begin_inner(fields: ObservationFields, content_capture: Option<(BoundedContentEncoder, usize)>) -> Self {
         let mut root = ObservationSpan::begin(ObservationStep::ExecuteStoryTurn, ObservationFields::default());
         let initial_baggage = if root.is_recording() {
             fields
@@ -37,11 +59,17 @@ impl ObservationTrace {
         };
         root.record_fields(fields);
         let context = root.tracing_span().context();
+        let (output_encoder, remaining_content_bytes) = match content_capture {
+            Some((encoder, remaining)) => (Some(encoder), remaining),
+            None => (None, 0),
+        };
         let mut trace = Self {
             root,
             context,
             finished: false,
             baggage: Vec::new(),
+            output_encoder,
+            remaining_content_bytes,
         };
         if trace.root.is_recording() {
             trace.root.record_static(TRACE_NAME, ObservationStep::ExecuteStoryTurn.name());
@@ -56,6 +84,24 @@ impl ObservationTrace {
             }
         }
         trace
+    }
+
+    pub(crate) fn encode_output<T: Serialize>(&self, value: &T) -> (Option<BoundedContent>, bool) {
+        if !self.root.is_recording() {
+            return (None, false);
+        }
+        self.output_encoder
+            .as_ref()
+            .map(|encoder| encoder.encode_with_status(value, self.remaining_content_bytes))
+            .unwrap_or((None, false))
+    }
+
+    pub(crate) fn content_encoder(&self) -> Option<BoundedContentEncoder> {
+        if self.root.is_recording() {
+            self.output_encoder.clone()
+        } else {
+            None
+        }
     }
 
     pub fn context(&self) -> &Context {

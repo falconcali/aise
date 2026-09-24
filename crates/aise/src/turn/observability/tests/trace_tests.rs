@@ -54,6 +54,35 @@ fn repeated_binding_replaces_the_previous_baggage_value() {
     );
 }
 
+#[test]
+fn configured_trace_encodes_root_output_with_remaining_budget() {
+    let subscriber = TestSubscriber::default();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let limits = ContentCaptureLimits {
+        max_field_bytes: 256,
+        max_observation_bytes: 256,
+        detector_overlap_bytes: 0,
+    };
+    let input = BoundedContentEncoder::new(ContentCapturePolicy::RedactedContent, limits.clone())
+        .encode(&"player input", limits.max_observation_bytes);
+    let trace = ObservationTrace::begin_with_content_capture(
+        ObservationFields {
+            metadata: Vec::new(),
+            input,
+        },
+        ContentCapturePolicy::RedactedContent,
+        limits,
+    );
+
+    let (output, encoding_failed) = trace.encode_output(&serde_json::json!({
+        "status": "committed",
+        "story_text": "story output"
+    }));
+
+    assert!(!encoding_failed);
+    assert!(output.unwrap().json.contains("story output"));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn root_span_can_parent_work_in_a_spawned_task() {
     let created = Arc::new(Mutex::new(Vec::new()));

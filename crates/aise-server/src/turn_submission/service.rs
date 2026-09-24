@@ -75,16 +75,20 @@ impl TurnSubmissionService {
         sink: Arc<dyn TurnEventSink>,
     ) -> Result<(), TurnSubmissionError> {
         let encoder = BoundedContentEncoder::new(self.trace_policy, self.trace_limits.clone());
-        let mut trace = ObservationTrace::begin(ObservationFields {
-            metadata: vec![
-                ObservationAttribute::string(TRACE_ENVIRONMENT, self.trace_environment.clone()),
-                ObservationAttribute::string(TRACE_RELEASE, self.trace_release.clone()),
-            ],
-            input: self
-                .trace_enabled
-                .then(|| encoder.encode(&request.player_contribution, self.trace_limits.max_observation_bytes))
-                .flatten(),
-        });
+        let mut trace = ObservationTrace::begin_with_content_capture(
+            ObservationFields {
+                metadata: vec![
+                    ObservationAttribute::string(TRACE_ENVIRONMENT, self.trace_environment.clone()),
+                    ObservationAttribute::string(TRACE_RELEASE, self.trace_release.clone()),
+                ],
+                input: self
+                    .trace_enabled
+                    .then(|| encoder.encode(&request.player_contribution, self.trace_limits.max_observation_bytes))
+                    .flatten(),
+            },
+            self.trace_policy,
+            self.trace_limits.clone(),
+        );
         let root_span = trace.span();
         let prepared = async {
             let session_span = ObservationSpan::begin_with_parent(

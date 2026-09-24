@@ -242,6 +242,7 @@ pub struct BoundedContent {
     pub sha256: String,
 }
 
+#[derive(Clone)]
 pub struct BoundedContentEncoder {
     policy: ContentCapturePolicy,
     limits: ContentCaptureLimits,
@@ -254,6 +255,10 @@ impl BoundedContentEncoder {
 
     pub fn encode<T: Serialize>(&self, value: &T, remaining_observation_bytes: usize) -> Option<BoundedContent> {
         self.encode_with_status(value, remaining_observation_bytes).0
+    }
+
+    pub fn max_observation_bytes(&self) -> usize {
+        self.limits.max_observation_bytes
     }
 
     pub fn encode_with_status<T: Serialize>(

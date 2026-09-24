@@ -4,14 +4,16 @@ use crate::persistence::store::{Store, StoredTurnOutcome};
 use crate::runtime::story_turn_coordinator::StoryTurnCoordinator;
 use crate::runtime::turn_runtime::TurnRuntime;
 use crate::turn::observability::{
-    METADATA_FAILURE_STAGE, METADATA_REPLAYED, METADATA_TERMINAL_STATUS, ObservationAttribute, ObservationError,
-    ObservationFields, ObservationFinish, ObservationSpan, ObservationStatus, ObservationStep, ObservationTrace,
+    METADATA_CONTENT_ENCODE_FAILED, METADATA_FAILURE_STAGE, METADATA_REPLAYED, METADATA_TERMINAL_STATUS,
+    ObservationAttribute, ObservationError, ObservationFields, ObservationFinish, ObservationSpan, ObservationStatus,
+    ObservationStep, ObservationTrace,
 };
 use crate::turn::turn_budget::TurnBudget;
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::{CommittedTurnResult, ExecuteTurnSpec, TurnControl, TurnIdentity};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind, TurnTerminalKind};
 use crate::turn::turn_event::{TurnEvent, TurnEventSink};
+use serde::Serialize;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::Instrument;
@@ -256,6 +258,9 @@ impl AiseEngine {
             Ok(ctx) => ctx,
             Err(error) => return self.finalize(None, Err(error), sink, permit).await,
         };
+        if let Some(encoder) = trace.content_encoder() {
+            ctx.set_observation_encoder(encoder);
+        }
 
         let runtime_outcome = self.runtime.run(&mut ctx, sink, trace.context()).await;
 
@@ -376,33 +381,97 @@ fn terminal_status(error: &TurnExecutionError) -> &'static str {
     }
 }
 
+#[derive(Serialize)]
+struct RootTraceOutput<'a> {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    story_text: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure_kind: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stage: Option<&'static str>,
+}
+
 fn finish_trace(mut trace: ObservationTrace, outcome: &TurnRunOutcome) {
+    let (output, encoding_failed) = trace.encode_output(&root_trace_output(outcome));
     match outcome {
         TurnRunOutcome::Committed { result, replayed } => {
             trace.bind_turn(result.turn_number.get());
+            let mut metadata = vec![
+                ObservationAttribute::bool(METADATA_REPLAYED, *replayed),
+                ObservationAttribute::string(
+                    METADATA_TERMINAL_STATUS,
+                    if *replayed { "replayed" } else { "committed" },
+                ),
+            ];
+            if encoding_failed {
+                metadata.push(ObservationAttribute::bool(METADATA_CONTENT_ENCODE_FAILED, true));
+            }
             trace.finish(ObservationFinish {
                 status: ObservationStatus::Ok,
-                metadata: vec![
-                    ObservationAttribute::bool(METADATA_REPLAYED, *replayed),
-                    ObservationAttribute::string(
-                        METADATA_TERMINAL_STATUS,
-                        if *replayed { "replayed" } else { "committed" },
-                    ),
-                ],
+                metadata,
+                output,
                 ..ObservationFinish::default()
             });
         }
-        TurnRunOutcome::Failed(error) => trace.finish(ObservationFinish {
-            status: execution_status(error),
-            metadata: failure_metadata(error),
-            error: Some(ObservationError {
-                code: error.code().into(),
-                failure_kind: format!("{:?}", error.kind()).to_lowercase(),
-                stage: error.stage().map(|stage| stage.as_str().into()),
-                message: error.to_string(),
-            }),
-            ..ObservationFinish::default()
-        }),
+        TurnRunOutcome::Failed(error) => {
+            let mut metadata = failure_metadata(error);
+            if encoding_failed {
+                metadata.push(ObservationAttribute::bool(METADATA_CONTENT_ENCODE_FAILED, true));
+            }
+            trace.finish(ObservationFinish {
+                status: execution_status(error),
+                metadata,
+                output,
+                error: Some(ObservationError {
+                    code: error.code().into(),
+                    failure_kind: failure_kind(error.kind()).into(),
+                    stage: error.stage().map(|stage| stage.as_str().into()),
+                    message: error.to_string(),
+                }),
+                ..ObservationFinish::default()
+            });
+        }
+    }
+}
+
+fn root_trace_output(outcome: &TurnRunOutcome) -> RootTraceOutput<'_> {
+    match outcome {
+        TurnRunOutcome::Committed { result, .. } => RootTraceOutput {
+            status: "committed",
+            story_text: Some(result.story_text.as_str()),
+            error_code: None,
+            failure_kind: None,
+            stage: None,
+        },
+        TurnRunOutcome::Failed(error) => RootTraceOutput {
+            status: terminal_status(error),
+            story_text: None,
+            error_code: Some(error.code()),
+            failure_kind: Some(failure_kind(error.kind())),
+            stage: error.stage().map(|stage| stage.as_str()),
+        },
+    }
+}
+
+const fn failure_kind(kind: TurnFailureKind) -> &'static str {
+    match kind {
+        TurnFailureKind::InvalidRequest => "invalid_request",
+        TurnFailureKind::StoryNotFound => "story_not_found",
+        TurnFailureKind::Cancelled => "cancelled",
+        TurnFailureKind::DeadlineExceeded => "deadline_exceeded",
+        TurnFailureKind::RevisionConflict => "revision_conflict",
+        TurnFailureKind::IdempotencyConflict => "idempotency_conflict",
+        TurnFailureKind::Backpressure => "backpressure",
+        TurnFailureKind::ValidationRejected => "validation_rejected",
+        TurnFailureKind::ValidationBudgetExhausted => "validation_budget_exhausted",
+        TurnFailureKind::TokenBudgetExceeded => "token_budget_exceeded",
+        TurnFailureKind::Llm => "llm",
+        TurnFailureKind::Store => "store",
+        TurnFailureKind::Io => "io",
+        TurnFailureKind::InvariantViolation => "invariant_violation",
     }
 }
 
@@ -416,3 +485,7 @@ fn failure_metadata(error: &TurnExecutionError) -> Vec<ObservationAttribute> {
     }
     metadata
 }
+
+#[cfg(test)]
+#[path = "tests/engine_tests.rs"]
+mod tests;
