@@ -138,7 +138,9 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
         let activation_observation =
             ObservationSpan::begin(ObservationStep::ActivateWorldInfo, ObservationFields::default());
         let trace_span = ctx.trace().begin_span("context.prepare", "context.prepare");
-        let prepared = prepare_baseline(self, &snapshot, ctx.player_contribution(), ctx.turn_number()).await;
+        let prepared = activation_observation
+            .in_scope(prepare_baseline(self, &snapshot, ctx.player_contribution(), ctx.turn_number()))
+            .await;
         let payload = SpanPayload::ToolCall(ToolCallData {
             tool: "context.prepare".to_owned(),
             args: serde_json::Value::Null,
