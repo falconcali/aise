@@ -4,7 +4,6 @@ use aise::turn::turn_contract::{
     IdempotencyKey, MAX_IDEMPOTENCY_KEY_CHARS, MAX_PLAYER_CONTRIBUTION_CHARS, TurnIdentity, TurnRequest,
     TurnRequestError,
 };
-use aise::turn::turn_trace::{TraceId, TraceIdError};
 
 #[test]
 fn story_id_rejects_empty_and_blank() {
@@ -85,16 +84,6 @@ fn active_story_constraint_uses_shared_constraint_id() {
         lifecycle: aise::domain::asset::constraint::StoryConstraintLifecycle::Persistent,
     };
     assert_eq!(constraint.id, id);
-}
-
-#[test]
-fn trace_id_rejects_empty_and_blank_with_trace_error() {
-    let empty = TraceId::try_new("").unwrap_err();
-    assert_eq!(empty, TraceIdError::EmptyTraceId);
-    assert_eq!(empty.to_string(), "trace_id must not be empty");
-    let blank = TraceId::try_new("   ").unwrap_err();
-    assert_eq!(blank, TraceIdError::EmptyTraceId);
-    assert_eq!(blank.to_string(), "trace_id must not be empty");
 }
 
 #[test]

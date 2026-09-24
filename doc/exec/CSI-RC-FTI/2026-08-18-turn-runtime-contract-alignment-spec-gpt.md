@@ -1,5 +1,9 @@
 # Turn Runtime Contract Alignment — Spec
 
+> 本文中的本地 Trace、TurnTrace、TraceCompleted 和相关配置已被
+> [Langfuse Trace Phase 2](../langfuse-trace-system-spec/2026-09-23-langfuse-trace-system-spec-phase-2-gpt.md)
+> superseded；仅 Phase 2 定义现行 Observation 与 OTLP exporter 契约。
+
 > **Model**: GPT-5
 > **Date**: 2026-08-18
 > **Status**: Proposed

@@ -5,7 +5,6 @@ pub mod turn_contract;
 pub mod turn_error;
 pub mod turn_event;
 pub mod turn_pipeline;
-pub mod turn_trace;
 pub mod turn_validation;
 
 mod snapshot_limits;

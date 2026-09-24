@@ -67,15 +67,12 @@ fn story_api_omits_removed_context_fields() {
 fn turn_request_accepts_only_player_contribution() {
     let request = serde_json::from_value::<TurnRequest>(serde_json::json!({
         "player_contribution": "你是谁",
-        "include_trace": true
     }))
     .expect("player contribution request");
     assert_eq!(request.player_contribution, "你是谁");
-    assert!(request.include_trace);
     let legacy_field = ["player", "input"].join("_");
     let mut legacy_request = serde_json::Map::new();
     legacy_request.insert(legacy_field, serde_json::Value::String("你是谁".into()));
-    legacy_request.insert("include_trace".into(), serde_json::Value::Bool(true));
     assert!(serde_json::from_value::<TurnRequest>(serde_json::Value::Object(legacy_request)).is_err());
 }
 

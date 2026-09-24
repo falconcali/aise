@@ -177,8 +177,7 @@ fn build_ready_context(
     );
     let request = TurnRequest::try_new("go north".to_owned()).unwrap();
     let control = TurnControl::new(std::time::Instant::now() + Duration::from_secs(30), TurnCancellation::new());
-    let trace = TraceRecorder::with_limits(budget.max_trace_spans());
-    let mut ctx = TurnExecutionContext::new(identity, request, budget, control, trace).unwrap();
+    let mut ctx = TurnExecutionContext::new(identity, request, budget, control).unwrap();
     ctx.complete_initialization().unwrap();
     let player = player_role();
     let snapshot = sample_snapshot(&player);

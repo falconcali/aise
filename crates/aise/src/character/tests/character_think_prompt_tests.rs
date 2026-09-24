@@ -19,7 +19,6 @@ use crate::domain::turn::{
 };
 use crate::turn::turn_budget::TurnBudget;
 use crate::turn::turn_contract::{IdempotencyKey, TurnCancellation, TurnControl, TurnIdentity, TurnRequest};
-use crate::turn::turn_trace::TraceRecorder;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -305,8 +304,7 @@ fn build_context_with_impulses(
     );
     let request = TurnRequest::try_new("go north".to_owned()).unwrap();
     let control = TurnControl::new(Instant::now() + Duration::from_secs(30), TurnCancellation::new());
-    let trace = TraceRecorder::with_limits(budget.max_trace_spans());
-    let mut ctx = TurnExecutionContext::new(identity, request, budget, control, trace).unwrap();
+    let mut ctx = TurnExecutionContext::new(identity, request, budget, control).unwrap();
     ctx.complete_initialization().unwrap();
     ctx.set_prepared_context(
         sample_snapshot(all_roles),
@@ -548,8 +546,7 @@ fn build_context_with_retrieval(
     );
     let request = TurnRequest::try_new("go north".to_owned()).unwrap();
     let control = TurnControl::new(Instant::now() + Duration::from_secs(30), TurnCancellation::new());
-    let trace = TraceRecorder::with_limits(budget.max_trace_spans());
-    let mut ctx = TurnExecutionContext::new(identity, request, budget, control, trace).unwrap();
+    let mut ctx = TurnExecutionContext::new(identity, request, budget, control).unwrap();
     ctx.complete_initialization().unwrap();
     ctx.set_prepared_context(
         sample_snapshot(all_roles),

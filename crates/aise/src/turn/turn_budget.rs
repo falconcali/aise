@@ -132,7 +132,6 @@ pub struct TurnBudgetLimits {
     pub max_knowledge_change_bytes: usize,
     pub max_validation_issues: usize,
     pub max_validation_issue_bytes: usize,
-    pub max_trace_spans: usize,
     pub state_extraction: StoryStateExtractionLimits,
     pub state_extractor_max_context_tokens: u64,
     pub state_extractor_max_output_tokens: u64,
@@ -176,7 +175,6 @@ impl TurnBudgetLimits {
             max_knowledge_change_bytes: content.max_knowledge_change_bytes,
             max_validation_issues: turn.max_validation_issues,
             max_validation_issue_bytes: content.max_validation_issue_bytes,
-            max_trace_spans: turn.max_trace_spans,
             state_extraction: StoryStateExtractionLimits {
                 max_new_roles: state_extractor.max_new_roles_per_turn,
                 max_role_states: state_extractor.max_role_states,
@@ -357,10 +355,6 @@ impl TurnBudget {
 
     pub fn max_validation_issue_bytes(&self) -> usize {
         self.limits.max_validation_issue_bytes
-    }
-
-    pub fn max_trace_spans(&self) -> usize {
-        self.limits.max_trace_spans
     }
 
     pub fn max_llm_calls(&self) -> u32 {

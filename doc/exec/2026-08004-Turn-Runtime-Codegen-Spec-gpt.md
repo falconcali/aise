@@ -1,5 +1,9 @@
 # AISE Turn Runtime 代码生成规范 v1.0
 
+> 本文中的本地 Trace、TurnTrace、TraceCompleted 和相关配置已被
+> [Langfuse Trace Phase 2](./langfuse-trace-system-spec/2026-09-23-langfuse-trace-system-spec-phase-2-gpt.md)
+> superseded；仅 Phase 2 定义现行 Observation 与 OTLP exporter 契约。
+
 ## 1. 文档定位
 
 本文用于指导 AI 按阶段生成、重构和验证 AISE 的 Rust 代码。

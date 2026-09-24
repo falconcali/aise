@@ -20,12 +20,11 @@ pub async fn run_turn(
     headers: HeaderMap,
     Json(req): Json<TurnRequest>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
-    let include_trace = req.include_trace;
     let raw_idempotency_key = idempotency_key_header(&headers)?;
 
     let (progress_tx, progress_rx) = mpsc::channel(SSE_CHANNEL_CAPACITY);
     let (terminal_tx, terminal_rx) = mpsc::channel(1);
-    let sink = Arc::new(SseSink::new(progress_tx, terminal_tx, include_trace));
+    let sink = Arc::new(SseSink::new(progress_tx, terminal_tx));
 
     let cancellation = TurnCancellation::new();
     let submission = TurnSubmissionRequest {

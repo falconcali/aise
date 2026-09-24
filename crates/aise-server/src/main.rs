@@ -1,11 +1,9 @@
-use aise::turn::turn_trace::TraceSpanSink;
 use aise_server::app::build_services;
 use aise_server::observability::{ObservabilityConfig, ObservabilityRuntime, TelemetryDiagnostics};
 use aise_server::session::SessionRegistry;
 use aise_server::shutdown::wait_for_shutdown_signal;
 use aise_server::tasks;
-use aise_server::trace::{CompositeTraceSink, LangfuseTraceSink};
-use aise_server::{AppState, ServerConfig, new_trace_writer, router};
+use aise_server::{AppState, ServerConfig, router};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
@@ -17,8 +15,8 @@ async fn main() -> anyhow::Result<()> {
     let config = ServerConfig::load()?;
     config.validate()?;
 
-    std::fs::create_dir_all(&config.trace_dir)?;
-    let file_appender = tracing_appender::rolling::daily(&config.trace_dir, "aise.log");
+    std::fs::create_dir_all(&config.log_dir)?;
+    let file_appender = tracing_appender::rolling::daily(&config.log_dir, "aise.log");
     let (file_writer, _file_guard) = tracing_appender::non_blocking(file_appender);
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let observability_load = ObservabilityConfig::load_from_env();
@@ -67,14 +65,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let server_result = async {
-        let trace_writer = new_trace_writer(&config)?;
-        let langfuse_sink = LangfuseTraceSink::from_config(&config.langfuse, config.aise.llm.trace_content)?;
-        let mut trace_sinks: Vec<Arc<dyn TraceSpanSink>> = vec![trace_writer.clone()];
-        if let Some(sink) = &langfuse_sink {
-            trace_sinks.push(sink.clone());
-        }
-        let trace_sink: Arc<dyn TraceSpanSink> = CompositeTraceSink::new(trace_sinks);
-        let services = build_services(&config, trace_sink).await?;
+        let services = build_services(&config).await?;
         let registry = SessionRegistry::new(config.max_sessions);
         let task_supervisor = tasks::TurnTaskSupervisor::new(config.turn_tasks())?;
         let state = Arc::new(
@@ -91,8 +82,7 @@ async fn main() -> anyhow::Result<()> {
         let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;
         tracing::info!(
             addr = %config.listen_addr,
-            trace_dir = %config.trace_dir.display(),
-            langfuse_enabled = config.langfuse.enabled,
+            log_dir = %config.log_dir.display(),
             observation_enabled,
             "aise-server listening"
         );
@@ -112,6 +102,9 @@ async fn main() -> anyhow::Result<()> {
             }
             _ = wait_for_shutdown_signal() => {
                 tracing::info!("shutdown signal received");
+                if let Err(error) = task_supervisor.shutdown_with_grace().await {
+                    tracing::warn!(error = %error, "turn task supervisor shutdown reported an error");
+                }
                 server_shutdown.cancel();
                 match (&mut server).await {
                     Ok(Ok(())) => tracing::info!("http server stopped"),
@@ -120,13 +113,9 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        if let Err(error) = task_supervisor.shutdown_with_grace().await {
-            tracing::warn!(error = %error, "turn task supervisor shutdown reported an error");
-        }
-        trace_writer.shutdown_with_grace().await;
-        if let Some(sink) = langfuse_sink {
-            if let Err(error) = sink.shutdown_with_grace().await {
-                tracing::warn!(error = %error, "Langfuse exporter shutdown reported an error");
+        if server.is_finished() {
+            if let Err(error) = task_supervisor.shutdown_with_grace().await {
+                tracing::warn!(error = %error, "turn task supervisor shutdown reported an error");
             }
         }
         Ok::<(), anyhow::Error>(())

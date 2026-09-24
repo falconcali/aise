@@ -19,8 +19,6 @@ pub struct TurnConfig {
     pub max_character_decisions: usize,
     #[serde(default = "default_max_validation_issues")]
     pub max_validation_issues: usize,
-    #[serde(default = "default_max_trace_spans")]
-    pub max_trace_spans: usize,
     #[serde(default = "default_turn_timeout_ms")]
     pub turn_timeout_ms: u64,
 }
@@ -36,7 +34,6 @@ impl Default for TurnConfig {
             max_context_tokens: default_max_context_tokens(),
             max_character_decisions: default_max_character_decisions(),
             max_validation_issues: default_max_validation_issues(),
-            max_trace_spans: default_max_trace_spans(),
             turn_timeout_ms: default_turn_timeout_ms(),
         }
     }
@@ -72,9 +69,6 @@ impl TurnConfig {
         if self.max_validation_issues == 0 {
             return Err(ConfigError::Invalid("turn.max_validation_issues must be positive".into()));
         }
-        if self.max_trace_spans == 0 {
-            return Err(ConfigError::Invalid("turn.max_trace_spans must be positive".into()));
-        }
         if self.turn_timeout_ms == 0 {
             return Err(ConfigError::Invalid("turn.turn_timeout_ms must be positive".into()));
         }
@@ -108,10 +102,6 @@ fn default_max_character_decisions() -> usize {
 
 fn default_max_validation_issues() -> usize {
     32
-}
-
-fn default_max_trace_spans() -> usize {
-    64
 }
 
 fn default_turn_timeout_ms() -> u64 {

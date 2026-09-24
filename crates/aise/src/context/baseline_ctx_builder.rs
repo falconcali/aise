@@ -4,6 +4,7 @@ use crate::config::{
 };
 use crate::context::activation::KnowledgeActivationCoordinator;
 use crate::context::activation::scan_builder::build_activation_scan_buffer;
+use crate::context::baseline_observation::BaselineObservation;
 use crate::context::error::ContextError;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::KnowledgeKind;
@@ -19,15 +20,10 @@ use crate::domain::turn::{
 };
 use crate::persistence::knowledge_read_port::KnowledgeIndexQuery;
 use crate::persistence::store::Store;
-use crate::turn::observability::{
-    METADATA_ACTIVATED_COUNT, METADATA_CANDIDATE_COUNT, METADATA_REQUEST_COUNT, METADATA_RETURNED_ITEM_COUNT,
-    METADATA_SNAPSHOT_REVISION, ObservationError, ObservationFields, ObservationFinish, ObservationSpan,
-    ObservationStatus, ObservationStep,
-};
+use crate::turn::observability::ObservationStep;
 use crate::turn::turn_context::{PreparedActivation, TurnExecutionContext};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::turn::turn_trace::{SpanPayload, ToolCallData};
 use async_trait::async_trait;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -89,96 +85,16 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
             &self.asset_limits,
             &self.narrative_config,
         );
-        let snapshot = {
-            let observation = ObservationSpan::begin(ObservationStep::LoadStorySnapshot, ObservationFields::default());
-            let trace_span = ctx.trace().begin_span("aise.tool_call", "store.load_story_snapshot");
-            let outcome = observation.in_scope(self.store.load_story_snapshot(&story_id, limits)).await;
-            let payload = SpanPayload::ToolCall(ToolCallData {
-                tool: "store.load_story_snapshot".to_owned(),
-                args: serde_json::Value::Null,
-                result: serde_json::json!({"ok": outcome.is_ok()}),
-                ok: outcome.is_ok(),
-                latency_ms: 0,
-            });
-            ctx.trace().end_span_with(trace_span, &payload);
-            observation.finish(match &outcome {
-                Ok(snapshot) => ObservationFinish {
-                    status: ObservationStatus::Ok,
-                    metadata: vec![
-                        crate::turn::observability::ObservationAttribute::string(
-                            crate::turn::observability::TRACE_METADATA_STORY_ID,
-                            story_id.as_str(),
-                        ),
-                        crate::turn::observability::ObservationAttribute::u64(
-                            METADATA_SNAPSHOT_REVISION,
-                            snapshot.base_revision().get(),
-                        ),
-                        crate::turn::observability::ObservationAttribute::u64(
-                            METADATA_RETURNED_ITEM_COUNT,
-                            snapshot.roles().len() as u64,
-                        ),
-                    ],
-                    ..ObservationFinish::default()
-                },
-                Err(error) => ObservationFinish {
-                    status: ObservationStatus::Error,
-                    error: Some(ObservationError {
-                        code: "story_snapshot_load_failed".into(),
-                        failure_kind: "store".into(),
-                        stage: Some(TurnStage::BaselineBuilder.as_str().into()),
-                        message: error.to_string(),
-                    }),
-                    ..ObservationFinish::default()
-                },
-            });
+        let observation = BaselineObservation::begin(ObservationStep::LoadStorySnapshot, Some(story_id.clone()));
+        let outcome = observation.in_scope(self.store.load_story_snapshot(&story_id, limits)).await;
+        observation.finish(&outcome);
+        let snapshot = outcome.map_err(TurnExecutionError::from)?;
 
-            outcome.map_err(TurnExecutionError::from)?
-        };
-
-        let activation_observation =
-            ObservationSpan::begin(ObservationStep::ActivateWorldInfo, ObservationFields::default());
-        let trace_span = ctx.trace().begin_span("context.prepare", "context.prepare");
-        let prepared = activation_observation
+        let observation = BaselineObservation::begin(ObservationStep::ActivateWorldInfo, None);
+        let prepared = observation
             .in_scope(prepare_baseline(self, &snapshot, ctx.player_contribution(), ctx.turn_number()))
             .await;
-        let payload = SpanPayload::ToolCall(ToolCallData {
-            tool: "context.prepare".to_owned(),
-            args: serde_json::Value::Null,
-            result: serde_json::json!({"ok": prepared.is_ok()}),
-            ok: prepared.is_ok(),
-            latency_ms: 0,
-        });
-        ctx.trace().end_span_with(trace_span, &payload);
-        activation_observation.finish(match &prepared {
-            Ok((_, _, activation)) => ObservationFinish {
-                status: ObservationStatus::Ok,
-                metadata: vec![
-                    crate::turn::observability::ObservationAttribute::u64(
-                        METADATA_REQUEST_COUNT,
-                        activation.loaded_entries.len() as u64,
-                    ),
-                    crate::turn::observability::ObservationAttribute::u64(
-                        METADATA_CANDIDATE_COUNT,
-                        activation.index_snapshot.metadata.len() as u64,
-                    ),
-                    crate::turn::observability::ObservationAttribute::u64(
-                        METADATA_ACTIVATED_COUNT,
-                        activation.continuation.activated.len() as u64,
-                    ),
-                ],
-                ..ObservationFinish::default()
-            },
-            Err(error) => ObservationFinish {
-                status: ObservationStatus::Error,
-                error: Some(ObservationError {
-                    code: error.turn_code().into(),
-                    failure_kind: "context".into(),
-                    stage: Some(TurnStage::BaselineBuilder.as_str().into()),
-                    message: error.to_string(),
-                }),
-                ..ObservationFinish::default()
-            },
-        });
+        observation.finish(&prepared);
 
         let (baseline, narrative_projection, activation) = prepared.map_err(map_baseline_error)?;
         ctx.set_prepared_context(snapshot, baseline, narrative_projection, activation)

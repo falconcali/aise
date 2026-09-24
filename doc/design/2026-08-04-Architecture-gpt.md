@@ -4,6 +4,9 @@
 > for knowledge retrieval. The Entity/Topic signal retrieval sections below are superseded:
 > knowledge selection is now performed by the World Info entry activation pipeline
 > (`domain/knowledge/activation` + `context/activation`). Entity/Topic index types no longer exist.
+> 本文中的本地 Trace、TurnTrace、TraceCompleted 和相关配置均已被
+> [Langfuse Trace Phase 2](../exec/langfuse-trace-system-spec/2026-09-23-langfuse-trace-system-spec-phase-2-gpt.md)
+> superseded；现行运行时仅使用 OpenTelemetry spans 和 Langfuse OTLP protobuf exporter。
 
 ## 1. 文档定位
 

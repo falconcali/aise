@@ -13,24 +13,22 @@ pub const SSE_CHANNEL_CAPACITY: usize = 64;
 pub struct SseSink {
     progress_tx: mpsc::Sender<Event>,
     terminal_tx: mpsc::Sender<Event>,
-    include_trace: bool,
     terminal_sent: AtomicBool,
     dropped: AtomicUsize,
 }
 
 impl SseSink {
-    pub fn new(progress_tx: mpsc::Sender<Event>, terminal_tx: mpsc::Sender<Event>, include_trace: bool) -> Self {
+    pub fn new(progress_tx: mpsc::Sender<Event>, terminal_tx: mpsc::Sender<Event>) -> Self {
         Self {
             progress_tx,
             terminal_tx,
-            include_trace,
             terminal_sent: AtomicBool::new(false),
             dropped: AtomicUsize::new(0),
         }
     }
 
-    pub fn new_shared(tx: mpsc::Sender<Event>, include_trace: bool) -> Self {
-        Self::new(tx.clone(), tx, include_trace)
+    pub fn new_shared(tx: mpsc::Sender<Event>) -> Self {
+        Self::new(tx.clone(), tx)
     }
 
     pub fn dropped_events(&self) -> usize {
@@ -74,15 +72,6 @@ impl SseSink {
                 "conflict",
                 serde_json::json!({ "turn_number": turn_number.map(|number| number.get()), "code": code }),
             ),
-            TurnEvent::TraceCompleted { trace, .. } => {
-                if !self.include_trace {
-                    return None;
-                }
-                match serde_json::to_value(trace) {
-                    Ok(value) => ("trace", value),
-                    Err(_) => return None,
-                }
-            }
         };
         let data = match serde_json::to_string(&payload) {
             Ok(data) => data,

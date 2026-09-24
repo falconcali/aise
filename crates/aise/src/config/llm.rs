@@ -3,15 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceContentPolicy {
-    #[default]
-    MetadataOnly,
-    RedactedContent,
-    FullContent,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ThinkingMode {
@@ -153,8 +144,6 @@ pub struct LlmConfig {
     #[serde(default)]
     pub tokens_per_minute: Option<NonZeroU32>,
     #[serde(default)]
-    pub trace_content: TraceContentPolicy,
-    #[serde(default)]
     pub thinking: Option<ThinkingMode>,
     #[serde(default)]
     pub price_input_per_1k_tokens: Option<i64>,
@@ -231,7 +220,6 @@ impl Default for LlmConfig {
             provider_timeout_ms: default_provider_timeout_ms(),
             requests_per_minute: None,
             tokens_per_minute: None,
-            trace_content: TraceContentPolicy::MetadataOnly,
             thinking: None,
             price_input_per_1k_tokens: None,
             price_cached_input_per_1k_tokens: None,
@@ -261,21 +249,8 @@ impl LlmConfig {
         }
         self.protocol.validate()?;
         self.structured_output.validate()?;
-        if matches!(
-            self.trace_content,
-            TraceContentPolicy::RedactedContent | TraceContentPolicy::FullContent
-        ) && !content_recording_allowed(std::env::var("AISE_ENV").ok().as_deref())
-        {
-            return Err(ConfigError::Invalid(
-                "llm.trace_content=redacted_content|full_content requires AISE_ENV=development".into(),
-            ));
-        }
         Ok(())
     }
-}
-
-fn content_recording_allowed(runtime_env: Option<&str>) -> bool {
-    runtime_env == Some("development")
 }
 
 fn default_queue_timeout_ms() -> u64 {

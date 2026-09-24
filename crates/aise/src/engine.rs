@@ -12,7 +12,6 @@ use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::{CommittedTurnResult, ExecuteTurnSpec, TurnControl, TurnIdentity};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind, TurnTerminalKind};
 use crate::turn::turn_event::{TurnEvent, TurnEventSink};
-use crate::turn::turn_trace::{MAX_LLM_CONTENT_CHARS, SpanPayload, TraceRecorder, TraceSpanSink, TurnData, truncate};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::Instrument;
@@ -46,7 +45,6 @@ pub struct AiseEngine {
     coordinator: Arc<StoryTurnCoordinator>,
     config: AiseConfig,
     clock: Arc<dyn Clock>,
-    trace_sink: Option<Arc<dyn TraceSpanSink>>,
 }
 
 impl AiseEngine {
@@ -63,13 +61,7 @@ impl AiseEngine {
             coordinator,
             config,
             clock,
-            trace_sink: None,
         }
-    }
-
-    pub fn with_trace_sink(mut self, trace_sink: Arc<dyn TraceSpanSink>) -> Self {
-        self.trace_sink = Some(trace_sink);
-        self
     }
 
     pub fn store(&self) -> &Arc<dyn Store> {
@@ -260,35 +252,12 @@ impl AiseEngine {
             created_at,
         );
         let control = TurnControl::new(deadline, cancellation);
-        let mut recorder = TraceRecorder::with_limits(budget.max_trace_spans());
-        if let Some(sink) = &self.trace_sink {
-            recorder = recorder.with_sink(sink.clone());
-        }
-        let mut ctx = match TurnExecutionContext::new(identity, request, budget, control, recorder) {
+        let mut ctx = match TurnExecutionContext::new(identity, request, budget, control) {
             Ok(ctx) => ctx,
             Err(error) => return self.finalize(None, Err(error), sink, permit).await,
         };
 
-        let root = ctx.trace().begin_span("aise.turn", "aise.turn");
         let runtime_outcome = self.runtime.run(&mut ctx, sink, trace.context()).await;
-
-        let turn_number = ctx.turn_number();
-        let story_id_owned = ctx.story_id().clone();
-        let player_contribution = truncate(ctx.player_contribution(), MAX_LLM_CONTENT_CHARS);
-        let (status, error) = match &runtime_outcome {
-            Ok(()) => ("ok", None),
-            Err(e) => ("error", Some(e.to_string())),
-        };
-        ctx.trace().end_span_with(
-            root,
-            &SpanPayload::Turn(TurnData {
-                story_id: story_id_owned.to_string(),
-                turn_number: Some(turn_number),
-                player_contribution,
-                status: status.to_owned(),
-                error,
-            }),
-        );
 
         let result = match runtime_outcome {
             Ok(()) => match ctx.committed_result().cloned() {
@@ -312,17 +281,7 @@ impl AiseEngine {
         sink: &dyn TurnEventSink,
         _permit: Option<crate::runtime::story_turn_coordinator::StoryPermit>,
     ) -> TurnRunOutcome {
-        let trace = ctx.as_mut().map(|context| {
-            let turn_number = context.turn_number();
-            let story_id = context.story_id().clone();
-            let trace = context.trace().build(&story_id, Some(turn_number));
-            if let Some(sink) = &self.trace_sink {
-                sink.write_trace(&trace);
-            }
-            trace
-        });
-
-        let outcome = match result {
+        match result {
             Ok(TurnRunOutcome::Committed { result, replayed }) => {
                 let event = TurnEvent::Committed {
                     result: result.clone(),
@@ -352,11 +311,7 @@ impl AiseEngine {
                 self.emit_terminal(ctx.as_mut(), &failure, sink);
                 TurnRunOutcome::Failed(failure)
             }
-        };
-        if let Some(trace) = trace {
-            let _ = sink.emit(TurnEvent::TraceCompleted { trace });
         }
-        outcome
     }
 
     fn emit_terminal(

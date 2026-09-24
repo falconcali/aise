@@ -3,7 +3,6 @@
 const $ = (id) => document.getElementById(id);
 
 const storyEl = $("story");
-const traceViewEl = $("trace-view");
 const sessionListEl = $("session-list");
 const packListEl = $("pack-list");
 const packGridEl = $("pack-grid");
@@ -19,9 +18,7 @@ const backToPacksBtn = $("back-to-packs");
 const turnForm = $("turn-form");
 const playerContribution = $("player-contribution");
 const sendBtn = $("send-btn");
-const traceToggle = $("trace-toggle");
 const tabStory = $("tab-story");
-const tabTrace = $("tab-trace");
 const gameTitleEl = $("game-title");
 const gameRoleEl = $("game-role");
 const backToDetailBtn = $("back-to-detail");
@@ -422,7 +419,6 @@ async function openGame(session, initialStory = null) {
   gameTitleEl.textContent = session.name;
   gameRoleEl.textContent = "";
   storyEl.textContent = "";
-  resetTraceView();
   roleStateEl.innerHTML = `<p class="muted">加载中…</p>`;
   worldInfoEl.innerHTML = "";
   playerContribution.disabled = false;
@@ -497,20 +493,6 @@ function renderWorldInfo(story) {
   worldInfoEl.innerHTML = `<p class="muted">故事进行中的世界信息将在此展示。</p>`;
 }
 
-function resetTraceView() {
-  traceViewEl.innerHTML = '<div class="trace-empty">勾选“调试 Trace”以生成</div>';
-}
-
-function switchTab(tab) {
-  const isTrace = tab === "trace";
-  tabStory.classList.toggle("active", !isTrace);
-  tabTrace.classList.toggle("active", isTrace);
-  storyEl.classList.toggle("active", !isTrace);
-  traceViewEl.classList.toggle("active", isTrace);
-}
-
-tabStory.onclick = () => switchTab("story");
-tabTrace.onclick = () => switchTab("trace");
 
 backToPacksBtn.onclick = () => {
   currentPack = null;
@@ -534,10 +516,6 @@ turnForm.onsubmit = async (e) => {
 
   playerContribution.disabled = true;
   sendBtn.disabled = true;
-  const traceEnabled = traceToggle.checked;
-  traceViewEl.innerHTML = traceEnabled
-    ? '<div class="trace-empty">正在生成 Trace…</div>'
-    : '<div class="trace-empty">勾选“调试 Trace”以生成</div>';
 
   try {
     const res = await api(`/api/sessions/${currentSession.id}/turns`, {
@@ -546,7 +524,7 @@ turnForm.onsubmit = async (e) => {
         "Content-Type": "application/json",
         "Idempotency-Key": crypto.randomUUID(),
       },
-      body: JSON.stringify({ player_contribution: contribution, include_trace: traceEnabled }),
+      body: JSON.stringify({ player_contribution: contribution }),
     });
     await consumeSse(res.body, {
       onStage: (stage) => console.debug("[stage]", stage),
@@ -569,21 +547,14 @@ turnForm.onsubmit = async (e) => {
         const text = payload && payload.code ? payload.code : JSON.stringify(payload);
         storyEl.textContent += `\n[冲突] ${text}\n`;
       },
-      onTrace: (trace) => renderTrace(trace),
     });
   } catch (err) {
     storyEl.textContent += `\n[错误] ${err.message}\n`;
-    if (traceEnabled) {
-      traceViewEl.innerHTML = '<div class="trace-empty">生成 Trace 失败，见上方错误信息</div>';
-    }
   } finally {
     playerContribution.disabled = false;
     sendBtn.disabled = false;
     playerContribution.value = "";
     playerContribution.focus();
-    if (traceEnabled && traceViewEl.querySelector(".trace-empty")?.textContent.includes("正在生成")) {
-      traceViewEl.innerHTML = '<div class="trace-empty">未收到 Trace 数据（请求异常中断）</div>';
-    }
   }
 };
 
@@ -625,214 +596,8 @@ function parseSseEvent(raw, handlers) {
   } else if (event === "failed") handlers.onFailed?.(JSON.parse(data));
   else if (event === "cancelled") handlers.onCancelled?.(JSON.parse(data));
   else if (event === "conflict") handlers.onConflict?.(JSON.parse(data));
-  else if (event === "trace") {
-    try {
-      handlers.onTrace?.(JSON.parse(data));
-    } catch (_) {
-      /* ignore malformed trace payload */
-    }
-  }
 }
 
-function renderTrace(trace) {
-  traceViewEl.innerHTML = "";
-
-  const header = document.createElement("div");
-  header.className = "trace-header";
-  const started = new Date(trace.started_at_ms || Date.now());
-  header.innerHTML =
-    `<strong>Trace</strong> <code>${escapeHtml(trace.trace_id || "")}</code>` +
-    `<span>Turn: <code>${escapeHtml(trace.turn_id || "")}</code></span>` +
-    `<span>开始: ${started.toLocaleString()}</span>` +
-    (trace.duration_ms ? `<span>耗时: ${trace.duration_ms} ms</span>` : "");
-  traceViewEl.appendChild(header);
-
-  const actions = document.createElement("div");
-  actions.className = "trace-actions";
-  const expandAll = document.createElement("button");
-  expandAll.textContent = "展开全部";
-  expandAll.onclick = () => traceViewEl.querySelectorAll("details").forEach((d) => (d.open = true));
-  const collapseAll = document.createElement("button");
-  collapseAll.textContent = "收起全部";
-  collapseAll.onclick = () => traceViewEl.querySelectorAll("details").forEach((d) => (d.open = false));
-  actions.appendChild(expandAll);
-  actions.appendChild(collapseAll);
-  traceViewEl.appendChild(actions);
-
-  if (!trace.spans || trace.spans.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "trace-empty";
-    empty.textContent = "Trace 已生成，但未返回详细 span 数据。";
-    traceViewEl.appendChild(empty);
-    return;
-  }
-
-  const byParent = new Map();
-  for (const s of trace.spans) {
-    const key = s.parent_span_id || "";
-    if (!byParent.has(key)) byParent.set(key, []);
-    byParent.get(key).push(s);
-  }
-  const roots = byParent.get("") || [];
-  const list = document.createElement("div");
-  list.className = "trace-tree";
-  for (const root of roots) renderSpanNode(root, byParent, list);
-  traceViewEl.appendChild(list);
-}
-
-function renderSpanNode(span, byParent, parentEl) {
-  const details = document.createElement("details");
-  details.className = `trace-span ${span.kind}`;
-
-  const summary = document.createElement("summary");
-  const payload = span.payload && typeof span.payload === "object" ? span.payload : {};
-  const status = payload.status ? `<span class="status ${escapeHtml(payload.status)}">${escapeHtml(payload.status)}</span>` : "";
-  const duration = span.duration_ms > 0 ? `<span class="dur">${span.duration_ms} ms</span>` : "";
-  summary.innerHTML =
-    `<span class="kind">${escapeHtml(span.kind)}</span>` +
-    `<span class="name">${escapeHtml(span.name)}</span>` +
-    status +
-    duration;
-  details.appendChild(summary);
-
-  const body = document.createElement("div");
-  body.className = "trace-body";
-  if (payload.kind === "llm_call") {
-    renderLlmCallPayload(body, payload);
-  } else {
-    const pre = document.createElement("pre");
-    pre.className = "trace-json";
-    pre.innerHTML = highlightJson(payload);
-    body.appendChild(pre);
-  }
-
-  const children = byParent.get(span.span_id) || [];
-  for (const child of children) renderSpanNode(child, byParent, body);
-
-  details.appendChild(body);
-  parentEl.appendChild(details);
-}
-
-function highlightJson(value, depth = 0) {
-  const pad = "  ".repeat(depth);
-  if (value === null || value === undefined) return `${pad}<span class="j-null">null</span>`;
-  if (typeof value === "string") return `${pad}<span class="j-str">${escapeHtml(value)}</span>`;
-  if (typeof value === "number") return `${pad}<span class="j-num">${escapeHtml(String(value))}</span>`;
-  if (typeof value === "boolean") return `${pad}<span class="j-bool">${escapeHtml(String(value))}</span>`;
-  if (Array.isArray(value)) {
-    if (value.length === 0) return `${pad}<span class="j-punc">[ ]</span>`;
-    const lines = [`${pad}<span class="j-punc">[</span>`];
-    for (const item of value) lines.push(highlightJson(item, depth + 1));
-    lines.push(`${pad}<span class="j-punc">]</span>`);
-    return lines.join("\n");
-  }
-  const keys = Object.keys(value);
-  if (keys.length === 0) return `${pad}<span class="j-punc">{ }</span>`;
-  const lines = [`${pad}<span class="j-punc">{</span>`];
-  const padN = "  ".repeat(depth + 1);
-  for (const key of keys) {
-    const keyHtml = `<span class="j-key">"${escapeHtml(key)}"</span><span class="j-punc">:</span> `;
-    const rendered = highlightJson(value[key], depth + 1);
-    lines.push(`${padN}${keyHtml}${rendered.slice(padN.length)}`);
-  }
-  lines.push(`${pad}<span class="j-punc">}</span>`);
-  return lines.join("\n");
-}
-
-function roleLabel(role) {
-  const labels = { system: "系统", user: "用户", assistant: "助手", tool: "工具", developer: "开发者", response: "返回" };
-  return labels[role] || role || "未知";
-}
-
-function renderLlmMessageContent(pre, text) {
-  const raw = text == null ? "" : String(text);
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    pre.textContent = "（空）";
-    return;
-  }
-  let parsed = null;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch (_) {
-    parsed = null;
-  }
-  if (parsed !== null && typeof parsed === "object") {
-    pre.innerHTML = highlightJson(parsed);
-  } else {
-    pre.textContent = raw;
-  }
-}
-
-function renderLlmCallPayload(body, payload) {
-  const metaDefs = [
-    ["provider", "提供方"],
-    ["model", "模型"],
-    ["purpose", "用途"],
-    ["stream", "流式"],
-    ["attempt", "尝试次数"],
-    ["queue_wait_ms", "排队等待 ms"],
-    ["provider_latency_ms", "提供方耗时 ms"],
-    ["total_latency_ms", "总耗时 ms"],
-    ["input_tokens", "输入 tokens"],
-    ["cached_input_tokens", "缓存 tokens"],
-    ["output_tokens", "输出 tokens"],
-    ["reasoning_tokens", "推理 tokens"],
-    ["usage_accuracy", "用量精度"],
-    ["finish_reason", "结束原因"],
-    ["status", "状态"],
-    ["error_kind", "错误类型"],
-  ];
-  const meta = document.createElement("div");
-  meta.className = "trace-meta";
-  const rows = [];
-  for (const [key, label] of metaDefs) {
-    const value = payload[key];
-    if (value === undefined || value === null) continue;
-    const display = key === "stream" ? (value ? "是" : "否") : String(value);
-    rows.push(
-      `<div class="tm-row"><span class="tm-k">${escapeHtml(label)}</span><span class="tm-v">${escapeHtml(display)}</span></div>`
-    );
-  }
-  if (payload.charge !== undefined && payload.charge !== null) {
-    rows.push(
-      `<div class="tm-row"><span class="tm-k">费用</span><span class="tm-v">${escapeHtml(JSON.stringify(payload.charge))}</span></div>`
-    );
-  }
-  meta.innerHTML = rows.join("");
-  body.appendChild(meta);
-
-  const content = payload.content || {};
-  const messages = Array.isArray(content.messages) ? content.messages : [];
-  for (const message of messages) {
-    const block = document.createElement("div");
-    block.className = "trace-msg";
-    const role = document.createElement("span");
-    role.className = `trace-role role-${escapeHtml(String(message.role || "unknown"))}`;
-    role.textContent = roleLabel(message.role);
-    const pre = document.createElement("pre");
-    pre.className = "trace-msg-content";
-    renderLlmMessageContent(pre, message.content);
-    block.appendChild(role);
-    block.appendChild(pre);
-    body.appendChild(block);
-  }
-
-  const response = content.response;
-  if (response != null && String(response).trim() !== "") {
-    const block = document.createElement("div");
-    block.className = "trace-msg trace-response";
-    const role = document.createElement("span");
-    role.className = "trace-role role-assistant";
-    role.textContent = "返回";
-    const pre = document.createElement("pre");
-    pre.className = "trace-msg-content";
-    renderLlmMessageContent(pre, response);
-    block.appendChild(role);
-    block.appendChild(pre);
-    body.appendChild(block);
-  }
-}
 
 showView("packs");
 refreshPacks();

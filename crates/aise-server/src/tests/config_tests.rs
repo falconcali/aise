@@ -98,32 +98,3 @@ fn zero_max_sessions_fails_validate() {
     };
     assert!(config.validate().is_err(), "zero capacities must fail validate");
 }
-
-#[test]
-fn langfuse_env_overrides_enable_export() {
-    let mut config = ServerConfig::default();
-    let get_env = |name: &str| match name {
-        "LANGFUSE_ENABLED" => Some("true".to_string()),
-        "LANGFUSE_PUBLIC_KEY" => Some("pk-lf-test".to_string()),
-        "LANGFUSE_SECRET_KEY" => Some("sk-lf-test".to_string()),
-        "LANGFUSE_BASE_URL" => Some("https://us.cloud.langfuse.com".to_string()),
-        "LANGFUSE_ENVIRONMENT" => Some("test".to_string()),
-        _ => None,
-    };
-    config.apply_env_overrides_with(get_env).unwrap();
-    assert!(config.langfuse.enabled);
-    assert_eq!(config.langfuse.base_url, "https://us.cloud.langfuse.com");
-    assert_eq!(config.langfuse.environment, "test");
-    assert!(config.langfuse.validate().is_ok());
-}
-
-#[test]
-fn enabled_langfuse_requires_both_keys() {
-    let config = LangfuseConfig {
-        enabled: true,
-        public_key: Some("pk-lf-test".into()),
-        secret_key: None,
-        ..LangfuseConfig::default()
-    };
-    assert!(config.validate().is_err());
-}

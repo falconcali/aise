@@ -29,7 +29,7 @@ pub use coordinator::CoordinatorConfig;
 pub use error::ConfigError;
 pub use llm::{
     LlmConfig, LlmProtocolLimitsConfig, ModelStructuredOutputCapabilities, StructuredOutputConfig,
-    StructuredOutputMode, ThinkingMode, TraceContentPolicy,
+    StructuredOutputMode, ThinkingMode,
 };
 pub use narrative::NarrativeConfig;
 pub use planner::PlannerConfig;

@@ -157,13 +157,35 @@ use serde::{Deserialize, Serialize};
 
 **Level: MUST**
 
-- Functions that coordinate multiple business steps MUST present the primary
-  control flow in execution order and at one abstraction level.
-- Multi-step supporting mechanics such as tracing, metrics, logging, timing,
-  serialization, and observability-only outcome mapping MUST live behind
-  named helpers or owned abstractions.
-- Call sites MAY retain concise lifecycle operations such as starting and
-  ending a span, but MUST NOT inline supporting payload construction or other
-  details that obscure the primary control flow.
-- Extraction MUST preserve explicit business decisions, state changes, and
-  error semantics.
+- Orchestration functions MUST show the primary flow in execution order and at
+  one abstraction level.
+- Supporting mechanics MUST live behind named helpers or owned abstractions;
+  concise lifecycle calls MAY remain.
+- Business decisions, state changes, and error semantics MUST remain explicit.
+
+```rust
+// BAD - observation mechanics obscure the business operation
+let observation =
+    ObservationSpan::begin(ObservationStep::LoadStorySnapshot, ObservationFields::default());
+let outcome = observation
+    .in_scope(self.store.load_story_snapshot(&story_id, limits))
+    .await;
+observation.finish(match &outcome {
+    Ok(snapshot) => ObservationFinish {
+        status: ObservationStatus::Ok,
+        metadata: snapshot_metadata(&story_id, snapshot),
+        ..ObservationFinish::default()
+    },
+    Err(error) => snapshot_error(error),
+});
+```
+
+```rust
+// GOOD - lifecycle stays visible; mechanics belong to BaselineObservation
+let observation =
+    BaselineObservation::begin(ObservationStep::LoadStorySnapshot, Some(story_id.clone()));
+let outcome = observation
+    .in_scope(self.store.load_story_snapshot(&story_id, limits))
+    .await;
+observation.finish(&outcome);
+```

@@ -1,7 +1,6 @@
 use crate::domain::ids::TurnNumber;
 use crate::turn::turn_contract::CommittedTurnResult;
 use crate::turn::turn_pipeline::TurnStage;
-use crate::turn::turn_trace::TurnTrace;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -38,10 +37,6 @@ pub enum TurnEvent {
         turn_number: Option<TurnNumber>,
         code: &'static str,
     },
-
-    TraceCompleted {
-        trace: TurnTrace,
-    },
 }
 
 impl TurnEvent {
@@ -53,7 +48,6 @@ impl TurnEvent {
             TurnEvent::Failed { turn_number, .. } => *turn_number,
             TurnEvent::Cancelled { turn_number, .. } => *turn_number,
             TurnEvent::Conflict { turn_number, .. } => *turn_number,
-            TurnEvent::TraceCompleted { trace } => trace.turn_number,
         }
     }
 
@@ -96,7 +90,6 @@ impl TurnEvent {
             TurnEvent::Failed { .. } => "failed",
             TurnEvent::Cancelled { .. } => "cancelled",
             TurnEvent::Conflict { .. } => "conflict",
-            TurnEvent::TraceCompleted { .. } => "trace_completed",
         }
     }
 
@@ -131,7 +124,6 @@ impl TurnEvent {
             TurnEvent::Conflict { turn_number, code } => {
                 json!({ "turn_number": turn_number.map(TurnNumber::get), "code": code })
             }
-            TurnEvent::TraceCompleted { trace } => serde_json::to_value(trace).unwrap_or(serde_json::Value::Null),
         }
     }
 }

@@ -10,7 +10,6 @@ use crate::turn::turn_error::TurnExecutionError;
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
 use async_trait::async_trait;
 use std::sync::Arc;
-use std::time::Instant;
 use tracing::{Instrument, info_span};
 
 pub struct TurnCommitter {
@@ -129,10 +128,8 @@ impl TurnExecutionPipeline for TurnCommitter {
             llm_calls,
             activation_state_delta,
         };
-        let pending = ctx.trace().begin_span("story.commit", "story.commit");
         let persistence_observation =
             ObservationSpan::begin(ObservationStep::PersistTurn, ObservationFields::default());
-        let started = Instant::now();
         let activation_span = info_span!(
             "knowledge.activation.commit",
             story_id = %story_id,
@@ -189,32 +186,6 @@ impl TurnExecutionPipeline for TurnCommitter {
                 activation_span.record("error_code", store_error_code(error));
             }
         }
-        let latency_ms = started.elapsed().as_millis() as u64;
-        let payload = match &outcome {
-            Ok(result) => serde_json::json!({
-                "story_id": story_id.as_str(),
-                "turn_number": turn_number.get(),
-                "base_revision": snapshot.base_revision().get(),
-                "committed_revision": result.story_revision.get(),
-                "knowledge_mutation_count": change_set.knowledge_mutations().len(),
-                "transition_count": change_set.narrative_resolution().transitions.len(),
-                "status": "ok",
-                "error_code": null,
-                "latency_ms": latency_ms,
-            }),
-            Err(error) => serde_json::json!({
-                "story_id": story_id.as_str(),
-                "turn_number": turn_number.get(),
-                "base_revision": snapshot.base_revision().get(),
-                "committed_revision": null,
-                "knowledge_mutation_count": change_set.knowledge_mutations().len(),
-                "transition_count": change_set.narrative_resolution().transitions.len(),
-                "status": "error",
-                "error_code": store_error_code(error),
-                "latency_ms": latency_ms,
-            }),
-        };
-        ctx.trace().end_span_with(pending, &payload);
         let result = outcome?;
         ctx.set_committed_result(result)
     }

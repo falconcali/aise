@@ -16,12 +16,10 @@ use crate::turn::turn_contract::{
 };
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::TurnStage;
-use crate::turn::turn_trace::{PendingSpan, TraceRecorder};
 use crate::turn::turn_validation::{
     BoundedValidationIssues, StateChange, ValidatedChangeSet, ValidatedChangeSetParts, ValidationDecision,
     ValidationResult,
 };
-use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -97,7 +95,6 @@ pub struct TurnExecutionContext {
     request: TurnRequest,
     control: TurnControl,
     budget: TurnBudget,
-    trace: TraceRecorder,
     snapshot: Option<StoryReadSnapshot>,
     baseline: Option<BaselineContext>,
     plan: Option<WriterPlan>,
@@ -124,7 +121,6 @@ impl TurnExecutionContext {
         request: TurnRequest,
         budget: TurnBudget,
         control: TurnControl,
-        trace: TraceRecorder,
     ) -> Result<Self, TurnExecutionError> {
         if budget.remaining_output_tokens() == 0 {
             return Err(TurnExecutionError::new(
@@ -140,7 +136,6 @@ impl TurnExecutionContext {
             request,
             control,
             budget,
-            trace,
             snapshot: None,
             baseline: None,
             plan: None,
@@ -224,10 +219,6 @@ impl TurnExecutionContext {
 
     pub fn budget_mut(&mut self) -> &mut TurnBudget {
         &mut self.budget
-    }
-
-    pub fn trace(&mut self) -> &mut TraceRecorder {
-        &mut self.trace
     }
 
     pub fn story_id(&self) -> &StoryId {
@@ -898,7 +889,6 @@ impl TurnExecutionContext {
             identity: &self.identity,
             control: &self.control,
             budget: &mut self.budget,
-            trace: &mut self.trace,
             llm_calls: &mut self.llm_calls,
             stage,
             observation_step: observation_step_for_stage(stage),
@@ -913,7 +903,6 @@ pub struct TurnLlmCallScope<'a> {
     identity: &'a TurnIdentity,
     control: &'a TurnControl,
     budget: &'a mut TurnBudget,
-    trace: &'a mut TraceRecorder,
     llm_calls: &'a mut Vec<LlmCallUsage>,
     stage: TurnStage,
     observation_step: ObservationStep,
@@ -993,14 +982,6 @@ impl TurnLlmCallScope<'_> {
         self.budget.settle_llm(reservation, usage.clone())?;
         self.llm_calls.push(usage);
         Ok(())
-    }
-
-    pub fn begin_llm_span(&mut self) -> PendingSpan {
-        self.trace.begin_span("aise.llm_call", "llm.call")
-    }
-
-    pub fn end_llm_span<S: Serialize>(&mut self, span: PendingSpan, payload: &S) {
-        self.trace.end_span_with(span, payload);
     }
 }
 

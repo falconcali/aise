@@ -52,12 +52,9 @@
           <div id="game-panel">
             <div id="tabs">
               <button id="tab-story" class="tab active" type="button">故事</button>
-              <button id="tab-trace" class="tab" type="button">调试 Trace</button>
             </div>
             <div id="story" class="tab-panel active"></div>
-            <div id="trace-view" class="tab-panel">
-              <div id="trace-empty">勾选“调试 Trace”以生成</div>
-              <section id="activation-preview">
+            <div id="activation-preview">
                 <h3>Activation Preview</h3>
                 <label for="activation-preview-contribution">Player Contribution</label>
                 <textarea id="activation-preview-contribution" maxlength="32768"></textarea>
@@ -71,13 +68,9 @@
                 </select>
                 <button id="activation-preview-run" type="button">Run Preview</button>
                 <div id="activation-preview-result"></div>
-              </section>
             </div>
             <form id="turn-form" autocomplete="off">
               <input id="player-contribution" placeholder="输入角色要说、做或想的内容…" disabled />
-              <label id="trace-toggle-label" title="开启后，每次 Turn 会把全链路调用信息（阶段、LLM Prompt、工具调用、LLM 返回等）返回到调试 Trace 页签">
-                <input type="checkbox" id="trace-toggle" checked /> Trace
-              </label>
               <button id="send-btn" type="submit" disabled>发送</button>
             </form>
           </div>

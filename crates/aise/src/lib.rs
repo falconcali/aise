@@ -17,7 +17,7 @@ pub mod validation;
 
 pub use config::{
     AiseConfig, AssetLimitsConfig, ContextPreparationConfig, CoordinatorConfig, LlmConfig, PlannerConfig,
-    PromptModuleConfig, RetrievalConfig, StorageConfig, TraceContentPolicy, TurnConfig, TurnContentLimitsConfig,
+    PromptModuleConfig, RetrievalConfig, StorageConfig, TurnConfig, TurnContentLimitsConfig,
 };
 pub use engine::AiseEngine;
 pub use error::AiseError;

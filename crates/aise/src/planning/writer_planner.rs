@@ -73,18 +73,6 @@ impl TurnExecutionPipeline for WriterPlanner {
             crate::turn::observability::ObservationStep::ProjectNarrative,
             ObservationFields::default(),
         );
-        let pending = ctx.trace().begin_span("narrative.project", "narrative.reuse");
-        let narrative_payload = serde_json::json!({
-            "story_id": ctx.story_id(),
-            "turn_number": ctx.turn_number().get(),
-            "graph_revision": snapshot.graph_revision(),
-            "active_node_count": narrative_plan.active_nodes.len(),
-            "condition_query_count": narrative_projection.condition_queries.len(),
-            "intent_count": narrative_plan.world_event_intents.len(),
-            "status": "ok",
-            "error_code": null,
-        });
-        ctx.trace().end_span_with(pending, &narrative_payload);
         projection_observation.finish(ObservationFinish {
             status: ObservationStatus::Ok,
             metadata: vec![

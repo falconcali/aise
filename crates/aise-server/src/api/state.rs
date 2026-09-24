@@ -11,9 +11,8 @@ use aise::story::pack_service::PackService;
 use std::sync::Arc;
 
 pub struct AppState {
-    pub engine: Arc<AiseEngine>,
+    pub(crate) engine: Arc<AiseEngine>,
     pub registry: Arc<SessionRegistry>,
-    pub tasks: Arc<TurnTaskSupervisor>,
     pub turn_submission: Arc<TurnSubmissionService>,
     pub config: ServerConfig,
     pub pack_service: Option<Arc<PackService>>,
@@ -34,7 +33,6 @@ impl AppState {
         Self {
             engine,
             registry,
-            tasks,
             turn_submission,
             config,
             pack_service: None,

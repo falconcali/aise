@@ -1,6 +1,5 @@
 use crate::config::ServerConfig;
 use crate::observability::ObservabilityConfig;
-use crate::trace::{NoopRedactor, TraceRedactor, TraceSinkError, TraceWriter, TraceWriterConfig};
 use aise::AiseEngine;
 use aise::character::CharacterThinkPipeline;
 use aise::context::activation::{
@@ -22,15 +21,8 @@ use aise::story::character_card_service::CharacterCardService;
 use aise::story::instance_factory::{StoryInstanceFactory, StoryInstantiationLimits};
 use aise::story::pack_service::{NativeAssetImporter, PackService};
 use aise::story::{StoryGenerator, StoryRepairer, StoryStateExtractor};
-use aise::turn::turn_trace::TraceSpanSink;
 use aise::validation::ValidationPipeline;
 use std::sync::Arc;
-
-pub fn new_trace_writer(config: &ServerConfig) -> Result<Arc<TraceWriter>, TraceSinkError> {
-    let writer_config: TraceWriterConfig = config.trace_writer_config();
-    let redactor: Arc<dyn TraceRedactor> = Arc::new(NoopRedactor);
-    TraceWriter::new(writer_config, config.trace_dir.clone(), redactor)
-}
 
 pub struct EngineServices {
     pub engine: Arc<AiseEngine>,
@@ -41,10 +33,7 @@ pub struct EngineServices {
     pub activation_preview: Arc<KnowledgeActivationPreviewService>,
 }
 
-pub async fn build_services(
-    config: &ServerConfig,
-    trace_sink: Arc<dyn TraceSpanSink>,
-) -> Result<EngineServices, anyhow::Error> {
+pub async fn build_services(config: &ServerConfig) -> Result<EngineServices, anyhow::Error> {
     let provider: Arc<dyn LlmProvider> = Arc::new(OpenAiCompatProvider::new(config.aise.llm.clone()));
     let prompt_source: Arc<dyn TrustedPromptSource> = Arc::new(
         CatalogPromptSource::from_config(&config.aise.prompt)
@@ -144,8 +133,7 @@ pub async fn build_services(
         .build()?;
     let runtime = TurnRuntime::new(pipeline_set);
 
-    let engine = AiseEngine::new(runtime, store.clone(), coordinator, config.aise.clone(), Arc::new(SystemClock))
-        .with_trace_sink(trace_sink);
+    let engine = AiseEngine::new(runtime, store.clone(), coordinator, config.aise.clone(), Arc::new(SystemClock));
 
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&config.aise.storage.database_url)
         .await
@@ -183,9 +171,6 @@ pub async fn build_services(
     })
 }
 
-pub async fn build_engine(
-    config: &ServerConfig,
-    trace_sink: Arc<dyn TraceSpanSink>,
-) -> Result<Arc<AiseEngine>, anyhow::Error> {
-    Ok(build_services(config, trace_sink).await?.engine)
+pub async fn build_engine(config: &ServerConfig) -> Result<Arc<AiseEngine>, anyhow::Error> {
+    Ok(build_services(config).await?.engine)
 }

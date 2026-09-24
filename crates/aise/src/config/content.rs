@@ -20,7 +20,6 @@ pub struct TurnContentLimitsConfig {
     pub max_state_extraction_bytes: usize,
     pub max_knowledge_change_bytes: usize,
     pub max_validation_issue_bytes: usize,
-    pub max_trace_field_bytes: usize,
 }
 
 impl Default for TurnContentLimitsConfig {
@@ -43,7 +42,6 @@ impl Default for TurnContentLimitsConfig {
             max_state_extraction_bytes: 32 * 1024,
             max_knowledge_change_bytes: 4 * 1024,
             max_validation_issue_bytes: 500,
-            max_trace_field_bytes: 2048,
         }
     }
 }
@@ -117,9 +115,6 @@ impl TurnContentLimitsConfig {
             return Err(ConfigError::Invalid(
                 "content.max_validation_issue_bytes must be positive".into(),
             ));
-        }
-        if self.max_trace_field_bytes == 0 {
-            return Err(ConfigError::Invalid("content.max_trace_field_bytes must be positive".into()));
         }
         Ok(())
     }

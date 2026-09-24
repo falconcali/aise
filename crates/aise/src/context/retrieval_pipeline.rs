@@ -83,7 +83,6 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
                 })
             })?
             .clone();
-        let pending = ctx.trace().begin_span("context.retrieve", "context.retrieve");
         let mut role_views: BTreeMap<RoleId, RoleContextView> = BTreeMap::new();
         for request in &plan.retrieval_plan.character_requests {
             let role = snapshot.role(&request.role_id).ok_or_else(|| {
@@ -306,19 +305,6 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
             max_item_bytes: self.config.max_item_bytes,
         };
         let context = RetrievedContext::try_new(world, characters, limits).map_err(map_retrieved_context_error)?;
-        let payload = serde_json::json!({
-            "story_id": ctx.story_id(),
-            "turn_number": ctx.turn_number().get(),
-            "base_revision": snapshot.base_revision().get(),
-            "character_request_count": plan.retrieval_plan.character_requests.len(),
-            "knowledge_request_count": plan.retrieval_plan.knowledge_requests.len(),
-            "world_item_count": context.world().facts.len() + context.world().rumors.len(),
-            "character_partition_count": context.characters().len(),
-            "total_tokens": context.total_tokens(),
-            "status": "ok",
-            "error_code": null,
-        });
-        ctx.trace().end_span_with(pending, &payload);
         ctx.replace_activation(crate::turn::turn_context::PreparedActivation {
             continuation: activation_result.continuation,
             pending_timed_state: activation_result.pending_timed_state,

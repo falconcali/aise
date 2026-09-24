@@ -9,7 +9,6 @@ use crate::turn::turn_contract::TurnPhase;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_event::{TurnEvent, TurnEventSink};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::turn::turn_trace::{PipelineData, SpanPayload};
 use opentelemetry::Context;
 use std::time::Instant;
 
@@ -161,21 +160,7 @@ impl TurnRuntime {
         });
         let observation =
             ObservationSpan::begin_with_parent(observation_step(stage), ObservationFields::default(), parent);
-        let pending = ctx.trace().begin_span("aise.pipeline", stage.as_str());
         let outcome = observation.in_scope(pipeline.execute(ctx)).await;
-        let payload = match &outcome {
-            Ok(()) => SpanPayload::Pipeline(PipelineData {
-                stage: stage.as_str().to_owned(),
-                status: "ok".into(),
-                error: None,
-            }),
-            Err(error) => SpanPayload::Pipeline(PipelineData {
-                stage: stage.as_str().to_owned(),
-                status: "error".into(),
-                error: Some(error.to_string()),
-            }),
-        };
-        ctx.trace().end_span_with(pending, &payload);
         observation.finish(match &outcome {
             Ok(()) => ObservationFinish {
                 status: ObservationStatus::Ok,

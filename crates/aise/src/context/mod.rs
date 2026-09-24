@@ -1,5 +1,6 @@
 pub mod activation;
 pub mod baseline_ctx_builder;
+pub(crate) mod baseline_observation;
 pub mod error;
 pub mod retrieval_pipeline;
 

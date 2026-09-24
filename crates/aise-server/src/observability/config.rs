@@ -126,7 +126,7 @@ impl ObservabilityConfig {
 }
 
 fn assign_string(get: &impl Fn(&str) -> Option<String>, name: &str, target: &mut String) {
-    if let Some(value) = get(name) {
+    if let Some(value) = get(name).filter(|value| !value.trim().is_empty()) {
         *target = value;
     }
 }

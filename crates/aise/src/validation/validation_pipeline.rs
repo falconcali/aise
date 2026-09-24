@@ -10,7 +10,6 @@ use crate::domain::turn::{
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::TurnExecutionError;
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use crate::turn::turn_trace::{SpanPayload, ValidationData};
 use crate::turn::turn_validation::{
     RoleStateChange, StateChange, ValidatedChangeSet, ValidatedChangeSetParts, ValidatedRelationshipOperation,
     ValidationIssue, ValidationResult,
@@ -48,15 +47,6 @@ impl TurnExecutionPipeline for ValidationPipeline {
             }
         }
         let issues = self.run_deterministic(ctx)?;
-        let payload = SpanPayload::Validation(ValidationData {
-            pass: issues.is_empty(),
-            issues: issues
-                .iter()
-                .map(|issue| format!("{}: {}", issue.code.as_str(), issue.message))
-                .collect(),
-        });
-        let pending = ctx.trace().begin_span("aise.validation", "validation.execute");
-        ctx.trace().end_span_with(pending, &payload);
         if issues.is_empty() {
             let change_set = build_change_set(ctx)?;
             return ctx.set_validation_result(ValidationResult::pass(change_set));

@@ -22,7 +22,6 @@ use crate::domain::turn::{
 };
 use crate::turn::turn_budget::TurnBudget;
 use crate::turn::turn_contract::{IdempotencyKey, TurnCancellation, TurnControl, TurnIdentity, TurnRequest};
-use crate::turn::turn_trace::TraceRecorder;
 use crate::turn::turn_validation::{
     BoundedValidationIssues, ValidationIssue, ValidationIssueClass, ValidationRemedy, ValidationResult,
 };
@@ -267,8 +266,7 @@ fn story_repairer_reuses_story_continuity_prose() {
     );
     let request = TurnRequest::try_new("go north".to_owned()).unwrap();
     let control = TurnControl::new(Instant::now() + Duration::from_secs(30), TurnCancellation::new());
-    let trace = TraceRecorder::with_limits(budget.max_trace_spans());
-    let mut ctx = TurnExecutionContext::new(identity, request, budget, control, trace).unwrap();
+    let mut ctx = TurnExecutionContext::new(identity, request, budget, control).unwrap();
     ctx.complete_initialization().unwrap();
     let snapshot = sample_snapshot(&player, continuity.clone());
     let activation = crate::turn::turn_context::PreparedActivation::empty(
