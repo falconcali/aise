@@ -61,6 +61,10 @@ pub const METADATA_OUTPUT_CAPTURED_BYTES: &str = "aise.observation.metadata.outp
 pub const METADATA_OUTPUT_TRUNCATED: &str = "aise.observation.metadata.output_truncated";
 pub const METADATA_OUTPUT_SHA256: &str = "aise.observation.metadata.output_sha256";
 
+pub fn sha256_hex(value: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(value))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ObservationStatus {
     Ok,
@@ -242,6 +246,30 @@ pub struct BoundedContent {
     pub sha256: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservationCaptureConfig {
+    pub policy: ContentCapturePolicy,
+    pub limits: ContentCaptureLimits,
+}
+
+impl ObservationCaptureConfig {
+    pub const fn new(policy: ContentCapturePolicy, limits: ContentCaptureLimits) -> Self {
+        Self { policy, limits }
+    }
+
+    pub const fn metadata_only() -> Self {
+        Self {
+            policy: ContentCapturePolicy::MetadataOnly,
+            limits: ContentCaptureLimits {
+                max_field_bytes: 16_384,
+                max_observation_bytes: 32_768,
+                detector_overlap_bytes: 512,
+            },
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct BoundedContentEncoder {
     policy: ContentCapturePolicy,
     limits: ContentCaptureLimits,
@@ -274,6 +302,33 @@ impl BoundedContentEncoder {
             Ok(()) => (Some(writer.finish()), false),
             Err(_) => (None, true),
         }
+    }
+}
+
+pub struct ObservationContentCapture {
+    encoder: BoundedContentEncoder,
+    remaining_bytes: usize,
+}
+
+impl ObservationContentCapture {
+    pub fn new(config: ObservationCaptureConfig) -> Self {
+        let remaining_bytes = config.limits.max_observation_bytes;
+        Self {
+            encoder: BoundedContentEncoder::new(config.policy, config.limits),
+            remaining_bytes,
+        }
+    }
+
+    pub fn capture<T: Serialize>(&mut self, value: &T) -> (Option<BoundedContent>, bool) {
+        let (content, failed) = self.encoder.encode_with_status(value, self.remaining_bytes);
+        if let Some(content) = &content {
+            self.remaining_bytes = self.remaining_bytes.saturating_sub(content.captured_bytes);
+        }
+        (content, failed)
+    }
+
+    pub fn remaining_bytes(&self) -> usize {
+        self.remaining_bytes
     }
 }
 

@@ -1,11 +1,12 @@
 use super::fields::{
-    ObservationAttribute, ObservationFields, ObservationFinish, ObservationStatus, ObservationValue, SCHEMA_VERSION,
-    SESSION_ID, TRACE_ENVIRONMENT, TRACE_METADATA_IDEMPOTENCY_KEY_DIGEST, TRACE_METADATA_STORY_ID,
-    TRACE_METADATA_TURN_NUMBER, TRACE_NAME, TRACE_RELEASE, TRACE_TAGS,
+    ObservationAttribute, ObservationCaptureConfig, ObservationFields, ObservationFinish, ObservationStatus,
+    ObservationValue, SCHEMA_VERSION, SESSION_ID, TRACE_ENVIRONMENT, TRACE_METADATA_IDEMPOTENCY_KEY_DIGEST,
+    TRACE_METADATA_STORY_ID, TRACE_METADATA_TURN_NUMBER, TRACE_NAME, TRACE_RELEASE, TRACE_TAGS,
 };
 use super::span::ObservationSpan;
 use super::step::ObservationStep;
 use opentelemetry::{Context, KeyValue, baggage::BaggageExt};
+use serde::Serialize;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -18,7 +19,20 @@ pub struct ObservationTrace {
 
 impl ObservationTrace {
     pub fn begin(fields: ObservationFields) -> Self {
-        let mut root = ObservationSpan::begin(ObservationStep::ExecuteStoryTurn, ObservationFields::default());
+        let root = ObservationSpan::begin(ObservationStep::ExecuteStoryTurn, ObservationFields::default());
+        Self::begin_inner(root, fields)
+    }
+
+    pub fn begin_captured<T: Serialize>(
+        metadata: Vec<ObservationAttribute>,
+        config: ObservationCaptureConfig,
+        input: &T,
+    ) -> Self {
+        let root = ObservationSpan::begin_captured(ObservationStep::ExecuteStoryTurn, Vec::new(), config, input);
+        Self::begin_inner(root, ObservationFields { metadata, input: None })
+    }
+
+    fn begin_inner(mut root: ObservationSpan, fields: ObservationFields) -> Self {
         let initial_baggage = if root.is_recording() {
             fields
                 .metadata
@@ -107,6 +121,11 @@ impl ObservationTrace {
 
     pub fn finish(mut self, finish: ObservationFinish) {
         self.root.finish_inner(finish);
+        self.finished = true;
+    }
+
+    pub fn finish_captured<T: Serialize>(mut self, finish: ObservationFinish, output: &T) {
+        self.root.finish_captured_inner(finish, output);
         self.finished = true;
     }
 

@@ -4,10 +4,12 @@ use super::fields::{
     METADATA_INPUT_TRUNCATED, METADATA_OUTPUT_CAPTURED_BYTES, METADATA_OUTPUT_ORIGINAL_BYTES, METADATA_OUTPUT_SHA256,
     METADATA_OUTPUT_TRUNCATED, METADATA_STAGE, OBSERVATION_COST_DETAILS, OBSERVATION_INPUT, OBSERVATION_LEVEL,
     OBSERVATION_OUTPUT, OBSERVATION_STATUS_MESSAGE, OBSERVATION_TYPE, OBSERVATION_USAGE_DETAILS, ObservationAttribute,
-    ObservationFields, ObservationFinish, ObservationStatus, ObservationValue, SCHEMA_VERSION,
+    ObservationCaptureConfig, ObservationContentCapture, ObservationFields, ObservationFinish, ObservationStatus,
+    ObservationValue, SCHEMA_VERSION,
 };
 use super::step::ObservationStep;
 use opentelemetry::{Array, Context, Value};
+use serde::Serialize;
 use std::future::Future;
 use tracing::{Instrument, Span, field::Empty};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -26,6 +28,7 @@ macro_rules! observation_span {
 pub struct ObservationSpan {
     span: Span,
     finished: bool,
+    content_capture: Option<ObservationContentCapture>,
 }
 
 impl ObservationSpan {
@@ -37,12 +40,39 @@ impl ObservationSpan {
         Self::begin_inner(step, fields, Some(parent))
     }
 
+    pub fn begin_captured<T: Serialize>(
+        step: ObservationStep,
+        metadata: Vec<ObservationAttribute>,
+        config: ObservationCaptureConfig,
+        input: &T,
+    ) -> Self {
+        let mut observation = Self::begin(step, ObservationFields { metadata, input: None });
+        observation.start_capture(config, input);
+        observation
+    }
+
+    pub fn begin_with_parent_captured<T: Serialize>(
+        step: ObservationStep,
+        metadata: Vec<ObservationAttribute>,
+        parent: &Context,
+        config: ObservationCaptureConfig,
+        input: &T,
+    ) -> Self {
+        let mut observation = Self::begin_with_parent(step, ObservationFields { metadata, input: None }, parent);
+        observation.start_capture(config, input);
+        observation
+    }
+
     fn begin_inner(step: ObservationStep, fields: ObservationFields, parent: Option<&Context>) -> Self {
         let span = create_span(step);
         if let Some(parent) = parent {
             let _ = span.set_parent(parent.clone());
         }
-        let mut observation = Self { span, finished: false };
+        let mut observation = Self {
+            span,
+            finished: false,
+            content_capture: None,
+        };
         if observation.is_recording() {
             observation.record_static(OBSERVATION_TYPE, step.kind().as_str());
             observation.record_static(SCHEMA_VERSION, ObservationStep::SCHEMA_VERSION);
@@ -56,6 +86,25 @@ impl ObservationSpan {
     }
 
     pub fn finish(mut self, finish: ObservationFinish) {
+        self.finish_inner(finish);
+    }
+
+    pub fn finish_captured<T: Serialize>(mut self, finish: ObservationFinish, output: &T) {
+        self.finish_captured_inner(finish, output);
+    }
+
+    pub(crate) fn finish_captured_inner<T: Serialize>(&mut self, mut finish: ObservationFinish, output: &T) {
+        if self.is_recording() {
+            if let Some(capture) = self.content_capture.as_mut() {
+                let (content, failed) = capture.capture(output);
+                finish.output = content;
+                if failed {
+                    finish
+                        .metadata
+                        .push(ObservationAttribute::bool(METADATA_CONTENT_ENCODE_FAILED, true));
+                }
+            }
+        }
         self.finish_inner(finish);
     }
 
@@ -110,6 +159,21 @@ impl ObservationSpan {
         if let Some(input) = fields.input {
             self.record_content(input, ContentDirection::Input);
         }
+    }
+
+    fn start_capture<T: Serialize>(&mut self, config: ObservationCaptureConfig, input: &T) {
+        if !self.is_recording() {
+            return;
+        }
+        let mut capture = ObservationContentCapture::new(config);
+        let (content, failed) = capture.capture(input);
+        if let Some(content) = content {
+            self.record_content(content, ContentDirection::Input);
+        }
+        if failed {
+            self.record_attribute(ObservationAttribute::bool(METADATA_CONTENT_ENCODE_FAILED, true));
+        }
+        self.content_capture = Some(capture);
     }
 
     pub(crate) fn finish_inner(&mut self, finish: ObservationFinish) {

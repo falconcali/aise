@@ -97,7 +97,7 @@ pub enum ObservationStep {
 
 impl ObservationStep {
     pub const ALL: &'static [Self];
-    pub const SCHEMA_VERSION: &'static str = "1";
+    pub const SCHEMA_VERSION: &'static str = "2";
     pub const fn name(self) -> &'static str;
     pub const fn kind(self) -> ObservationKind;
 }

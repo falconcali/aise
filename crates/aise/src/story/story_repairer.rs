@@ -38,6 +38,34 @@ impl TurnExecutionPipeline for StoryRepairer {
         TurnStage::StoryRepairer
     }
 
+    fn observation_input(&self, ctx: &TurnExecutionContext) -> serde_json::Value {
+        let story = ctx.story().map(|value| value.story_text.as_str());
+        let validation = ctx.validation();
+        serde_json::json!({
+            "story_candidate": {
+                "version": ctx.story_version(),
+                "bytes": story.map_or(0, str::len),
+                "sha256": story.map(|value| crate::turn::observability::sha256_hex(value.as_bytes()))
+            },
+            "issue_codes": validation.into_iter()
+                .flat_map(|value| value.issues())
+                .map(|issue| issue.code.as_str())
+                .collect::<Vec<_>>()
+        })
+    }
+
+    fn observation_output(&self, ctx: &TurnExecutionContext, succeeded: bool) -> serde_json::Value {
+        let story = ctx.story().map(|value| value.story_text.as_str());
+        serde_json::json!({
+            "completed": succeeded,
+            "story_candidate": {
+                "version": ctx.story_version(),
+                "bytes": story.map_or(0, str::len),
+                "sha256": story.map(|value| crate::turn::observability::sha256_hex(value.as_bytes()))
+            }
+        })
+    }
+
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;
         let issue_count = projection.context.validation_issues.len();

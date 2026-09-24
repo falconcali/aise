@@ -162,8 +162,11 @@ fn build_provider(
             KeyValue::new("deployment.environment.name", config.environment.clone()),
             KeyValue::new("langfuse.environment", config.environment.clone()),
             KeyValue::new("langfuse.release", config.release.clone()),
-            KeyValue::new("aise.schema.version", "1"),
-            KeyValue::new("langfuse.version", "1"),
+            KeyValue::new(
+                "aise.schema.version",
+                aise::turn::observability::ObservationStep::SCHEMA_VERSION,
+            ),
+            KeyValue::new("langfuse.version", aise::turn::observability::ObservationStep::SCHEMA_VERSION),
         ])
         .build();
     Ok(SdkTracerProvider::builder()

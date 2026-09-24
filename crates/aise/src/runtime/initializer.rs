@@ -12,6 +12,21 @@ impl TurnExecutionPipeline for TurnInitializer {
         TurnStage::TurnInitializer
     }
 
+    fn observation_input(&self, ctx: &TurnExecutionContext) -> serde_json::Value {
+        serde_json::json!({
+            "phase": format!("{:?}", ctx.phase()).to_lowercase(),
+            "player_contribution_bytes": ctx.player_contribution().len(),
+            "player_contribution_sha256": crate::turn::observability::sha256_hex(ctx.player_contribution().as_bytes())
+        })
+    }
+
+    fn observation_output(&self, ctx: &TurnExecutionContext, succeeded: bool) -> serde_json::Value {
+        serde_json::json!({
+            "completed": succeeded,
+            "phase": format!("{:?}", ctx.phase()).to_lowercase()
+        })
+    }
+
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         if ctx.player_contribution().is_empty() {
             Err(TurnExecutionError::invalid_request("empty player contribution"))

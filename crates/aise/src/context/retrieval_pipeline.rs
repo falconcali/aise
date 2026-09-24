@@ -46,6 +46,68 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
         TurnStage::ContextRetrieval
     }
 
+    fn observation_input(&self, ctx: &TurnExecutionContext) -> serde_json::Value {
+        let plan = ctx.plan();
+        let targets = plan
+            .into_iter()
+            .flat_map(|value| value.retrieval_plan.knowledge_requests.iter())
+            .map(|request| {
+                serde_json::json!({
+                    "source_id": request.target_source_id.as_str(),
+                    "kind": format!("{:?}", request.target_source_id.kind()).to_lowercase(),
+                    "delivery": request.delivery,
+                    "mandatory": request.mandatory
+                })
+            })
+            .collect::<Vec<_>>();
+        let character_role_ids = plan
+            .into_iter()
+            .flat_map(|value| value.retrieval_plan.character_requests.iter())
+            .map(|request| request.role_id.as_str())
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "knowledge_targets": targets,
+            "character_role_ids": character_role_ids
+        })
+    }
+
+    fn observation_output(&self, ctx: &TurnExecutionContext, succeeded: bool) -> serde_json::Value {
+        let retrieved = ctx.retrieved();
+        let world_source_ids = retrieved
+            .world()
+            .facts
+            .iter()
+            .chain(retrieved.world().rumors.iter())
+            .map(|item| item.source_id.as_str())
+            .collect::<Vec<_>>();
+        let character_partitions = retrieved
+            .characters()
+            .iter()
+            .map(|(role_id, context)| {
+                serde_json::json!({
+                    "role_id": role_id.as_str(),
+                    "rumor_count": context.known_rumors.len(),
+                    "memory_count": context.memories.len(),
+                    "rumor_tokens": context.known_rumors.iter().map(|item| item.token_cost).sum::<u64>(),
+                    "memory_tokens": context.memories.iter().map(|item| item.token_cost).sum::<u64>(),
+                    "rumor_source_ids": context.known_rumors.iter().map(|item| item.source_id.as_str()).collect::<Vec<_>>(),
+                    "memory_source_ids": context.memories.iter().map(|item| item.source_id.as_str()).collect::<Vec<_>>()
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "completed": succeeded,
+            "world": {
+                "fact_count": retrieved.world().facts.len(),
+                "rumor_count": retrieved.world().rumors.len(),
+                "source_ids": world_source_ids
+            },
+            "character_partitions": character_partitions,
+            "total_items": retrieved.total_items(),
+            "total_tokens": retrieved.total_tokens()
+        })
+    }
+
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let plan = ctx
             .plan()
