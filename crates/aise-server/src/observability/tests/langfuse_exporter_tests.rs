@@ -103,26 +103,6 @@ fn removes_unknown_aise_attributes_and_preserves_other_attributes() {
 }
 
 #[test]
-fn removes_tracing_runtime_noise_from_business_observations() {
-    let mut batch = vec![span(vec![
-        KeyValue::new("target", "aise::observation"),
-        KeyValue::new("thread.name", "tokio-rt-worker"),
-        KeyValue::new("thread.id", 2_i64),
-        KeyValue::new("code.line.number", 42_i64),
-        KeyValue::new("code.module.name", "aise::turn::observability::span"),
-        KeyValue::new("code.file.path", "span.rs"),
-        KeyValue::new("busy_ns", 10_i64),
-        KeyValue::new("idle_ns", 20_i64),
-        KeyValue::new("aise.observation.type", "span"),
-    ])];
-    let adapter = LangfuseExportAdapter::new(NoopExporter, StreamingMasker::new(1024, false), TelemetryDiagnostics);
-
-    adapter.map_batch(&mut batch);
-
-    assert_eq!(mapped_keys(&batch[0]), ["langfuse.observation.type"]);
-}
-
-#[test]
 fn masks_and_then_truncates_every_exported_string_attribute() {
     let mut batch = vec![span(vec![
         KeyValue::new("aise.observation.output", "prefix Authorization: Bearer secret-token suffix"),

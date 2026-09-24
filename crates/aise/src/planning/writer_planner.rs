@@ -6,6 +6,10 @@ use crate::planning::planner_output::writer_planner_contract;
 use crate::planning::retrieval_plan_builder::RetrievalPlanBuilder;
 use crate::planning::writer_planner_prompt::WriterPlannerPromptContextProjector;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
+use crate::turn::observability::{
+    METADATA_GRAPH_REVISION, METADATA_PROJECTED_EDGE_COUNT, METADATA_PROJECTED_NODE_COUNT, ObservationAttribute,
+    ObservationFields, ObservationFinish, ObservationSpan, ObservationStatus,
+};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
@@ -39,30 +43,6 @@ impl TurnExecutionPipeline for WriterPlanner {
         TurnStage::WriterPlanner
     }
 
-    fn observation_input(&self, ctx: &TurnExecutionContext) -> serde_json::Value {
-        serde_json::json!({
-            "phase": format!("{:?}", ctx.phase()).to_lowercase(),
-            "has_baseline": ctx.baseline().is_some(),
-            "has_narrative_projection": ctx.narrative_projection().is_some(),
-            "remaining_output_tokens": ctx.budget().remaining_output_tokens()
-        })
-    }
-
-    fn observation_output(&self, ctx: &TurnExecutionContext, succeeded: bool) -> serde_json::Value {
-        let plan = ctx.plan();
-        let serialized = plan.and_then(|value| serde_json::to_vec(value).ok());
-        serde_json::json!({
-            "completed": succeeded,
-            "phase": format!("{:?}", ctx.phase()).to_lowercase(),
-            "plan_bytes": serialized.as_ref().map_or(0, Vec::len),
-            "plan_sha256": serialized.as_ref().map(|value| crate::turn::observability::sha256_hex(value)),
-            "character_request_count": plan.map_or(0, |value| value.character_think_requests.len()),
-            "knowledge_request_count": plan.map_or(0, |value| value.retrieval_plan.knowledge_requests.len()),
-            "requires_retrieval": ctx.requires_retrieval().unwrap_or(false),
-            "requires_character_thinking": ctx.requires_character_thinking().unwrap_or(false)
-        })
-    }
-
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let baseline = ctx
             .baseline()
@@ -89,6 +69,22 @@ impl TurnExecutionPipeline for WriterPlanner {
             })?
             .clone();
         let narrative_plan = narrative_projection.plan.clone();
+        let projection_observation = ObservationSpan::begin(
+            crate::turn::observability::ObservationStep::ProjectNarrative,
+            ObservationFields::default(),
+        );
+        projection_observation.finish(ObservationFinish {
+            status: ObservationStatus::Ok,
+            metadata: vec![
+                ObservationAttribute::u64(METADATA_GRAPH_REVISION, snapshot.graph_revision()),
+                ObservationAttribute::u64(METADATA_PROJECTED_NODE_COUNT, narrative_plan.active_nodes.len() as u64),
+                ObservationAttribute::u64(
+                    METADATA_PROJECTED_EDGE_COUNT,
+                    narrative_plan.world_event_intents.len() as u64,
+                ),
+            ],
+            ..ObservationFinish::default()
+        });
         let player_contribution = BoundedText::try_new(
             ctx.player_contribution().to_owned(),
             "player_contribution",

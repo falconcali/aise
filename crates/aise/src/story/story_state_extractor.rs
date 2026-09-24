@@ -52,24 +52,6 @@ impl TurnExecutionPipeline for StoryStateExtractor {
         TurnStage::StoryStateExtractor
     }
 
-    fn observation_input(&self, ctx: &TurnExecutionContext) -> serde_json::Value {
-        let story = ctx.story().map(|value| value.story_text.as_str());
-        serde_json::json!({
-            "story_candidate": {
-                "bytes": story.map_or(0, str::len),
-                "sha256": story.map(|value| crate::turn::observability::sha256_hex(value.as_bytes()))
-            },
-            "graph_revision": ctx.snapshot().map(|value| value.graph_revision())
-        })
-    }
-
-    fn observation_output(&self, ctx: &TurnExecutionContext, succeeded: bool) -> serde_json::Value {
-        serde_json::json!({
-            "completed": succeeded,
-            "phase": format!("{:?}", ctx.phase()).to_lowercase()
-        })
-    }
-
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let is_reextraction = ctx.phase() == TurnPhase::StateReextractionRequired;
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;

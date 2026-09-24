@@ -40,33 +40,6 @@ impl TurnExecutionPipeline for ValidationPipeline {
         TurnStage::Validation
     }
 
-    fn observation_input(&self, ctx: &TurnExecutionContext) -> serde_json::Value {
-        let story = ctx.story().map(|value| value.story_text.as_str());
-        serde_json::json!({
-            "story_candidate": {
-                "version": ctx.story_version(),
-                "bytes": story.map_or(0, str::len),
-                "sha256": story.map(|value| crate::turn::observability::sha256_hex(value.as_bytes()))
-            },
-            "snapshot_revision": ctx.snapshot().map(|value| value.base_revision().get()),
-            "graph_revision": ctx.snapshot().map(|value| value.graph_revision())
-        })
-    }
-
-    fn observation_output(&self, ctx: &TurnExecutionContext, succeeded: bool) -> serde_json::Value {
-        let validation = ctx.validation();
-        serde_json::json!({
-            "completed": succeeded,
-            "decision": validation.map(|value| value.decision().as_str()),
-            "issue_count": validation.map_or(0, |value| value.issues().len()),
-            "issue_codes": validation.into_iter()
-                .flat_map(|value| value.issues())
-                .map(|issue| issue.code.as_str())
-                .collect::<Vec<_>>(),
-            "changeset_present": ctx.change_set().is_some()
-        })
-    }
-
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         if let Some(extraction_version) = ctx.extraction_story_version() {
             if extraction_version != ctx.story_version() {

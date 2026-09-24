@@ -1,8 +1,8 @@
-use crate::runtime::turn_pipeline_set::TurnPipelineSet;
+﻿use crate::runtime::turn_pipeline_set::TurnPipelineSet;
 //use crate::turn::turn_budget::CorrectionKind;
 use crate::turn::observability::{
     METADATA_CHARACTER_THINKING_SKIPPED, METADATA_RETRIEVAL_SKIPPED, METADATA_SKIP_REASON, ObservationAttribute,
-    ObservationCaptureConfig, ObservationError, ObservationFinish, ObservationSpan, ObservationStatus, ObservationStep,
+    ObservationError, ObservationFields, ObservationFinish, ObservationSpan, ObservationStatus, ObservationStep,
 };
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::TurnPhase;
@@ -26,17 +26,11 @@ impl TurnRuntime {
         ctx: &mut TurnExecutionContext,
         sink: &dyn TurnEventSink,
         parent: &Context,
-        capture: &ObservationCaptureConfig,
     ) -> Result<(), TurnExecutionError> {
-        let run_span = ObservationSpan::begin_with_parent_captured(
-            ObservationStep::RunTurnPipelines,
-            Vec::new(),
-            parent,
-            capture.clone(),
-            &serde_json::json!({"phase": format!("{:?}", ctx.phase()).to_lowercase()}),
-        );
+        let run_span =
+            ObservationSpan::begin_with_parent(ObservationStep::RunTurnPipelines, ObservationFields::default(), parent);
         let run_context = run_span.context();
-        let result = run_span.in_scope(self.run_inner(ctx, sink, &run_context, capture)).await;
+        let result = run_span.in_scope(self.run_inner(ctx, sink, &run_context)).await;
         let mut metadata = vec![
             ObservationAttribute::bool(METADATA_RETRIEVAL_SKIPPED, ctx.retrieval_skipped()),
             ObservationAttribute::bool(METADATA_CHARACTER_THINKING_SKIPPED, ctx.character_thinking_skipped()),
@@ -51,7 +45,7 @@ impl TurnRuntime {
             }
             metadata.push(ObservationAttribute::string_list(METADATA_SKIP_REASON, reasons));
         }
-        let finish = match &result {
+        run_span.finish(match &result {
             Ok(()) => ObservationFinish {
                 status: ObservationStatus::Ok,
                 metadata,
@@ -63,15 +57,7 @@ impl TurnRuntime {
                 error: Some(runtime_error(error)),
                 ..ObservationFinish::default()
             },
-        };
-        run_span.finish_captured(
-            finish,
-            &serde_json::json!({
-                "completed": result.is_ok(),
-                "phase": format!("{:?}", ctx.phase()).to_lowercase(),
-                "story_revision": ctx.committed_result().map(|value| value.story_revision.get())
-            }),
-        );
+        });
         result
     }
 
@@ -80,31 +66,25 @@ impl TurnRuntime {
         ctx: &mut TurnExecutionContext,
         sink: &dyn TurnEventSink,
         parent: &Context,
-        capture: &ObservationCaptureConfig,
     ) -> Result<(), TurnExecutionError> {
-        self.execute(self.pipeline_set.initializer(), ctx, sink, parent, capture)
-            .await?;
-        self.execute(self.pipeline_set.baseline_builder(), ctx, sink, parent, capture)
-            .await?;
-        self.execute(self.pipeline_set.writer_planner(), ctx, sink, parent, capture)
-            .await?;
+        self.execute(self.pipeline_set.initializer(), ctx, sink, parent).await?;
+        self.execute(self.pipeline_set.baseline_builder(), ctx, sink, parent).await?;
+        self.execute(self.pipeline_set.writer_planner(), ctx, sink, parent).await?;
 
         if ctx.requires_retrieval()? {
-            self.execute(self.pipeline_set.retrieval(), ctx, sink, parent, capture).await?;
+            self.execute(self.pipeline_set.retrieval(), ctx, sink, parent).await?;
         } else {
             ctx.skip_retrieval()?;
         }
 
         if ctx.requires_character_thinking()? {
-            self.execute(self.pipeline_set.character_think(), ctx, sink, parent, capture)
-                .await?;
+            self.execute(self.pipeline_set.character_think(), ctx, sink, parent).await?;
         } else {
             ctx.skip_character_thinking()?;
         }
 
         ctx.complete_context_preparation()?;
-        self.execute(self.pipeline_set.story_generator(), ctx, sink, parent, capture)
-            .await?;
+        self.execute(self.pipeline_set.story_generator(), ctx, sink, parent).await?;
 
         // loop {
         //     if matches!(ctx.phase(), TurnPhase::StoryReady | TurnPhase::StateReextractionRequired) {
@@ -145,7 +125,7 @@ impl TurnRuntime {
         ctx.set_pahse(TurnPhase::ReadyToCommit); // TODO : Debug Code
         ctx.construct_changeset()?; // TODO : Debug Code
 
-        self.execute(self.pipeline_set.committer(), ctx, sink, parent, capture).await?;
+        self.execute(self.pipeline_set.committer(), ctx, sink, parent).await?;
         ctx.committed_result()
             .map(|_| ())
             .ok_or_else(|| invariant("committed turn missing committed result".to_string()))
@@ -157,7 +137,6 @@ impl TurnRuntime {
         ctx: &mut TurnExecutionContext,
         sink: &dyn TurnEventSink,
         parent: &Context,
-        capture: &ObservationCaptureConfig,
     ) -> Result<(), TurnExecutionError> {
         let stage = pipeline.stage();
         if let Some(entries) = stage_entry_phases(stage) {
@@ -179,16 +158,10 @@ impl TurnRuntime {
             turn_number: Some(ctx.turn_number()),
             stage,
         });
-        let input = pipeline.observation_input(ctx);
-        let observation = ObservationSpan::begin_with_parent_captured(
-            observation_step(stage),
-            Vec::new(),
-            parent,
-            capture.clone(),
-            &input,
-        );
+        let observation =
+            ObservationSpan::begin_with_parent(observation_step(stage), ObservationFields::default(), parent);
         let outcome = observation.in_scope(pipeline.execute(ctx)).await;
-        let finish = match &outcome {
+        observation.finish(match &outcome {
             Ok(()) => ObservationFinish {
                 status: ObservationStatus::Ok,
                 ..ObservationFinish::default()
@@ -198,9 +171,7 @@ impl TurnRuntime {
                 error: Some(runtime_error(error)),
                 ..ObservationFinish::default()
             },
-        };
-        let output = pipeline.observation_output(ctx, outcome.is_ok());
-        observation.finish_captured(finish, &output);
+        });
         if outcome.is_ok() {
             if let Some(exits) = stage_exit_phases(stage) {
                 if !exits.contains(&ctx.phase()) {

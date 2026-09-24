@@ -20,9 +20,7 @@ use crate::domain::turn::{
 };
 use crate::persistence::knowledge_read_port::KnowledgeIndexQuery;
 use crate::persistence::store::Store;
-use crate::turn::observability::{
-    ObservationCaptureConfig, ObservationFinish, ObservationSpan, ObservationStatus, ObservationStep,
-};
+use crate::turn::observability::ObservationStep;
 use crate::turn::turn_context::{PreparedActivation, TurnExecutionContext};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
@@ -79,26 +77,6 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
         TurnStage::BaselineBuilder
     }
 
-    fn observation_input(&self, ctx: &TurnExecutionContext) -> serde_json::Value {
-        serde_json::json!({
-            "phase": format!("{:?}", ctx.phase()).to_lowercase(),
-            "max_context_tokens": ctx.budget().max_context_tokens()
-        })
-    }
-
-    fn observation_output(&self, ctx: &TurnExecutionContext, succeeded: bool) -> serde_json::Value {
-        let baseline = ctx.baseline();
-        serde_json::json!({
-            "completed": succeeded,
-            "phase": format!("{:?}", ctx.phase()).to_lowercase(),
-            "relevant_roles": baseline.map_or(0, |value| value.relevant_roles.len()),
-            "role_index_entries": baseline.map_or(0, |value| value.role_index.len()),
-            "knowledge_index_entries": baseline.map_or(0, |value| value.knowledge_index.len()),
-            "baseline_facts": baseline.map_or(0, |value| value.relevant_world_knowledge.facts.len()),
-            "baseline_rumors": baseline.map_or(0, |value| value.relevant_world_knowledge.rumors.len())
-        })
-    }
-
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let story_id = ctx.story_id().clone();
         let limits = SnapshotLimits::from_config(
@@ -107,45 +85,14 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
             &self.asset_limits,
             &self.narrative_config,
         );
-        let observation = BaselineObservation::begin(
-            ObservationStep::LoadStorySnapshot,
-            Some(story_id.clone()),
-            ctx.observation_capture().clone(),
-            &serde_json::json!({
-                "story_id": story_id.as_str(),
-                "limits": {
-                    "max_roles": limits.max_roles,
-                    "max_relationships": limits.max_relationships,
-                    "max_narrative_nodes": limits.max_narrative_nodes,
-                    "max_constraints": limits.max_constraints
-                }
-            }),
-        );
+        let observation = BaselineObservation::begin(ObservationStep::LoadStorySnapshot, Some(story_id.clone()));
         let outcome = observation.in_scope(self.store.load_story_snapshot(&story_id, limits)).await;
         observation.finish(&outcome);
         let snapshot = outcome.map_err(TurnExecutionError::from)?;
 
-        let observation = BaselineObservation::begin(
-            ObservationStep::ActivateWorldInfo,
-            None,
-            ctx.observation_capture().clone(),
-            &serde_json::json!({
-                "turn_number": ctx.turn_number().get(),
-                "mode": "commit_eligible",
-                "generation_trigger": "normal",
-                "player_contribution_sha256": crate::turn::observability::sha256_hex(
-                    ctx.player_contribution().as_bytes()
-                )
-            }),
-        );
+        let observation = BaselineObservation::begin(ObservationStep::ActivateWorldInfo, None);
         let prepared = observation
-            .in_scope(prepare_baseline(
-                self,
-                &snapshot,
-                ctx.player_contribution(),
-                ctx.turn_number(),
-                ctx.observation_capture(),
-            ))
+            .in_scope(prepare_baseline(self, &snapshot, ctx.player_contribution(), ctx.turn_number()))
             .await;
         observation.finish(&prepared);
 
@@ -159,7 +106,6 @@ async fn prepare_baseline(
     snapshot: &StoryReadSnapshot,
     player_contribution: &str,
     turn_number: crate::domain::ids::TurnNumber,
-    capture: &ObservationCaptureConfig,
 ) -> Result<(BaselineContext, NarrativeProjection, PreparedActivation), ContextError> {
     let player_role_view = snapshot
         .role(snapshot.player_role_id())
@@ -169,51 +115,17 @@ async fn prepare_baseline(
     let player_role = project_role_context(player_role_view);
     let committed_view = CommittedNarrativeStateView::new(snapshot);
     let current_turn = snapshot.base_revision().get().saturating_add(1);
-    let projection_input = NarrativeProjectionInput {
-        definition: snapshot.narrative_definition(),
-        state: snapshot.narrative_state(),
-        committed_view: &committed_view,
-        current_turn,
-    };
-    let projection_observation = ObservationSpan::begin_captured(
-        ObservationStep::ProjectNarrative,
-        Vec::new(),
-        capture.clone(),
-        &serde_json::json!({
-            "graph_revision": snapshot.graph_revision(),
-            "current_turn": current_turn
-        }),
-    );
-    let narrative_projection =
-        builder
-            .narrative_projector
-            .project(projection_input)
-            .map_err(|_| ContextError::SnapshotInconsistent {
-                code: "narrative_projection_failed",
-            });
-    match &narrative_projection {
-        Ok(projection) => projection_observation.finish_captured(
-            ObservationFinish {
-                status: ObservationStatus::Ok,
-                ..ObservationFinish::default()
-            },
-            &serde_json::json!({
-                "active_node_ids": projection.plan.active_nodes.iter().map(|node| node.to_string()).collect::<Vec<_>>(),
-                "active_node_count": projection.plan.active_nodes.len(),
-                "world_event_intent_count": projection.plan.world_event_intents.len(),
-                "character_impulse_count": projection.plan.character_impulses.len(),
-                "effect_disposition_count": projection.plan.effect_dispositions.len()
-            }),
-        ),
-        Err(_) => projection_observation.finish_captured(
-            ObservationFinish {
-                status: ObservationStatus::Error,
-                ..ObservationFinish::default()
-            },
-            &serde_json::json!({"completed": false}),
-        ),
-    }
-    let narrative_projection = narrative_projection?;
+    let narrative_projection = builder
+        .narrative_projector
+        .project(NarrativeProjectionInput {
+            definition: snapshot.narrative_definition(),
+            state: snapshot.narrative_state(),
+            committed_view: &committed_view,
+            current_turn,
+        })
+        .map_err(|_| ContextError::SnapshotInconsistent {
+            code: "narrative_projection_failed",
+        })?;
     let scan_buffer = build_activation_scan_buffer(
         snapshot,
         &player_role,

@@ -40,17 +40,15 @@ pub async fn build_services(config: &ServerConfig) -> Result<EngineServices, any
             .map_err(|error| anyhow::anyhow!("trusted prompt source failed: {error}"))?,
     );
     let observation_config = ObservabilityConfig::load_from_env().config;
-    let observation_capture = aise::turn::observability::ObservationCaptureConfig::new(
-        observation_config.content_policy,
-        aise::turn::observability::ContentCaptureLimits {
-            max_field_bytes: observation_config.max_field_bytes,
-            max_observation_bytes: observation_config.max_observation_bytes,
-            detector_overlap_bytes: 512,
-        },
-    );
     let gateway = Arc::new(
-        LlmGateway::new(provider, prompt_source, config.aise.llm.clone())?
-            .with_observation_capture(observation_capture.policy, observation_capture.limits.clone()),
+        LlmGateway::new(provider, prompt_source, config.aise.llm.clone())?.with_observation_capture(
+            observation_config.content_policy,
+            aise::turn::observability::ContentCaptureLimits {
+                max_field_bytes: observation_config.max_field_bytes,
+                max_observation_bytes: observation_config.max_observation_bytes,
+                detector_overlap_bytes: 512,
+            },
+        ),
     );
 
     let sqlite = SqliteStore::connect(&config.aise.storage.database_url).await?;
@@ -135,14 +133,7 @@ pub async fn build_services(config: &ServerConfig) -> Result<EngineServices, any
         .build()?;
     let runtime = TurnRuntime::new(pipeline_set);
 
-    let engine = AiseEngine::new(
-        runtime,
-        store.clone(),
-        coordinator,
-        config.aise.clone(),
-        Arc::new(SystemClock),
-        observation_capture,
-    );
+    let engine = AiseEngine::new(runtime, store.clone(), coordinator, config.aise.clone(), Arc::new(SystemClock));
 
     let asset_store: Arc<dyn AssetStore> = SqliteAssetStore::connect(&config.aise.storage.database_url)
         .await

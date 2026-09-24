@@ -9,7 +9,7 @@ use crate::domain::turn::{
     ValidatedNarrativeResolution, WriterPlan,
 };
 use crate::domain::turn::{StoryGeneratorOutput, StoryStateExtractionDto, StoryStateExtractionEnvelope};
-use crate::turn::observability::{ObservationCaptureConfig, ObservationStep};
+use crate::turn::observability::ObservationStep;
 use crate::turn::turn_budget::{CorrectionKind, TurnBudget};
 use crate::turn::turn_contract::{
     CommittedTurnResult, LlmBudgetReservation, LlmCallUsage, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
@@ -113,7 +113,6 @@ pub struct TurnExecutionContext {
     llm_calls: Vec<LlmCallUsage>,
     retrieval_skipped: bool,
     character_thinking_skipped: bool,
-    observation_capture: ObservationCaptureConfig,
 }
 
 impl TurnExecutionContext {
@@ -155,13 +154,7 @@ impl TurnExecutionContext {
             llm_calls: Vec::new(),
             retrieval_skipped: false,
             character_thinking_skipped: false,
-            observation_capture: ObservationCaptureConfig::metadata_only(),
         })
-    }
-
-    pub fn with_observation_capture(mut self, observation_capture: ObservationCaptureConfig) -> Self {
-        self.observation_capture = observation_capture;
-        self
     }
 
     pub fn set_pahse(&mut self, phase: TurnPhase) {
@@ -226,10 +219,6 @@ impl TurnExecutionContext {
 
     pub fn budget_mut(&mut self) -> &mut TurnBudget {
         &mut self.budget
-    }
-
-    pub fn observation_capture(&self) -> &ObservationCaptureConfig {
-        &self.observation_capture
     }
 
     pub fn story_id(&self) -> &StoryId {

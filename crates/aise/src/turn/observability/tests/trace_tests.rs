@@ -1,5 +1,4 @@
 use super::*;
-use crate::turn::observability::{ContentCaptureLimits, ContentCapturePolicy};
 use opentelemetry::baggage::BaggageExt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -52,32 +51,6 @@ fn repeated_binding_replaces_the_previous_baggage_value() {
             .map(ToString::to_string)
             .as_deref(),
         Some("digest-2")
-    );
-}
-
-#[test]
-fn configured_trace_encodes_root_output_with_remaining_budget() {
-    let subscriber = TestSubscriber::default();
-    let _guard = tracing::subscriber::set_default(subscriber);
-    let limits = ContentCaptureLimits {
-        max_field_bytes: 256,
-        max_observation_bytes: 256,
-        detector_overlap_bytes: 0,
-    };
-    let trace = ObservationTrace::begin_captured(
-        Vec::new(),
-        ObservationCaptureConfig::new(ContentCapturePolicy::RedactedContent, limits),
-        &serde_json::json!({"player_contribution": "player input"}),
-    );
-    trace.finish_captured(
-        ObservationFinish {
-            status: ObservationStatus::Ok,
-            ..ObservationFinish::default()
-        },
-        &serde_json::json!({
-            "status": "committed",
-            "story_text": "story output"
-        }),
     );
 }
 

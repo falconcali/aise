@@ -2,7 +2,7 @@ use crate::domain::narrative::StoryTurn;
 use crate::persistence::store::{OutboxRecord, Store, TurnCommitSpec};
 use crate::turn::observability::{
     METADATA_COMMIT_STATUS, METADATA_GRAPH_REVISION, METADATA_STORY_ID, METADATA_TURN_NUMBER, ObservationAttribute,
-    ObservationError, ObservationFinish, ObservationSpan, ObservationStatus, ObservationStep,
+    ObservationError, ObservationFields, ObservationFinish, ObservationSpan, ObservationStatus, ObservationStep,
 };
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::TurnPhase;
@@ -26,30 +26,6 @@ impl TurnCommitter {
 impl TurnExecutionPipeline for TurnCommitter {
     fn stage(&self) -> TurnStage {
         TurnStage::TurnCommitter
-    }
-
-    fn observation_input(&self, ctx: &TurnExecutionContext) -> serde_json::Value {
-        let change_set = ctx.change_set();
-        let story_text = change_set.map(|value| value.story_text());
-        serde_json::json!({
-            "phase": format!("{:?}", ctx.phase()).to_lowercase(),
-            "story_text_bytes": story_text.map_or(0, str::len),
-            "story_text_sha256": story_text.map(|value| crate::turn::observability::sha256_hex(value.as_bytes())),
-            "new_role_count": change_set.map_or(0, |value| value.new_roles().len()),
-            "role_change_count": change_set.map_or(0, |value| value.role_changes().len()),
-            "knowledge_mutation_count": change_set.map_or(0, |value| value.knowledge_mutations().len()),
-            "narrative_event_count": change_set.map_or(0, |value| value.narrative_events().len())
-        })
-    }
-
-    fn observation_output(&self, ctx: &TurnExecutionContext, succeeded: bool) -> serde_json::Value {
-        let result = ctx.committed_result();
-        serde_json::json!({
-            "committed": succeeded,
-            "turn_number": result.map(|value| value.turn_number.get()),
-            "story_revision": result.map(|value| value.story_revision.get()),
-            "llm_call_count": result.map_or(0, |value| value.llm_calls.len())
-        })
     }
 
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
@@ -152,19 +128,8 @@ impl TurnExecutionPipeline for TurnCommitter {
             llm_calls,
             activation_state_delta,
         };
-        let persistence_observation = ObservationSpan::begin_captured(
-            ObservationStep::PersistTurn,
-            Vec::new(),
-            ctx.observation_capture().clone(),
-            &serde_json::json!({
-                "operation": "commit_turn",
-                "base_revision": snapshot.base_revision().get(),
-                "expected_graph_revision": snapshot.graph_revision(),
-                "outbox_event_count": commit.outbox.len(),
-                "timed_upserts": timed_upserts,
-                "timed_deletes": timed_deletes
-            }),
-        );
+        let persistence_observation =
+            ObservationSpan::begin(ObservationStep::PersistTurn, ObservationFields::default());
         let activation_span = info_span!(
             "knowledge.activation.commit",
             story_id = %story_id,
@@ -177,7 +142,7 @@ impl TurnExecutionPipeline for TurnCommitter {
             error_code = tracing::field::Empty,
         );
         let outcome = self.store.commit_turn(&commit).instrument(activation_span.clone()).await;
-        let persistence_finish = match &outcome {
+        persistence_observation.finish(match &outcome {
             Ok(result) => ObservationFinish {
                 status: ObservationStatus::Ok,
                 metadata: vec![
@@ -211,14 +176,7 @@ impl TurnExecutionPipeline for TurnCommitter {
                 }),
                 ..ObservationFinish::default()
             },
-        };
-        persistence_observation.finish_captured(
-            persistence_finish,
-            &serde_json::json!({
-                "commit_status": if outcome.is_ok() { "committed" } else { "failed" },
-                "story_revision": outcome.as_ref().ok().map(|result| result.story_revision.get())
-            }),
-        );
+        });
         match &outcome {
             Ok(_) => {
                 activation_span.record("status", "ok");

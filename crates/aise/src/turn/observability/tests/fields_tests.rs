@@ -76,24 +76,6 @@ fn encoder_enforces_the_observation_limit() {
 }
 
 #[test]
-fn observation_capture_shares_one_budget_between_input_and_output() {
-    let mut capture = ObservationContentCapture::new(ObservationCaptureConfig::new(
-        ContentCapturePolicy::FullContent,
-        ContentCaptureLimits {
-            max_field_bytes: 100,
-            max_observation_bytes: 12,
-            detector_overlap_bytes: 0,
-        },
-    ));
-
-    let input = capture.capture(&"123456").0.unwrap();
-    let output = capture.capture(&"abcdef").0.unwrap();
-
-    assert!(input.captured_bytes + output.captured_bytes <= 12);
-    assert_eq!(capture.remaining_bytes(), 0);
-}
-
-#[test]
 fn generation_usage_requires_mutually_exclusive_total() {
     let valid = GenerationUsage {
         input: 3,

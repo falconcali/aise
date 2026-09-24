@@ -40,33 +40,6 @@ impl TurnExecutionPipeline for StoryGenerator {
         TurnStage::StoryGenerator
     }
 
-    fn observation_input(&self, ctx: &TurnExecutionContext) -> serde_json::Value {
-        let writer_plan_digest = ctx
-            .plan()
-            .and_then(|plan| serde_json::to_vec(plan).ok())
-            .map(|value| crate::turn::observability::sha256_hex(&value));
-        serde_json::json!({
-            "writer_plan_sha256": writer_plan_digest,
-            "character_role_ids": ctx.character_decisions().iter()
-                .map(|decision| decision.role_id.as_str())
-                .collect::<Vec<_>>(),
-            "context_item_counts": {
-                "world_facts": ctx.retrieved().world().facts.len(),
-                "world_rumors": ctx.retrieved().world().rumors.len(),
-                "character_partitions": ctx.retrieved().characters().len()
-            }
-        })
-    }
-
-    fn observation_output(&self, ctx: &TurnExecutionContext, succeeded: bool) -> serde_json::Value {
-        let story = ctx.story().map(|story| story.story_text.as_str());
-        serde_json::json!({
-            "completed": succeeded,
-            "story_candidate_bytes": story.map_or(0, str::len),
-            "story_candidate_sha256": story.map(|value| crate::turn::observability::sha256_hex(value.as_bytes()))
-        })
-    }
-
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let projection_started = Instant::now();
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;

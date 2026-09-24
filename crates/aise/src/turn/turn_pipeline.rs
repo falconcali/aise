@@ -46,9 +46,5 @@ impl fmt::Display for TurnStage {
 pub trait TurnExecutionPipeline: Send + Sync {
     fn stage(&self) -> TurnStage;
 
-    fn observation_input(&self, ctx: &TurnExecutionContext) -> serde_json::Value;
-
-    fn observation_output(&self, ctx: &TurnExecutionContext, succeeded: bool) -> serde_json::Value;
-
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError>;
 }

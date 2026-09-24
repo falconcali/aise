@@ -82,31 +82,6 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
         TurnStage::CharacterThink
     }
 
-    fn observation_input(&self, ctx: &TurnExecutionContext) -> serde_json::Value {
-        let requested_role_ids = ctx
-            .plan()
-            .into_iter()
-            .flat_map(|plan| plan.character_think_requests.iter())
-            .map(|request| request.role_id.as_str())
-            .collect::<Vec<_>>();
-        serde_json::json!({
-            "requested_role_ids": requested_role_ids
-        })
-    }
-
-    fn observation_output(&self, ctx: &TurnExecutionContext, succeeded: bool) -> serde_json::Value {
-        let decisions = ctx.character_decisions();
-        serde_json::json!({
-            "completed": succeeded,
-            "decision_count": decisions.len(),
-            "completed_role_ids": decisions.iter().map(|decision| decision.role_id.as_str()).collect::<Vec<_>>(),
-            "total_decision_bytes": decisions.iter().map(|decision| {
-                decision.decision.as_str().len()
-                    + decision.suggested_utterance.as_ref().map_or(0, |value| value.as_str().len())
-            }).sum::<usize>()
-        })
-    }
-
     async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let plan = ctx
             .plan()

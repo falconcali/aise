@@ -82,7 +82,7 @@ impl ObservationStep {
         Self::CommitTurn,
         Self::PersistTurn,
     ];
-    pub const SCHEMA_VERSION: &'static str = "2";
+    pub const SCHEMA_VERSION: &'static str = "1";
 
     pub const fn name(self) -> &'static str {
         match self {

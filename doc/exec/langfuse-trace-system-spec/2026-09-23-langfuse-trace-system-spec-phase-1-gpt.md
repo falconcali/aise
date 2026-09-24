@@ -135,7 +135,7 @@ The root MUST emit this logical payload:
     "turn_number": "bound after story load",
     "idempotency_key_digest": "sha256 hex; raw key forbidden",
     "replayed": false,
-    "schema_version": "2"
+    "schema_version": "1"
   }
 }
 ```
@@ -216,9 +216,9 @@ The following nested operations MUST create child Observations:
 
 | Parent | Child | Required metadata |
 |---|---|---|
-| `PrepareContext` | `LoadStorySnapshot` | `story_id`, snapshot revision, role, relationship, constraint, and graph counts |
+| `PrepareContext` | `LoadStorySnapshot` | `story_id`, snapshot revision, returned item counts |
 | `PrepareContext` | `ActivateWorldInfo` | request count, candidate count, activated count, skipped reason |
-| `ActivateWorldInfo` | `ProjectNarrative` | graph revision, active node IDs and counts, intent, impulse, and effect counts |
+| `PlanTurn` | `ProjectNarrative` | graph revision, projected node count, projected edge count |
 | `PlanTurn` | `GenerateWriterPlan` | Generation fields from §3.7 |
 | `ThinkCharacters` | one `ThinkCharacter` per actual completion | `character_id`, `attempt` |
 | `GenerateStory` | `DraftStoryText` | Generation fields from §3.7 |
@@ -227,15 +227,6 @@ The following nested operations MUST create child Observations:
 | `CommitTurn` | `PersistTurn` | `story_id`, `turn_number`, commit status |
 
 If an operation is not present as a distinct function boundary, instrumentation MUST be placed at the narrowest existing boundary that owns its result. Instrumentation MUST NOT duplicate the business operation.
-
-Every currently executed non-Generation Observation MUST emit policy-controlled bounded input and output:
-
-- Submission and engine nodes emit request validation, admission, coordination, story lookup, and idempotency outcomes.
-- Pipeline Chain nodes emit only phase transitions and bounded domain summaries.
-- Retriever nodes emit query keys and result IDs/counts without private content.
-- `CommitTurn` and `PersistTurn` emit changeset and storage summaries without story text.
-- Generation nodes exclusively own prompts and raw provider outputs.
-- Character memories, private rumors, and character thoughts MUST NOT appear in non-Generation input or output.
 
 ### 3.7 LLM Generation Protocol
 
@@ -350,8 +341,8 @@ execute-story-turn
     ├── prepare-context
     │   ├── load-story-snapshot
     │   └── activate-world-info
-    │       └── project-narrative
     ├── plan-turn
+    │   ├── project-narrative
     │   └── generate-writer-plan
     ├── retrieve-context
     ├── think-characters

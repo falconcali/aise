@@ -144,19 +144,7 @@ fn map_key(key: &str) -> Option<String> {
     if let Some(suffix) = key.strip_prefix("aise.trace.metadata.") {
         return (!suffix.is_empty()).then(|| format!("langfuse.trace.metadata.{suffix}"));
     }
-    if key.starts_with("aise.")
-        || matches!(
-            key,
-            "target"
-                | "thread.name"
-                | "thread.id"
-                | "code.line.number"
-                | "code.module.name"
-                | "code.file.path"
-                | "busy_ns"
-                | "idle_ns"
-        )
-    {
+    if key.starts_with("aise.") {
         None
     } else {
         Some(key.into())

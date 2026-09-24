@@ -136,7 +136,7 @@ fn registry_contains_each_step_once() {
     let unique = ObservationStep::ALL.iter().copied().collect::<HashSet<_>>();
 
     assert_eq!(unique.len(), ObservationStep::ALL.len());
-    assert_eq!(ObservationStep::SCHEMA_VERSION, "2");
+    assert_eq!(ObservationStep::SCHEMA_VERSION, "1");
 }
 
 #[test]
