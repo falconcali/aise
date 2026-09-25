@@ -9,7 +9,6 @@ use crate::domain::turn::{
     ValidatedNarrativeResolution, WriterPlan,
 };
 use crate::domain::turn::{StoryGeneratorOutput, StoryStateExtractionDto, StoryStateExtractionEnvelope};
-use crate::turn::observability::{BoundedContentEncoder, ObservationStep};
 use crate::turn::turn_budget::{CorrectionKind, TurnBudget};
 use crate::turn::turn_contract::{
     CommittedTurnResult, LlmBudgetReservation, LlmCallUsage, TurnControl, TurnIdentity, TurnPhase, TurnRequest,
@@ -113,7 +112,6 @@ pub struct TurnExecutionContext {
     llm_calls: Vec<LlmCallUsage>,
     retrieval_skipped: bool,
     character_thinking_skipped: bool,
-    observation_encoder: Option<BoundedContentEncoder>,
 }
 
 impl TurnExecutionContext {
@@ -155,7 +153,6 @@ impl TurnExecutionContext {
             llm_calls: Vec::new(),
             retrieval_skipped: false,
             character_thinking_skipped: false,
-            observation_encoder: None,
         })
     }
 
@@ -221,14 +218,6 @@ impl TurnExecutionContext {
 
     pub fn budget_mut(&mut self) -> &mut TurnBudget {
         &mut self.budget
-    }
-
-    pub(crate) fn set_observation_encoder(&mut self, encoder: BoundedContentEncoder) {
-        self.observation_encoder = Some(encoder);
-    }
-
-    pub(crate) fn observation_encoder(&self) -> Option<&BoundedContentEncoder> {
-        self.observation_encoder.as_ref()
     }
 
     pub fn story_id(&self) -> &StoryId {
@@ -901,7 +890,6 @@ impl TurnExecutionContext {
             budget: &mut self.budget,
             llm_calls: &mut self.llm_calls,
             stage,
-            observation_step: observation_step_for_stage(stage),
             attempt: 1,
             correction_round: None,
             character_id: None,
@@ -915,7 +903,6 @@ pub struct TurnLlmCallScope<'a> {
     budget: &'a mut TurnBudget,
     llm_calls: &'a mut Vec<LlmCallUsage>,
     stage: TurnStage,
-    observation_step: ObservationStep,
     attempt: u32,
     correction_round: Option<u32>,
     character_id: Option<String>,
@@ -946,10 +933,6 @@ impl TurnLlmCallScope<'_> {
     pub fn with_correction_round(mut self, correction_round: u32) -> Self {
         self.correction_round = Some(correction_round);
         self
-    }
-
-    pub fn observation_step(&self) -> ObservationStep {
-        self.observation_step
     }
 
     pub fn attempt(&self) -> u32 {
@@ -992,22 +975,6 @@ impl TurnLlmCallScope<'_> {
         self.budget.settle_llm(reservation, usage.clone())?;
         self.llm_calls.push(usage);
         Ok(())
-    }
-}
-
-fn observation_step_for_stage(stage: TurnStage) -> ObservationStep {
-    match stage {
-        TurnStage::WriterPlanner => ObservationStep::GenerateWriterPlan,
-        TurnStage::ContextRetrieval => ObservationStep::RetrieveContext,
-        TurnStage::CharacterThink => ObservationStep::ThinkCharacter,
-        TurnStage::StoryGenerator => ObservationStep::DraftStoryText,
-        TurnStage::StoryStateExtractor => ObservationStep::InferStoryState,
-        TurnStage::StoryRepairer => ObservationStep::ReviseStoryText,
-        TurnStage::TurnInitializer => ObservationStep::InitializeTurn,
-        TurnStage::BaselineBuilder => ObservationStep::PrepareContext,
-        TurnStage::Context => ObservationStep::PrepareContext,
-        TurnStage::Validation => ObservationStep::ValidateStory,
-        TurnStage::TurnCommitter => ObservationStep::CommitTurn,
     }
 }
 

@@ -24,6 +24,11 @@ self-contained: it MUST NOT depend on `turn`, `config`, or any outer layer.
 Turn data objects (`domain::turn`) live inside `domain`; the `turn` module only
 defines Turn execution contracts.
 
+`observability` is a cross-cutting leaf foundation: it MAY depend only on std
+and external telemetry libraries. `turn` and upper execution layers MAY depend
+on it to pass explicit `Observation` parents, but `domain` and `config` MUST
+remain independent of it.
+
 ## R-LAYER-01 - turn does not depend on the entry layer
 
 **Level: MUST**
@@ -58,8 +63,9 @@ defines Turn execution contracts.
 
 **Level: MUST**
 
-- `domain` MUST NOT import `turn`, `config`, `runtime`, `llm`, `persistence`,
-  `engine`, or any pipeline module; it MAY depend only on its own submodules.
+- `domain` MUST NOT import `turn`, `config`, `observability`, `runtime`, `llm`,
+  `persistence`, `engine`, or any pipeline module; it MAY depend only on its
+  own submodules.
 - `domain` MUST NOT reference Turn-stage concepts (`TurnStage`, `TurnBudget`,
   `TurnExecutionContext`, `LlmGateway`, `Store`, ...).
 - Cross-submodule reads inside `domain` (e.g. `narrative_graph::director` reading
@@ -71,7 +77,7 @@ defines Turn execution contracts.
 **Level: MUST**
 
 - `turn` MAY depend on `domain` (including `domain::turn` data objects),
-  `config`, and turn-internal modules.
+  `config`, top-level `observability`, and turn-internal modules.
 - `turn` MUST NOT depend on `runtime`, any specific pipeline, `llm`,
   `persistence`, or `engine`.
 - `turn` is the single definition layer for Turn execution contracts; Turn data
@@ -81,34 +87,36 @@ defines Turn execution contracts.
 
 **Level: MUST**
 
-- Pipelines MAY depend on `turn`, `domain`, `config`, `llm::gateway` (the only
-  cross-cutting dependency), persistence ports (`store`, `asset_store`,
+- Pipelines MAY depend on `turn`, `domain`, `config`, top-level
+  `observability`, `llm::gateway`, persistence ports (`store`, `asset_store`,
   `knowledge_read_port`) including their error types, and `prompt`.
 - Pipelines MUST NOT import persistence adapters (`sqlite_*`) or other pipeline
   modules.
 - `llm` MAY depend only on the restricted Turn LLM scope (`TurnLlmCallScope`,
-  `turn_contract`, `turn_error`, `turn_trace`), `config`, and `prompt`; it MUST
-  NOT import the full `TurnExecutionContext` or any concrete pipeline.
+  `turn_contract`, `turn_error`), `config`, top-level `observability`, and
+  `prompt`; it MUST NOT import the full `TurnExecutionContext` or any concrete
+  pipeline.
 
 ## Dependency matrix
 
 | module | may depend on | must not depend on |
 | --- | --- | --- |
-| `domain` | its own submodules (incl. `turn` DTOs) | `turn`, `config`, `runtime`, pipelines, `llm`, `persistence`, `engine` |
+| `domain` | its own submodules (incl. `turn` DTOs) | `turn`, `config`, `observability`, `runtime`, pipelines, `llm`, `persistence`, `engine` |
 | `config` | external crates / std | any internal module |
-| `turn` | `domain`, `config`, turn-internal | `runtime`, pipelines, `llm`, `persistence`, `engine` |
-| `runtime` | `turn`, `domain`, `config`, injected traits | concrete pipeline types, persistence adapters, `llm` providers |
-| `llm` | restricted `turn` contracts, `config`, `prompt` | `runtime`, concrete pipelines, full `TurnExecutionContext`, `persistence` |
-| pipelines | `turn`, `domain`, `config`, `llm::gateway`, persistence ports, `prompt` | other pipelines, persistence adapters, `runtime`, `engine`, `llm` internals |
+| `observability` | external crates / std | every internal business module |
+| `turn` | `domain`, `config`, `observability`, turn-internal | `runtime`, pipelines, `llm`, `persistence`, `engine` |
+| `runtime` | `turn`, `domain`, `config`, `observability`, injected traits | concrete pipeline types, persistence adapters, `llm` providers |
+| `llm` | restricted `turn` contracts, `config`, `observability`, `prompt` | `runtime`, concrete pipelines, full `TurnExecutionContext`, `persistence` |
+| pipelines | `turn`, `domain`, `config`, `observability`, `llm::gateway`, persistence ports, `prompt` | other pipelines, persistence adapters, `runtime`, `engine`, `llm` internals |
 | `prompt` | `turn`, `domain`, `config` | `runtime`, concrete pipelines, `persistence`, `llm` internals |
 | persistence ports | `turn`, `domain`, `config`, persistence-internal | adapters, `runtime`, concrete pipelines |
 | persistence adapters | persistence ports, `domain`, `turn`, `config` | reverse dependency from `turn`/`domain` |
-| `engine` | `config`, `turn`, `runtime`, persistence ports | concrete pipelines, persistence adapters |
+| `engine` | `config`, `turn`, `runtime`, `observability`, persistence ports | concrete pipelines, persistence adapters |
 | aise-server (composition root) | everything | nothing (wires `TurnPipelineSetBuilder` once) |
 
 Forbidden reverse dependencies: `turn -> runtime`,
 `turn -> planning/story/validation/character/context`, `llm -> runtime`,
-`pipeline A -> pipeline B`, `domain -> turn/config/runtime/adapter`.
+`pipeline A -> pipeline B`, `domain -> turn/config/observability/runtime/adapter`.
 
 `TurnCommitter` lives in `persistence/` but is a commit coordinator; database
 connections, SQL, and transaction implementations belong to the Store adapter.

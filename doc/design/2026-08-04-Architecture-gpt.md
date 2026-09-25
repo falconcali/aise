@@ -7,6 +7,9 @@
 > 本文中的本地 Trace、TurnTrace、TraceCompleted 和相关配置均已被
 > [Langfuse Trace Phase 2](../exec/langfuse-trace-system-spec/2026-09-23-langfuse-trace-system-spec-phase-2-gpt.md)
 > superseded；现行运行时仅使用 OpenTelemetry spans 和 Langfuse OTLP protobuf exporter。
+> Pipeline 的现行 observability 参数契约由
+> [Langfuse Observability 数据模型对齐](../refactor/2026-09-25-langfuse-observability-model-refactor-gpt.md)
+> 修订。
 
 ## 1. 文档定位
 
@@ -33,7 +36,7 @@
 1. Story 串行化由 `AiseEngine` 内部的 `StoryTurnCoordinator` 强制，不再依赖 `Session::lock_turn`。
 2. Session 是临时连接资源，Story 是持久化领域对象，两者不构成一对一架构不变量。
 3. 新增 `turn` Turn Contracts 层，Runtime、Engine、LLM Gateway 和所有 Pipeline 单向依赖它；Turn 数据对象（`StoryProposal`、`BaselineContext`、检索/规划 DTO 等）下沉到 `domain::turn`。
-4. `TurnExecutionContext` 创建时必须已有有效的 Identity、Request、Budget、Deadline、Cancellation 和 Trace；不得存在空 ID 或半初始化对象。
+4. `TurnExecutionContext` 创建时必须已有有效的 Identity、Request、Budget、Deadline 和 Cancellation；不得存在空 ID 或半初始化对象。Trace 父节点通过独立的 `&Observation` 参数显式传递，不存入 Context。
 5. `TurnInitializer` 只负责 Turn 内部对象准备和状态初始化，不加载 Story、World、Character、Memory 或历史；请求规范化由 `TurnRequest::try_new` 在 Context 构造前完成。
 6. `StoryDraft` 改为不可信的 `StoryProposal`；只有 `ValidatedChangeSet` 可以进入 Commit。
 7. 状态表是当前权威状态，Canonical Events 是不可变审计记录；本阶段不实现完整 Event Sourcing。
@@ -49,6 +52,13 @@
 4. 明确 Pipeline 只能依赖 persistence port（trait 及其错误类型），不得导入 `sqlite_*` adapter。
 5. 明确 `llm` 只依赖受限 Turn LLM Scope 与 `prompt`，不得导入全量 `TurnExecutionContext`。
 
+## 1.3 Observability 契约修订
+
+1. `TurnExecutionPipeline::execute` 增加独立的 `&Observation` 参数。
+2. Pipeline 只通过 `TurnExecutionContext` 交换 Turn 业务状态；`Observation` 只表示显式观测父节点。
+3. Pipeline 不得通过 `Observation` 读写业务状态，也不得把它存入 `TurnExecutionContext`。
+4. 子任务需要创建嵌套观测节点时，必须继续显式传递 `&Observation`，不得依赖隐式当前 Span。
+
 ---
 
 ## 2. 核心架构决策
@@ -61,7 +71,7 @@ AISE 是一个基于 Turn 的互动叙事生成系统。
 
 1. 同一个 Story 的 Turn 严格串行执行，不同 Story 可以并行执行。
 2. 一个 Turn 只能由一个 `TurnRuntime` 拥有，从创建到结束不得转移或跨 Turn 共享。
-3. 所有 Pipeline 只通过当前 Turn 的 `TurnExecutionContext` 交换数据。
+3. 所有 Pipeline 只通过当前 Turn 的 `TurnExecutionContext` 交换业务数据，并通过独立的 `&Observation` 参数接收显式观测父节点。
 4. Pipeline 失败后立即把可诊断错误返回给 `TurnRuntime`，不得静默失败。
 5. Validation / Repair 循环必须受预算限制，预算耗尽时 Turn 失败。
 6. LLM 只能提出故事和状态变更建议，不能直接修改权威状态。
@@ -242,11 +252,14 @@ pub trait TurnExecutionPipeline: Send + Sync {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
+        observation: &Observation,
     ) -> Result<(), AiseError>;
 }
 ```
 
 `TurnStage` 是有穷枚举，`stage()` 返回稳定、低基数的阶段标识，用于事件、日志、指标和 Trace；禁止 Pipeline 自定义动态 Stage 名称。
+
+`ctx` 是 Pipeline 之间唯一的 Turn 业务状态交换通道。`observation` 只用于创建当前 Pipeline 的子 Observation 和传播显式父子关系；不得从中读取业务状态，不得向其中写入供后续 Pipeline 消费的数据，也不得把它存入 `TurnExecutionContext`。
 
 `execute()` 的语义：
 
@@ -389,7 +402,6 @@ struct TurnExecutionContext {
     request: TurnRequest,
     control: TurnControl,
     budget: TurnBudget,
-    trace: TurnTraceRecorder,
     snapshot: Option<StoryReadSnapshot>,
     baseline: Option<BaselineContext>,
     plan: Option<WriterPlan>,
@@ -405,7 +417,7 @@ struct TurnExecutionContext {
 
 字段全部私有。`Option` 只表示阶段产物尚未产生；阶段正确性由私有字段、Phase 状态机和有语义的方法共同保证，不依赖 `Option::unwrap`。
 
-Context 创建时即持有有效的 Identity、Request、Budget、Control（deadline + cancellation）和 Trace，满足 `TurnPhase::Created` 的全部不变量。`StoryReadSnapshot` 包含 `base_revision`，表示本 Turn 从 Store 原子读取的权威状态版本。
+Context 创建时即持有有效的 Identity、Request、Budget 和 Control（deadline + cancellation），满足 `TurnPhase::Created` 的全部不变量。Trace 和 Observation 由执行调用栈显式传递，不属于 Context。`StoryReadSnapshot` 包含 `base_revision`，表示本 Turn 从 Store 原子读取的权威状态版本。
 
 Engine 必须先创建以下有效对象，再构造 Context：
 
@@ -443,7 +455,6 @@ pub fn new(
     request: TurnRequest,
     budget: TurnBudget,
     control: TurnControl,
-    trace: TurnTraceRecorder,
 ) -> Result<Self, AiseError>;
 ```
 
@@ -486,7 +497,7 @@ llm_call_scope
 | Story Repairer | Generator Context、Proposal、Validation Issues | 新版本 `StoryProposal` |
 | Turn Committer | Identity、Snapshot、`ValidatedChangeSet` | `CommittedTurnResult`（含 `StorySequence`） |
 
-`TurnInitializer` 的输入是已经有效的 Context，只负责初始化本 Turn 的临时槽位和执行状态，并将 Phase 从 `Created` 推进为 `Initialized`。它不得生成 `turn_id`、不得创建或覆盖 Budget/Deadline/Cancellation/Trace、不得调用 Store/LLM/Retriever/其他 Pipeline、不得加载 World/Character/Memory/History/Summary 或 Narrative Graph。请求规范化由 `TurnRequest::try_new` 在 Context 构造前完成。
+`TurnInitializer` 的输入是已经有效的 Context，只负责初始化本 Turn 的临时槽位和执行状态，并将 Phase 从 `Created` 推进为 `Initialized`。它不得生成 `turn_id`、不得创建或覆盖 Budget/Deadline/Cancellation、不得调用 Store/LLM/Retriever/其他 Pipeline、不得加载 World/Character/Memory/History/Summary 或 Narrative Graph。请求规范化由 `TurnRequest::try_new` 在 Context 构造前完成。
 
 `TurnPhase` 最低包含：`Created`、`Initialized`、`Prepared`、`Planned`、`ContextReady`、`ProposalReady`、`RepairRequired`、`ReadyToCommit`、`Committed`、`Failed`、`Cancelled`、`Conflict`。允许转换固定为：`Created -> Initialized -> Prepared -> Planned -> ContextReady -> ProposalReady`；Validation Pass 时 `ProposalReady -> ReadyToCommit -> Committed`；Validation Repair 时 `ProposalReady -> RepairRequired -> ProposalReady`；Reject 不得进入 `ReadyToCommit`；任意非终态可因失败、取消或冲突进入对应终态。
 
@@ -909,12 +920,14 @@ impl LlmGateway {
     pub async fn complete(
         &self,
         scope: TurnLlmCallScope<'_>,
+        observation: &Observation,
         spec: CompletionSpec,
     ) -> Result<LlmCompletion, LlmError>;
 
     pub async fn complete_stream(
         &self,
         scope: TurnLlmCallScope<'_>,
+        observation: &Observation,
         spec: CompletionSpec,
         sink: BoundedDeltaSink,
     ) -> Result<LlmCompletion, LlmError>;
@@ -922,12 +935,13 @@ impl LlmGateway {
     pub async fn embed(
         &self,
         scope: TurnLlmCallScope<'_>,
+        observation: &Observation,
         spec: EmbeddingSpec,
     ) -> Result<EmbeddingOutput, LlmError>;
 }
 ```
 
-Pipeline 通过 `ctx.llm_call_scope(stage)` 获得受限 Scope。Scope 只暴露 story_id、turn_id、Stage、trace correlation、Turn absolute deadline、cancellation token、LLM Budget reservation/settlement 能力和 Turn Trace 中的 LLM Call transaction；不暴露 Baseline、Proposal、Validation 或其他 Pipeline 数据。
+Pipeline 通过 `ctx.llm_call_scope(stage)` 获得受限业务 Scope，并把当前 `&Observation` 作为独立参数传给 Gateway。Scope 只暴露 story_id、turn_id、Stage、Turn absolute deadline、cancellation token 和 LLM Budget reservation/settlement 能力；不暴露 Baseline、Proposal、Validation、Trace 或其他 Pipeline 数据。
 
 `OpenAiCompatProvider` 只负责构建供应商 HTTP 请求、认证 Header、解析响应/SSE Delta/finish reason/原始 token usage，并将供应商错误转换为 `LlmProviderError`。Provider 不得持有 Limiter、Turn Budget、Cancellation、Turn Trace 或业务 Context。
 
@@ -936,7 +950,7 @@ Gateway 是每次 LLM 调用的固定事务所有者，按以下顺序执行，�
 1. 检查 Turn cancellation 和 absolute deadline。
 2. 估算输入 token，并预留 Turn 的 LLM call、输入 token 和最大输出 token 预算。
 3. 根据输入和 `max_output_tokens` 预留全局 RPM/TPM 配额。
-4. 创建标准 `tracing` span 和 Turn Trace LLM span。
+4. 以传入的父 Observation 创建 LLM Generation Observation。
 5. 在 cancellation、deadline 和 queue timeout 共同约束下等待并发 permit。
 6. 使用 `min(turn_deadline, now + provider_timeout)` 约束 Provider 请求。
 7. 收集 response、finish reason、provider usage 和 latency。

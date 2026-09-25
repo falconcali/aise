@@ -7,6 +7,7 @@ pub mod domain;
 pub mod engine;
 pub mod error;
 pub mod llm;
+pub mod observability;
 pub mod persistence;
 pub mod planning;
 pub mod prompt;

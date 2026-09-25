@@ -1,22 +1,20 @@
 use crate::config::AiseConfig;
 use crate::domain::ids::{TurnKey, TurnNumber};
+use crate::observability::{
+    Attribute, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus, Trace,
+};
 use crate::persistence::store::{Store, StoredTurnOutcome};
 use crate::runtime::story_turn_coordinator::StoryTurnCoordinator;
 use crate::runtime::turn_runtime::TurnRuntime;
-use crate::turn::observability::{
-    METADATA_CONTENT_ENCODE_FAILED, METADATA_FAILURE_STAGE, METADATA_REPLAYED, METADATA_TERMINAL_STATUS,
-    ObservationAttribute, ObservationError, ObservationFields, ObservationFinish, ObservationSpan, ObservationStatus,
-    ObservationStep, ObservationTrace,
-};
 use crate::turn::turn_budget::TurnBudget;
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::{CommittedTurnResult, ExecuteTurnSpec, TurnControl, TurnIdentity};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind, TurnTerminalKind};
 use crate::turn::turn_event::{TurnEvent, TurnEventSink};
+#[cfg(test)]
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tracing::Instrument;
 
 pub trait Clock: Send + Sync {
     fn now_millis(&self) -> i64;
@@ -82,7 +80,7 @@ impl AiseEngine {
         &self,
         spec: ExecuteTurnSpec,
         sink: &dyn TurnEventSink,
-        trace: ObservationTrace,
+        trace: Trace,
     ) -> Result<CommittedTurnResult, TurnExecutionError> {
         match self.execute_turn(spec, sink, trace).await {
             TurnRunOutcome::Committed { result, .. } => Ok(result),
@@ -94,23 +92,18 @@ impl AiseEngine {
         &self,
         spec: ExecuteTurnSpec,
         sink: &dyn TurnEventSink,
-        mut trace: ObservationTrace,
+        mut trace: Trace,
     ) -> TurnRunOutcome {
-        let root_span = trace.span();
-        async move {
-            let outcome = self.execute_turn_inner(spec, sink, &mut trace).await;
-            finish_trace(trace, &outcome);
-            outcome
-        }
-        .instrument(root_span)
-        .await
+        let outcome = self.execute_turn_inner(spec, sink, &mut trace).await;
+        finish_trace(trace, &outcome);
+        outcome
     }
 
     async fn execute_turn_inner(
         &self,
         spec: ExecuteTurnSpec,
         sink: &dyn TurnEventSink,
-        trace: &mut ObservationTrace,
+        trace: &mut Trace,
     ) -> TurnRunOutcome {
         let validated = match spec.try_into_validated() {
             Ok(validated) => validated,
@@ -130,13 +123,9 @@ impl AiseEngine {
         let cancellation = validated.cancellation().clone();
         let deadline = Instant::now() + Duration::from_millis(self.config.turn.turn_timeout_ms);
 
-        let coordinate_span = ObservationSpan::begin_with_parent(
-            ObservationStep::CoordinateStoryTurn,
-            ObservationFields::default(),
-            trace.context(),
-        );
+        let coordinate_span = engine_observation(trace, "coordinate-story-turn");
         let permit_result = coordinate_span
-            .in_scope(self.coordinator.acquire(&story_id, deadline, &cancellation))
+            .trace(self.coordinator.acquire(&story_id, deadline, &cancellation))
             .await;
         let permit = match permit_result {
             Ok(permit) => Some(permit),
@@ -145,21 +134,17 @@ impl AiseEngine {
                 return self.finalize(None, Err(error), sink, None).await;
             }
         };
-        coordinate_span.finish(ObservationFinish {
+        coordinate_span.finish(ObservationOutcome {
             status: ObservationStatus::Ok,
-            ..ObservationFinish::default()
+            ..ObservationOutcome::default()
         });
 
-        let load_span = ObservationSpan::begin_with_parent(
-            ObservationStep::LoadStory,
-            ObservationFields::default(),
-            trace.context(),
-        );
-        let story_info_result = load_span.in_scope(self.store.get_story(&story_id)).await;
+        let load_span = engine_observation(trace, "load-story");
+        let story_info_result = load_span.trace(self.store.get_story(&story_id)).await;
         let story_info = match story_info_result {
             Ok(Some(info)) => info,
             Ok(None) => {
-                load_span.finish(ObservationFinish {
+                load_span.finish(ObservationOutcome {
                     status: ObservationStatus::Error,
                     error: Some(ObservationError {
                         code: "story_not_found".into(),
@@ -167,7 +152,7 @@ impl AiseEngine {
                         stage: None,
                         message: "story not found".into(),
                     }),
-                    ..ObservationFinish::default()
+                    ..ObservationOutcome::default()
                 });
                 let failure = TurnExecutionError::new(
                     TurnFailureKind::StoryNotFound,
@@ -183,18 +168,14 @@ impl AiseEngine {
                 return self.finalize(None, Err(failure), sink, permit).await;
             }
         };
-        load_span.finish(ObservationFinish {
+        load_span.finish(ObservationOutcome {
             status: ObservationStatus::Ok,
-            ..ObservationFinish::default()
+            ..ObservationOutcome::default()
         });
 
-        let idempotency_span = ObservationSpan::begin_with_parent(
-            ObservationStep::CheckIdempotency,
-            ObservationFields::default(),
-            trace.context(),
-        );
+        let idempotency_span = engine_observation(trace, "check-idempotency");
         let replay_result = idempotency_span
-            .in_scope(self.store.find_committed_turn(&story_id, &idempotency_key))
+            .trace(self.store.find_committed_turn(&story_id, &idempotency_key))
             .await;
         let replay = match replay_result {
             Ok(outcome) => outcome,
@@ -204,9 +185,9 @@ impl AiseEngine {
                 return self.finalize(None, Err(failure), sink, permit).await;
             }
         };
-        idempotency_span.finish(ObservationFinish {
+        idempotency_span.finish(ObservationOutcome {
             status: ObservationStatus::Ok,
-            ..ObservationFinish::default()
+            ..ObservationOutcome::default()
         });
         if let Some(StoredTurnOutcome { request_digest, result }) = replay {
             if request_digest == *request.request_digest() {
@@ -234,7 +215,7 @@ impl AiseEngine {
                 return self.finalize(None, Err(failure), sink, permit).await;
             }
         };
-        trace.bind_turn(candidate_turn_number.get());
+        trace.bind(Attribute::u64("aise.trace.metadata.turn_number", candidate_turn_number.get()));
 
         let budget = match TurnBudget::from_config(
             &self.config.turn,
@@ -258,11 +239,7 @@ impl AiseEngine {
             Ok(ctx) => ctx,
             Err(error) => return self.finalize(None, Err(error), sink, permit).await,
         };
-        if let Some(encoder) = trace.content_encoder() {
-            ctx.set_observation_encoder(encoder);
-        }
-
-        let runtime_outcome = self.runtime.run(&mut ctx, sink, trace.context()).await;
+        let runtime_outcome = self.runtime.run(&mut ctx, sink, trace).await;
 
         let result = match runtime_outcome {
             Ok(()) => match ctx.committed_result().cloned() {
@@ -350,8 +327,8 @@ impl AiseEngine {
     }
 }
 
-fn execution_finish(error: &TurnExecutionError) -> ObservationFinish {
-    ObservationFinish {
+fn execution_finish(error: &TurnExecutionError) -> ObservationOutcome {
+    ObservationOutcome {
         status: execution_status(error),
         error: Some(ObservationError {
             code: error.code().into(),
@@ -359,7 +336,7 @@ fn execution_finish(error: &TurnExecutionError) -> ObservationFinish {
             stage: error.stage().map(|stage| stage.as_str().into()),
             message: error.to_string(),
         }),
-        ..ObservationFinish::default()
+        ..ObservationOutcome::default()
     }
 }
 
@@ -381,6 +358,40 @@ fn terminal_status(error: &TurnExecutionError) -> &'static str {
     }
 }
 
+fn finish_trace(mut trace: Trace, outcome: &TurnRunOutcome) {
+    match outcome {
+        TurnRunOutcome::Committed { result, replayed } => {
+            let metadata = vec![
+                Attribute::bool("aise.observation.metadata.replayed", *replayed),
+                Attribute::string(
+                    "aise.observation.metadata.terminal_status",
+                    if *replayed { "replayed" } else { "committed" },
+                ),
+            ];
+            trace.bind(Attribute::u64("aise.trace.metadata.turn_number", result.turn_number.get()));
+            trace.finish(ObservationOutcome {
+                status: ObservationStatus::Ok,
+                metadata,
+                ..ObservationOutcome::default()
+            });
+        }
+        TurnRunOutcome::Failed(error) => {
+            trace.finish(ObservationOutcome {
+                status: execution_status(error),
+                metadata: failure_metadata(error),
+                error: Some(ObservationError {
+                    code: error.code().into(),
+                    failure_kind: failure_kind(error.kind()).into(),
+                    stage: error.stage().map(|stage| stage.as_str().into()),
+                    message: error.to_string(),
+                }),
+                ..ObservationOutcome::default()
+            });
+        }
+    }
+}
+
+#[cfg(test)]
 #[derive(Serialize)]
 struct RootTraceOutput<'a> {
     status: &'static str,
@@ -394,49 +405,7 @@ struct RootTraceOutput<'a> {
     stage: Option<&'static str>,
 }
 
-fn finish_trace(mut trace: ObservationTrace, outcome: &TurnRunOutcome) {
-    let (output, encoding_failed) = trace.encode_output(&root_trace_output(outcome));
-    match outcome {
-        TurnRunOutcome::Committed { result, replayed } => {
-            trace.bind_turn(result.turn_number.get());
-            let mut metadata = vec![
-                ObservationAttribute::bool(METADATA_REPLAYED, *replayed),
-                ObservationAttribute::string(
-                    METADATA_TERMINAL_STATUS,
-                    if *replayed { "replayed" } else { "committed" },
-                ),
-            ];
-            if encoding_failed {
-                metadata.push(ObservationAttribute::bool(METADATA_CONTENT_ENCODE_FAILED, true));
-            }
-            trace.finish(ObservationFinish {
-                status: ObservationStatus::Ok,
-                metadata,
-                output,
-                ..ObservationFinish::default()
-            });
-        }
-        TurnRunOutcome::Failed(error) => {
-            let mut metadata = failure_metadata(error);
-            if encoding_failed {
-                metadata.push(ObservationAttribute::bool(METADATA_CONTENT_ENCODE_FAILED, true));
-            }
-            trace.finish(ObservationFinish {
-                status: execution_status(error),
-                metadata,
-                output,
-                error: Some(ObservationError {
-                    code: error.code().into(),
-                    failure_kind: failure_kind(error.kind()).into(),
-                    stage: error.stage().map(|stage| stage.as_str().into()),
-                    message: error.to_string(),
-                }),
-                ..ObservationFinish::default()
-            });
-        }
-    }
-}
-
+#[cfg(test)]
 fn root_trace_output(outcome: &TurnRunOutcome) -> RootTraceOutput<'_> {
     match outcome {
         TurnRunOutcome::Committed { result, .. } => RootTraceOutput {
@@ -475,15 +444,24 @@ const fn failure_kind(kind: TurnFailureKind) -> &'static str {
     }
 }
 
-fn failure_metadata(error: &TurnExecutionError) -> Vec<ObservationAttribute> {
+fn failure_metadata(error: &TurnExecutionError) -> Vec<Attribute> {
     let mut metadata = vec![
-        ObservationAttribute::bool(METADATA_REPLAYED, false),
-        ObservationAttribute::string(METADATA_TERMINAL_STATUS, terminal_status(error)),
+        Attribute::bool("aise.observation.metadata.replayed", false),
+        Attribute::string("aise.observation.metadata.terminal_status", terminal_status(error)),
     ];
     if let Some(stage) = error.stage() {
-        metadata.push(ObservationAttribute::string(METADATA_FAILURE_STAGE, stage.as_str()));
+        metadata.push(Attribute::string("aise.observation.metadata.failure_stage", stage.as_str()));
     }
     metadata
+}
+
+fn engine_observation(trace: &Trace, name: &'static str) -> crate::observability::Observation {
+    trace.begin_observation(ObservationSpec {
+        name,
+        kind: ObservationKind::Chain,
+        input: None,
+        metadata: Vec::new(),
+    })
 }
 
 #[cfg(test)]

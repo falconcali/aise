@@ -4,7 +4,6 @@ use crate::config::{
 };
 use crate::context::activation::KnowledgeActivationCoordinator;
 use crate::context::activation::scan_builder::build_activation_scan_buffer;
-use crate::context::baseline_observation::BaselineObservation;
 use crate::context::error::ContextError;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::KnowledgeKind;
@@ -18,9 +17,9 @@ use crate::domain::turn::{
     BaselineContext, KnowledgeDelivery, KnowledgeIndexEntry, NarrativeGraphStateIndex, RelevantWorldKnowledge,
     RelevantWorldKnowledgeItem, RoleContextView, RoleIndexEntry, SnapshotLimits,
 };
+use crate::observability::{ObservationKind, ObservationOutcome, ObservationSpec};
 use crate::persistence::knowledge_read_port::KnowledgeIndexQuery;
 use crate::persistence::store::Store;
-use crate::turn::observability::ObservationStep;
 use crate::turn::turn_context::{PreparedActivation, TurnExecutionContext};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
@@ -77,7 +76,11 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
         TurnStage::BaselineBuilder
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
+    async fn execute(
+        &self,
+        ctx: &mut TurnExecutionContext,
+        observation: &crate::observability::Observation,
+    ) -> Result<(), TurnExecutionError> {
         let story_id = ctx.story_id().clone();
         let limits = SnapshotLimits::from_config(
             &self.content_limits,
@@ -85,16 +88,42 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
             &self.asset_limits,
             &self.narrative_config,
         );
-        let observation = BaselineObservation::begin(ObservationStep::LoadStorySnapshot, ctx);
-        let outcome = observation.in_scope(self.store.load_story_snapshot(&story_id, limits)).await;
-        observation.finish(ctx, &outcome);
+        let snapshot_observation = observation.begin(ObservationSpec {
+            name: "load-story-snapshot",
+            kind: ObservationKind::Retriever,
+            input: None,
+            metadata: Vec::new(),
+        });
+        let outcome = snapshot_observation
+            .trace(self.store.load_story_snapshot(&story_id, limits))
+            .await;
+        snapshot_observation.finish(ObservationOutcome {
+            status: if outcome.is_ok() {
+                crate::observability::ObservationStatus::Ok
+            } else {
+                crate::observability::ObservationStatus::Error
+            },
+            ..ObservationOutcome::default()
+        });
         let snapshot = outcome.map_err(TurnExecutionError::from)?;
 
-        let observation = BaselineObservation::begin(ObservationStep::ActivateWorldInfo, ctx);
-        let prepared = observation
-            .in_scope(prepare_baseline(self, &snapshot, ctx.player_contribution(), ctx.turn_number()))
+        let activation_observation = observation.begin(ObservationSpec {
+            name: "activate-world-info",
+            kind: ObservationKind::Retriever,
+            input: None,
+            metadata: Vec::new(),
+        });
+        let prepared = activation_observation
+            .trace(prepare_baseline(self, &snapshot, ctx.player_contribution(), ctx.turn_number()))
             .await;
-        observation.finish(ctx, &prepared);
+        activation_observation.finish(ObservationOutcome {
+            status: if prepared.is_ok() {
+                crate::observability::ObservationStatus::Ok
+            } else {
+                crate::observability::ObservationStatus::Error
+            },
+            ..ObservationOutcome::default()
+        });
 
         let (baseline, narrative_projection, activation) = prepared.map_err(map_baseline_error)?;
         ctx.set_prepared_context(snapshot, baseline, narrative_projection, activation)

@@ -84,7 +84,10 @@ Project-specific hard constraints (see doc/design/2026-08-04-Architecture-gpt.md
 - `R-AISE-01` Turn execution MUST be orchestrated by `TurnRuntime`; pipelines
   MUST NOT call each other directly.
 - `R-AISE-02` Every pipeline MUST implement `TurnExecutionPipeline` and
-  interact only through `&mut TurnExecutionContext`; no hidden shared state.
+  `execute` with `&mut TurnExecutionContext` for Turn business state and a
+  separate `&Observation` for the explicit observability parent; pipelines
+  MUST NOT exchange business state through `Observation`, store it in
+  `TurnExecutionContext`, or use hidden shared state.
 - `R-AISE-03` `TurnExecutionContext` lives only for one Turn; it MUST NOT be
   persisted directly or shared across Turns.
 - `R-AISE-04` Module boundaries MUST follow the architecture directory layout:

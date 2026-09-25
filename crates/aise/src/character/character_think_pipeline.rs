@@ -82,7 +82,11 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
         TurnStage::CharacterThink
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
+    async fn execute(
+        &self,
+        ctx: &mut TurnExecutionContext,
+        _observation: &crate::observability::Observation,
+    ) -> Result<(), TurnExecutionError> {
         let plan = ctx
             .plan()
             .ok_or_else(|| invariant("writer plan not set before character think"))?

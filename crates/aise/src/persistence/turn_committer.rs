@@ -28,7 +28,11 @@ impl TurnExecutionPipeline for TurnCommitter {
         TurnStage::TurnCommitter
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
+    async fn execute(
+        &self,
+        ctx: &mut TurnExecutionContext,
+        _observation: &crate::observability::Observation,
+    ) -> Result<(), TurnExecutionError> {
         if ctx.phase() != TurnPhase::ReadyToCommit {
             return Err(TurnExecutionError::new(
                 crate::turn::turn_error::TurnFailureKind::InvariantViolation,

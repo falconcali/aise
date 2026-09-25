@@ -43,7 +43,11 @@ impl TurnExecutionPipeline for WriterPlanner {
         TurnStage::WriterPlanner
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
+    async fn execute(
+        &self,
+        ctx: &mut TurnExecutionContext,
+        _observation: &crate::observability::Observation,
+    ) -> Result<(), TurnExecutionError> {
         let baseline = ctx
             .baseline()
             .ok_or_else(|| {

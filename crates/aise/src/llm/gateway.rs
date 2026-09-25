@@ -716,7 +716,8 @@ fn begin_generation(
     if let Some(character_id) = scope.character_id() {
         metadata.push(ObservationAttribute::string(METADATA_CHARACTER_ID, character_id));
     }
-    let mut observation = ObservationSpan::begin(scope.observation_step(), ObservationFields { metadata, input: None });
+    let mut observation =
+        ObservationSpan::begin(llm_observation_step(scope.stage()), ObservationFields { metadata, input: None });
     if observation.is_recording() {
         let (input, encoding_failed) = encoder.encode_with_status(&request.messages, limits.max_observation_bytes);
         if encoding_failed {
@@ -750,7 +751,8 @@ fn begin_embedding_generation(
     if let Some(round) = scope.correction_round() {
         metadata.push(ObservationAttribute::u64(METADATA_CORRECTION_ROUND, round as u64));
     }
-    let mut observation = ObservationSpan::begin(scope.observation_step(), ObservationFields { metadata, input: None });
+    let mut observation =
+        ObservationSpan::begin(llm_observation_step(scope.stage()), ObservationFields { metadata, input: None });
     if observation.is_recording() {
         let (input, encoding_failed) = encoder.encode_with_status(&request.inputs, limits.max_observation_bytes);
         if encoding_failed {
@@ -795,6 +797,30 @@ fn finish_generation(
         usage: Some(generation_usage(usage)),
         ..ObservationFinish::default()
     });
+}
+
+fn llm_observation_step(stage: crate::turn::turn_pipeline::TurnStage) -> crate::turn::observability::ObservationStep {
+    match stage {
+        crate::turn::turn_pipeline::TurnStage::WriterPlanner => {
+            crate::turn::observability::ObservationStep::GenerateWriterPlan
+        }
+        crate::turn::turn_pipeline::TurnStage::ContextRetrieval => {
+            crate::turn::observability::ObservationStep::RetrieveContext
+        }
+        crate::turn::turn_pipeline::TurnStage::CharacterThink => {
+            crate::turn::observability::ObservationStep::ThinkCharacter
+        }
+        crate::turn::turn_pipeline::TurnStage::StoryGenerator => {
+            crate::turn::observability::ObservationStep::DraftStoryText
+        }
+        crate::turn::turn_pipeline::TurnStage::StoryStateExtractor => {
+            crate::turn::observability::ObservationStep::InferStoryState
+        }
+        crate::turn::turn_pipeline::TurnStage::StoryRepairer => {
+            crate::turn::observability::ObservationStep::ReviseStoryText
+        }
+        _ => crate::turn::observability::ObservationStep::GenerateStory,
+    }
 }
 
 fn generation_usage(usage: &crate::llm::accounting::LlmTokenUsage) -> GenerationUsage {

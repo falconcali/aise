@@ -1,15 +1,13 @@
-﻿use crate::runtime::turn_pipeline_set::TurnPipelineSet;
+use crate::runtime::turn_pipeline_set::TurnPipelineSet;
 //use crate::turn::turn_budget::CorrectionKind;
-use crate::turn::observability::{
-    METADATA_CHARACTER_THINKING_SKIPPED, METADATA_RETRIEVAL_SKIPPED, METADATA_SKIP_REASON, ObservationAttribute,
-    ObservationError, ObservationFields, ObservationFinish, ObservationSpan, ObservationStatus, ObservationStep,
+use crate::observability::{
+    Attribute, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus, Trace,
 };
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::TurnPhase;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_event::{TurnEvent, TurnEventSink};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
-use opentelemetry::Context;
 use std::time::Instant;
 
 pub struct TurnRuntime {
@@ -25,37 +23,33 @@ impl TurnRuntime {
         &self,
         ctx: &mut TurnExecutionContext,
         sink: &dyn TurnEventSink,
-        parent: &Context,
+        trace: &Trace,
     ) -> Result<(), TurnExecutionError> {
-        let run_span =
-            ObservationSpan::begin_with_parent(ObservationStep::RunTurnPipelines, ObservationFields::default(), parent);
-        let run_context = run_span.context();
-        let result = run_span.in_scope(self.run_inner(ctx, sink, &run_context)).await;
-        let mut metadata = vec![
-            ObservationAttribute::bool(METADATA_RETRIEVAL_SKIPPED, ctx.retrieval_skipped()),
-            ObservationAttribute::bool(METADATA_CHARACTER_THINKING_SKIPPED, ctx.character_thinking_skipped()),
+        let run_span = trace.begin_observation(ObservationSpec {
+            name: "run-turn-pipelines",
+            kind: ObservationKind::Chain,
+            input: None,
+            metadata: Vec::new(),
+        });
+        let result = run_span.trace(self.run_inner(ctx, sink, &run_span)).await;
+        let metadata = vec![
+            Attribute::bool("aise.observation.metadata.retrieval_skipped", ctx.retrieval_skipped()),
+            Attribute::bool(
+                "aise.observation.metadata.character_thinking_skipped",
+                ctx.character_thinking_skipped(),
+            ),
         ];
-        if ctx.retrieval_skipped() || ctx.character_thinking_skipped() {
-            let mut reasons = Vec::new();
-            if ctx.retrieval_skipped() {
-                reasons.push("retrieval:not_required".to_owned());
-            }
-            if ctx.character_thinking_skipped() {
-                reasons.push("character_thinking:not_required".to_owned());
-            }
-            metadata.push(ObservationAttribute::string_list(METADATA_SKIP_REASON, reasons));
-        }
         run_span.finish(match &result {
-            Ok(()) => ObservationFinish {
+            Ok(()) => ObservationOutcome {
                 status: ObservationStatus::Ok,
                 metadata,
-                ..ObservationFinish::default()
+                ..ObservationOutcome::default()
             },
-            Err(error) => ObservationFinish {
+            Err(error) => ObservationOutcome {
                 status: runtime_status(error),
                 metadata,
                 error: Some(runtime_error(error)),
-                ..ObservationFinish::default()
+                ..ObservationOutcome::default()
             },
         });
         result
@@ -65,7 +59,7 @@ impl TurnRuntime {
         &self,
         ctx: &mut TurnExecutionContext,
         sink: &dyn TurnEventSink,
-        parent: &Context,
+        parent: &crate::observability::Observation,
     ) -> Result<(), TurnExecutionError> {
         self.execute(self.pipeline_set.initializer(), ctx, sink, parent).await?;
         self.execute(self.pipeline_set.baseline_builder(), ctx, sink, parent).await?;
@@ -136,7 +130,7 @@ impl TurnRuntime {
         pipeline: &dyn TurnExecutionPipeline,
         ctx: &mut TurnExecutionContext,
         sink: &dyn TurnEventSink,
-        parent: &Context,
+        parent: &crate::observability::Observation,
     ) -> Result<(), TurnExecutionError> {
         let stage = pipeline.stage();
         if let Some(entries) = stage_entry_phases(stage) {
@@ -158,18 +152,22 @@ impl TurnRuntime {
             turn_number: Some(ctx.turn_number()),
             stage,
         });
-        let observation =
-            ObservationSpan::begin_with_parent(observation_step(stage), ObservationFields::default(), parent);
-        let outcome = observation.in_scope(pipeline.execute(ctx)).await;
+        let observation = parent.begin(ObservationSpec {
+            name: stage_name(stage),
+            kind: ObservationKind::Chain,
+            input: None,
+            metadata: Vec::new(),
+        });
+        let outcome = observation.trace(pipeline.execute(ctx, &observation)).await;
         observation.finish(match &outcome {
-            Ok(()) => ObservationFinish {
+            Ok(()) => ObservationOutcome {
                 status: ObservationStatus::Ok,
-                ..ObservationFinish::default()
+                ..ObservationOutcome::default()
             },
-            Err(error) => ObservationFinish {
+            Err(error) => ObservationOutcome {
                 status: runtime_status(error),
                 error: Some(runtime_error(error)),
-                ..ObservationFinish::default()
+                ..ObservationOutcome::default()
             },
         });
         if outcome.is_ok() {
@@ -187,19 +185,19 @@ impl TurnRuntime {
     }
 }
 
-pub const fn observation_step(stage: TurnStage) -> ObservationStep {
+const fn stage_name(stage: TurnStage) -> &'static str {
     match stage {
-        TurnStage::TurnInitializer => ObservationStep::InitializeTurn,
-        TurnStage::BaselineBuilder => ObservationStep::PrepareContext,
-        TurnStage::WriterPlanner => ObservationStep::PlanTurn,
-        TurnStage::ContextRetrieval => ObservationStep::RetrieveContext,
-        TurnStage::CharacterThink => ObservationStep::ThinkCharacters,
-        TurnStage::StoryGenerator => ObservationStep::GenerateStory,
-        TurnStage::StoryStateExtractor => ObservationStep::ExtractStoryState,
-        TurnStage::Validation => ObservationStep::ValidateStory,
-        TurnStage::StoryRepairer => ObservationStep::RepairStory,
-        TurnStage::TurnCommitter => ObservationStep::CommitTurn,
-        TurnStage::Context => ObservationStep::PrepareContext,
+        TurnStage::TurnInitializer => "initialize-turn",
+        TurnStage::BaselineBuilder => "prepare-context",
+        TurnStage::WriterPlanner => "plan-turn",
+        TurnStage::ContextRetrieval => "retrieve-context",
+        TurnStage::CharacterThink => "think-characters",
+        TurnStage::StoryGenerator => "generate-story",
+        TurnStage::StoryStateExtractor => "extract-story-state",
+        TurnStage::Validation => "validate-story",
+        TurnStage::StoryRepairer => "repair-story",
+        TurnStage::TurnCommitter => "commit-turn",
+        TurnStage::Context => "prepare-context",
     }
 }
 

@@ -52,7 +52,11 @@ impl TurnExecutionPipeline for StoryStateExtractor {
         TurnStage::StoryStateExtractor
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
+    async fn execute(
+        &self,
+        ctx: &mut TurnExecutionContext,
+        _observation: &crate::observability::Observation,
+    ) -> Result<(), TurnExecutionError> {
         let is_reextraction = ctx.phase() == TurnPhase::StateReextractionRequired;
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;
         let request = PromptCompositionInput {

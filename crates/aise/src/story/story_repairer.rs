@@ -38,7 +38,11 @@ impl TurnExecutionPipeline for StoryRepairer {
         TurnStage::StoryRepairer
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
+    async fn execute(
+        &self,
+        ctx: &mut TurnExecutionContext,
+        _observation: &crate::observability::Observation,
+    ) -> Result<(), TurnExecutionError> {
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;
         let issue_count = projection.context.validation_issues.len();
         let issue_codes = projection

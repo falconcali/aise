@@ -67,10 +67,6 @@ impl ObservationSpan {
         self.span.clone()
     }
 
-    pub(crate) fn context(&self) -> Context {
-        self.span.context()
-    }
-
     pub(crate) fn record_attribute(&mut self, attribute: ObservationAttribute) {
         if !self.is_recording() {
             return;

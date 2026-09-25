@@ -1,3 +1,4 @@
+use crate::observability::Observation;
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::TurnExecutionError;
 use async_trait::async_trait;
@@ -46,5 +47,9 @@ impl fmt::Display for TurnStage {
 pub trait TurnExecutionPipeline: Send + Sync {
     fn stage(&self) -> TurnStage;
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError>;
+    async fn execute(
+        &self,
+        ctx: &mut TurnExecutionContext,
+        observation: &Observation,
+    ) -> Result<(), TurnExecutionError>;
 }

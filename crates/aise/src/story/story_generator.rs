@@ -40,7 +40,11 @@ impl TurnExecutionPipeline for StoryGenerator {
         TurnStage::StoryGenerator
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
+    async fn execute(
+        &self,
+        ctx: &mut TurnExecutionContext,
+        _observation: &crate::observability::Observation,
+    ) -> Result<(), TurnExecutionError> {
         let projection_started = Instant::now();
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;
         let projection_ms = projection_started.elapsed().as_millis() as u64;

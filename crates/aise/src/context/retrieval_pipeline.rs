@@ -46,7 +46,11 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
         TurnStage::ContextRetrieval
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
+    async fn execute(
+        &self,
+        ctx: &mut TurnExecutionContext,
+        _observation: &crate::observability::Observation,
+    ) -> Result<(), TurnExecutionError> {
         let plan = ctx
             .plan()
             .ok_or_else(|| map_context_error(ContextError::InvalidPlan { code: "missing_plan" }))?

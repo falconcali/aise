@@ -40,7 +40,11 @@ impl TurnExecutionPipeline for ValidationPipeline {
         TurnStage::Validation
     }
 
-    async fn execute(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
+    async fn execute(
+        &self,
+        ctx: &mut TurnExecutionContext,
+        _observation: &crate::observability::Observation,
+    ) -> Result<(), TurnExecutionError> {
         if let Some(extraction_version) = ctx.extraction_story_version() {
             if extraction_version != ctx.story_version() {
                 return Err(TurnExecutionError::stale_state_extraction(Some(TurnStage::Validation)));
