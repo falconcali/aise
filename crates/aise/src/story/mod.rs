@@ -1,5 +1,6 @@
 pub mod character_card_service;
 pub mod instance_factory;
+pub mod observability;
 pub mod pack_service;
 pub mod story_generator;
 pub mod story_generator_prompt;

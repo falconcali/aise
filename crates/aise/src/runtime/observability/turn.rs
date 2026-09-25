@@ -1,7 +1,6 @@
 use crate::observability::{Attribute, Observation, ObservationError, ObservationOutcome, ObservationStatus, Trace};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
-use std::future::Future;
 
 pub struct RunTurnPipelinesObservation {
     observation: Observation,
@@ -19,11 +18,7 @@ impl RunTurnPipelinesObservation {
         }
     }
 
-    pub async fn trace<F: Future>(&self, future: F) -> F::Output {
-        self.observation.trace(future).await
-    }
-
-    pub fn parent(&self) -> &Observation {
+    pub fn observation(&self) -> &Observation {
         &self.observation
     }
 

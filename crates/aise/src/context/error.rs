@@ -2,7 +2,7 @@ use crate::domain::knowledge::activation::ActivationError;
 use crate::persistence::store::StoreError;
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum ContextError {
     #[error("story snapshot is inconsistent: {code}")]
     SnapshotInconsistent { code: &'static str },

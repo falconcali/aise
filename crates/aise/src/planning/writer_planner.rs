@@ -1,8 +1,8 @@
 use crate::config::{NarrativeConfig, PlannerConfig, RetrievalConfig};
 use crate::domain::asset::validation::BoundedText;
 use crate::llm::gateway::LlmGateway;
-use crate::observability::{Attribute, ObservationOutcome, ObservationSpec, ObservationStatus};
 use crate::planning::error::PlanningError;
+use crate::planning::observability;
 use crate::planning::planner_output::writer_planner_contract;
 use crate::planning::retrieval_plan_builder::RetrievalPlanBuilder;
 use crate::planning::writer_planner_prompt::WriterPlannerPromptContextProjector;
@@ -70,27 +70,11 @@ impl TurnExecutionPipeline for WriterPlanner {
             })?
             .clone();
         let narrative_plan = narrative_projection.plan.clone();
-        let projection_observation = observation.begin(ObservationSpec {
-            name: "project-narrative",
-            kind: crate::observability::ObservationKind::Chain,
-            input: None,
-            metadata: Vec::new(),
-        });
-        projection_observation.finish(ObservationOutcome {
-            status: ObservationStatus::Ok,
-            metadata: vec![
-                Attribute::u64("aise.observation.metadata.graph_revision", snapshot.graph_revision()),
-                Attribute::u64(
-                    "aise.observation.metadata.projected_node_count",
-                    narrative_plan.active_nodes.len() as u64,
-                ),
-                Attribute::u64(
-                    "aise.observation.metadata.projected_edge_count",
-                    narrative_plan.world_event_intents.len() as u64,
-                ),
-            ],
-            ..ObservationOutcome::default()
-        });
+        observability::begin_project_narrative(observation, ctx).finish(
+            snapshot.graph_revision(),
+            narrative_plan.active_nodes.len(),
+            narrative_plan.world_event_intents.len(),
+        );
         let player_contribution = BoundedText::try_new(
             ctx.player_contribution().to_owned(),
             "player_contribution",

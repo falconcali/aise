@@ -4,8 +4,7 @@ use super::model::{
     ObservationSpec, ObservationStatus,
 };
 use opentelemetry::{Array, Context, Value};
-use std::future::Future;
-use tracing::{Instrument, Span, field::Empty};
+use tracing::{Span, field::Empty};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 pub struct Observation {
@@ -50,10 +49,6 @@ impl Observation {
 
     pub fn content_capture(&self) -> &ContentCapture {
         &self.content
-    }
-
-    pub async fn trace<F: Future>(&self, future: F) -> F::Output {
-        future.instrument(self.span.clone()).await
     }
 
     pub fn finish(mut self, outcome: ObservationOutcome) {

@@ -3,6 +3,7 @@ use crate::domain::asset::validation::BoundedText;
 use crate::domain::turn::StoryGeneratorOutput;
 use crate::llm::gateway::LlmGateway;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
+use crate::story::observability;
 use crate::story::story_repairer_prompt::{
     DefaultStoryRepairerPromptContextProjector, StoryRepairerProjectionError, StoryRepairerPromptContextProjector,
 };
@@ -76,19 +77,35 @@ impl TurnExecutionPipeline for StoryRepairer {
             story_version,
             issue_count,
         );
-        let completion = self
+        let revision_observation = observability::begin_revise_story_text(observation);
+        let completion_result = self
             .gateway
-            .complete_text_composed(scope, request, max_output_tokens, LlmCallPurpose::StoryRepair, observation)
+            .complete_text_composed(
+                scope,
+                request,
+                max_output_tokens,
+                LlmCallPurpose::StoryRepair,
+                revision_observation.observation(),
+            )
             .instrument(span)
-            .await
-            .map_err(|error| {
-                TurnExecutionError::new(
-                    TurnFailureKind::Llm,
-                    "llm_error",
-                    Some(TurnStage::StoryRepairer),
-                    error.to_string(),
-                )
-            })?;
+            .await;
+        let mapped_result = completion_result.as_ref().map(|_| ()).map_err(|error| {
+            TurnExecutionError::new(
+                TurnFailureKind::Llm,
+                "llm_error",
+                Some(TurnStage::StoryRepairer),
+                error.to_string(),
+            )
+        });
+        revision_observation.finish(&mapped_result);
+        let completion = completion_result.map_err(|error| {
+            TurnExecutionError::new(
+                TurnFailureKind::Llm,
+                "llm_error",
+                Some(TurnStage::StoryRepairer),
+                error.to_string(),
+            )
+        })?;
         let trimmed = completion.text.trim();
         if trimmed.is_empty() {
             tracing::warn!(

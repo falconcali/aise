@@ -6,7 +6,6 @@ use super::model::{
 };
 use super::observation::Observation;
 use opentelemetry::Context;
-use std::future::Future;
 
 pub struct Trace {
     pub(crate) root: Option<Observation>,
@@ -94,10 +93,6 @@ impl Trace {
 
     pub fn content_capture(&self) -> &ContentCapture {
         &self.content
-    }
-
-    pub async fn trace<F: Future>(&self, future: F) -> F::Output {
-        self.root().trace(future).await
     }
 
     pub fn finish(mut self, outcome: TraceOutcome) {

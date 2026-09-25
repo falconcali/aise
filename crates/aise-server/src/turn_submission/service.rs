@@ -114,7 +114,7 @@ impl TurnSubmissionService {
                     return Err(error);
                 }
             };
-            let session = match session_span.trace(self.registry.get(&session_id)).await {
+            let session = match self.registry.get(&session_id).await {
                 Some(session) => session,
                 None => {
                     let error = TurnSubmissionError::SessionNotFound;
@@ -186,7 +186,7 @@ impl TurnSubmissionService {
             input: None,
             metadata: Vec::new(),
         });
-        let permit = match admission.trace(self.tasks.reserve(&request.cancellation)).await {
+        let permit = match self.tasks.reserve(&request.cancellation).await {
             Ok(permit) => permit,
             Err(error) => {
                 let error = TurnSubmissionError::Admission(error.to_string());

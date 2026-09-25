@@ -1,5 +1,9 @@
 # Langfuse Observability 数据模型对齐 — Refactor
 
+> 本文中的 Future instrumentation 方案已由
+> [Observation Future Instrumentation Removal](../exec/2026-09-25-observability-explicit-parent-remediation-spec-gpt.md)
+> 取代。当前实现必须直接等待业务 Future，并显式传递 `&Trace` 或 `&Observation`。
+
 > **Date**: 2026-09-25
 > **Author**: GPT-5.6 Sol
 > **Status**: Draft
@@ -37,7 +41,7 @@ Langfuse 官方数据模型规定：
 
 ### 3. 业务编排仍暴露 Trace 组装细节
 
-- `crates/aise/src/context/baseline_ctx_builder.rs:88-97` 在主业务流程中显式执行 `begin → in_scope → finish`。
+- `crates/aise/src/context/baseline_ctx_builder.rs:88-97` 在主业务流程中显式执行 `begin → direct await → finish`。
 - `crates/aise/src/runtime/turn_runtime.rs:30-60`、`crates/aise/src/runtime/turn_runtime.rs:161-174` 直接组装 `ObservationFields`、状态、错误和 skip metadata。
 - `crates/aise/src/engine.rs:133-210` 直接创建协调、Story 读取和幂等检查 Observation。
 - `crates/aise-server/src/turn_submission/service.rs:77-228` 同时负责 Session 查询、Trace 根构造、内容采集、三个 Observation 和跨 task Trace ownership 转移。
@@ -47,7 +51,7 @@ Langfuse 官方数据模型规定：
 
 ### 4. 父子关系依赖隐式 scope，而不是显式 Observation 传播
 
-- `crates/aise/src/turn/observability/span.rs:54-56` 使用 `Future::instrument` 建立当前 tracing scope。
+- 旧实现曾使用 Future instrumentation 建立当前 tracing scope；该路径已删除。
 - `crates/aise/src/runtime/turn_runtime.rs:31-33` 只提取一次 `RunTurnPipelines` Context，后续所有 stage 都使用同一个父 Context。
 - `TurnExecutionPipeline::execute` 当前只接收 `&mut TurnExecutionContext`，内部子步骤依赖外层 `in_scope` 的隐式当前 Span。
 - `crates/aise/src/turn/turn_context.rs:912-1011` 把 `ObservationStep` 放入 `TurnLlmCallScope`，通过阶段到 LLM 步骤的第二份映射补偿没有显式父 Observation 的问题。
@@ -252,13 +256,11 @@ impl ObservationSession {
 
 impl Trace {
     pub fn begin_observation(&self, spec: ObservationSpec) -> Observation;
-    pub async fn trace<F: Future>(&self, future: F) -> F::Output;
     pub fn finish(self, outcome: TraceOutcome);
 }
 
 impl Observation {
     pub fn begin(&self, spec: ObservationSpec) -> Observation;
-    pub async fn trace<F: Future>(&self, future: F) -> F::Output;
     pub fn finish(self, outcome: ObservationOutcome);
 }
 ```
@@ -267,7 +269,7 @@ impl Observation {
 
 - `finish` 消费句柄，编译期禁止正常路径重复结束；`Drop` 仍以 `incomplete` 结束未完成 Trace/Observation。
 - `Observation::begin` 必须使用自身保存的 OTel Context 设置显式父节点，不查询 `Span::current()`。
-- `trace(future)` 只负责 instrumentation；业务 metadata 和 outcome 映射由模块 observability helper 提供。
+- 业务 Future 由编排函数直接 `.await`；业务 metadata 和 outcome 映射由模块 observability helper 提供。
 - `ObservationSession` 不创建 Span。它向 `Trace` 提供 session id、user id 和 session metadata；`finish` 不产生 OTLP 节点。
 - `Trace` 的 root 同时是 Langfuse Trace 的根 Observation。Trace 级属性由 exporter 传播到该 Trace 的全部 Observation。
 - `Trace` 和 `Observation` 不暴露原始 `tracing::Span` 或 `opentelemetry::Context` 给业务模块。
@@ -283,8 +285,7 @@ pub fn begin_load_story_snapshot(
 ) -> LoadStorySnapshotObservation;
 
 impl LoadStorySnapshotObservation {
-    pub async fn trace<F: Future>(&self, future: F) -> F::Output;
-    pub fn parent(&self) -> &Observation;
+    pub fn observation(&self) -> &Observation;
     pub fn finish(
         self,
         ctx: &TurnExecutionContext,
@@ -297,18 +298,14 @@ impl LoadStorySnapshotObservation {
 
 ```rust
 let observation = context_observability::begin_load_story_snapshot(parent, ctx);
-let outcome = observation
-    .trace(self.store.load_story_snapshot(&story_id, limits, observation.parent()))
-    .await;
+let outcome = self.store.load_story_snapshot(&story_id, limits).await;
 observation.finish(ctx, &outcome);
 ```
 
 若 store 本身不创建子 Observation，则不增加无意义参数：
 
 ```rust
-let outcome = observation
-    .trace(self.store.load_story_snapshot(&story_id, limits))
-    .await;
+let outcome = self.store.load_story_snapshot(&story_id, limits).await;
 ```
 
 是否继续传递 Observation 由被调模块是否需要创建子节点决定，不要求所有底层函数机械增加参数。
@@ -331,7 +328,7 @@ sequenceDiagram
   R->>O: trace.begin_observation(run pipelines)
   R->>P: execute(ctx, observation)
   P->>C: observation.begin(module step)
-  P->>P: child.trace(business future)
+  P->>P: direct await business future
   P->>C: finish(outcome)
   R->>O: finish(outcome)
   Root->>T: finish(turn outcome)

@@ -2,6 +2,7 @@ use crate::config::{ActivationConfig, RetrievalConfig};
 use crate::context::activation::KnowledgeActivationCoordinator;
 use crate::context::activation::scan_builder::build_activation_scan_buffer;
 use crate::context::error::ContextError;
+use crate::context::observability;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::activation::{
     ActivationMacroValues, ActivationRunMode, ActivationSeedKind, ExternalActivationSeed, GenerationTrigger,
@@ -49,8 +50,17 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        _observation: &crate::observability::Observation,
+        observation: &crate::observability::Observation,
     ) -> Result<(), TurnExecutionError> {
+        let operation = observability::begin_retrieve_context(observation, ctx);
+        let result = self.execute_inner(ctx).await;
+        operation.finish(&result);
+        result
+    }
+}
+
+impl ContextRetrievalPipeline {
+    async fn execute_inner(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         let plan = ctx
             .plan()
             .ok_or_else(|| map_context_error(ContextError::InvalidPlan { code: "missing_plan" }))?

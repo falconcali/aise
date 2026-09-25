@@ -1,7 +1,7 @@
 use crate::runtime::turn_pipeline_set::TurnPipelineSet;
 //use crate::turn::turn_budget::CorrectionKind;
 use crate::observability::Trace;
-use crate::runtime::observability::{PipelineStageObservation, RunTurnPipelinesObservation};
+use crate::runtime::observability;
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::TurnPhase;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
@@ -24,8 +24,8 @@ impl TurnRuntime {
         sink: &dyn TurnEventSink,
         trace: &Trace,
     ) -> Result<(), TurnExecutionError> {
-        let run_observation = RunTurnPipelinesObservation::begin(trace);
-        let result = run_observation.trace(self.run_inner(ctx, sink, run_observation.parent())).await;
+        let run_observation = observability::RunTurnPipelinesObservation::begin(trace);
+        let result = self.run_inner(ctx, sink, run_observation.observation()).await;
         run_observation.finish(ctx, &result);
         result
     }
@@ -127,8 +127,8 @@ impl TurnRuntime {
             turn_number: Some(ctx.turn_number()),
             stage,
         });
-        let observation = PipelineStageObservation::begin(parent, stage);
-        let outcome = observation.trace(pipeline.execute(ctx, observation.parent())).await;
+        let observation = observability::PipelineStageObservation::begin(parent, stage);
+        let outcome = pipeline.execute(ctx, observation.observation()).await;
         observation.finish(&outcome);
         if outcome.is_ok() {
             if let Some(exits) = stage_exit_phases(stage) {

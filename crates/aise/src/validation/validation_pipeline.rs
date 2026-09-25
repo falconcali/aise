@@ -15,6 +15,7 @@ use crate::turn::turn_validation::{
     ValidationIssue, ValidationResult,
 };
 use crate::validation::narrative_candidate_state::CandidateNarrativeStateView;
+use crate::validation::observability;
 use crate::validation::validators::DeterministicValidator;
 use crate::validation::validators::changed_only::ChangedOnlyValidator;
 use crate::validation::validators::domain_invariant::DomainInvariantValidator;
@@ -43,8 +44,17 @@ impl TurnExecutionPipeline for ValidationPipeline {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        _observation: &crate::observability::Observation,
+        observation: &crate::observability::Observation,
     ) -> Result<(), TurnExecutionError> {
+        let operation = observability::begin_validate_story(observation, ctx);
+        let result = self.execute_inner(ctx).await;
+        operation.finish(&result);
+        result
+    }
+}
+
+impl ValidationPipeline {
+    async fn execute_inner(&self, ctx: &mut TurnExecutionContext) -> Result<(), TurnExecutionError> {
         if let Some(extraction_version) = ctx.extraction_story_version() {
             if extraction_version != ctx.story_version() {
                 return Err(TurnExecutionError::stale_state_extraction(Some(TurnStage::Validation)));
@@ -58,9 +68,7 @@ impl TurnExecutionPipeline for ValidationPipeline {
         let result = ValidationResult::from_issues(issues, ctx.budget().max_validation_issues())?;
         ctx.set_validation_result(result)
     }
-}
 
-impl ValidationPipeline {
     fn run_deterministic(&self, ctx: &TurnExecutionContext) -> Result<Vec<ValidationIssue>, TurnExecutionError> {
         let mut issues = Vec::new();
         for validator in [

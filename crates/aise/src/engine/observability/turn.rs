@@ -1,17 +1,12 @@
 use crate::domain::ids::TurnNumber;
 use crate::observability::{Attribute, Observation, ObservationError, ObservationOutcome, ObservationStatus, Trace};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
-use std::future::Future;
 
 pub struct EngineObservation {
     observation: Observation,
 }
 
 impl EngineObservation {
-    pub async fn trace<F: Future>(&self, future: F) -> F::Output {
-        self.observation.trace(future).await
-    }
-
     pub fn finish_ok(self) {
         self.observation.finish(ObservationOutcome {
             status: ObservationStatus::Ok,

@@ -1,4 +1,5 @@
 pub mod error;
+pub mod observability;
 pub mod planner_output;
 pub mod retrieval_plan_builder;
 pub mod writer_planner;

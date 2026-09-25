@@ -1,5 +1,9 @@
 # Langfuse Observability Model Alignment — Spec
 
+> 本文中的 Future instrumentation 方案已由
+> [Observation Future Instrumentation Removal](../2026-09-25-observability-explicit-parent-remediation-spec-gpt.md)
+> 取代。生命周期统一采用 `begin` → 业务 Future 直接 `.await` → `finish`。
+
 > **Model**: GPT-5.6 Sol
 > **Date**: 2026-09-25
 > **Status**: Proposed
@@ -252,14 +256,12 @@ impl Trace {
     pub fn begin_observation(&self, spec: ObservationSpec) -> Observation;
     pub fn bind(&mut self, attributes: Vec<Attribute>);
     pub fn content_capture(&self) -> &ContentCapture;
-    pub async fn trace<F: std::future::Future>(&self, future: F) -> F::Output;
     pub fn finish(self, outcome: TraceOutcome);
 }
 
 impl Observation {
     pub fn begin(&self, spec: ObservationSpec) -> Observation;
     pub fn content_capture(&self) -> &ContentCapture;
-    pub async fn trace<F: std::future::Future>(&self, future: F) -> F::Output;
     pub fn finish(self, outcome: ObservationOutcome);
     pub fn is_recording(&self) -> bool;
 }
@@ -449,8 +451,7 @@ pub fn begin_load_story_snapshot(
 ) -> LoadStorySnapshotObservation;
 
 impl LoadStorySnapshotObservation {
-    pub async fn trace<F: std::future::Future>(&self, future: F) -> F::Output;
-    pub fn parent(&self) -> &Observation;
+    pub fn observation(&self) -> &Observation;
     pub fn finish(
         self,
         ctx: &TurnExecutionContext,

@@ -2,6 +2,7 @@ pub mod activation_index_port;
 pub mod activation_timed_state_port;
 pub mod asset_store;
 pub mod knowledge_read_port;
+pub mod observability;
 pub mod sqlite_activation;
 pub mod sqlite_asset_store;
 pub mod sqlite_error;

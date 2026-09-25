@@ -1,6 +1,7 @@
 use crate::character::character_think_prompt::{
     CharacterThinkProjectionError, CharacterThinkPromptContextProjector, DefaultCharacterThinkPromptContextProjector,
 };
+use crate::character::observability;
 use crate::config::{CharacterThinkConfig, ContextPreparationConfig};
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::text::estimate_text_tokens;
@@ -151,7 +152,9 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
             let scope = ctx
                 .llm_call_scope(TurnStage::CharacterThink)
                 .with_character_id(request.role_id.to_string());
-            let structured = self
+            let character_observation =
+                observability::begin_think_character(observation, request.role_id.to_string().as_str());
+            let structured_result = self
                 .gateway
                 .complete_structured_composed(
                     scope,
@@ -159,17 +162,26 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                     max_output_tokens,
                     crate::turn::turn_contract::LlmCallPurpose::CharacterThink,
                     character_decision_contract(&self.config),
-                    observation,
+                    character_observation.observation(),
                 )
-                .await
-                .map_err(|error| {
-                    TurnExecutionError::new(
-                        TurnFailureKind::Llm,
-                        "llm_error",
-                        Some(TurnStage::CharacterThink),
-                        error.to_string(),
-                    )
-                })?;
+                .await;
+            let mapped_result = structured_result.as_ref().map(|_| ()).map_err(|error| {
+                TurnExecutionError::new(
+                    TurnFailureKind::Llm,
+                    "llm_error",
+                    Some(TurnStage::CharacterThink),
+                    error.to_string(),
+                )
+            });
+            character_observation.finish(&mapped_result);
+            let structured = structured_result.map_err(|error| {
+                TurnExecutionError::new(
+                    TurnFailureKind::Llm,
+                    "llm_error",
+                    Some(TurnStage::CharacterThink),
+                    error.to_string(),
+                )
+            })?;
             let dto = structured.value;
             let decision_text = normalize_required_output(dto.decision, "decision", self.config.max_field_bytes)?;
             let suggested_utterance =

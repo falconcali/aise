@@ -19,7 +19,7 @@ pub enum StoreSerializationErrorKind {
     InvalidMemory,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum StoreError {
     #[error("story not found")]
     NotFound,

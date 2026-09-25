@@ -5,6 +5,7 @@ use crate::config::{
 use crate::context::activation::KnowledgeActivationCoordinator;
 use crate::context::activation::scan_builder::build_activation_scan_buffer;
 use crate::context::error::ContextError;
+use crate::context::observability;
 use crate::domain::ids::RoleId;
 use crate::domain::knowledge::KnowledgeKind;
 use crate::domain::knowledge::activation::{
@@ -17,7 +18,6 @@ use crate::domain::turn::{
     BaselineContext, KnowledgeDelivery, KnowledgeIndexEntry, NarrativeGraphStateIndex, RelevantWorldKnowledge,
     RelevantWorldKnowledgeItem, RoleContextView, RoleIndexEntry, SnapshotLimits,
 };
-use crate::observability::{ObservationKind, ObservationOutcome, ObservationSpec};
 use crate::persistence::knowledge_read_port::KnowledgeIndexQuery;
 use crate::persistence::store::Store;
 use crate::turn::turn_context::{PreparedActivation, TurnExecutionContext};
@@ -88,42 +88,14 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
             &self.asset_limits,
             &self.narrative_config,
         );
-        let snapshot_observation = observation.begin(ObservationSpec {
-            name: "load-story-snapshot",
-            kind: ObservationKind::Retriever,
-            input: None,
-            metadata: Vec::new(),
-        });
-        let outcome = snapshot_observation
-            .trace(self.store.load_story_snapshot(&story_id, limits))
-            .await;
-        snapshot_observation.finish(ObservationOutcome {
-            status: if outcome.is_ok() {
-                crate::observability::ObservationStatus::Ok
-            } else {
-                crate::observability::ObservationStatus::Error
-            },
-            ..ObservationOutcome::default()
-        });
+        let snapshot_observation = observability::begin_load_story_snapshot(observation, ctx);
+        let outcome = self.store.load_story_snapshot(&story_id, limits).await;
+        snapshot_observation.finish(&outcome);
         let snapshot = outcome.map_err(TurnExecutionError::from)?;
 
-        let activation_observation = observation.begin(ObservationSpec {
-            name: "activate-world-info",
-            kind: ObservationKind::Retriever,
-            input: None,
-            metadata: Vec::new(),
-        });
-        let prepared = activation_observation
-            .trace(prepare_baseline(self, &snapshot, ctx.player_contribution(), ctx.turn_number()))
-            .await;
-        activation_observation.finish(ObservationOutcome {
-            status: if prepared.is_ok() {
-                crate::observability::ObservationStatus::Ok
-            } else {
-                crate::observability::ObservationStatus::Error
-            },
-            ..ObservationOutcome::default()
-        });
+        let activation_observation = observability::begin_activate_world_info(observation, ctx);
+        let prepared = prepare_baseline(self, &snapshot, ctx.player_contribution(), ctx.turn_number()).await;
+        activation_observation.finish(&prepared);
 
         let (baseline, narrative_projection, activation) = prepared.map_err(map_baseline_error)?;
         ctx.set_prepared_context(snapshot, baseline, narrative_projection, activation)

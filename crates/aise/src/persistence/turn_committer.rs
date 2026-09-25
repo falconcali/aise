@@ -1,5 +1,5 @@
 use crate::domain::narrative::StoryTurn;
-use crate::observability::{Attribute, ObservationError, ObservationOutcome, ObservationSpec, ObservationStatus};
+use crate::persistence::observability;
 use crate::persistence::store::{OutboxRecord, Store, TurnCommitSpec};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::TurnPhase;
@@ -129,12 +129,8 @@ impl TurnExecutionPipeline for TurnCommitter {
             llm_calls,
             activation_state_delta,
         };
-        let persistence_observation = observation.begin(ObservationSpec {
-            name: "persist-turn",
-            kind: crate::observability::ObservationKind::Tool,
-            input: None,
-            metadata: Vec::new(),
-        });
+        let commit_observation = observability::begin_commit_turn(observation, ctx);
+        let persistence_observation = observability::begin_persist_turn(observation, ctx);
         let activation_span = info_span!(
             "knowledge.activation.commit",
             story_id = %story_id,
@@ -147,52 +143,20 @@ impl TurnExecutionPipeline for TurnCommitter {
             error_code = tracing::field::Empty,
         );
         let outcome = self.store.commit_turn(&commit).instrument(activation_span.clone()).await;
-        persistence_observation.finish(match &outcome {
-            Ok(result) => ObservationOutcome {
-                status: ObservationStatus::Ok,
-                metadata: vec![
-                    Attribute::string("aise.observation.metadata.story_id", story_id.as_str()),
-                    Attribute::u64("aise.observation.metadata.turn_number", turn_number.get()),
-                    Attribute::string("aise.observation.metadata.commit_status", "committed"),
-                    Attribute::u64("aise.observation.metadata.graph_revision", result.story_revision.get()),
-                ],
-                ..ObservationOutcome::default()
-            },
-            Err(error) => ObservationOutcome {
-                status: if matches!(
-                    error,
-                    crate::persistence::store::StoreError::RevisionConflict
-                        | crate::persistence::store::StoreError::IdempotencyConflict
-                ) {
-                    ObservationStatus::Conflict
-                } else {
-                    ObservationStatus::Error
-                },
-                metadata: vec![
-                    Attribute::string("aise.observation.metadata.story_id", story_id.as_str()),
-                    Attribute::u64("aise.observation.metadata.turn_number", turn_number.get()),
-                    Attribute::string("aise.observation.metadata.commit_status", "failed"),
-                ],
-                error: Some(ObservationError {
-                    code: store_error_code(error).into(),
-                    failure_kind: "store".into(),
-                    stage: Some(TurnStage::TurnCommitter.as_str().into()),
-                    message: error.to_string(),
-                }),
-                ..ObservationOutcome::default()
-            },
-        });
+        persistence_observation.finish(&outcome);
         match &outcome {
             Ok(_) => {
                 activation_span.record("status", "ok");
             }
             Err(error) => {
                 activation_span.record("status", "error");
-                activation_span.record("error_code", store_error_code(error));
+                activation_span.record("error_code", observability::store_error_code(error));
             }
         }
         let result = outcome?;
-        ctx.set_committed_result(result)
+        let committed = ctx.set_committed_result(result);
+        commit_observation.finish(&committed);
+        committed
     }
 }
 
@@ -205,17 +169,5 @@ fn knowledge_mutation_affects_activation(mutation: &crate::turn::turn_validation
         crate::turn::turn_validation::ValidatedKnowledgeOperation::Delete { target } => {
             matches!(target, crate::domain::turn::DeletableKnowledgeId::Rumor(_))
         }
-    }
-}
-
-fn store_error_code(error: &crate::persistence::store::StoreError) -> &'static str {
-    match error {
-        crate::persistence::store::StoreError::NotFound => "story_not_found",
-        crate::persistence::store::StoreError::RevisionConflict => "revision_conflict",
-        crate::persistence::store::StoreError::IdempotencyConflict => "idempotency_conflict",
-        crate::persistence::store::StoreError::ConstraintViolation { .. } => "constraint_violation",
-        crate::persistence::store::StoreError::LimitExceeded { .. } => "store_limit_exceeded",
-        crate::persistence::store::StoreError::Serialization { .. } => "store_serialization_error",
-        crate::persistence::store::StoreError::Unavailable => "store_unavailable",
     }
 }

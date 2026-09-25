@@ -7,6 +7,7 @@ use crate::llm::error::{LlmError, LlmProtocolErrorKind};
 use crate::llm::gateway::LlmGateway;
 use crate::llm::output_contract::{LlmOutputContract, LlmOutputViolation};
 use crate::prompt::{PromptCompositionInput, PromptProfile};
+use crate::story::observability;
 use crate::story::story_state_extractor_prompt::{
     DefaultStoryStateExtractorPromptContextProjector, StoryStateExtractorProjectionError,
     StoryStateExtractorPromptContextProjector,
@@ -82,6 +83,7 @@ impl TurnExecutionPipeline for StoryStateExtractor {
             is_reextraction
         );
         let contract = story_state_extraction_contract(limits);
+        let extraction_observation = observability::begin_extract_story_state(observation);
         let outcome = self
             .gateway
             .complete_structured_composed(
@@ -90,10 +92,19 @@ impl TurnExecutionPipeline for StoryStateExtractor {
                 max_output_tokens,
                 LlmCallPurpose::StoryStateExtraction,
                 contract,
-                observation,
+                extraction_observation.observation(),
             )
             .instrument(span)
             .await;
+        let observation_result = outcome.as_ref().map(|_| ()).map_err(|error| {
+            TurnExecutionError::new(
+                TurnFailureKind::Llm,
+                "llm_error",
+                Some(TurnStage::StoryStateExtractor),
+                error.to_string(),
+            )
+        });
+        extraction_observation.finish(&observation_result);
         match outcome {
             Ok(structured) => {
                 let dto = structured.value;
