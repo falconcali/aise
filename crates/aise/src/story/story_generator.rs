@@ -43,7 +43,7 @@ impl TurnExecutionPipeline for StoryGenerator {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        _observation: &crate::observability::Observation,
+        observation: &crate::observability::Observation,
     ) -> Result<(), TurnExecutionError> {
         let projection_started = Instant::now();
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;
@@ -147,7 +147,7 @@ impl TurnExecutionPipeline for StoryGenerator {
         );
         let completion = self
             .gateway
-            .complete_text_composed(scope, request, max_output_tokens, LlmCallPurpose::StoryGeneration)
+            .complete_text_composed(scope, request, max_output_tokens, LlmCallPurpose::StoryGeneration, observation)
             .instrument(span)
             .await
             .map_err(|error| {

@@ -44,16 +44,17 @@ pub async fn build_services(config: &ServerConfig) -> Result<EngineServices, any
         LlmGateway::new(provider, prompt_source, config.aise.llm.clone())?.with_observation_capture(
             match observation_config.content_policy {
                 aise::observability::ContentCapturePolicy::MetadataOnly => {
-                    aise::turn::observability::ContentCapturePolicy::MetadataOnly
+                    aise::observability::ContentCapturePolicy::MetadataOnly
                 }
                 aise::observability::ContentCapturePolicy::RedactedContent => {
-                    aise::turn::observability::ContentCapturePolicy::RedactedContent
+                    aise::observability::ContentCapturePolicy::RedactedContent
                 }
                 aise::observability::ContentCapturePolicy::FullContent => {
-                    aise::turn::observability::ContentCapturePolicy::FullContent
+                    aise::observability::ContentCapturePolicy::FullContent
                 }
             },
-            aise::turn::observability::ContentCaptureLimits {
+            aise::observability::ObservabilityContentConfig {
+                policy: observation_config.content_policy.clone(),
                 max_field_bytes: observation_config.max_field_bytes,
                 max_observation_bytes: observation_config.max_observation_bytes,
                 detector_overlap_bytes: 512,

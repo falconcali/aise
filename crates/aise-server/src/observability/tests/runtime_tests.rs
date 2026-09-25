@@ -1,6 +1,7 @@
 use super::*;
-use aise::turn::observability::{
-    ObservationFields, ObservationFinish, ObservationSpan, ObservationStatus, ObservationStep,
+use aise::observability::{
+    ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationKind, ObservationOutcome,
+    ObservationSession, ObservationSpec, ObservationStatus, SessionSpec, TraceSpec,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -126,11 +127,40 @@ async fn exporter_posts_protobuf_to_the_langfuse_endpoint() {
     let runtime = components.runtime;
     let subscriber = tracing_subscriber::registry().with(layer);
     tracing::subscriber::with_default(subscriber, || {
-        let span = ObservationSpan::begin(ObservationStep::ValidateRequest, ObservationFields::default());
-        span.finish(ObservationFinish {
-            status: ObservationStatus::Ok,
-            ..ObservationFinish::default()
+        let session = ObservationSession::begin(
+            SessionSpec {
+                id: None,
+                user_id: None,
+                metadata: Vec::new(),
+            },
+            ContentCapture::new(ObservabilityContentConfig {
+                policy: ContentCapturePolicy::MetadataOnly,
+                max_field_bytes: 1024,
+                max_observation_bytes: 2048,
+                detector_overlap_bytes: 0,
+            }),
+        );
+        let trace = session.begin_trace(TraceSpec {
+            name: "test-trace",
+            input: None,
+            metadata: Vec::new(),
+            tags: Vec::new(),
         });
+        let observation = trace.begin_observation(ObservationSpec {
+            name: "validate-request",
+            kind: ObservationKind::Chain,
+            input: None,
+            metadata: Vec::new(),
+        });
+        observation.finish(ObservationOutcome {
+            status: ObservationStatus::Ok,
+            ..ObservationOutcome::default()
+        });
+        trace.finish(ObservationOutcome {
+            status: ObservationStatus::Ok,
+            ..ObservationOutcome::default()
+        });
+        session.finish(aise::observability::SessionOutcome::default());
     });
 
     let report = tokio::task::spawn_blocking(move || runtime.shutdown_with_timeout())

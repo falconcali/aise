@@ -41,7 +41,7 @@ impl TurnExecutionPipeline for StoryRepairer {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        _observation: &crate::observability::Observation,
+        observation: &crate::observability::Observation,
     ) -> Result<(), TurnExecutionError> {
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;
         let issue_count = projection.context.validation_issues.len();
@@ -78,7 +78,7 @@ impl TurnExecutionPipeline for StoryRepairer {
         );
         let completion = self
             .gateway
-            .complete_text_composed(scope, request, max_output_tokens, LlmCallPurpose::StoryRepair)
+            .complete_text_composed(scope, request, max_output_tokens, LlmCallPurpose::StoryRepair, observation)
             .instrument(span)
             .await
             .map_err(|error| {

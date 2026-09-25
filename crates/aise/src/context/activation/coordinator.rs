@@ -238,27 +238,20 @@ impl KnowledgeActivationCoordinator {
                 self.index_limits,
                 activation_rule_limits(&self.rule_limits, self.runtime_limits.max_scan_depth),
             )?;
-            let current = tracing::Span::current();
-            current.record("overlay_version", metadata.reference.overlay_version);
-            current.record("index_entries", metadata.entries.len());
-            current.record("overlay_entries", overlay.upserts.len());
-            current.record("tombstones", overlay.tombstones.len());
-            current.record(
-                "literal_patterns",
-                pack_index.literal_index.len().saturating_add(overlay.literal_index.len()),
-            );
-            current.record(
-                "regex_patterns",
-                pack_index.regex_set.len().saturating_add(overlay.regex_set.len()),
-            );
-            current.record(
-                "compiled_bytes",
-                pack_index
+            tracing::info!(
+                overlay_version = metadata.reference.overlay_version,
+                index_entries = metadata.entries.len(),
+                overlay_entries = overlay.upserts.len(),
+                tombstones = overlay.tombstones.len(),
+                literal_patterns = pack_index.literal_index.len().saturating_add(overlay.literal_index.len()),
+                regex_patterns = pack_index.regex_set.len().saturating_add(overlay.regex_set.len()),
+                compiled_bytes = pack_index
                     .estimated_bytes()
                     .saturating_add(overlay.literal_index.compiled_bytes())
                     .saturating_add(overlay.regex_set.compiled_bytes()),
+                frozen_cache_hit,
+                "activation overlay index composed"
             );
-            current.record("frozen_cache_hit", frozen_cache_hit);
             Ok(Arc::new(compose_index_snapshot(
                 metadata.reference.clone(),
                 &pack_index,

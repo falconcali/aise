@@ -85,7 +85,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        _observation: &crate::observability::Observation,
+        observation: &crate::observability::Observation,
     ) -> Result<(), TurnExecutionError> {
         let plan = ctx
             .plan()
@@ -159,6 +159,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                     max_output_tokens,
                     crate::turn::turn_contract::LlmCallPurpose::CharacterThink,
                     character_decision_contract(&self.config),
+                    observation,
                 )
                 .await
                 .map_err(|error| {

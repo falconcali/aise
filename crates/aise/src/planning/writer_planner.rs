@@ -144,6 +144,7 @@ impl TurnExecutionPipeline for WriterPlanner {
                 max_output_tokens,
                 crate::turn::turn_contract::LlmCallPurpose::WriterPlan,
                 writer_planner_contract(&self.config),
+                observation,
             )
             .await
             .map_err(|error| {

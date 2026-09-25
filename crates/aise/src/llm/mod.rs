@@ -3,6 +3,7 @@ pub mod error;
 pub mod gateway;
 pub mod limiter;
 pub mod message;
+pub mod observability;
 pub mod openai_compat;
 pub mod output_contract;
 pub mod provider;

@@ -1,0 +1,12 @@
+pub const METADATA_ATTEMPT: &str = "aise.observation.metadata.attempt";
+pub const METADATA_CALL_ID: &str = "aise.observation.metadata.call_id";
+pub const METADATA_CHARACTER_ID: &str = "aise.observation.metadata.character_id";
+pub const METADATA_CONTENT_ENCODE_FAILED: &str = "aise.observation.metadata.content_encode_failed";
+pub const METADATA_CORRECTION_ROUND: &str = "aise.observation.metadata.correction_round";
+pub const METADATA_FINISH_REASON: &str = "aise.observation.metadata.finish_reason";
+pub const METADATA_PROVIDER: &str = "aise.observation.metadata.provider";
+pub const METADATA_PROVIDER_LATENCY_MS: &str = "aise.observation.metadata.provider_latency_ms";
+pub const METADATA_QUEUE_WAIT_MS: &str = "aise.observation.metadata.queue_wait_ms";
+pub const METADATA_REASONING_CONTENT_AVAILABLE: &str = "aise.observation.metadata.reasoning_content_available";
+pub const METADATA_TOTAL_LATENCY_MS: &str = "aise.observation.metadata.total_latency_ms";
+pub const METADATA_USAGE_ACCURACY: &str = "aise.observation.metadata.usage_accuracy";

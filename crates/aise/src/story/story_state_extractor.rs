@@ -55,7 +55,7 @@ impl TurnExecutionPipeline for StoryStateExtractor {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        _observation: &crate::observability::Observation,
+        observation: &crate::observability::Observation,
     ) -> Result<(), TurnExecutionError> {
         let is_reextraction = ctx.phase() == TurnPhase::StateReextractionRequired;
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;
@@ -90,6 +90,7 @@ impl TurnExecutionPipeline for StoryStateExtractor {
                 max_output_tokens,
                 LlmCallPurpose::StoryStateExtraction,
                 contract,
+                observation,
             )
             .instrument(span)
             .await;

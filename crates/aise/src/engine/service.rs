@@ -80,7 +80,7 @@ impl AiseEngine {
         &self,
         spec: ExecuteTurnSpec,
         sink: &dyn TurnEventSink,
-        trace: Trace,
+        trace: &mut Trace,
     ) -> Result<CommittedTurnResult, TurnExecutionError> {
         match self.execute_turn(spec, sink, trace).await {
             TurnRunOutcome::Committed { result, .. } => Ok(result),
@@ -92,11 +92,9 @@ impl AiseEngine {
         &self,
         spec: ExecuteTurnSpec,
         sink: &dyn TurnEventSink,
-        mut trace: Trace,
+        trace: &mut Trace,
     ) -> TurnRunOutcome {
-        let outcome = self.execute_turn_inner(spec, sink, &mut trace).await;
-        finish_trace(trace, &outcome);
-        outcome
+        self.execute_turn_inner(spec, sink, trace).await
     }
 
     async fn execute_turn_inner(
@@ -352,48 +350,13 @@ fn execution_status(error: &TurnExecutionError) -> ObservationStatus {
     }
 }
 
+#[cfg(test)]
 fn terminal_status(error: &TurnExecutionError) -> &'static str {
     match error.kind() {
         TurnFailureKind::Cancelled => "cancelled",
         TurnFailureKind::DeadlineExceeded => "deadline_exceeded",
         TurnFailureKind::RevisionConflict | TurnFailureKind::IdempotencyConflict => "conflict",
         _ => "failed",
-    }
-}
-
-fn finish_trace(mut trace: Trace, outcome: &TurnRunOutcome) {
-    match outcome {
-        TurnRunOutcome::Committed { result, replayed } => {
-            let metadata = vec![
-                Attribute::bool("aise.observation.metadata.replayed", *replayed),
-                Attribute::string(
-                    "aise.observation.metadata.terminal_status",
-                    if *replayed { "replayed" } else { "committed" },
-                ),
-            ];
-            trace.bind(vec![Attribute::u64(
-                "aise.trace.metadata.turn_number",
-                result.turn_number.get(),
-            )]);
-            trace.finish(ObservationOutcome {
-                status: ObservationStatus::Ok,
-                metadata,
-                ..ObservationOutcome::default()
-            });
-        }
-        TurnRunOutcome::Failed(error) => {
-            trace.finish(ObservationOutcome {
-                status: execution_status(error),
-                metadata: failure_metadata(error),
-                error: Some(ObservationError {
-                    code: error.code().into(),
-                    failure_kind: failure_kind(error.kind()).into(),
-                    stage: error.stage().map(|stage| stage.as_str().into()),
-                    message: error.to_string(),
-                }),
-                ..ObservationOutcome::default()
-            });
-        }
     }
 }
 
@@ -431,6 +394,7 @@ fn root_trace_output(outcome: &TurnRunOutcome) -> RootTraceOutput<'_> {
     }
 }
 
+#[cfg(test)]
 const fn failure_kind(kind: TurnFailureKind) -> &'static str {
     match kind {
         TurnFailureKind::InvalidRequest => "invalid_request",
@@ -450,17 +414,6 @@ const fn failure_kind(kind: TurnFailureKind) -> &'static str {
     }
 }
 
-fn failure_metadata(error: &TurnExecutionError) -> Vec<Attribute> {
-    let mut metadata = vec![
-        Attribute::bool("aise.observation.metadata.replayed", false),
-        Attribute::string("aise.observation.metadata.terminal_status", terminal_status(error)),
-    ];
-    if let Some(stage) = error.stage() {
-        metadata.push(Attribute::string("aise.observation.metadata.failure_stage", stage.as_str()));
-    }
-    metadata
-}
-
 fn engine_observation(trace: &Trace, name: &'static str) -> crate::observability::Observation {
     trace.begin_observation(ObservationSpec {
         name,
@@ -471,5 +424,5 @@ fn engine_observation(trace: &Trace, name: &'static str) -> crate::observability
 }
 
 #[cfg(test)]
-#[path = "tests/engine_tests.rs"]
+#[path = "../tests/engine_tests.rs"]
 mod tests;

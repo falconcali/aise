@@ -6,20 +6,22 @@ use crate::llm::limiter::LlmLimiter;
 use crate::llm::message::{
     ChatMessage, CompletionOutputSpec, CompletionRequest, CompletionSpec, EmbeddingOutput, EmbeddingRequest, Role,
 };
+use crate::llm::observability::{
+    METADATA_ATTEMPT, METADATA_CALL_ID, METADATA_CHARACTER_ID, METADATA_CONTENT_ENCODE_FAILED,
+    METADATA_CORRECTION_ROUND, METADATA_FINISH_REASON, METADATA_PROVIDER, METADATA_PROVIDER_LATENCY_MS,
+    METADATA_QUEUE_WAIT_MS, METADATA_REASONING_CONTENT_AVAILABLE, METADATA_TOTAL_LATENCY_MS, METADATA_USAGE_ACCURACY,
+};
 use crate::llm::output_contract::{
     CompletionOutputRequest, LlmOutputContract, ResolvedStructuredOutputRequest, StructuredLlmCompletion,
     canonical_schema_hash, resolve_structured_output_mode,
 };
 use crate::llm::provider::{DeltaSink, LlmProvider};
-use crate::prompt::{PromptComposition, PromptCompositionInput, TrustedPromptSource};
-use crate::turn::observability::{
-    BoundedContentEncoder, ContentCaptureLimits, ContentCapturePolicy, GenerationUsage, METADATA_ATTEMPT,
-    METADATA_CALL_ID, METADATA_CHARACTER_ID, METADATA_CONTENT_ENCODE_FAILED, METADATA_CORRECTION_ROUND,
-    METADATA_FINISH_REASON, METADATA_PROVIDER, METADATA_PROVIDER_LATENCY_MS, METADATA_QUEUE_WAIT_MS,
-    METADATA_REASONING_CONTENT_AVAILABLE, METADATA_TOTAL_LATENCY_MS, METADATA_USAGE_ACCURACY, OBSERVATION_MODEL_NAME,
-    OBSERVATION_MODEL_PARAMETERS, ObservationAttribute, ObservationError, ObservationFields, ObservationFinish,
-    ObservationSpan, ObservationStatus,
+use crate::observability::{
+    Attribute, ContentCapture, ContentCapturePolicy, GenerationUsage, OBSERVATION_MODEL_NAME,
+    OBSERVATION_MODEL_PARAMETERS, ObservabilityContentConfig, Observation, ObservationError, ObservationOutcome,
+    ObservationSpec, ObservationStatus,
 };
+use crate::prompt::{PromptComposition, PromptCompositionInput, TrustedPromptSource};
 use crate::turn::turn_context::TurnLlmCallScope;
 use crate::turn::turn_contract::{LlmBudgetReservation, LlmCallPurpose, LlmCallUsage, UsageAccuracy};
 use crate::turn::turn_error::TurnExecutionError;
@@ -35,12 +37,11 @@ pub struct LlmGateway {
     config: LlmConfig,
     accountant: TokenAccountant,
     observation_policy: ContentCapturePolicy,
-    observation_limits: ContentCaptureLimits,
+    observation_limits: ObservabilityContentConfig,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct LlmObservation<'a> {
-    pub step: crate::turn::observability::ObservationStep,
     pub attempt: u32,
     pub correction_round: Option<u32>,
     pub character_id: Option<&'a str>,
@@ -77,7 +78,8 @@ impl LlmGateway {
             config,
             accountant,
             observation_policy: ContentCapturePolicy::MetadataOnly,
-            observation_limits: ContentCaptureLimits {
+            observation_limits: ObservabilityContentConfig {
+                policy: ContentCapturePolicy::MetadataOnly,
                 max_field_bytes: 16_384,
                 max_observation_bytes: 32_768,
                 detector_overlap_bytes: 512,
@@ -85,8 +87,13 @@ impl LlmGateway {
         })
     }
 
-    pub fn with_observation_capture(mut self, policy: ContentCapturePolicy, limits: ContentCaptureLimits) -> Self {
-        self.observation_policy = policy;
+    pub fn with_observation_capture(
+        mut self,
+        policy: ContentCapturePolicy,
+        mut limits: ObservabilityContentConfig,
+    ) -> Self {
+        self.observation_policy = policy.clone();
+        limits.policy = policy;
         self.observation_limits = limits;
         self
     }
@@ -97,6 +104,7 @@ impl LlmGateway {
         input: PromptCompositionInput,
         max_output_tokens: u32,
         purpose: LlmCallPurpose,
+        parent: &Observation,
     ) -> Result<LlmCompletion, LlmError> {
         let composition = self.render_composition(&input)?;
         let spec = CompletionSpec {
@@ -109,7 +117,7 @@ impl LlmGateway {
         let reservation = scope
             .reserve_llm(estimated_input, u64::from(spec.max_output_tokens))
             .map_err(|error| LlmError::TokenBudgetExceeded(error.to_string()))?;
-        self.complete(scope, spec, reservation).await
+        self.complete(scope, spec, reservation, parent).await
     }
 
     pub async fn complete_structured_composed<T>(
@@ -119,6 +127,7 @@ impl LlmGateway {
         max_output_tokens: u32,
         purpose: LlmCallPurpose,
         contract: LlmOutputContract<T>,
+        parent: &Observation,
     ) -> Result<StructuredLlmCompletion<T>, LlmError>
     where
         T: DeserializeOwned + Send + 'static,
@@ -173,7 +182,7 @@ impl LlmGateway {
             .map_err(|error| LlmError::TokenBudgetExceeded(error.to_string()))?;
 
         let completion = self
-            .run_call(&mut scope, request, false, None, reservation, Some(check))
+            .run_call(&mut scope, request, false, None, reservation, Some(check), parent)
             .await?;
         let value = serde_json::from_str::<T>(&completion.text).map_err(|_| LlmError::Protocol {
             kind: crate::llm::error::LlmProtocolErrorKind::InvalidStructuredOutput,
@@ -210,6 +219,7 @@ impl LlmGateway {
         mut scope: TurnLlmCallScope<'_>,
         spec: CompletionSpec,
         reservation: LlmBudgetReservation,
+        parent: &Observation,
     ) -> Result<LlmCompletion, LlmError> {
         let output = match spec.output {
             CompletionOutputSpec::Text => CompletionOutputRequest::Text,
@@ -228,7 +238,7 @@ impl LlmGateway {
             purpose: spec.purpose,
             output,
         };
-        self.execute_call(&mut scope, request, false, None, reservation).await
+        self.execute_call(&mut scope, request, false, None, reservation, parent).await
     }
 
     pub async fn complete_stream(
@@ -237,6 +247,7 @@ impl LlmGateway {
         spec: CompletionSpec,
         reservation: LlmBudgetReservation,
         sink: DeltaSink,
+        parent: &Observation,
     ) -> Result<LlmCompletion, LlmError> {
         let output = match spec.output {
             CompletionOutputSpec::Text => CompletionOutputRequest::Text,
@@ -255,7 +266,8 @@ impl LlmGateway {
             purpose: spec.purpose,
             output,
         };
-        self.execute_call_owned(scope, request, true, Some(sink), reservation).await
+        self.execute_call_owned(scope, request, true, Some(sink), reservation, parent)
+            .await
     }
 
     pub async fn embed(
@@ -263,6 +275,7 @@ impl LlmGateway {
         mut scope: TurnLlmCallScope<'_>,
         inputs: Vec<String>,
         reservation: LlmBudgetReservation,
+        parent: &Observation,
     ) -> Result<EmbeddingOutput, LlmError> {
         if scope.cancellation().is_cancelled() {
             scope.release_llm(reservation);
@@ -319,14 +332,15 @@ impl LlmGateway {
             inputs,
         };
         let generation = begin_embedding_generation(
-            self.observation_policy,
+            self.observation_policy.clone(),
             &self.observation_limits,
             self.provider.provider_name(),
             &scope,
             &request,
+            parent,
         );
         let provider_outcome = generation
-            .in_scope(async {
+            .trace(async {
                 let call = self.provider.embed(&request);
                 async {
                     tokio::select! {
@@ -382,19 +396,19 @@ impl LlmGateway {
         let observation_call_id = call_usage.call_id.as_str().to_owned();
         let settle = scope.settle_llm(reservation, call_usage);
         let mut generation = generation;
-        generation.record_attribute(ObservationAttribute::string(METADATA_CALL_ID, observation_call_id));
-        generation.record_attribute(ObservationAttribute::u64(METADATA_QUEUE_WAIT_MS, queue_wait_ms));
-        generation.record_attribute(ObservationAttribute::u64(METADATA_PROVIDER_LATENCY_MS, provider_latency_ms));
-        generation.record_attribute(ObservationAttribute::u64(METADATA_TOTAL_LATENCY_MS, total_latency_ms));
-        generation.record_attribute(ObservationAttribute::string(METADATA_USAGE_ACCURACY, usage.accuracy.as_str()));
-        generation.finish(ObservationFinish {
+        generation.record_attribute(Attribute::string(METADATA_CALL_ID, observation_call_id));
+        generation.record_attribute(Attribute::u64(METADATA_QUEUE_WAIT_MS, queue_wait_ms));
+        generation.record_attribute(Attribute::u64(METADATA_PROVIDER_LATENCY_MS, provider_latency_ms));
+        generation.record_attribute(Attribute::u64(METADATA_TOTAL_LATENCY_MS, total_latency_ms));
+        generation.record_attribute(Attribute::string(METADATA_USAGE_ACCURACY, usage.accuracy.as_str()));
+        generation.finish(ObservationOutcome {
             status: provider_error
                 .as_ref()
                 .map(llm_observation_status)
                 .unwrap_or(ObservationStatus::Ok),
             error: provider_error.as_ref().map(llm_observation_error),
             usage: Some(generation_usage(&usage)),
-            ..ObservationFinish::default()
+            ..ObservationOutcome::default()
         });
         drop(permit);
         settle.map_err(budget_to_llm)?;
@@ -413,13 +427,14 @@ impl LlmGateway {
         stream: bool,
         sink: Option<DeltaSink>,
         reservation: LlmBudgetReservation,
+        parent: &Observation,
     ) -> Result<LlmCompletion, LlmError> {
         if stream && sink.is_none() {
             return Err(LlmError::Protocol {
                 kind: crate::llm::error::LlmProtocolErrorKind::InvalidSseLine,
             });
         }
-        self.run_call(scope, request, stream, sink, reservation, None).await
+        self.run_call(scope, request, stream, sink, reservation, None, parent).await
     }
 
     async fn execute_call_owned(
@@ -429,8 +444,10 @@ impl LlmGateway {
         stream: bool,
         sink: Option<DeltaSink>,
         reservation: LlmBudgetReservation,
+        parent: &Observation,
     ) -> Result<LlmCompletion, LlmError> {
-        self.run_call(&mut scope, request, stream, sink, reservation, None).await
+        self.run_call(&mut scope, request, stream, sink, reservation, None, parent)
+            .await
     }
 
     async fn run_call(
@@ -441,33 +458,35 @@ impl LlmGateway {
         sink: Option<DeltaSink>,
         reservation: LlmBudgetReservation,
         structured: Option<StructuredCheck>,
+        parent: &Observation,
     ) -> Result<LlmCompletion, LlmError> {
         let structured_check = structured;
         let call_id = reservation.call_id().clone();
         let mut generation = begin_generation(
-            self.observation_policy,
+            self.observation_policy.clone(),
             &self.observation_limits,
             self.provider.provider_name(),
             thinking_mode(self.config.thinking),
             scope,
             &request,
+            parent,
         );
         let call_started = Instant::now();
 
         if scope.cancellation().is_cancelled() {
-            generation.finish(ObservationFinish {
+            generation.finish(ObservationOutcome {
                 status: ObservationStatus::Cancelled,
                 error: Some(llm_observation_error(&LlmError::Cancelled)),
-                ..ObservationFinish::default()
+                ..ObservationOutcome::default()
             });
             scope.release_llm(reservation);
             return Err(LlmError::Cancelled);
         }
         if call_started >= scope.deadline() {
-            generation.finish(ObservationFinish {
+            generation.finish(ObservationOutcome {
                 status: ObservationStatus::DeadlineExceeded,
                 error: Some(llm_observation_error(&LlmError::TurnDeadlineExceeded)),
-                ..ObservationFinish::default()
+                ..ObservationOutcome::default()
             });
             scope.release_llm(reservation);
             return Err(LlmError::TurnDeadlineExceeded);
@@ -480,10 +499,10 @@ impl LlmGateway {
             .acquire_quota(estimated_input, max_output, scope.deadline(), scope.cancellation())
             .await
         {
-            generation.finish(ObservationFinish {
+            generation.finish(ObservationOutcome {
                 status: llm_observation_status(&error),
                 error: Some(llm_observation_error(&error)),
-                ..ObservationFinish::default()
+                ..ObservationOutcome::default()
             });
             scope.release_llm(reservation);
             return Err(error);
@@ -502,10 +521,10 @@ impl LlmGateway {
                     error = %error,
                     "llm call left the queue without reaching the provider"
                 );
-                generation.finish(ObservationFinish {
+                generation.finish(ObservationOutcome {
                     status: llm_observation_status(&error),
                     error: Some(llm_observation_error(&error)),
-                    ..ObservationFinish::default()
+                    ..ObservationOutcome::default()
                 });
                 scope.release_llm(reservation);
                 return Err(error);
@@ -530,7 +549,7 @@ impl LlmGateway {
             model = %self.config.model,
         );
         let provider_outcome: Result<LlmCompletion, LlmError> = generation
-            .in_scope(async {
+            .trace(async {
                 match stream {
                     false => {
                         let call = self.provider.complete(&request);
@@ -628,20 +647,20 @@ impl LlmGateway {
         let call_usage = self.usage_to_call_usage(call_id, request.purpose, &usage, &charge_value, finish_reason_owned);
         let observation_call_id = call_usage.call_id.as_str().to_owned();
         let settle = scope.settle_llm(reservation, call_usage);
-        generation.record_attribute(ObservationAttribute::string(METADATA_CALL_ID, observation_call_id));
-        generation.record_attribute(ObservationAttribute::u64(METADATA_QUEUE_WAIT_MS, queue_wait_ms));
-        generation.record_attribute(ObservationAttribute::u64(METADATA_PROVIDER_LATENCY_MS, provider_latency_ms));
-        generation.record_attribute(ObservationAttribute::u64(METADATA_TOTAL_LATENCY_MS, total_latency_ms));
-        generation.record_attribute(ObservationAttribute::string(METADATA_USAGE_ACCURACY, usage.accuracy.as_str()));
-        generation.record_attribute(ObservationAttribute::bool(
+        generation.record_attribute(Attribute::string(METADATA_CALL_ID, observation_call_id));
+        generation.record_attribute(Attribute::u64(METADATA_QUEUE_WAIT_MS, queue_wait_ms));
+        generation.record_attribute(Attribute::u64(METADATA_PROVIDER_LATENCY_MS, provider_latency_ms));
+        generation.record_attribute(Attribute::u64(METADATA_TOTAL_LATENCY_MS, total_latency_ms));
+        generation.record_attribute(Attribute::string(METADATA_USAGE_ACCURACY, usage.accuracy.as_str()));
+        generation.record_attribute(Attribute::bool(
             METADATA_REASONING_CONTENT_AVAILABLE,
             usage.reasoning_tokens.unwrap_or_default() > 0,
         ));
         if let Some(reason) = &finish_reason_string {
-            generation.record_attribute(ObservationAttribute::string(METADATA_FINISH_REASON, reason));
+            generation.record_attribute(Attribute::string(METADATA_FINISH_REASON, reason));
         }
         finish_generation(
-            self.observation_policy,
+            self.observation_policy.clone(),
             &self.observation_limits,
             generation,
             completion.as_ref(),
@@ -687,14 +706,15 @@ impl LlmGateway {
 }
 
 fn begin_generation(
-    policy: ContentCapturePolicy,
-    limits: &ContentCaptureLimits,
+    _policy: ContentCapturePolicy,
+    limits: &ObservabilityContentConfig,
     provider: &str,
     thinking: &'static str,
     scope: &TurnLlmCallScope<'_>,
     request: &CompletionRequest,
-) -> crate::turn::observability::ObservationSpan {
-    let encoder = BoundedContentEncoder::new(policy, limits.clone());
+    parent: &Observation,
+) -> Observation {
+    let encoder = ContentCapture::new(limits.clone());
     let parameters = serde_json::json!({
         "temperature": request.temperature,
         "max_tokens": request.max_tokens,
@@ -702,82 +722,82 @@ fn begin_generation(
     })
     .to_string();
     let mut metadata = vec![
-        ObservationAttribute::string(METADATA_PROVIDER, provider),
-        ObservationAttribute::u64(METADATA_ATTEMPT, scope.attempt() as u64),
-        ObservationAttribute::u64(METADATA_QUEUE_WAIT_MS, 0),
-        ObservationAttribute::u64(METADATA_PROVIDER_LATENCY_MS, 0),
-        ObservationAttribute::u64(METADATA_TOTAL_LATENCY_MS, 0),
-        ObservationAttribute::string(OBSERVATION_MODEL_NAME, request.model.clone()),
-        ObservationAttribute::string(OBSERVATION_MODEL_PARAMETERS, parameters),
+        Attribute::string(METADATA_PROVIDER, provider),
+        Attribute::u64(METADATA_ATTEMPT, scope.attempt() as u64),
+        Attribute::u64(METADATA_QUEUE_WAIT_MS, 0),
+        Attribute::u64(METADATA_PROVIDER_LATENCY_MS, 0),
+        Attribute::u64(METADATA_TOTAL_LATENCY_MS, 0),
+        Attribute::string(OBSERVATION_MODEL_NAME, request.model.clone()),
+        Attribute::string(OBSERVATION_MODEL_PARAMETERS, parameters),
     ];
     if let Some(round) = scope.correction_round() {
-        metadata.push(ObservationAttribute::u64(METADATA_CORRECTION_ROUND, round as u64));
+        metadata.push(Attribute::u64(METADATA_CORRECTION_ROUND, round as u64));
     }
     if let Some(character_id) = scope.character_id() {
-        metadata.push(ObservationAttribute::string(METADATA_CHARACTER_ID, character_id));
+        metadata.push(Attribute::string(METADATA_CHARACTER_ID, character_id));
     }
-    let mut observation =
-        ObservationSpan::begin(llm_observation_step(scope.stage()), ObservationFields { metadata, input: None });
-    if observation.is_recording() {
-        let (input, encoding_failed) = encoder.encode_with_status(&request.messages, limits.max_observation_bytes);
-        if encoding_failed {
-            observation.record_attribute(ObservationAttribute::bool(METADATA_CONTENT_ENCODE_FAILED, true));
-        }
-        observation.record_fields(ObservationFields {
-            metadata: Vec::new(),
-            input,
-        });
+    let captured = encoder.encode(&request.messages, limits.max_observation_bytes);
+    let mut spec = ObservationSpec {
+        name: "llm-generation",
+        kind: crate::observability::ObservationKind::Generation,
+        input: captured.content,
+        metadata,
+    };
+    if captured.encode_failed {
+        spec.metadata.push(Attribute::bool(METADATA_CONTENT_ENCODE_FAILED, true));
     }
-    observation
+    parent.begin(spec)
 }
 
 fn begin_embedding_generation(
-    policy: ContentCapturePolicy,
-    limits: &ContentCaptureLimits,
+    _policy: ContentCapturePolicy,
+    limits: &ObservabilityContentConfig,
     provider: &str,
     scope: &TurnLlmCallScope<'_>,
     request: &EmbeddingRequest,
-) -> crate::turn::observability::ObservationSpan {
-    let encoder = BoundedContentEncoder::new(policy, limits.clone());
+    parent: &Observation,
+) -> Observation {
+    let encoder = ContentCapture::new(limits.clone());
     let mut metadata = vec![
-        ObservationAttribute::string(METADATA_PROVIDER, provider),
-        ObservationAttribute::u64(METADATA_ATTEMPT, scope.attempt() as u64),
-        ObservationAttribute::string(OBSERVATION_MODEL_NAME, request.model.clone()),
-        ObservationAttribute::string(
+        Attribute::string(METADATA_PROVIDER, provider),
+        Attribute::u64(METADATA_ATTEMPT, scope.attempt() as u64),
+        Attribute::string(OBSERVATION_MODEL_NAME, request.model.clone()),
+        Attribute::string(
             OBSERVATION_MODEL_PARAMETERS,
             serde_json::json!({"thinking": "provider_default"}).to_string(),
         ),
     ];
     if let Some(round) = scope.correction_round() {
-        metadata.push(ObservationAttribute::u64(METADATA_CORRECTION_ROUND, round as u64));
+        metadata.push(Attribute::u64(METADATA_CORRECTION_ROUND, round as u64));
     }
-    let mut observation =
-        ObservationSpan::begin(llm_observation_step(scope.stage()), ObservationFields { metadata, input: None });
-    if observation.is_recording() {
-        let (input, encoding_failed) = encoder.encode_with_status(&request.inputs, limits.max_observation_bytes);
-        if encoding_failed {
-            observation.record_attribute(ObservationAttribute::bool(METADATA_CONTENT_ENCODE_FAILED, true));
-        }
-        observation.record_fields(ObservationFields {
-            metadata: Vec::new(),
-            input,
-        });
+    let captured = encoder.encode(&request.inputs, limits.max_observation_bytes);
+    let mut spec = ObservationSpec {
+        name: "llm-embedding",
+        kind: crate::observability::ObservationKind::Generation,
+        input: captured.content,
+        metadata,
+    };
+    if captured.encode_failed {
+        spec.metadata.push(Attribute::bool(METADATA_CONTENT_ENCODE_FAILED, true));
     }
-    observation
+    parent.begin(spec)
 }
 
 fn finish_generation(
-    policy: ContentCapturePolicy,
-    limits: &ContentCaptureLimits,
-    generation: crate::turn::observability::ObservationSpan,
+    _policy: ContentCapturePolicy,
+    limits: &ObservabilityContentConfig,
+    generation: Observation,
     completion: Option<&LlmCompletion>,
     error: Option<&LlmError>,
     usage: &crate::llm::accounting::LlmTokenUsage,
 ) {
-    let encoder = BoundedContentEncoder::new(policy, limits.clone());
+    let encoder = ContentCapture::new(limits.clone());
     let (output, encoding_failed) = if generation.is_recording() {
         completion
-            .map(|completion| encoder.encode_with_status(&completion.text, limits.max_observation_bytes))
+            .map(|completion| {
+                let captured = encoder.encode(&completion.text, limits.max_observation_bytes);
+                (captured.content, captured.encode_failed)
+            })
             .unwrap_or((None, false))
     } else {
         (None, false)
@@ -785,42 +805,18 @@ fn finish_generation(
     let status = error.map(llm_observation_status).unwrap_or(ObservationStatus::Ok);
     let error = error.map(llm_observation_error);
     let metadata = if encoding_failed {
-        vec![ObservationAttribute::bool(METADATA_CONTENT_ENCODE_FAILED, true)]
+        vec![Attribute::bool(METADATA_CONTENT_ENCODE_FAILED, true)]
     } else {
         Vec::new()
     };
-    generation.finish(ObservationFinish {
+    generation.finish(ObservationOutcome {
         status,
         metadata,
         output,
         error,
         usage: Some(generation_usage(usage)),
-        ..ObservationFinish::default()
+        ..ObservationOutcome::default()
     });
-}
-
-fn llm_observation_step(stage: crate::turn::turn_pipeline::TurnStage) -> crate::turn::observability::ObservationStep {
-    match stage {
-        crate::turn::turn_pipeline::TurnStage::WriterPlanner => {
-            crate::turn::observability::ObservationStep::GenerateWriterPlan
-        }
-        crate::turn::turn_pipeline::TurnStage::ContextRetrieval => {
-            crate::turn::observability::ObservationStep::RetrieveContext
-        }
-        crate::turn::turn_pipeline::TurnStage::CharacterThink => {
-            crate::turn::observability::ObservationStep::ThinkCharacter
-        }
-        crate::turn::turn_pipeline::TurnStage::StoryGenerator => {
-            crate::turn::observability::ObservationStep::DraftStoryText
-        }
-        crate::turn::turn_pipeline::TurnStage::StoryStateExtractor => {
-            crate::turn::observability::ObservationStep::InferStoryState
-        }
-        crate::turn::turn_pipeline::TurnStage::StoryRepairer => {
-            crate::turn::observability::ObservationStep::ReviseStoryText
-        }
-        _ => crate::turn::observability::ObservationStep::GenerateStory,
-    }
 }
 
 fn generation_usage(usage: &crate::llm::accounting::LlmTokenUsage) -> GenerationUsage {

@@ -201,21 +201,55 @@ impl TurnSubmissionService {
         let task = TurnTaskSpec {
             cancellation: request.cancellation,
             future: Box::pin(async move {
-                if let Err(error) = engine.run_turn(spec, sink.as_ref(), trace).await {
+                let session = session;
+                let result = engine.run_turn(spec, sink.as_ref(), &mut trace).await;
+                let trace_outcome = match &result {
+                    Ok(result) => {
+                        trace.bind(vec![aise::observability::Attribute::u64(
+                            aise::observability::TRACE_METADATA_TURN_NUMBER,
+                            result.turn_number.get(),
+                        )]);
+                        ObservationOutcome {
+                            status: ObservationStatus::Ok,
+                            ..ObservationOutcome::default()
+                        }
+                    }
+                    Err(error) => ObservationOutcome {
+                        status: turn_observation_status(error.kind()),
+                        error: Some(ObservationError {
+                            code: error.code().into(),
+                            failure_kind: failure_kind(error.kind()).into(),
+                            stage: error.stage().map(|stage| stage.as_str().into()),
+                            message: error.to_string(),
+                        }),
+                        ..ObservationOutcome::default()
+                    },
+                };
+                trace.finish(trace_outcome);
+                if let Err(error) = result {
                     tracing::error!(
                         error = %error,
                         error_kind = failure_kind(error.kind()),
                         "turn task failed"
                     );
                 }
+                session.finish(aise::observability::SessionOutcome {
+                    status: aise::observability::ObservationStatus::Ok,
+                    metadata: Vec::new(),
+                });
             }),
         };
         self.tasks.spawn_reserved(permit, task);
-        session.finish(aise::observability::SessionOutcome {
-            status: ObservationStatus::Ok,
-            metadata: Vec::new(),
-        });
         Ok(())
+    }
+}
+
+fn turn_observation_status(kind: TurnFailureKind) -> ObservationStatus {
+    match kind {
+        TurnFailureKind::Cancelled => ObservationStatus::Cancelled,
+        TurnFailureKind::DeadlineExceeded => ObservationStatus::DeadlineExceeded,
+        TurnFailureKind::RevisionConflict | TurnFailureKind::IdempotencyConflict => ObservationStatus::Conflict,
+        _ => ObservationStatus::Error,
     }
 }
 
