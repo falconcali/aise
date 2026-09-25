@@ -5,58 +5,31 @@ use crate::observability::{
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_pipeline::TurnStage;
 
-pub struct LoadStorySnapshotObservation {
-    observation: Observation,
+pub fn begin_load_story_snapshot_observation(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+    begin_observation(parent, ctx, "load-story-snapshot")
 }
 
-pub fn begin_load_story_snapshot(parent: &Observation, ctx: &TurnExecutionContext) -> LoadStorySnapshotObservation {
-    LoadStorySnapshotObservation {
-        observation: parent.begin(ObservationSpec {
-            name: "load-story-snapshot",
-            kind: ObservationKind::Retriever,
-            input: None,
-            metadata: vec![Attribute::string(
-                "aise.observation.metadata.story_id",
-                ctx.story_id().as_str(),
-            )],
-        }),
-    }
+pub fn begin_activate_world_info_observation(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+    begin_observation(parent, ctx, "activate-world-info")
 }
 
-impl LoadStorySnapshotObservation {
-    pub fn finish<T, E>(self, outcome: &Result<T, E>)
-    where
-        E: Clone + Into<ContextError>,
-    {
-        self.observation.finish(context_outcome(outcome, TurnStage::BaselineBuilder));
-    }
+pub fn finish_observation<T, E>(observation: Observation, outcome: &Result<T, E>)
+where
+    E: Clone + Into<ContextError>,
+{
+    observation.finish(context_outcome(outcome, TurnStage::BaselineBuilder));
 }
 
-pub struct ActivateWorldInfoObservation {
-    observation: Observation,
-}
-
-pub fn begin_activate_world_info(parent: &Observation, ctx: &TurnExecutionContext) -> ActivateWorldInfoObservation {
-    ActivateWorldInfoObservation {
-        observation: parent.begin(ObservationSpec {
-            name: "activate-world-info",
-            kind: ObservationKind::Retriever,
-            input: None,
-            metadata: vec![Attribute::string(
-                "aise.observation.metadata.story_id",
-                ctx.story_id().as_str(),
-            )],
-        }),
-    }
-}
-
-impl ActivateWorldInfoObservation {
-    pub fn finish<T, E>(self, outcome: &Result<T, E>)
-    where
-        E: Clone + Into<ContextError>,
-    {
-        self.observation.finish(context_outcome(outcome, TurnStage::BaselineBuilder));
-    }
+fn begin_observation(parent: &Observation, ctx: &TurnExecutionContext, name: &'static str) -> Observation {
+    parent.begin(ObservationSpec {
+        name,
+        kind: ObservationKind::Retriever,
+        input: None,
+        metadata: vec![Attribute::string(
+            "aise.observation.metadata.story_id",
+            ctx.story_id().as_str(),
+        )],
+    })
 }
 
 fn context_outcome<T, E>(outcome: &Result<T, E>, stage: TurnStage) -> ObservationOutcome

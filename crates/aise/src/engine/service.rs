@@ -120,50 +120,54 @@ impl AiseEngine {
         let cancellation = validated.cancellation().clone();
         let deadline = Instant::now() + Duration::from_millis(self.config.turn.turn_timeout_ms);
 
-        let coordinate_span = observability::begin_coordinate_story_turn(trace);
+        let coordinate_span = observability::begin_coordinate_story_turn_observation(trace);
         let permit_result = self.coordinator.acquire(&story_id, deadline, &cancellation).await;
         let permit = match permit_result {
             Ok(permit) => Some(permit),
             Err(error) => {
-                coordinate_span.finish_error(&error);
-                return self.finalize(None, Err(error), sink, None).await;
+                let outcome = Err(error);
+                observability::finish_observation(coordinate_span, &outcome);
+                return self.finalize(None, outcome, sink, None).await;
             }
         };
-        coordinate_span.finish_ok();
+        observability::finish_observation(coordinate_span, &Ok(()));
 
-        let load_span = observability::begin_load_story(trace);
+        let load_span = observability::begin_load_story_observation(trace);
         let story_info_result = self.store.get_story(&story_id).await;
         let story_info = match story_info_result {
             Ok(Some(info)) => info,
             Ok(None) => {
-                load_span.finish_story_not_found();
                 let failure = TurnExecutionError::new(
                     TurnFailureKind::StoryNotFound,
                     "story_not_found",
                     None,
                     format!("story {} not found", story_id.as_str()),
                 );
-                return self.finalize(None, Err(failure), sink, permit).await;
+                let outcome = Err(failure);
+                observability::finish_observation(load_span, &outcome);
+                return self.finalize(None, outcome, sink, permit).await;
             }
             Err(error) => {
                 let failure = TurnExecutionError::from(error);
-                load_span.finish_error(&failure);
-                return self.finalize(None, Err(failure), sink, permit).await;
+                let outcome = Err(failure);
+                observability::finish_observation(load_span, &outcome);
+                return self.finalize(None, outcome, sink, permit).await;
             }
         };
-        load_span.finish_ok();
+        observability::finish_observation(load_span, &Ok(()));
 
-        let idempotency_span = observability::begin_check_idempotency(trace);
+        let idempotency_span = observability::begin_check_idempotency_observation(trace);
         let replay_result = self.store.find_committed_turn(&story_id, &idempotency_key).await;
         let replay = match replay_result {
             Ok(outcome) => outcome,
             Err(error) => {
                 let failure = TurnExecutionError::from(error);
-                idempotency_span.finish_error(&failure);
-                return self.finalize(None, Err(failure), sink, permit).await;
+                let outcome = Err(failure);
+                observability::finish_observation(idempotency_span, &outcome);
+                return self.finalize(None, outcome, sink, permit).await;
             }
         };
-        idempotency_span.finish_ok();
+        observability::finish_observation(idempotency_span, &Ok(()));
         if let Some(StoredTurnOutcome { request_digest, result }) = replay {
             if request_digest == *request.request_digest() {
                 let outcome = TurnRunOutcome::Committed { result, replayed: true };

@@ -24,9 +24,9 @@ impl TurnRuntime {
         sink: &dyn TurnEventSink,
         trace: &Trace,
     ) -> Result<(), TurnExecutionError> {
-        let run_observation = observability::RunTurnPipelinesObservation::begin(trace);
-        let result = self.run_inner(ctx, sink, run_observation.observation()).await;
-        run_observation.finish(ctx, &result);
+        let run_observation = observability::begin_run_turn_pipelines_observation(trace);
+        let result = self.run_inner(ctx, sink, &run_observation).await;
+        observability::end_turn_observation(run_observation, ctx, &result);
         result
     }
 
@@ -127,9 +127,9 @@ impl TurnRuntime {
             turn_number: Some(ctx.turn_number()),
             stage,
         });
-        let observation = observability::PipelineStageObservation::begin(parent, stage);
-        let outcome = pipeline.execute(ctx, observation.observation()).await;
-        observation.finish(&outcome);
+        let observation = observability::begin_pipeline_stage_observation(parent, stage);
+        let outcome = pipeline.execute(ctx, &observation).await;
+        observability::end_stage_observation(observation, &outcome);
         if outcome.is_ok() {
             if let Some(exits) = stage_exit_phases(stage) {
                 if !exits.contains(&ctx.phase()) {

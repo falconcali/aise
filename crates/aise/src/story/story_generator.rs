@@ -146,7 +146,7 @@ impl TurnExecutionPipeline for StoryGenerator {
             writer_knowledge_count,
             constraint_count,
         );
-        let draft_observation = observability::begin_draft_story_text(observation);
+        let draft_observation = observability::begin_draft_story_text_observation(observation);
         let completion_result = self
             .gateway
             .complete_text_composed(
@@ -154,7 +154,7 @@ impl TurnExecutionPipeline for StoryGenerator {
                 request,
                 max_output_tokens,
                 LlmCallPurpose::StoryGeneration,
-                draft_observation.observation(),
+                &draft_observation,
             )
             .instrument(span)
             .await;
@@ -166,7 +166,7 @@ impl TurnExecutionPipeline for StoryGenerator {
                 error.to_string(),
             )
         });
-        draft_observation.finish(&mapped_result);
+        observability::end_generation_observation(draft_observation, &mapped_result);
         let completion = completion_result.map_err(|error| {
             TurnExecutionError::new(
                 TurnFailureKind::Llm,

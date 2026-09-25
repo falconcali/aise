@@ -3,54 +3,26 @@ use crate::observability::{
 };
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub struct RepairStoryObservation {
-    observation: Observation,
+pub fn begin_repair_story_observation(parent: &Observation) -> Observation {
+    parent.begin(ObservationSpec {
+        name: "repair-story",
+        kind: ObservationKind::Chain,
+        input: None,
+        metadata: Vec::new(),
+    })
 }
 
-pub fn begin_repair_story(parent: &Observation) -> RepairStoryObservation {
-    RepairStoryObservation {
-        observation: parent.begin(ObservationSpec {
-            name: "repair-story",
-            kind: ObservationKind::Chain,
-            input: None,
-            metadata: Vec::new(),
-        }),
-    }
+pub fn begin_revise_story_text_observation(parent: &Observation) -> Observation {
+    parent.begin(ObservationSpec {
+        name: "revise-story-text",
+        kind: ObservationKind::Generation,
+        input: None,
+        metadata: Vec::new(),
+    })
 }
 
-impl RepairStoryObservation {
-    pub fn observation(&self) -> &Observation {
-        &self.observation
-    }
-
-    pub fn finish(self, outcome: &Result<(), TurnExecutionError>) {
-        self.observation.finish(outcome_for(outcome));
-    }
-}
-
-pub struct ReviseStoryTextObservation {
-    observation: Observation,
-}
-
-pub fn begin_revise_story_text(parent: &Observation) -> ReviseStoryTextObservation {
-    ReviseStoryTextObservation {
-        observation: parent.begin(ObservationSpec {
-            name: "revise-story-text",
-            kind: ObservationKind::Generation,
-            input: None,
-            metadata: Vec::new(),
-        }),
-    }
-}
-
-impl ReviseStoryTextObservation {
-    pub fn observation(&self) -> &Observation {
-        &self.observation
-    }
-
-    pub fn finish(self, outcome: &Result<(), TurnExecutionError>) {
-        self.observation.finish(outcome_for(outcome));
-    }
+pub fn finish_observation(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
+    observation.finish(outcome_for(outcome));
 }
 
 fn outcome_for(outcome: &Result<(), TurnExecutionError>) -> ObservationOutcome {

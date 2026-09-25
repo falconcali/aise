@@ -2,39 +2,27 @@ use crate::observability::{Observation, ObservationError, ObservationOutcome, Ob
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::TurnStage;
 
-pub struct PipelineStageObservation {
-    observation: Observation,
+pub fn begin_pipeline_stage_observation(parent: &Observation, stage: TurnStage) -> Observation {
+    parent.begin(crate::observability::ObservationSpec {
+        name: stage_name(stage),
+        kind: crate::observability::ObservationKind::Chain,
+        input: None,
+        metadata: Vec::new(),
+    })
 }
 
-impl PipelineStageObservation {
-    pub fn begin(parent: &Observation, stage: TurnStage) -> Self {
-        Self {
-            observation: parent.begin(crate::observability::ObservationSpec {
-                name: stage_name(stage),
-                kind: crate::observability::ObservationKind::Chain,
-                input: None,
-                metadata: Vec::new(),
-            }),
-        }
-    }
-
-    pub fn observation(&self) -> &Observation {
-        &self.observation
-    }
-
-    pub fn finish(self, result: &Result<(), TurnExecutionError>) {
-        self.observation.finish(match result {
-            Ok(()) => ObservationOutcome {
-                status: ObservationStatus::Ok,
-                ..ObservationOutcome::default()
-            },
-            Err(error) => ObservationOutcome {
-                status: status(error),
-                error: Some(error_info(error)),
-                ..ObservationOutcome::default()
-            },
-        });
-    }
+pub fn finish_observation(observation: Observation, result: &Result<(), TurnExecutionError>) {
+    observation.finish(match result {
+        Ok(()) => ObservationOutcome {
+            status: ObservationStatus::Ok,
+            ..ObservationOutcome::default()
+        },
+        Err(error) => ObservationOutcome {
+            status: status(error),
+            error: Some(error_info(error)),
+            ..ObservationOutcome::default()
+        },
+    });
 }
 
 const fn stage_name(stage: TurnStage) -> &'static str {

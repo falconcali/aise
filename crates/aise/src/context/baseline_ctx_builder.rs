@@ -88,14 +88,14 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
             &self.asset_limits,
             &self.narrative_config,
         );
-        let snapshot_observation = observability::begin_load_story_snapshot(observation, ctx);
+        let snapshot_observation = observability::begin_load_story_snapshot_observation(observation, ctx);
         let outcome = self.store.load_story_snapshot(&story_id, limits).await;
-        snapshot_observation.finish(&outcome);
+        observability::finish_observation(snapshot_observation, &outcome);
         let snapshot = outcome.map_err(TurnExecutionError::from)?;
 
-        let activation_observation = observability::begin_activate_world_info(observation, ctx);
+        let activation_observation = observability::begin_activate_world_info_observation(observation, ctx);
         let prepared = prepare_baseline(self, &snapshot, ctx.player_contribution(), ctx.turn_number()).await;
-        activation_observation.finish(&prepared);
+        observability::finish_observation(activation_observation, &prepared);
 
         let (baseline, narrative_projection, activation) = prepared.map_err(map_baseline_error)?;
         ctx.set_prepared_context(snapshot, baseline, narrative_projection, activation)

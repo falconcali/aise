@@ -2,48 +2,36 @@ use crate::observability::{Attribute, Observation, ObservationError, Observation
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub struct RunTurnPipelinesObservation {
-    observation: Observation,
+pub fn begin_run_turn_pipelines_observation(trace: &Trace) -> Observation {
+    trace.begin_observation(crate::observability::ObservationSpec {
+        name: "run-turn-pipelines",
+        kind: crate::observability::ObservationKind::Chain,
+        input: None,
+        metadata: Vec::new(),
+    })
 }
 
-impl RunTurnPipelinesObservation {
-    pub fn begin(trace: &Trace) -> Self {
-        Self {
-            observation: trace.begin_observation(crate::observability::ObservationSpec {
-                name: "run-turn-pipelines",
-                kind: crate::observability::ObservationKind::Chain,
-                input: None,
-                metadata: Vec::new(),
-            }),
-        }
-    }
-
-    pub fn observation(&self) -> &Observation {
-        &self.observation
-    }
-
-    pub fn finish(self, ctx: &TurnExecutionContext, result: &Result<(), TurnExecutionError>) {
-        let metadata = vec![
-            Attribute::bool("aise.observation.metadata.retrieval_skipped", ctx.retrieval_skipped()),
-            Attribute::bool(
-                "aise.observation.metadata.character_thinking_skipped",
-                ctx.character_thinking_skipped(),
-            ),
-        ];
-        self.observation.finish(match result {
-            Ok(()) => ObservationOutcome {
-                status: ObservationStatus::Ok,
-                metadata,
-                ..ObservationOutcome::default()
-            },
-            Err(error) => ObservationOutcome {
-                status: status(error),
-                metadata,
-                error: Some(error_info(error)),
-                ..ObservationOutcome::default()
-            },
-        });
-    }
+pub fn finish_observation(observation: Observation, ctx: &TurnExecutionContext, result: &Result<(), TurnExecutionError>) {
+    let metadata = vec![
+        Attribute::bool("aise.observation.metadata.retrieval_skipped", ctx.retrieval_skipped()),
+        Attribute::bool(
+            "aise.observation.metadata.character_thinking_skipped",
+            ctx.character_thinking_skipped(),
+        ),
+    ];
+    observation.finish(match result {
+        Ok(()) => ObservationOutcome {
+            status: ObservationStatus::Ok,
+            metadata,
+            ..ObservationOutcome::default()
+        },
+        Err(error) => ObservationOutcome {
+            status: status(error),
+            metadata,
+            error: Some(error_info(error)),
+            ..ObservationOutcome::default()
+        },
+    });
 }
 
 fn error_info(error: &TurnExecutionError) -> ObservationError {

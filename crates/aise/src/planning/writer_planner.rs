@@ -70,7 +70,9 @@ impl TurnExecutionPipeline for WriterPlanner {
             })?
             .clone();
         let narrative_plan = narrative_projection.plan.clone();
-        observability::begin_project_narrative(observation, ctx).finish(
+        let project_observation = observability::begin_project_narrative_observation(observation, ctx);
+        observability::end_project_narrative_observation(
+            project_observation,
             snapshot.graph_revision(),
             narrative_plan.active_nodes.len(),
             narrative_plan.world_event_intents.len(),

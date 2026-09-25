@@ -279,27 +279,23 @@ impl Observation {
 每个业务 observability 模块提供语义化 facade，不向业务文件暴露 `ObservationSpec` 和 `ObservationOutcome`：
 
 ```rust
-pub fn begin_load_story_snapshot(
+pub fn begin_load_story_snapshot_observation(
     parent: &Observation,
     ctx: &TurnExecutionContext,
-) -> LoadStorySnapshotObservation;
+) -> Observation;
 
-impl LoadStorySnapshotObservation {
-    pub fn observation(&self) -> &Observation;
-    pub fn finish(
-        self,
-        ctx: &TurnExecutionContext,
-        outcome: &Result<StoryReadSnapshot, StoreError>,
-    );
-}
+pub fn finish_observation<T, E>(
+    observation: Observation,
+    outcome: &Result<T, E>,
+);
 ```
 
 业务调用保持一个抽象层级：
 
 ```rust
-let observation = context_observability::begin_load_story_snapshot(parent, ctx);
+let observation = context_observability::begin_load_story_snapshot_observation(parent, ctx);
 let outcome = self.store.load_story_snapshot(&story_id, limits).await;
-observation.finish(ctx, &outcome);
+context_observability::finish_observation(observation, &outcome);
 ```
 
 若 store 本身不创建子 Observation，则不增加无意义参数：

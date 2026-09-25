@@ -153,7 +153,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                 .llm_call_scope(TurnStage::CharacterThink)
                 .with_character_id(request.role_id.to_string());
             let character_observation =
-                observability::begin_think_character(observation, request.role_id.to_string().as_str());
+                observability::begin_think_character_observation(observation, request.role_id.to_string().as_str());
             let structured_result = self
                 .gateway
                 .complete_structured_composed(
@@ -162,7 +162,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                     max_output_tokens,
                     crate::turn::turn_contract::LlmCallPurpose::CharacterThink,
                     character_decision_contract(&self.config),
-                    character_observation.observation(),
+                    &character_observation,
                 )
                 .await;
             let mapped_result = structured_result.as_ref().map(|_| ()).map_err(|error| {
@@ -173,7 +173,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                     error.to_string(),
                 )
             });
-            character_observation.finish(&mapped_result);
+            observability::finish_observation(character_observation, &mapped_result);
             let structured = structured_result.map_err(|error| {
                 TurnExecutionError::new(
                     TurnFailureKind::Llm,

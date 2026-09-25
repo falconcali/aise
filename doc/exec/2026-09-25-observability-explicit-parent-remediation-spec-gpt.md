@@ -88,19 +88,19 @@ pub async fn in_scope<F: Future>(&self, future: F) -> F::Output;
 Replace:
 
 ```rust
-let observation = begin_load_story_snapshot(parent, ctx);
+let observation = begin_load_story_snapshot_observation(parent, ctx);
 let outcome = observation
     .trace(self.store.load_story_snapshot(&story_id, limits))
     .await;
-observation.finish(&outcome);
+finish_observation(observation, &outcome);
 ```
 
 With:
 
 ```rust
-let observation = begin_load_story_snapshot(parent, ctx);
+let observation = begin_load_story_snapshot_observation(parent, ctx);
 let outcome = self.store.load_story_snapshot(&story_id, limits).await;
-observation.finish(&outcome);
+finish_observation(observation, &outcome);
 ```
 
 The business Future MUST be awaited directly by the orchestration function.
@@ -110,19 +110,17 @@ The business Future MUST be awaited directly by the orchestration function.
 Replace:
 
 ```rust
-let observation = PipelineStageObservation::begin(parent, stage);
-let outcome = observation
-    .trace(pipeline.execute(ctx, observation.observation()))
-    .await;
-observation.finish(&outcome);
+let observation = begin_pipeline_stage_observation(parent, stage);
+let outcome = pipeline.execute(ctx, &observation).await;
+finish_observation(observation, &outcome);
 ```
 
 With:
 
 ```rust
-let observation = PipelineStageObservation::begin(parent, stage);
-let outcome = pipeline.execute(ctx, observation.observation()).await;
-observation.finish(&outcome);
+let observation = begin_pipeline_stage_observation(parent, stage);
+let outcome = pipeline.execute(ctx, &observation).await;
+finish_observation(observation, &outcome);
 ```
 
 The nested function MUST receive the existing explicit parent parameter:
@@ -140,19 +138,17 @@ async fn execute(
 Replace:
 
 ```rust
-let observation = RunTurnPipelinesObservation::begin(trace);
-let result = observation
-    .trace(self.run_inner(ctx, sink, observation.observation()))
-    .await;
-observation.finish(ctx, &result);
+let observation = begin_run_turn_pipelines_observation(trace);
+let result = self.run_inner(ctx, sink, &observation).await;
+finish_observation(observation, ctx, &result);
 ```
 
 With:
 
 ```rust
-let observation = RunTurnPipelinesObservation::begin(trace);
-let result = self.run_inner(ctx, sink, observation.observation()).await;
-observation.finish(ctx, &result);
+let observation = begin_run_turn_pipelines_observation(trace);
+let result = self.run_inner(ctx, sink, &observation).await;
+finish_observation(observation, ctx, &result);
 ```
 
 Engine and submission operations MUST use the same direct-await shape.
@@ -162,9 +158,9 @@ Engine and submission operations MUST use the same direct-await shape.
 LLM generation, streaming, and embedding Observations MUST be started before limiter/provider execution and finished after the typed result is available:
 
 ```rust
-let observation = begin_generation(parent, request);
-let result = self.execute_completion(request, observation.observation()).await;
-observation.finish(&result);
+let observation = begin_generation_observation(parent, request);
+let result = self.execute_completion(request, &observation).await;
+finish_observation(observation, &result);
 ```
 
 Every actual LLM call MUST continue through the existing shared injected concurrency limiter. Removing Future instrumentation MUST NOT move, duplicate, or bypass limiter acquisition.

@@ -52,9 +52,9 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
         ctx: &mut TurnExecutionContext,
         observation: &crate::observability::Observation,
     ) -> Result<(), TurnExecutionError> {
-        let operation = observability::begin_retrieve_context(observation, ctx);
+        let operation = observability::begin_retrieve_context_observation(observation, ctx);
         let result = self.execute_inner(ctx).await;
-        operation.finish(&result);
+        observability::end_retrieval_observation(operation, &result);
         result
     }
 }

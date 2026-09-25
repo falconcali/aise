@@ -129,8 +129,8 @@ impl TurnExecutionPipeline for TurnCommitter {
             llm_calls,
             activation_state_delta,
         };
-        let commit_observation = observability::begin_commit_turn(observation, ctx);
-        let persistence_observation = observability::begin_persist_turn(observation, ctx);
+        let commit_observation = observability::begin_commit_turn_observation(observation, ctx);
+        let persistence_observation = observability::begin_persist_turn_observation(observation, ctx);
         let activation_span = info_span!(
             "knowledge.activation.commit",
             story_id = %story_id,
@@ -143,7 +143,7 @@ impl TurnExecutionPipeline for TurnCommitter {
             error_code = tracing::field::Empty,
         );
         let outcome = self.store.commit_turn(&commit).instrument(activation_span.clone()).await;
-        persistence_observation.finish(&outcome);
+        observability::end_persist_observation(persistence_observation, &outcome);
         match &outcome {
             Ok(_) => {
                 activation_span.record("status", "ok");
@@ -155,7 +155,7 @@ impl TurnExecutionPipeline for TurnCommitter {
         }
         let result = outcome?;
         let committed = ctx.set_committed_result(result);
-        commit_observation.finish(&committed);
+        observability::finish_observation(commit_observation, &committed);
         committed
     }
 }

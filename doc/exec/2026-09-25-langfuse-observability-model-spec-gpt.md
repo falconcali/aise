@@ -441,23 +441,15 @@ The shared limiter acquisition remains authoritative and MUST occur before provi
 Each facade returns a semantic wrapper that hides generic specs and outcomes:
 
 ```rust
-pub struct LoadStorySnapshotObservation {
-    observation: Observation,
-}
-
-pub fn begin_load_story_snapshot(
+pub fn begin_load_story_snapshot_observation(
     parent: &Observation,
     ctx: &TurnExecutionContext,
-) -> LoadStorySnapshotObservation;
+) -> Observation;
 
-impl LoadStorySnapshotObservation {
-    pub fn observation(&self) -> &Observation;
-    pub fn finish(
-        self,
-        ctx: &TurnExecutionContext,
-        outcome: &Result<StoryReadSnapshot, StoreError>,
-    );
-}
+pub fn finish_observation<T, E>(
+    observation: Observation,
+    outcome: &Result<T, E>,
+);
 ```
 
 Every module-specific wrapper MUST follow this shape:

@@ -77,7 +77,7 @@ impl TurnExecutionPipeline for StoryRepairer {
             story_version,
             issue_count,
         );
-        let revision_observation = observability::begin_revise_story_text(observation);
+        let revision_observation = observability::begin_revise_story_text_observation(observation);
         let completion_result = self
             .gateway
             .complete_text_composed(
@@ -85,7 +85,7 @@ impl TurnExecutionPipeline for StoryRepairer {
                 request,
                 max_output_tokens,
                 LlmCallPurpose::StoryRepair,
-                revision_observation.observation(),
+                &revision_observation,
             )
             .instrument(span)
             .await;
@@ -97,7 +97,7 @@ impl TurnExecutionPipeline for StoryRepairer {
                 error.to_string(),
             )
         });
-        revision_observation.finish(&mapped_result);
+        observability::end_repair_observation(revision_observation, &mapped_result);
         let completion = completion_result.map_err(|error| {
             TurnExecutionError::new(
                 TurnFailureKind::Llm,

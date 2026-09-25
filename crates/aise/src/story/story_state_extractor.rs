@@ -83,7 +83,7 @@ impl TurnExecutionPipeline for StoryStateExtractor {
             is_reextraction
         );
         let contract = story_state_extraction_contract(limits);
-        let extraction_observation = observability::begin_extract_story_state(observation);
+        let extraction_observation = observability::begin_extract_story_state_observation(observation);
         let outcome = self
             .gateway
             .complete_structured_composed(
@@ -92,7 +92,7 @@ impl TurnExecutionPipeline for StoryStateExtractor {
                 max_output_tokens,
                 LlmCallPurpose::StoryStateExtraction,
                 contract,
-                extraction_observation.observation(),
+                &extraction_observation,
             )
             .instrument(span)
             .await;
@@ -104,7 +104,7 @@ impl TurnExecutionPipeline for StoryStateExtractor {
                 error.to_string(),
             )
         });
-        extraction_observation.finish(&observation_result);
+        observability::end_extraction_observation(extraction_observation, &observation_result);
         match outcome {
             Ok(structured) => {
                 let dto = structured.value;

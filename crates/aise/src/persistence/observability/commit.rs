@@ -5,54 +5,34 @@ use crate::persistence::store::StoreError;
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub struct CommitTurnObservation {
-    observation: Observation,
+pub fn begin_commit_turn_observation(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+    begin_observation(parent, ctx, "commit-turn", ObservationKind::Chain)
 }
 
-pub fn begin_commit_turn(parent: &Observation, ctx: &TurnExecutionContext) -> CommitTurnObservation {
-    CommitTurnObservation {
-        observation: parent.begin(ObservationSpec {
-            name: "commit-turn",
-            kind: ObservationKind::Chain,
-            input: None,
-            metadata: commit_metadata(ctx),
-        }),
-    }
+pub fn begin_persist_turn_observation(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+    begin_observation(parent, ctx, "persist-turn", ObservationKind::Tool)
 }
 
-impl CommitTurnObservation {
-    pub fn observation(&self) -> &Observation {
-        &self.observation
-    }
-
-    pub fn finish(self, outcome: &Result<(), TurnExecutionError>) {
-        self.observation.finish(turn_outcome(outcome));
-    }
+pub fn finish_observation(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
+    observation.finish(turn_outcome(outcome));
 }
 
-pub struct PersistTurnObservation {
-    observation: Observation,
+pub fn end_persist_observation<T>(observation: Observation, outcome: &Result<T, StoreError>) {
+    observation.finish(store_outcome(outcome));
 }
 
-pub fn begin_persist_turn(parent: &Observation, ctx: &TurnExecutionContext) -> PersistTurnObservation {
-    PersistTurnObservation {
-        observation: parent.begin(ObservationSpec {
-            name: "persist-turn",
-            kind: ObservationKind::Tool,
-            input: None,
-            metadata: commit_metadata(ctx),
-        }),
-    }
-}
-
-impl PersistTurnObservation {
-    pub fn observation(&self) -> &Observation {
-        &self.observation
-    }
-
-    pub fn finish<T>(self, outcome: &Result<T, StoreError>) {
-        self.observation.finish(store_outcome(outcome));
-    }
+fn begin_observation(
+    parent: &Observation,
+    ctx: &TurnExecutionContext,
+    name: &'static str,
+    kind: ObservationKind,
+) -> Observation {
+    parent.begin(ObservationSpec {
+        name,
+        kind,
+        input: None,
+        metadata: commit_metadata(ctx),
+    })
 }
 
 fn commit_metadata(ctx: &TurnExecutionContext) -> Vec<Attribute> {

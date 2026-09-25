@@ -46,9 +46,9 @@ impl TurnExecutionPipeline for ValidationPipeline {
         ctx: &mut TurnExecutionContext,
         observation: &crate::observability::Observation,
     ) -> Result<(), TurnExecutionError> {
-        let operation = observability::begin_validate_story(observation, ctx);
+        let operation = observability::begin_validate_story_observation(observation, ctx);
         let result = self.execute_inner(ctx).await;
-        operation.finish(&result);
+        observability::finish_observation(operation, &result);
         result
     }
 }

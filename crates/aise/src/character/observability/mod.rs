@@ -1,3 +1,3 @@
 mod think;
 
-pub use think::{ThinkCharacterObservation, begin_think_character};
+pub use think::{begin_think_character_observation, finish_observation};

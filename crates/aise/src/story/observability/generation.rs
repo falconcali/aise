@@ -3,54 +3,25 @@ use crate::observability::{
 };
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub struct GenerateStoryObservation {
-    observation: Observation,
+pub fn begin_generate_story_observation(parent: &Observation) -> Observation {
+    begin_observation(parent, "generate-story", ObservationKind::Chain)
 }
 
-pub fn begin_generate_story(parent: &Observation) -> GenerateStoryObservation {
-    GenerateStoryObservation {
-        observation: parent.begin(ObservationSpec {
-            name: "generate-story",
-            kind: ObservationKind::Chain,
-            input: None,
-            metadata: Vec::new(),
-        }),
-    }
+pub fn begin_draft_story_text_observation(parent: &Observation) -> Observation {
+    begin_observation(parent, "draft-story-text", ObservationKind::Generation)
 }
 
-impl GenerateStoryObservation {
-    pub fn observation(&self) -> &Observation {
-        &self.observation
-    }
-
-    pub fn finish(self, outcome: &Result<(), TurnExecutionError>) {
-        self.observation.finish(outcome_for(outcome));
-    }
+pub fn finish_observation(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
+    observation.finish(outcome_for(outcome));
 }
 
-pub struct DraftStoryTextObservation {
-    observation: Observation,
-}
-
-pub fn begin_draft_story_text(parent: &Observation) -> DraftStoryTextObservation {
-    DraftStoryTextObservation {
-        observation: parent.begin(ObservationSpec {
-            name: "draft-story-text",
-            kind: ObservationKind::Generation,
-            input: None,
-            metadata: Vec::new(),
-        }),
-    }
-}
-
-impl DraftStoryTextObservation {
-    pub fn observation(&self) -> &Observation {
-        &self.observation
-    }
-
-    pub fn finish(self, outcome: &Result<(), TurnExecutionError>) {
-        self.observation.finish(outcome_for(outcome));
-    }
+fn begin_observation(parent: &Observation, name: &'static str, kind: ObservationKind) -> Observation {
+    parent.begin(ObservationSpec {
+        name,
+        kind,
+        input: None,
+        metadata: Vec::new(),
+    })
 }
 
 fn outcome_for(outcome: &Result<(), TurnExecutionError>) -> ObservationOutcome {

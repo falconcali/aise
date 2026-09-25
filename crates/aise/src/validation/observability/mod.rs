@@ -1,3 +1,3 @@
 mod validation;
 
-pub use validation::{ValidateStoryObservation, begin_validate_story};
+pub use validation::{begin_validate_story_observation, finish_observation};

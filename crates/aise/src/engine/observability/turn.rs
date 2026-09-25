@@ -2,46 +2,26 @@ use crate::domain::ids::TurnNumber;
 use crate::observability::{Attribute, Observation, ObservationError, ObservationOutcome, ObservationStatus, Trace};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub struct EngineObservation {
-    observation: Observation,
-}
-
-impl EngineObservation {
-    pub fn finish_ok(self) {
-        self.observation.finish(ObservationOutcome {
-            status: ObservationStatus::Ok,
-            ..ObservationOutcome::default()
-        });
-    }
-
-    pub fn finish_error(self, error: &TurnExecutionError) {
-        self.observation.finish(execution_error(error));
-    }
-
-    pub fn finish_story_not_found(self) {
-        self.observation.finish(ObservationOutcome {
-            status: ObservationStatus::Error,
-            error: Some(ObservationError {
-                code: "story_not_found".into(),
-                failure_kind: "story_not_found".into(),
-                stage: None,
-                message: "story not found".into(),
-            }),
-            ..ObservationOutcome::default()
-        });
-    }
-}
-
-pub fn begin_coordinate_story_turn(trace: &Trace) -> EngineObservation {
+pub fn begin_coordinate_story_turn_observation(trace: &Trace) -> Observation {
     begin(trace, "coordinate-story-turn")
 }
 
-pub fn begin_load_story(trace: &Trace) -> EngineObservation {
+pub fn begin_load_story_observation(trace: &Trace) -> Observation {
     begin(trace, "load-story")
 }
 
-pub fn begin_check_idempotency(trace: &Trace) -> EngineObservation {
+pub fn begin_check_idempotency_observation(trace: &Trace) -> Observation {
     begin(trace, "check-idempotency")
+}
+
+pub fn finish_observation<T>(observation: Observation, outcome: &Result<T, TurnExecutionError>) {
+    observation.finish(match outcome {
+        Ok(_) => ObservationOutcome {
+            status: ObservationStatus::Ok,
+            ..ObservationOutcome::default()
+        },
+        Err(error) => execution_error(error),
+    });
 }
 
 pub fn bind_turn_number(trace: &mut Trace, turn_number: TurnNumber) {
@@ -51,15 +31,13 @@ pub fn bind_turn_number(trace: &mut Trace, turn_number: TurnNumber) {
     )]);
 }
 
-fn begin(trace: &Trace, name: &'static str) -> EngineObservation {
-    EngineObservation {
-        observation: trace.begin_observation(crate::observability::ObservationSpec {
-            name,
-            kind: crate::observability::ObservationKind::Chain,
-            input: None,
-            metadata: Vec::new(),
-        }),
-    }
+fn begin(trace: &Trace, name: &'static str) -> Observation {
+    trace.begin_observation(crate::observability::ObservationSpec {
+        name,
+        kind: crate::observability::ObservationKind::Chain,
+        input: None,
+        metadata: Vec::new(),
+    })
 }
 
 fn execution_error(error: &TurnExecutionError) -> ObservationOutcome {

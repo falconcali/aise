@@ -3,29 +3,17 @@ use crate::observability::{
 };
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub struct ExtractStoryStateObservation {
-    observation: Observation,
+pub fn begin_extract_story_state_observation(parent: &Observation) -> Observation {
+    parent.begin(ObservationSpec {
+        name: "extract-story-state",
+        kind: ObservationKind::Chain,
+        input: None,
+        metadata: Vec::new(),
+    })
 }
 
-pub fn begin_extract_story_state(parent: &Observation) -> ExtractStoryStateObservation {
-    ExtractStoryStateObservation {
-        observation: parent.begin(ObservationSpec {
-            name: "extract-story-state",
-            kind: ObservationKind::Chain,
-            input: None,
-            metadata: Vec::new(),
-        }),
-    }
-}
-
-impl ExtractStoryStateObservation {
-    pub fn observation(&self) -> &Observation {
-        &self.observation
-    }
-
-    pub fn finish(self, outcome: &Result<(), TurnExecutionError>) {
-        self.observation.finish(outcome_for(outcome));
-    }
+pub fn finish_observation(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
+    observation.finish(outcome_for(outcome));
 }
 
 fn outcome_for(outcome: &Result<(), TurnExecutionError>) -> ObservationOutcome {

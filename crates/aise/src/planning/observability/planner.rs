@@ -4,89 +4,54 @@ use crate::observability::{
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub struct PlanTurnObservation {
+pub fn begin_plan_turn_observation(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+    begin_context_observation(parent, ctx, "plan-turn")
+}
+
+pub fn begin_project_narrative_observation(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+    begin_context_observation(parent, ctx, "project-narrative")
+}
+
+pub fn begin_generate_writer_plan_observation(parent: &Observation) -> Observation {
+    parent.begin(ObservationSpec {
+        name: "generate-writer-plan",
+        kind: ObservationKind::Chain,
+        input: None,
+        metadata: Vec::new(),
+    })
+}
+
+pub fn finish_observation(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
+    observation.finish(turn_outcome(outcome));
+}
+
+pub fn end_project_narrative_observation(
     observation: Observation,
+    graph_revision: u64,
+    node_count: usize,
+    edge_count: usize,
+) {
+    observation.finish(ObservationOutcome {
+        status: ObservationStatus::Ok,
+        metadata: vec![
+            Attribute::u64("aise.observation.metadata.graph_revision", graph_revision),
+            Attribute::u64("aise.observation.metadata.projected_node_count", node_count as u64),
+            Attribute::u64("aise.observation.metadata.projected_edge_count", edge_count as u64),
+        ],
+        ..ObservationOutcome::default()
+    });
 }
 
-pub fn begin_plan_turn(parent: &Observation, ctx: &TurnExecutionContext) -> PlanTurnObservation {
-    PlanTurnObservation {
-        observation: parent.begin(ObservationSpec {
-            name: "plan-turn",
-            kind: ObservationKind::Chain,
-            input: None,
-            metadata: vec![Attribute::string(
-                "aise.observation.metadata.story_id",
-                ctx.story_id().as_str(),
-            )],
-        }),
-    }
-}
-
-impl PlanTurnObservation {
-    pub fn observation(&self) -> &Observation {
-        &self.observation
-    }
-
-    pub fn finish(self, outcome: &Result<(), TurnExecutionError>) {
-        self.observation.finish(turn_outcome(outcome));
-    }
-}
-
-pub struct ProjectNarrativeObservation {
-    observation: Observation,
-}
-
-pub fn begin_project_narrative(parent: &Observation, ctx: &TurnExecutionContext) -> ProjectNarrativeObservation {
-    ProjectNarrativeObservation {
-        observation: parent.begin(ObservationSpec {
-            name: "project-narrative",
-            kind: ObservationKind::Chain,
-            input: None,
-            metadata: vec![Attribute::string(
-                "aise.observation.metadata.story_id",
-                ctx.story_id().as_str(),
-            )],
-        }),
-    }
-}
-
-impl ProjectNarrativeObservation {
-    pub fn finish(self, graph_revision: u64, node_count: usize, edge_count: usize) {
-        self.observation.finish(ObservationOutcome {
-            status: ObservationStatus::Ok,
-            metadata: vec![
-                Attribute::u64("aise.observation.metadata.graph_revision", graph_revision),
-                Attribute::u64("aise.observation.metadata.projected_node_count", node_count as u64),
-                Attribute::u64("aise.observation.metadata.projected_edge_count", edge_count as u64),
-            ],
-            ..ObservationOutcome::default()
-        });
-    }
-}
-
-pub struct GenerateWriterPlanObservation {
-    observation: Observation,
-}
-
-pub fn begin_generate_writer_plan(parent: &Observation) -> GenerateWriterPlanObservation {
-    GenerateWriterPlanObservation {
-        observation: parent.begin(ObservationSpec {
-            name: "generate-writer-plan",
-            kind: ObservationKind::Chain,
-            input: None,
-            metadata: Vec::new(),
-        }),
-    }
-}
-
-impl GenerateWriterPlanObservation {
-    pub fn observation(&self) -> &Observation {
-        &self.observation
-    }
-
-    pub fn finish(self, outcome: &Result<(), TurnExecutionError>) {
-        self.observation.finish(turn_outcome(outcome));
-    }
+fn begin_context_observation(parent: &Observation, ctx: &TurnExecutionContext, name: &'static str) -> Observation {
+    parent.begin(ObservationSpec {
+        name,
+        kind: ObservationKind::Chain,
+        input: None,
+        metadata: vec![Attribute::string(
+            "aise.observation.metadata.story_id",
+            ctx.story_id().as_str(),
+        )],
+    })
 }
 
 fn turn_outcome(outcome: &Result<(), TurnExecutionError>) -> ObservationOutcome {
