@@ -1,4 +1,4 @@
-use aise::turn::observability::ContentCapturePolicy;
+use aise::observability::ContentCapturePolicy;
 
 const DEFAULT_BASE_URL: &str = "https://cloud.langfuse.com";
 const DEFAULT_ENVIRONMENT: &str = "development";

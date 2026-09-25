@@ -1,15 +1,12 @@
 use crate::config::{NarrativeConfig, PlannerConfig, RetrievalConfig};
 use crate::domain::asset::validation::BoundedText;
 use crate::llm::gateway::LlmGateway;
+use crate::observability::{Attribute, ObservationOutcome, ObservationSpec, ObservationStatus};
 use crate::planning::error::PlanningError;
 use crate::planning::planner_output::writer_planner_contract;
 use crate::planning::retrieval_plan_builder::RetrievalPlanBuilder;
 use crate::planning::writer_planner_prompt::WriterPlannerPromptContextProjector;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
-use crate::turn::observability::{
-    METADATA_GRAPH_REVISION, METADATA_PROJECTED_EDGE_COUNT, METADATA_PROJECTED_NODE_COUNT, ObservationAttribute,
-    ObservationFields, ObservationFinish, ObservationSpan, ObservationStatus,
-};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
@@ -46,7 +43,7 @@ impl TurnExecutionPipeline for WriterPlanner {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        _observation: &crate::observability::Observation,
+        observation: &crate::observability::Observation,
     ) -> Result<(), TurnExecutionError> {
         let baseline = ctx
             .baseline()
@@ -73,21 +70,26 @@ impl TurnExecutionPipeline for WriterPlanner {
             })?
             .clone();
         let narrative_plan = narrative_projection.plan.clone();
-        let projection_observation = ObservationSpan::begin(
-            crate::turn::observability::ObservationStep::ProjectNarrative,
-            ObservationFields::default(),
-        );
-        projection_observation.finish(ObservationFinish {
+        let projection_observation = observation.begin(ObservationSpec {
+            name: "project-narrative",
+            kind: crate::observability::ObservationKind::Chain,
+            input: None,
+            metadata: Vec::new(),
+        });
+        projection_observation.finish(ObservationOutcome {
             status: ObservationStatus::Ok,
             metadata: vec![
-                ObservationAttribute::u64(METADATA_GRAPH_REVISION, snapshot.graph_revision()),
-                ObservationAttribute::u64(METADATA_PROJECTED_NODE_COUNT, narrative_plan.active_nodes.len() as u64),
-                ObservationAttribute::u64(
-                    METADATA_PROJECTED_EDGE_COUNT,
+                Attribute::u64("aise.observation.metadata.graph_revision", snapshot.graph_revision()),
+                Attribute::u64(
+                    "aise.observation.metadata.projected_node_count",
+                    narrative_plan.active_nodes.len() as u64,
+                ),
+                Attribute::u64(
+                    "aise.observation.metadata.projected_edge_count",
                     narrative_plan.world_event_intents.len() as u64,
                 ),
             ],
-            ..ObservationFinish::default()
+            ..ObservationOutcome::default()
         });
         let player_contribution = BoundedText::try_new(
             ctx.player_contribution().to_owned(),

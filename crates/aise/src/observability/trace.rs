@@ -7,7 +7,6 @@ use super::model::{
 use super::observation::Observation;
 use opentelemetry::Context;
 use std::future::Future;
-use tracing::Span;
 
 pub struct Trace {
     pub(crate) root: Option<Observation>,
@@ -44,7 +43,7 @@ impl Trace {
             propagated: Vec::new(),
             finished: false,
         };
-        trace.bind(Attribute::string(TRACE_TAGS, spec.tags.join(",")));
+        trace.bind(vec![Attribute::string(TRACE_TAGS, spec.tags.join(","))]);
         trace
     }
 
@@ -59,19 +58,22 @@ impl Trace {
         self.root().begin(spec)
     }
 
-    pub fn bind(&mut self, attribute: Attribute) {
-        if matches!(
-            attribute.key,
-            TRACE_NAME
-                | TRACE_TAGS
-                | TRACE_ENVIRONMENT
-                | TRACE_RELEASE
-                | super::model::SCHEMA_VERSION
-                | super::model::SESSION_ID
-                | TRACE_METADATA_STORY_ID
-                | TRACE_METADATA_IDEMPOTENCY_KEY_DIGEST
-                | TRACE_METADATA_TURN_NUMBER
-        ) {
+    pub fn bind(&mut self, attributes: Vec<Attribute>) {
+        for attribute in attributes {
+            if !matches!(
+                attribute.key,
+                TRACE_NAME
+                    | TRACE_TAGS
+                    | TRACE_ENVIRONMENT
+                    | TRACE_RELEASE
+                    | super::model::SCHEMA_VERSION
+                    | super::model::SESSION_ID
+                    | TRACE_METADATA_STORY_ID
+                    | TRACE_METADATA_IDEMPOTENCY_KEY_DIGEST
+                    | TRACE_METADATA_TURN_NUMBER
+            ) {
+                continue;
+            }
             self.root
                 .as_mut()
                 .expect("trace root exists")
@@ -87,27 +89,6 @@ impl Trace {
 
     pub fn content_capture(&self) -> &ContentCapture {
         &self.content
-    }
-
-    pub fn context(&self) -> &Context {
-        &self.context
-    }
-
-    pub fn span(&self) -> Span {
-        self.root().span.clone()
-    }
-
-    pub fn bind_session(&mut self, session_id: &str, story_id: &str) {
-        self.bind(Attribute::string(super::model::SESSION_ID, session_id));
-        self.bind(Attribute::string(TRACE_METADATA_STORY_ID, story_id));
-    }
-
-    pub fn bind_request(&mut self, digest: &str) {
-        self.bind(Attribute::string(TRACE_METADATA_IDEMPOTENCY_KEY_DIGEST, digest));
-    }
-
-    pub fn bind_turn(&mut self, turn_number: u64) {
-        self.bind(Attribute::u64(TRACE_METADATA_TURN_NUMBER, turn_number));
     }
 
     pub async fn trace<F: Future>(&self, future: F) -> F::Output {

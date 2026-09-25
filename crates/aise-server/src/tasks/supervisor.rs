@@ -70,12 +70,19 @@ pub struct TurnTaskSpec {
 }
 
 enum TurnTaskCommand {
-    Spawn {
+    Reserve {
+        reply: oneshot::Sender<Result<TurnTaskPermit, TurnTaskError>>,
+    },
+    SpawnReserved {
+        permit: TurnTaskPermit,
         spec: TurnTaskSpec,
-        reply: oneshot::Sender<Result<(), TurnTaskError>>,
     },
     Active(oneshot::Sender<usize>),
     Shutdown(oneshot::Sender<()>),
+}
+
+pub struct TurnTaskPermit {
+    permit: tokio::sync::OwnedSemaphorePermit,
 }
 
 pub struct TurnTaskSupervisor {
@@ -115,13 +122,13 @@ impl TurnTaskSupervisor {
         Ok(handle)
     }
 
-    pub async fn spawn(&self, spec: TurnTaskSpec) -> Result<(), TurnTaskError> {
+    pub async fn reserve(&self, cancellation: &TurnCancellation) -> Result<TurnTaskPermit, TurnTaskError> {
         if self.service_cancellation.is_cancelled() {
             self.rejected.fetch_add(1, Ordering::Relaxed);
             return Err(TurnTaskError::ShuttingDown);
         }
         let (reply_tx, reply_rx) = oneshot::channel();
-        let command = TurnTaskCommand::Spawn { spec, reply: reply_tx };
+        let command = TurnTaskCommand::Reserve { reply: reply_tx };
         match tokio::time::timeout(self.admission_timeout, self.command_tx.send(command)).await {
             Ok(Ok(())) => {}
             Ok(Err(_)) => return Err(TurnTaskError::SupervisorGone),
@@ -130,14 +137,36 @@ impl TurnTaskSupervisor {
                 return Err(TurnTaskError::AdmissionTimeout(self.admission_timeout.as_millis() as u64));
             }
         }
-        match tokio::time::timeout(self.admission_timeout, reply_rx).await {
+        let permit = match tokio::time::timeout(self.admission_timeout, reply_rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(TurnTaskError::SupervisorGone),
             Err(_) => {
                 self.rejected.fetch_add(1, Ordering::Relaxed);
                 Err(TurnTaskError::AdmissionTimeout(self.admission_timeout.as_millis() as u64))
             }
+        }?;
+        if cancellation.is_cancelled() {
+            drop(permit);
+            return Err(TurnTaskError::ShuttingDown);
         }
+        Ok(permit)
+    }
+
+    pub fn spawn_reserved(&self, permit: TurnTaskPermit, spec: TurnTaskSpec) {
+        if self
+            .command_tx
+            .try_send(TurnTaskCommand::SpawnReserved { permit, spec })
+            .is_err()
+        {
+            self.rejected.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub async fn spawn(&self, spec: TurnTaskSpec) -> Result<(), TurnTaskError> {
+        let cancellation = spec.cancellation.clone();
+        let permit = self.reserve(&cancellation).await?;
+        self.spawn_reserved(permit, spec);
+        Ok(())
     }
 
     pub async fn active_turns(&self) -> usize {
@@ -192,7 +221,7 @@ async fn run_supervisor(
             command = command_rx.recv() => {
                 let Some(command) = command else { break };
                 match command {
-                    TurnTaskCommand::Spawn { spec, reply } => {
+                    TurnTaskCommand::Reserve { reply } => {
                         let permit = tokio::select! {
                             permit = admission.clone().acquire_owned() => match permit {
                                 Ok(permit) => Some(permit),
@@ -213,11 +242,15 @@ async fn run_supervisor(
                                 continue;
                             }
                         };
-                        let _ = reply.send(Ok(()));
+                        let _ = reply.send(Ok(TurnTaskPermit {
+                            permit: permit.expect("valid admission permit"),
+                        }));
+                    }
+                    TurnTaskCommand::SpawnReserved { permit, spec } => {
                         started.fetch_add(1, Ordering::Relaxed);
                         let service = service_cancellation.clone();
                         joinset.spawn(async move {
-                            let _permit = permit;
+                            let _permit = permit.permit;
                             let mut future = spec.future;
                             let mut completed = false;
                             tokio::select! {
@@ -281,9 +314,12 @@ async fn shutdown_sequence(
     loop {
         while let Ok(command) = command_rx.try_recv() {
             match command {
-                TurnTaskCommand::Spawn { reply, .. } => {
+                TurnTaskCommand::Reserve { reply } => {
                     rejected.fetch_add(1, Ordering::Relaxed);
                     let _ = reply.send(Err(TurnTaskError::ShuttingDown));
+                }
+                TurnTaskCommand::SpawnReserved { .. } => {
+                    rejected.fetch_add(1, Ordering::Relaxed);
                 }
                 TurnTaskCommand::Active(reply) => {
                     while joinset.try_join_next().is_some() {}

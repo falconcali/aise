@@ -4,12 +4,7 @@ use crate::tasks::{TurnTaskSpec, TurnTaskSupervisor};
 use aise::AiseEngine;
 use aise::observability::{
     Attribute, ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationError, ObservationOutcome,
-    ObservationSession, SessionSpec, Trace, TraceSpec,
-};
-use aise::turn::observability::{
-    ObservationAttribute, ObservationError as LegacyObservationError, ObservationFields, ObservationFinish,
-    ObservationSpan, ObservationStatus, ObservationStep, SESSION_ID, TRACE_METADATA_IDEMPOTENCY_KEY_DIGEST,
-    TRACE_METADATA_STORY_ID,
+    ObservationSession, ObservationSpec, ObservationStatus, SessionSpec, Trace, TraceSpec,
 };
 use aise::turn::turn_contract::{ExecuteTurnSpec, IdempotencyKey, TurnCancellation, TurnRequest};
 use aise::turn::turn_error::TurnFailureKind;
@@ -17,8 +12,6 @@ use aise::turn::turn_event::TurnEventSink;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::oneshot;
-use tracing::Instrument;
 
 pub struct TurnSubmissionRequest {
     pub raw_session_id: String,
@@ -62,11 +55,9 @@ impl TurnSubmissionService {
             tasks,
             trace_limits: ObservabilityContentConfig {
                 policy: match config.content_policy {
-                    aise::turn::observability::ContentCapturePolicy::MetadataOnly => ContentCapturePolicy::MetadataOnly,
-                    aise::turn::observability::ContentCapturePolicy::RedactedContent => {
-                        ContentCapturePolicy::RedactedContent
-                    }
-                    aise::turn::observability::ContentCapturePolicy::FullContent => ContentCapturePolicy::FullContent,
+                    ContentCapturePolicy::MetadataOnly => ContentCapturePolicy::MetadataOnly,
+                    ContentCapturePolicy::RedactedContent => ContentCapturePolicy::RedactedContent,
+                    ContentCapturePolicy::FullContent => ContentCapturePolicy::FullContent,
                 },
                 max_field_bytes: config.max_field_bytes,
                 max_observation_bytes: config.max_observation_bytes,
@@ -84,15 +75,15 @@ impl TurnSubmissionService {
         sink: Arc<dyn TurnEventSink>,
     ) -> Result<(), TurnSubmissionError> {
         let encoder = ContentCapture::new(self.trace_limits.clone());
-        let mut trace = ObservationSession::begin(
+        let session = ObservationSession::begin(
             SessionSpec {
                 id: None,
                 user_id: None,
                 metadata: Vec::new(),
             },
             encoder.clone(),
-        )
-        .begin_trace(TraceSpec {
+        );
+        let mut trace = session.begin_trace(TraceSpec {
             name: "execute-story-turn",
             input: self
                 .trace_enabled
@@ -108,57 +99,54 @@ impl TurnSubmissionService {
             ],
             tags: vec!["story-turn".to_owned()],
         });
-        let root_span = trace.span();
         let prepared = async {
-            let session_span = ObservationSpan::begin_with_parent(
-                ObservationStep::ResolveInteractionSession,
-                ObservationFields::default(),
-                trace.context(),
-            );
+            let session_span = trace.begin_observation(ObservationSpec {
+                name: "resolve-interaction-session",
+                kind: aise::observability::ObservationKind::Retriever,
+                input: None,
+                metadata: Vec::new(),
+            });
             let session_id = match SessionId::try_new(request.raw_session_id) {
                 Ok(session_id) => session_id,
                 Err(_) => {
                     let error = TurnSubmissionError::InvalidSession;
-                    session_span.finish(submission_span_finish(&error));
+                    session_span.finish(submission_finish(&error));
                     return Err(error);
                 }
             };
-            let session = match session_span.in_scope(self.registry.get(&session_id)).await {
+            let session = match session_span.trace(self.registry.get(&session_id)).await {
                 Some(session) => session,
                 None => {
                     let error = TurnSubmissionError::SessionNotFound;
-                    session_span.finish(submission_span_finish(&error));
+                    session_span.finish(submission_finish(&error));
                     return Err(error);
                 }
             };
-            trace.bind_session(session.id.as_str(), session.story_id.as_str());
-            session_span.finish(ObservationFinish {
+            trace.bind(vec![
+                Attribute::string(aise::observability::SESSION_ID, session.id.as_str()),
+                Attribute::string(aise::observability::TRACE_METADATA_STORY_ID, session.story_id.as_str()),
+            ]);
+            session_span.finish(ObservationOutcome {
                 status: ObservationStatus::Ok,
-                metadata: vec![
-                    ObservationAttribute::string(SESSION_ID, session.id.as_str()),
-                    ObservationAttribute::string(TRACE_METADATA_STORY_ID, session.story_id.as_str()),
-                ],
-                output: None,
-                error: None,
-                usage: None,
-                cost: None,
+                ..ObservationOutcome::default()
             });
 
-            let validation_span = ObservationSpan::begin_with_parent(
-                ObservationStep::ValidateRequest,
-                ObservationFields::default(),
-                trace.context(),
-            );
+            let validation_span = trace.begin_observation(ObservationSpec {
+                name: "validate-request",
+                kind: aise::observability::ObservationKind::Chain,
+                input: None,
+                metadata: Vec::new(),
+            });
             if let Err(error) = TurnRequest::try_new(request.player_contribution.clone()) {
                 let error = TurnSubmissionError::InvalidRequest(error.to_string());
-                validation_span.finish(submission_span_finish(&error));
+                validation_span.finish(submission_finish(&error));
                 return Err(error);
             }
             let raw_idempotency_key = match request.raw_idempotency_key {
                 Some(key) => key,
                 None => {
                     let error = TurnSubmissionError::MissingIdempotencyKey;
-                    validation_span.finish(submission_span_finish(&error));
+                    validation_span.finish(submission_finish(&error));
                     return Err(error);
                 }
             };
@@ -166,22 +154,18 @@ impl TurnSubmissionService {
                 Ok(key) => key,
                 Err(error) => {
                     let error = TurnSubmissionError::InvalidIdempotencyKey(error.to_string());
-                    validation_span.finish(submission_span_finish(&error));
+                    validation_span.finish(submission_finish(&error));
                     return Err(error);
                 }
             };
             let idempotency_key_digest = digest(idempotency_key.as_str());
-            trace.bind_request(&idempotency_key_digest);
-            validation_span.finish(ObservationFinish {
+            trace.bind(vec![Attribute::string(
+                aise::observability::TRACE_METADATA_IDEMPOTENCY_KEY_DIGEST,
+                idempotency_key_digest,
+            )]);
+            validation_span.finish(ObservationOutcome {
                 status: ObservationStatus::Ok,
-                metadata: vec![ObservationAttribute::string(
-                    TRACE_METADATA_IDEMPOTENCY_KEY_DIGEST,
-                    idempotency_key_digest,
-                )],
-                output: None,
-                error: None,
-                usage: None,
-                cost: None,
+                ..ObservationOutcome::default()
             });
             Ok(ExecuteTurnSpec {
                 story_id: session.story_id.clone(),
@@ -190,22 +174,34 @@ impl TurnSubmissionService {
                 cancellation: request.cancellation.clone(),
             })
         }
-        .instrument(root_span.clone())
         .await;
         let spec = match prepared {
             Ok(spec) => spec,
             Err(error) => return finish_submission_error(trace, error),
         };
         let engine = self.engine.clone();
-        let (trace_tx, trace_rx) = oneshot::channel::<Trace>();
+        let admission = trace.begin_observation(ObservationSpec {
+            name: "admit-turn-task",
+            kind: aise::observability::ObservationKind::Chain,
+            input: None,
+            metadata: Vec::new(),
+        });
+        let permit = match admission.trace(self.tasks.reserve(&request.cancellation)).await {
+            Ok(permit) => permit,
+            Err(error) => {
+                let error = TurnSubmissionError::Admission(error.to_string());
+                admission.finish(submission_finish(&error));
+                return finish_submission_error(trace, error);
+            }
+        };
+        admission.finish(ObservationOutcome {
+            status: ObservationStatus::Ok,
+            ..ObservationOutcome::default()
+        });
         let task = TurnTaskSpec {
             cancellation: request.cancellation,
             future: Box::pin(async move {
-                let Ok(trace) = trace_rx.await else {
-                    return;
-                };
-                let span = trace.span();
-                if let Err(error) = engine.run_turn(spec, sink.as_ref(), trace).instrument(span).await {
+                if let Err(error) = engine.run_turn(spec, sink.as_ref(), trace).await {
                     tracing::error!(
                         error = %error,
                         error_kind = failure_kind(error.kind()),
@@ -214,42 +210,11 @@ impl TurnSubmissionService {
                 }
             }),
         };
-        let admission_parent = trace.context().clone();
-        let admission = async {
-            let admission_span = ObservationSpan::begin_with_parent(
-                ObservationStep::AdmitTurnTask,
-                ObservationFields::default(),
-                &admission_parent,
-            );
-            let admission = admission_span.in_scope(self.tasks.spawn(task)).await;
-            match &admission {
-                Ok(()) => admission_span.finish(ObservationFinish {
-                    status: ObservationStatus::Ok,
-                    metadata: Vec::new(),
-                    output: None,
-                    error: None,
-                    usage: None,
-                    cost: None,
-                }),
-                Err(error) => {
-                    let error = TurnSubmissionError::Admission(error.to_string());
-                    admission_span.finish(submission_span_finish(&error));
-                }
-            }
-            admission
-        }
-        .instrument(root_span)
-        .await;
-        if let Err(error) = admission {
-            let error = TurnSubmissionError::Admission(error.to_string());
-            return finish_submission_error(trace, error);
-        }
-        if let Err(trace) = trace_tx.send(trace) {
-            return finish_submission_error(
-                trace,
-                TurnSubmissionError::Admission("admitted turn task stopped before trace transfer".into()),
-            );
-        }
+        self.tasks.spawn_reserved(permit, task);
+        session.finish(aise::observability::SessionOutcome {
+            status: ObservationStatus::Ok,
+            metadata: Vec::new(),
+        });
         Ok(())
     }
 }
@@ -269,22 +234,6 @@ fn submission_finish(error: &TurnSubmissionError) -> ObservationOutcome {
             message: error.to_string(),
         }),
         ..ObservationOutcome::default()
-    }
-}
-
-fn submission_span_finish(error: &TurnSubmissionError) -> ObservationFinish {
-    ObservationFinish {
-        status: ObservationStatus::Error,
-        metadata: Vec::new(),
-        output: None,
-        error: Some(LegacyObservationError {
-            code: submission_error_code(error).into(),
-            failure_kind: "submission".into(),
-            stage: None,
-            message: error.to_string(),
-        }),
-        usage: None,
-        cost: None,
     }
 }
 

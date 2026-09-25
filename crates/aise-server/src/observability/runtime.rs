@@ -3,7 +3,7 @@ use crate::observability::config::{ObservabilityConfig, ObservabilityConfigLoad}
 use crate::observability::diagnostics::TelemetryDiagnostics;
 use crate::observability::langfuse_exporter::LangfuseExportAdapter;
 use crate::observability::propagation::StreamingMasker;
-use aise::turn::observability::ContentCapturePolicy;
+use aise::observability::ContentCapturePolicy;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use opentelemetry::KeyValue;
@@ -162,8 +162,8 @@ fn build_provider(
             KeyValue::new("deployment.environment.name", config.environment.clone()),
             KeyValue::new("langfuse.environment", config.environment.clone()),
             KeyValue::new("langfuse.release", config.release.clone()),
-            KeyValue::new("aise.schema.version", "1"),
-            KeyValue::new("langfuse.version", "1"),
+            KeyValue::new("aise.schema.version", "2"),
+            KeyValue::new("langfuse.version", "2"),
         ])
         .build();
     Ok(SdkTracerProvider::builder()

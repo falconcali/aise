@@ -215,7 +215,10 @@ impl AiseEngine {
                 return self.finalize(None, Err(failure), sink, permit).await;
             }
         };
-        trace.bind(Attribute::u64("aise.trace.metadata.turn_number", candidate_turn_number.get()));
+        trace.bind(vec![Attribute::u64(
+            "aise.trace.metadata.turn_number",
+            candidate_turn_number.get(),
+        )]);
 
         let budget = match TurnBudget::from_config(
             &self.config.turn,
@@ -368,7 +371,10 @@ fn finish_trace(mut trace: Trace, outcome: &TurnRunOutcome) {
                     if *replayed { "replayed" } else { "committed" },
                 ),
             ];
-            trace.bind(Attribute::u64("aise.trace.metadata.turn_number", result.turn_number.get()));
+            trace.bind(vec![Attribute::u64(
+                "aise.trace.metadata.turn_number",
+                result.turn_number.get(),
+            )]);
             trace.finish(ObservationOutcome {
                 status: ObservationStatus::Ok,
                 metadata,
