@@ -1,8 +1,9 @@
 use crate::config::AiseConfig;
 use crate::domain::ids::{TurnKey, TurnNumber};
-use crate::observability::{
-    Attribute, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus, Trace,
+use crate::engine::observability::{
+    begin_check_idempotency, begin_coordinate_story_turn, begin_load_story, bind_turn_number,
 };
+use crate::observability::Trace;
 use crate::persistence::store::{Store, StoredTurnOutcome};
 use crate::runtime::story_turn_coordinator::StoryTurnCoordinator;
 use crate::runtime::turn_runtime::TurnRuntime;
@@ -121,37 +122,25 @@ impl AiseEngine {
         let cancellation = validated.cancellation().clone();
         let deadline = Instant::now() + Duration::from_millis(self.config.turn.turn_timeout_ms);
 
-        let coordinate_span = engine_observation(trace, "coordinate-story-turn");
+        let coordinate_span = begin_coordinate_story_turn(trace);
         let permit_result = coordinate_span
             .trace(self.coordinator.acquire(&story_id, deadline, &cancellation))
             .await;
         let permit = match permit_result {
             Ok(permit) => Some(permit),
             Err(error) => {
-                coordinate_span.finish(execution_finish(&error));
+                coordinate_span.finish_error(&error);
                 return self.finalize(None, Err(error), sink, None).await;
             }
         };
-        coordinate_span.finish(ObservationOutcome {
-            status: ObservationStatus::Ok,
-            ..ObservationOutcome::default()
-        });
+        coordinate_span.finish_ok();
 
-        let load_span = engine_observation(trace, "load-story");
+        let load_span = begin_load_story(trace);
         let story_info_result = load_span.trace(self.store.get_story(&story_id)).await;
         let story_info = match story_info_result {
             Ok(Some(info)) => info,
             Ok(None) => {
-                load_span.finish(ObservationOutcome {
-                    status: ObservationStatus::Error,
-                    error: Some(ObservationError {
-                        code: "story_not_found".into(),
-                        failure_kind: "story_not_found".into(),
-                        stage: None,
-                        message: "story not found".into(),
-                    }),
-                    ..ObservationOutcome::default()
-                });
+                load_span.finish_story_not_found();
                 let failure = TurnExecutionError::new(
                     TurnFailureKind::StoryNotFound,
                     "story_not_found",
@@ -162,16 +151,13 @@ impl AiseEngine {
             }
             Err(error) => {
                 let failure = TurnExecutionError::from(error);
-                load_span.finish(execution_finish(&failure));
+                load_span.finish_error(&failure);
                 return self.finalize(None, Err(failure), sink, permit).await;
             }
         };
-        load_span.finish(ObservationOutcome {
-            status: ObservationStatus::Ok,
-            ..ObservationOutcome::default()
-        });
+        load_span.finish_ok();
 
-        let idempotency_span = engine_observation(trace, "check-idempotency");
+        let idempotency_span = begin_check_idempotency(trace);
         let replay_result = idempotency_span
             .trace(self.store.find_committed_turn(&story_id, &idempotency_key))
             .await;
@@ -179,14 +165,11 @@ impl AiseEngine {
             Ok(outcome) => outcome,
             Err(error) => {
                 let failure = TurnExecutionError::from(error);
-                idempotency_span.finish(execution_finish(&failure));
+                idempotency_span.finish_error(&failure);
                 return self.finalize(None, Err(failure), sink, permit).await;
             }
         };
-        idempotency_span.finish(ObservationOutcome {
-            status: ObservationStatus::Ok,
-            ..ObservationOutcome::default()
-        });
+        idempotency_span.finish_ok();
         if let Some(StoredTurnOutcome { request_digest, result }) = replay {
             if request_digest == *request.request_digest() {
                 let outcome = TurnRunOutcome::Committed { result, replayed: true };
@@ -213,10 +196,7 @@ impl AiseEngine {
                 return self.finalize(None, Err(failure), sink, permit).await;
             }
         };
-        trace.bind(vec![Attribute::u64(
-            "aise.trace.metadata.turn_number",
-            candidate_turn_number.get(),
-        )]);
+        bind_turn_number(trace, candidate_turn_number);
 
         let budget = match TurnBudget::from_config(
             &self.config.turn,
@@ -328,28 +308,6 @@ impl AiseEngine {
     }
 }
 
-fn execution_finish(error: &TurnExecutionError) -> ObservationOutcome {
-    ObservationOutcome {
-        status: execution_status(error),
-        error: Some(ObservationError {
-            code: error.code().into(),
-            failure_kind: format!("{:?}", error.kind()).to_lowercase(),
-            stage: error.stage().map(|stage| stage.as_str().into()),
-            message: error.to_string(),
-        }),
-        ..ObservationOutcome::default()
-    }
-}
-
-fn execution_status(error: &TurnExecutionError) -> ObservationStatus {
-    match error.kind() {
-        TurnFailureKind::Cancelled => ObservationStatus::Cancelled,
-        TurnFailureKind::DeadlineExceeded => ObservationStatus::DeadlineExceeded,
-        TurnFailureKind::RevisionConflict | TurnFailureKind::IdempotencyConflict => ObservationStatus::Conflict,
-        _ => ObservationStatus::Error,
-    }
-}
-
 #[cfg(test)]
 fn terminal_status(error: &TurnExecutionError) -> &'static str {
     match error.kind() {
@@ -412,15 +370,6 @@ const fn failure_kind(kind: TurnFailureKind) -> &'static str {
         TurnFailureKind::Io => "io",
         TurnFailureKind::InvariantViolation => "invariant_violation",
     }
-}
-
-fn engine_observation(trace: &Trace, name: &'static str) -> crate::observability::Observation {
-    trace.begin_observation(ObservationSpec {
-        name,
-        kind: ObservationKind::Chain,
-        input: None,
-        metadata: Vec::new(),
-    })
 }
 
 #[cfg(test)]

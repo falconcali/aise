@@ -250,7 +250,7 @@ fn no_legacy_patterns_in_server_src() {
 #[test]
 fn no_create_story_in_turn_execution_path() {
     let files = [
-        src_root().join("engine.rs"),
+        src_root().join("engine").join("service.rs"),
         server_src_root().join("api").join("turn.rs"),
     ];
     for path in files {

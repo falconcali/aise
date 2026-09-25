@@ -1,8 +1,7 @@
 use crate::runtime::turn_pipeline_set::TurnPipelineSet;
 //use crate::turn::turn_budget::CorrectionKind;
-use crate::observability::{
-    Attribute, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus, Trace,
-};
+use crate::observability::Trace;
+use crate::runtime::observability::{PipelineStageObservation, RunTurnPipelinesObservation};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::TurnPhase;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
@@ -25,33 +24,9 @@ impl TurnRuntime {
         sink: &dyn TurnEventSink,
         trace: &Trace,
     ) -> Result<(), TurnExecutionError> {
-        let run_span = trace.begin_observation(ObservationSpec {
-            name: "run-turn-pipelines",
-            kind: ObservationKind::Chain,
-            input: None,
-            metadata: Vec::new(),
-        });
-        let result = run_span.trace(self.run_inner(ctx, sink, &run_span)).await;
-        let metadata = vec![
-            Attribute::bool("aise.observation.metadata.retrieval_skipped", ctx.retrieval_skipped()),
-            Attribute::bool(
-                "aise.observation.metadata.character_thinking_skipped",
-                ctx.character_thinking_skipped(),
-            ),
-        ];
-        run_span.finish(match &result {
-            Ok(()) => ObservationOutcome {
-                status: ObservationStatus::Ok,
-                metadata,
-                ..ObservationOutcome::default()
-            },
-            Err(error) => ObservationOutcome {
-                status: runtime_status(error),
-                metadata,
-                error: Some(runtime_error(error)),
-                ..ObservationOutcome::default()
-            },
-        });
+        let run_observation = RunTurnPipelinesObservation::begin(trace);
+        let result = run_observation.trace(self.run_inner(ctx, sink, run_observation.parent())).await;
+        run_observation.finish(ctx, &result);
         result
     }
 
@@ -152,24 +127,9 @@ impl TurnRuntime {
             turn_number: Some(ctx.turn_number()),
             stage,
         });
-        let observation = parent.begin(ObservationSpec {
-            name: stage_name(stage),
-            kind: ObservationKind::Chain,
-            input: None,
-            metadata: Vec::new(),
-        });
-        let outcome = observation.trace(pipeline.execute(ctx, &observation)).await;
-        observation.finish(match &outcome {
-            Ok(()) => ObservationOutcome {
-                status: ObservationStatus::Ok,
-                ..ObservationOutcome::default()
-            },
-            Err(error) => ObservationOutcome {
-                status: runtime_status(error),
-                error: Some(runtime_error(error)),
-                ..ObservationOutcome::default()
-            },
-        });
+        let observation = PipelineStageObservation::begin(parent, stage);
+        let outcome = observation.trace(pipeline.execute(ctx, observation.parent())).await;
+        observation.finish(&outcome);
         if outcome.is_ok() {
             if let Some(exits) = stage_exit_phases(stage) {
                 if !exits.contains(&ctx.phase()) {
@@ -182,40 +142,6 @@ impl TurnRuntime {
             }
         }
         outcome
-    }
-}
-
-const fn stage_name(stage: TurnStage) -> &'static str {
-    match stage {
-        TurnStage::TurnInitializer => "initialize-turn",
-        TurnStage::BaselineBuilder => "prepare-context",
-        TurnStage::WriterPlanner => "plan-turn",
-        TurnStage::ContextRetrieval => "retrieve-context",
-        TurnStage::CharacterThink => "think-characters",
-        TurnStage::StoryGenerator => "generate-story",
-        TurnStage::StoryStateExtractor => "extract-story-state",
-        TurnStage::Validation => "validate-story",
-        TurnStage::StoryRepairer => "repair-story",
-        TurnStage::TurnCommitter => "commit-turn",
-        TurnStage::Context => "prepare-context",
-    }
-}
-
-fn runtime_error(error: &TurnExecutionError) -> ObservationError {
-    ObservationError {
-        code: error.code().into(),
-        failure_kind: format!("{:?}", error.kind()).to_lowercase(),
-        stage: error.stage().map(|stage| stage.as_str().into()),
-        message: error.to_string(),
-    }
-}
-
-fn runtime_status(error: &TurnExecutionError) -> ObservationStatus {
-    match error.kind() {
-        TurnFailureKind::Cancelled => ObservationStatus::Cancelled,
-        TurnFailureKind::DeadlineExceeded => ObservationStatus::DeadlineExceeded,
-        TurnFailureKind::RevisionConflict | TurnFailureKind::IdempotencyConflict => ObservationStatus::Conflict,
-        _ => ObservationStatus::Error,
     }
 }
 

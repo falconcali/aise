@@ -19,6 +19,7 @@ impl Observation {
     pub(crate) fn new(spec: ObservationSpec, parent: Option<&Context>, content: ContentCapture) -> Self {
         let span = tracing::span!(
             target: "aise::observation",
+            parent: None,
             tracing::Level::INFO,
             "observation",
             "observation.name" = spec.name,

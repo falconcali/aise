@@ -25,6 +25,11 @@ impl Trace {
         if let Some(id) = &session.id {
             metadata.push(Attribute::string(super::model::SESSION_ID, id.clone()));
         }
+        let propagated = metadata
+            .iter()
+            .filter(|attribute| is_propagated(attribute.key))
+            .cloned()
+            .collect();
         let root = Observation::new(
             ObservationSpec {
                 name: spec.name,
@@ -40,7 +45,7 @@ impl Trace {
             root: Some(root),
             context,
             content,
-            propagated: Vec::new(),
+            propagated,
             finished: false,
         };
         trace.bind(vec![Attribute::string(TRACE_TAGS, spec.tags.join(","))]);
@@ -55,7 +60,7 @@ impl Trace {
         let mut metadata = self.propagated.clone();
         metadata.append(&mut spec.metadata);
         spec.metadata = metadata;
-        self.root().begin(spec)
+        Observation::new(spec, Some(&self.context), self.content.clone())
     }
 
     pub fn bind(&mut self, attributes: Vec<Attribute>) {
@@ -101,6 +106,21 @@ impl Trace {
         }
         self.finished = true;
     }
+}
+
+fn is_propagated(key: &str) -> bool {
+    matches!(
+        key,
+        TRACE_NAME
+            | TRACE_TAGS
+            | TRACE_ENVIRONMENT
+            | TRACE_RELEASE
+            | super::model::SCHEMA_VERSION
+            | super::model::SESSION_ID
+            | TRACE_METADATA_STORY_ID
+            | TRACE_METADATA_IDEMPOTENCY_KEY_DIGEST
+            | TRACE_METADATA_TURN_NUMBER
+    )
 }
 
 impl Drop for Trace {

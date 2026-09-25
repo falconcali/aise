@@ -55,6 +55,11 @@ enum StructuredCheckOutcome {
 
 type StructuredCheck = Box<dyn FnOnce(&str) -> StructuredCheckOutcome + Send>;
 
+struct CallOptions<'a> {
+    structured: Option<StructuredCheck>,
+    parent: &'a Observation,
+}
+
 impl LlmGateway {
     pub fn new(
         provider: Arc<dyn LlmProvider>,
@@ -182,7 +187,17 @@ impl LlmGateway {
             .map_err(|error| LlmError::TokenBudgetExceeded(error.to_string()))?;
 
         let completion = self
-            .run_call(&mut scope, request, false, None, reservation, Some(check), parent)
+            .run_call(
+                &mut scope,
+                request,
+                false,
+                None,
+                reservation,
+                CallOptions {
+                    structured: Some(check),
+                    parent,
+                },
+            )
             .await?;
         let value = serde_json::from_str::<T>(&completion.text).map_err(|_| LlmError::Protocol {
             kind: crate::llm::error::LlmProtocolErrorKind::InvalidStructuredOutput,
@@ -434,7 +449,18 @@ impl LlmGateway {
                 kind: crate::llm::error::LlmProtocolErrorKind::InvalidSseLine,
             });
         }
-        self.run_call(scope, request, stream, sink, reservation, None, parent).await
+        self.run_call(
+            scope,
+            request,
+            stream,
+            sink,
+            reservation,
+            CallOptions {
+                structured: None,
+                parent,
+            },
+        )
+        .await
     }
 
     async fn execute_call_owned(
@@ -446,8 +472,18 @@ impl LlmGateway {
         reservation: LlmBudgetReservation,
         parent: &Observation,
     ) -> Result<LlmCompletion, LlmError> {
-        self.run_call(&mut scope, request, stream, sink, reservation, None, parent)
-            .await
+        self.run_call(
+            &mut scope,
+            request,
+            stream,
+            sink,
+            reservation,
+            CallOptions {
+                structured: None,
+                parent,
+            },
+        )
+        .await
     }
 
     async fn run_call(
@@ -457,10 +493,9 @@ impl LlmGateway {
         stream: bool,
         sink: Option<DeltaSink>,
         reservation: LlmBudgetReservation,
-        structured: Option<StructuredCheck>,
-        parent: &Observation,
+        options: CallOptions<'_>,
     ) -> Result<LlmCompletion, LlmError> {
-        let structured_check = structured;
+        let structured_check = options.structured;
         let call_id = reservation.call_id().clone();
         let mut generation = begin_generation(
             self.observation_policy.clone(),
@@ -469,7 +504,7 @@ impl LlmGateway {
             thinking_mode(self.config.thinking),
             scope,
             &request,
-            parent,
+            options.parent,
         );
         let call_started = Instant::now();
 

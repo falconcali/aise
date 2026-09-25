@@ -1,4 +1,5 @@
 pub mod initializer;
+pub mod observability;
 pub mod story_turn_coordinator;
 pub mod turn_pipeline_set;
 pub mod turn_runtime;
