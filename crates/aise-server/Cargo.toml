@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 aise = { path = "../aise" }
+aise-core = { path = "../aise-core" }
 anyhow.workspace = true
 axum.workspace = true
 base64.workspace = true

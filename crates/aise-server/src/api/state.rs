@@ -8,6 +8,7 @@ use aise::persistence::StoryHistoryReadPort;
 use aise::story::character_card_service::CharacterCardService;
 use aise::story::instance_factory::StoryInstanceFactory;
 use aise::story::pack_service::PackService;
+use aise_core::engine::Engine as CoreEngine;
 use std::sync::Arc;
 
 pub struct AppState {
@@ -25,11 +26,13 @@ pub struct AppState {
 impl AppState {
     pub fn new(
         engine: Arc<AiseEngine>,
+        core_engine: Arc<dyn CoreEngine>,
         registry: Arc<SessionRegistry>,
         tasks: Arc<TurnTaskSupervisor>,
         config: ServerConfig,
     ) -> Self {
-        let turn_submission = Arc::new(TurnSubmissionService::new(engine.clone(), registry.clone(), tasks.clone()));
+        let turn_submission =
+            Arc::new(TurnSubmissionService::new(core_engine.clone(), registry.clone(), tasks.clone()));
         Self {
             engine,
             registry,

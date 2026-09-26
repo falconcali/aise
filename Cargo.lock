@@ -44,10 +44,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "aise-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "thiserror",
+ "tokio-util",
+]
+
+[[package]]
 name = "aise-server"
 version = "0.1.0"
 dependencies = [
  "aise",
+ "aise-core",
  "anyhow",
  "async-trait",
  "axum",

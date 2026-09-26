@@ -533,7 +533,6 @@ turnForm.onsubmit = async (e) => {
           storyEl.textContent += `\n${result.story_text}\n\n`;
           storyEl.scrollTop = storyEl.scrollHeight;
         }
-        await loadStory(currentSession.story_id);
       },
       onFailed: (payload) => {
         const text = payload && payload.code ? payload.code : JSON.stringify(payload);

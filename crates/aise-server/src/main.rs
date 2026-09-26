@@ -1,3 +1,4 @@
+use aise_core::engine::HelloWorldEngine;
 use aise_server::app::build_services;
 use aise_server::observability::{ObservabilityConfig, ObservabilityRuntime, TelemetryDiagnostics};
 use aise_server::session::SessionRegistry;
@@ -69,7 +70,14 @@ async fn main() -> anyhow::Result<()> {
         let registry = SessionRegistry::new(config.max_sessions);
         let task_supervisor = tasks::TurnTaskSupervisor::new(config.turn_tasks())?;
         let state = Arc::new(
-            AppState::new(services.engine, registry, task_supervisor.clone(), config.clone()).with_services(
+            AppState::new(
+                services.engine,
+                Arc::new(HelloWorldEngine),
+                registry,
+                task_supervisor.clone(),
+                config.clone(),
+            )
+            .with_services(
                 services.pack_service,
                 services.character_card_service,
                 services.instance_factory,

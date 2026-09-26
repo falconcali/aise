@@ -6,8 +6,8 @@ use aise::observability::{
     ObservationKind, ObservationOutcome, ObservationSession, ObservationSpec, ObservationStatus, SessionSpec, Trace,
     TraceSpec,
 };
-use aise::turn::turn_contract::CommittedTurnResult;
-use aise::turn::turn_error::{TurnExecutionError, TurnFailureKind};
+use aise_core::core::TurnResult;
+use aise_core::engine::EngineError;
 use sha2::{Digest, Sha256};
 
 pub struct TurnSubmissionTrace {
@@ -46,10 +46,6 @@ impl TurnSubmissionTrace {
             trace,
             encoder,
         }
-    }
-
-    pub fn trace(&mut self) -> &mut Trace {
-        &mut self.trace
     }
 
     pub fn begin_session_resolution(&self) -> TurnSubmissionSpan {
@@ -95,25 +91,24 @@ impl TurnSubmissionTrace {
         span.finish(outcome);
     }
 
-    pub fn finish_turn(mut self, result: &Result<CommittedTurnResult, TurnExecutionError>) {
+    pub fn finish_core_turn(self, result: &Result<TurnResult, EngineError>) {
         let outcome = match result {
-            Ok(result) => {
-                self.trace.bind(vec![Attribute::u64(
-                    aise::observability::TRACE_METADATA_TURN_NUMBER,
-                    result.turn_number.get(),
-                )]);
-                ObservationOutcome {
-                    status: ObservationStatus::Ok,
-                    output: self
-                        .encoder
-                        .encode(&result.story_text, self.encoder.max_observation_bytes())
-                        .content,
-                    ..ObservationOutcome::default()
-                }
-            }
+            Ok(result) => ObservationOutcome {
+                status: ObservationStatus::Ok,
+                output: self
+                    .encoder
+                    .encode(&result.result.story_text, self.encoder.max_observation_bytes())
+                    .content,
+                ..ObservationOutcome::default()
+            },
             Err(error) => ObservationOutcome {
-                status: turn_observation_status(error.kind()),
-                error: Some(turn_error(error)),
+                status: ObservationStatus::Error,
+                error: Some(ObservationError {
+                    code: "core_engine_error".into(),
+                    failure_kind: "engine".into(),
+                    stage: None,
+                    message: error.to_string(),
+                }),
                 ..ObservationOutcome::default()
             },
         };
@@ -181,24 +176,6 @@ fn submission_outcome(observation: &Observation, result: Result<(), &TurnSubmiss
     }
 }
 
-fn turn_error(error: &TurnExecutionError) -> ObservationError {
-    ObservationError {
-        code: error.code().into(),
-        failure_kind: failure_kind(error.kind()).into(),
-        stage: error.stage().map(|stage| stage.as_str().into()),
-        message: error.to_string(),
-    }
-}
-
-fn turn_observation_status(kind: TurnFailureKind) -> ObservationStatus {
-    match kind {
-        TurnFailureKind::Cancelled => ObservationStatus::Cancelled,
-        TurnFailureKind::DeadlineExceeded => ObservationStatus::DeadlineExceeded,
-        TurnFailureKind::RevisionConflict | TurnFailureKind::IdempotencyConflict => ObservationStatus::Conflict,
-        _ => ObservationStatus::Error,
-    }
-}
-
 pub(super) fn submission_error_code(error: &TurnSubmissionError) -> &'static str {
     match error {
         TurnSubmissionError::InvalidSession => "invalid_session",
@@ -207,25 +184,6 @@ pub(super) fn submission_error_code(error: &TurnSubmissionError) -> &'static str
         TurnSubmissionError::MissingIdempotencyKey => "missing_idempotency_key",
         TurnSubmissionError::InvalidIdempotencyKey(_) => "invalid_idempotency_key",
         TurnSubmissionError::Admission(_) => "turn_task_admission_failed",
-    }
-}
-
-fn failure_kind(kind: TurnFailureKind) -> &'static str {
-    match kind {
-        TurnFailureKind::InvalidRequest => "invalid_request",
-        TurnFailureKind::StoryNotFound => "story_not_found",
-        TurnFailureKind::Cancelled => "cancelled",
-        TurnFailureKind::DeadlineExceeded => "deadline_exceeded",
-        TurnFailureKind::RevisionConflict => "revision_conflict",
-        TurnFailureKind::IdempotencyConflict => "idempotency_conflict",
-        TurnFailureKind::Backpressure => "backpressure",
-        TurnFailureKind::ValidationRejected => "validation_rejected",
-        TurnFailureKind::ValidationBudgetExhausted => "validation_budget_exhausted",
-        TurnFailureKind::TokenBudgetExceeded => "token_budget_exceeded",
-        TurnFailureKind::Llm => "llm",
-        TurnFailureKind::Store => "store",
-        TurnFailureKind::Io => "io",
-        TurnFailureKind::InvariantViolation => "invariant_violation",
     }
 }
 

@@ -1,7 +1,5 @@
-use aise::TurnEvent;
-use aise::TurnEventSink;
 use aise::turn::turn_contract::TurnCancellation;
-use aise::turn::turn_event::TurnEventDeliveryError;
+use aise_core::core::{TurnEvent, TurnEventDeliveryError, TurnEventSink};
 use axum::response::sse::Event;
 use futures::stream::Stream;
 use std::convert::Infallible;
@@ -37,41 +35,19 @@ impl SseSink {
 
     fn to_sse(&self, event: &TurnEvent) -> Option<Event> {
         let (name, payload) = match event {
-            TurnEvent::StageStarted { stage, .. } => ("stage", serde_json::json!({ "stage": stage.as_str() })),
-            TurnEvent::ValidationCompleted {
-                attempt,
-                decision,
-                issue_codes,
-                ..
-            } => (
-                "validation",
-                serde_json::json!({
-                    "attempt": attempt,
-                    "decision": decision.as_str(),
-                    "issue_codes": issue_codes.iter().map(|code| code.as_str()).collect::<Vec<_>>(),
-                }),
-            ),
+            TurnEvent::StageStarted { stage } => ("stage", serde_json::json!({ "stage": stage })),
             TurnEvent::Committed { result, replayed } => (
                 "committed",
                 serde_json::json!({
-                    "turn_number": result.turn_number.get(),
-                    "story_revision": result.story_revision.get(),
+                    "turn_number": result.turn_number,
+                    "story_revision": result.story_revision,
                     "story_text": result.story_text,
                     "replayed": replayed,
                 }),
             ),
-            TurnEvent::Failed { turn_number, code } => (
-                "failed",
-                serde_json::json!({ "turn_number": turn_number.map(|number| number.get()), "code": code }),
-            ),
-            TurnEvent::Cancelled { turn_number, code } => (
-                "cancelled",
-                serde_json::json!({ "turn_number": turn_number.map(|number| number.get()), "code": code }),
-            ),
-            TurnEvent::Conflict { turn_number, code } => (
-                "conflict",
-                serde_json::json!({ "turn_number": turn_number.map(|number| number.get()), "code": code }),
-            ),
+            TurnEvent::Failed { code } => ("failed", serde_json::json!({ "code": code })),
+            TurnEvent::Cancelled { code } => ("cancelled", serde_json::json!({ "code": code })),
+            TurnEvent::Conflict { code } => ("conflict", serde_json::json!({ "code": code })),
         };
         let data = match serde_json::to_string(&payload) {
             Ok(data) => data,
@@ -97,10 +73,10 @@ impl TurnEventSink for SseSink {
             }
             match self.terminal_tx.try_send(sse) {
                 Ok(()) => Ok(()),
-                Err(mpsc::error::TrySendError::Full(_)) => Err(TurnEventDeliveryError::ProgressBackpressure),
+                Err(mpsc::error::TrySendError::Full(_)) => Err(TurnEventDeliveryError::Backpressure),
                 Err(mpsc::error::TrySendError::Closed(_)) => {
                     self.dropped.fetch_add(1, Ordering::Relaxed);
-                    Err(TurnEventDeliveryError::ClientDisconnected)
+                    Err(TurnEventDeliveryError::Disconnected)
                 }
             }
         } else {
@@ -112,7 +88,7 @@ impl TurnEventSink for SseSink {
                         dropped_events = self.dropped.load(Ordering::Relaxed),
                         "sse progress lane saturated"
                     );
-                    Err(TurnEventDeliveryError::ProgressBackpressure)
+                    Err(TurnEventDeliveryError::Backpressure)
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => {
                     self.dropped.fetch_add(1, Ordering::Relaxed);
@@ -121,7 +97,7 @@ impl TurnEventSink for SseSink {
                         dropped_events = self.dropped.load(Ordering::Relaxed),
                         "sse client disconnected during progress delivery"
                     );
-                    Err(TurnEventDeliveryError::ClientDisconnected)
+                    Err(TurnEventDeliveryError::Disconnected)
                 }
             }
         }
