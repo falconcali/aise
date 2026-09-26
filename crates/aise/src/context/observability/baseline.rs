@@ -17,14 +17,15 @@ pub fn finish<T, E>(observation: Observation, outcome: &Result<T, E>)
 where
     E: Clone + Into<ContextError>,
 {
-    observation.finish(context_outcome(outcome, TurnStage::BaselineBuilder));
+    let observation_outcome = context_outcome(&observation, outcome, TurnStage::BaselineBuilder);
+    observation.finish(observation_outcome);
 }
 
 fn begin(parent: &Observation, ctx: &TurnExecutionContext, name: &'static str) -> Observation {
     parent.begin(ObservationSpec {
         name,
         kind: ObservationKind::Retriever,
-        input: None,
+        input: parent.capture_content(&ctx.observation_input()),
         metadata: vec![Attribute::string(
             "aise.observation.metadata.story_id",
             ctx.story_id().as_str(),
@@ -32,13 +33,14 @@ fn begin(parent: &Observation, ctx: &TurnExecutionContext, name: &'static str) -
     })
 }
 
-fn context_outcome<T, E>(outcome: &Result<T, E>, stage: TurnStage) -> ObservationOutcome
+fn context_outcome<T, E>(observation: &Observation, outcome: &Result<T, E>, stage: TurnStage) -> ObservationOutcome
 where
     E: Clone + Into<ContextError>,
 {
     match outcome {
         Ok(_) => ObservationOutcome {
             status: ObservationStatus::Ok,
+            output: observation.capture_content(&serde_json::json!({"status": "completed"})),
             ..ObservationOutcome::default()
         },
         Err(error) => {

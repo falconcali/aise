@@ -2,11 +2,11 @@ use crate::observability::{Attribute, Observation, ObservationError, Observation
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub fn begin_run_turn_pipelines(trace: &Trace) -> Observation {
+pub fn begin_run_turn_pipelines(trace: &Trace, ctx: &TurnExecutionContext) -> Observation {
     trace.begin_observation(crate::observability::ObservationSpec {
         name: "run-turn-pipelines",
         kind: crate::observability::ObservationKind::Chain,
-        input: None,
+        input: trace.root().capture_content(&ctx.observation_input()),
         metadata: Vec::new(),
     })
 }
@@ -19,10 +19,15 @@ pub fn finish(observation: Observation, ctx: &TurnExecutionContext, result: &Res
             ctx.character_thinking_skipped(),
         ),
     ];
+    let output = result
+        .as_ref()
+        .ok()
+        .and_then(|_| observation.capture_content(&ctx.observation_output()));
     observation.finish(match result {
         Ok(()) => ObservationOutcome {
             status: ObservationStatus::Ok,
             metadata,
+            output,
             ..ObservationOutcome::default()
         },
         Err(error) => ObservationOutcome {

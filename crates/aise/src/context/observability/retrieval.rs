@@ -8,7 +8,7 @@ pub fn begin_retrieve_context(parent: &Observation, ctx: &TurnExecutionContext) 
     parent.begin(ObservationSpec {
         name: "retrieve-context",
         kind: ObservationKind::Retriever,
-        input: None,
+        input: parent.capture_content(&ctx.observation_input()),
         metadata: vec![Attribute::string(
             "aise.observation.metadata.story_id",
             ctx.story_id().as_str(),
@@ -17,9 +17,15 @@ pub fn begin_retrieve_context(parent: &Observation, ctx: &TurnExecutionContext) 
 }
 
 pub fn finish(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
+    let output = outcome.as_ref().ok().and_then(|_| {
+        observation.capture_content(&serde_json::json!({
+            "status": "context_retrieved",
+        }))
+    });
     observation.finish(match outcome {
         Ok(()) => ObservationOutcome {
             status: ObservationStatus::Ok,
+            output,
             ..ObservationOutcome::default()
         },
         Err(error) => ObservationOutcome {

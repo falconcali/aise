@@ -1,33 +1,36 @@
 use crate::observability::{
     Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus,
 };
+use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub fn begin_generate_story(parent: &Observation) -> Observation {
-    begin(parent, "generate-story", ObservationKind::Chain)
+pub fn begin_generate_story(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+    begin(parent, ctx, "generate-story", ObservationKind::Chain)
 }
 
-pub fn begin_draft_story_text(parent: &Observation) -> Observation {
-    begin(parent, "draft-story-text", ObservationKind::Generation)
+pub fn begin_draft_story_text(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+    begin(parent, ctx, "draft-story-text", ObservationKind::Generation)
 }
 
 pub fn finish(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
-    observation.finish(outcome_for(outcome));
+    let observation_outcome = outcome_for(&observation, outcome);
+    observation.finish(observation_outcome);
 }
 
-fn begin(parent: &Observation, name: &'static str, kind: ObservationKind) -> Observation {
+fn begin(parent: &Observation, ctx: &TurnExecutionContext, name: &'static str, kind: ObservationKind) -> Observation {
     parent.begin(ObservationSpec {
         name,
         kind,
-        input: None,
+        input: parent.capture_content(&ctx.observation_input()),
         metadata: Vec::new(),
     })
 }
 
-fn outcome_for(outcome: &Result<(), TurnExecutionError>) -> ObservationOutcome {
+fn outcome_for(observation: &Observation, outcome: &Result<(), TurnExecutionError>) -> ObservationOutcome {
     match outcome {
         Ok(()) => ObservationOutcome {
             status: ObservationStatus::Ok,
+            output: observation.capture_content(&serde_json::json!({"status": "generated"})),
             ..ObservationOutcome::default()
         },
         Err(error) => ObservationOutcome {

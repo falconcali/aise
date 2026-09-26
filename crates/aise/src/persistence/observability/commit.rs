@@ -14,18 +14,20 @@ pub fn begin_persist_turn(parent: &Observation, ctx: &TurnExecutionContext) -> O
 }
 
 pub fn finish(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
-    observation.finish(turn_outcome(outcome));
+    let observation_outcome = turn_outcome(&observation, outcome);
+    observation.finish(observation_outcome);
 }
 
 pub fn end_persist<T>(observation: Observation, outcome: &Result<T, StoreError>) {
-    observation.finish(store_outcome(outcome));
+    let observation_outcome = store_outcome(&observation, outcome);
+    observation.finish(observation_outcome);
 }
 
 fn begin(parent: &Observation, ctx: &TurnExecutionContext, name: &'static str, kind: ObservationKind) -> Observation {
     parent.begin(ObservationSpec {
         name,
         kind,
-        input: None,
+        input: parent.capture_content(&ctx.observation_input()),
         metadata: commit_metadata(ctx),
     })
 }
@@ -37,7 +39,7 @@ fn commit_metadata(ctx: &TurnExecutionContext) -> Vec<Attribute> {
     ]
 }
 
-fn store_outcome<T>(outcome: &Result<T, StoreError>) -> ObservationOutcome {
+fn store_outcome<T>(observation: &Observation, outcome: &Result<T, StoreError>) -> ObservationOutcome {
     match outcome {
         Ok(_) => ObservationOutcome {
             status: ObservationStatus::Ok,
@@ -45,6 +47,7 @@ fn store_outcome<T>(outcome: &Result<T, StoreError>) -> ObservationOutcome {
                 "aise.observation.metadata.commit_status",
                 "committed",
             )],
+            output: observation.capture_content(&serde_json::json!({"status": "committed"})),
             ..ObservationOutcome::default()
         },
         Err(error) => ObservationOutcome {
@@ -61,10 +64,11 @@ fn store_outcome<T>(outcome: &Result<T, StoreError>) -> ObservationOutcome {
     }
 }
 
-fn turn_outcome(outcome: &Result<(), TurnExecutionError>) -> ObservationOutcome {
+fn turn_outcome(observation: &Observation, outcome: &Result<(), TurnExecutionError>) -> ObservationOutcome {
     match outcome {
         Ok(()) => ObservationOutcome {
             status: ObservationStatus::Ok,
+            output: observation.capture_content(&serde_json::json!({"status": "completed"})),
             ..ObservationOutcome::default()
         },
         Err(error) => ObservationOutcome {

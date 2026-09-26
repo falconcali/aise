@@ -150,11 +150,11 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                 .budget()
                 .remaining_output_tokens()
                 .min(u64::from(self.config.max_output_tokens)) as u32;
+            let character_observation =
+                observability::begin_think_character(observation, ctx, request.role_id.to_string().as_str());
             let scope = ctx
                 .llm_call_scope(TurnStage::CharacterThink)
                 .with_character_id(request.role_id.to_string());
-            let character_observation =
-                observability::begin_think_character(observation, request.role_id.to_string().as_str());
             let structured_result = self
                 .gateway
                 .complete_structured_composed(

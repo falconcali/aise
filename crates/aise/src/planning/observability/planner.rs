@@ -12,20 +12,26 @@ pub fn begin_project_narrative(parent: &Observation, ctx: &TurnExecutionContext)
     begin_context(parent, ctx, "project-narrative")
 }
 
-pub fn begin_generate_writer_plan(parent: &Observation) -> Observation {
+pub fn begin_generate_writer_plan(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
     parent.begin(ObservationSpec {
         name: "generate-writer-plan",
         kind: ObservationKind::Chain,
-        input: None,
+        input: parent.capture_content(&ctx.observation_input()),
         metadata: Vec::new(),
     })
 }
 
 pub fn finish(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
-    observation.finish(turn_outcome(outcome));
+    let observation_outcome = turn_outcome(&observation, outcome);
+    observation.finish(observation_outcome);
 }
 
 pub fn end_project_narrative(observation: Observation, graph_revision: u64, node_count: usize, edge_count: usize) {
+    let output = observation.capture_content(&serde_json::json!({
+        "graph_revision": graph_revision,
+        "node_count": node_count,
+        "edge_count": edge_count,
+    }));
     observation.finish(ObservationOutcome {
         status: ObservationStatus::Ok,
         metadata: vec![
@@ -33,6 +39,7 @@ pub fn end_project_narrative(observation: Observation, graph_revision: u64, node
             Attribute::u64("aise.observation.metadata.projected_node_count", node_count as u64),
             Attribute::u64("aise.observation.metadata.projected_edge_count", edge_count as u64),
         ],
+        output,
         ..ObservationOutcome::default()
     });
 }
@@ -41,7 +48,7 @@ fn begin_context(parent: &Observation, ctx: &TurnExecutionContext, name: &'stati
     parent.begin(ObservationSpec {
         name,
         kind: ObservationKind::Chain,
-        input: None,
+        input: parent.capture_content(&ctx.observation_input()),
         metadata: vec![Attribute::string(
             "aise.observation.metadata.story_id",
             ctx.story_id().as_str(),
@@ -49,10 +56,11 @@ fn begin_context(parent: &Observation, ctx: &TurnExecutionContext, name: &'stati
     })
 }
 
-fn turn_outcome(outcome: &Result<(), TurnExecutionError>) -> ObservationOutcome {
+fn turn_outcome(observation: &Observation, outcome: &Result<(), TurnExecutionError>) -> ObservationOutcome {
     match outcome {
         Ok(()) => ObservationOutcome {
             status: ObservationStatus::Ok,
+            output: observation.capture_content(&serde_json::json!({"status": "completed"})),
             ..ObservationOutcome::default()
         },
         Err(error) => ObservationOutcome {

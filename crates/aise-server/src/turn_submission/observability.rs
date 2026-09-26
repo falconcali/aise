@@ -53,15 +53,27 @@ impl TurnSubmissionTrace {
     }
 
     pub fn begin_session_resolution(&self) -> TurnSubmissionSpan {
-        self.begin_observation("resolve-interaction-session", ObservationKind::Retriever)
+        self.begin_observation(
+            "resolve-interaction-session",
+            ObservationKind::Retriever,
+            serde_json::json!({"operation": "resolve-interaction-session"}),
+        )
     }
 
     pub fn begin_request_validation(&self) -> TurnSubmissionSpan {
-        self.begin_observation("validate-request", ObservationKind::Chain)
+        self.begin_observation(
+            "validate-request",
+            ObservationKind::Chain,
+            serde_json::json!({"operation": "validate-request"}),
+        )
     }
 
     pub fn begin_task_admission(&self) -> TurnSubmissionSpan {
-        self.begin_observation("admit-turn-task", ObservationKind::Chain)
+        self.begin_observation(
+            "admit-turn-task",
+            ObservationKind::Chain,
+            serde_json::json!({"operation": "admit-turn-task"}),
+        )
     }
 
     pub fn bind_session(&mut self, session: &Session) {
@@ -79,7 +91,8 @@ impl TurnSubmissionTrace {
     }
 
     pub fn finish_span(&self, span: TurnSubmissionSpan, result: Result<(), &TurnSubmissionError>) {
-        span.finish(submission_outcome(result));
+        let outcome = submission_outcome(&span.observation, result);
+        span.finish(outcome);
     }
 
     pub fn finish_turn(mut self, result: &Result<CommittedTurnResult, TurnExecutionError>) {
@@ -112,7 +125,8 @@ impl TurnSubmissionTrace {
     }
 
     pub fn finish_submission_error(self, error: TurnSubmissionError) -> TurnSubmissionError {
-        self.trace.finish(submission_outcome(Err(&error)));
+        let outcome = submission_outcome(self.trace.root(), Err(&error));
+        self.trace.finish(outcome);
         self.session.finish(aise::observability::SessionOutcome {
             status: ObservationStatus::Ok,
             metadata: Vec::new(),
@@ -120,12 +134,17 @@ impl TurnSubmissionTrace {
         error
     }
 
-    fn begin_observation(&self, name: &'static str, kind: ObservationKind) -> TurnSubmissionSpan {
+    fn begin_observation(
+        &self,
+        name: &'static str,
+        kind: ObservationKind,
+        input: serde_json::Value,
+    ) -> TurnSubmissionSpan {
         TurnSubmissionSpan {
             observation: self.trace.begin_observation(ObservationSpec {
                 name,
                 kind,
-                input: None,
+                input: self.trace.root().capture_content(&input),
                 metadata: Vec::new(),
             }),
         }
@@ -142,10 +161,11 @@ impl TurnSubmissionSpan {
     }
 }
 
-fn submission_outcome(result: Result<(), &TurnSubmissionError>) -> ObservationOutcome {
+fn submission_outcome(observation: &Observation, result: Result<(), &TurnSubmissionError>) -> ObservationOutcome {
     match result {
         Ok(()) => ObservationOutcome {
             status: ObservationStatus::Ok,
+            output: observation.capture_content(&serde_json::json!({"status": "completed"})),
             ..ObservationOutcome::default()
         },
         Err(error) => ObservationOutcome {

@@ -120,7 +120,7 @@ impl AiseEngine {
         let cancellation = validated.cancellation().clone();
         let deadline = Instant::now() + Duration::from_millis(self.config.turn.turn_timeout_ms);
 
-        let coordinate_span = observability::begin_coordinate_story_turn(trace);
+        let coordinate_span = observability::begin_coordinate_story_turn(trace, &story_id);
         let permit_result = self.coordinator.acquire(&story_id, deadline, &cancellation).await;
         let permit = match permit_result {
             Ok(permit) => Some(permit),
@@ -132,7 +132,7 @@ impl AiseEngine {
         };
         observability::finish(coordinate_span, &Ok(()));
 
-        let load_span = observability::begin_load_story(trace);
+        let load_span = observability::begin_load_story(trace, &story_id);
         let story_info_result = self.store.get_story(&story_id).await;
         let story_info = match story_info_result {
             Ok(Some(info)) => info,
@@ -156,7 +156,8 @@ impl AiseEngine {
         };
         observability::finish(load_span, &Ok(()));
 
-        let idempotency_span = observability::begin_check_idempotency(trace);
+        let idempotency_span =
+            observability::begin_check_idempotency(trace, &story_id, request.request_digest().as_str());
         let replay_result = self.store.find_committed_turn(&story_id, &idempotency_key).await;
         let replay = match replay_result {
             Ok(outcome) => outcome,

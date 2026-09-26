@@ -139,6 +139,7 @@ impl TurnExecutionPipeline for StoryGenerator {
             projection_ms,
             "story generator prompt projected"
         );
+        let draft_observation = observability::begin_draft_story_text(observation, ctx);
         let scope = ctx.llm_call_scope(TurnStage::StoryGenerator);
         let span = tracing::info_span!(
             "story_generator.generate",
@@ -147,7 +148,6 @@ impl TurnExecutionPipeline for StoryGenerator {
             writer_knowledge_count,
             constraint_count,
         );
-        let draft_observation = observability::begin_draft_story_text(observation);
         let completion_result = self
             .gateway
             .complete_text_composed(

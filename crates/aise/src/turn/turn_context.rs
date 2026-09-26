@@ -19,6 +19,7 @@ use crate::turn::turn_validation::{
     BoundedValidationIssues, StateChange, ValidatedChangeSet, ValidatedChangeSetParts, ValidationDecision,
     ValidationResult,
 };
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -306,6 +307,30 @@ impl TurnExecutionContext {
 
     pub fn llm_calls(&self) -> &[LlmCallUsage] {
         &self.llm_calls
+    }
+
+    pub fn observation_input(&self) -> Value {
+        json!({
+            "story_id": self.story_id().as_str(),
+            "turn_number": self.turn_number().get(),
+            "player_contribution": self.player_contribution(),
+            "phase": format!("{:?}", self.phase()),
+        })
+    }
+
+    pub fn observation_output(&self) -> Value {
+        json!({
+            "phase": format!("{:?}", self.phase()),
+            "has_baseline": self.baseline().is_some(),
+            "has_snapshot": self.snapshot().is_some(),
+            "has_plan": self.plan().is_some(),
+            "has_narrative_projection": self.narrative_projection().is_some(),
+            "character_decision_count": self.character_decisions().len(),
+            "story_text": self.story().map(|story| story.story_text.as_str()),
+            "has_extraction": self.extraction().is_some(),
+            "has_validation": self.validation().is_some(),
+            "committed_story_text": self.committed_result().map(|result| result.story_text.as_str()),
+        })
     }
 
     pub fn complete_initialization(&mut self) -> Result<(), TurnExecutionError> {

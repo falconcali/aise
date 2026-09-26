@@ -1,20 +1,30 @@
 use crate::observability::{Observation, ObservationError, ObservationOutcome, ObservationStatus};
+use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::TurnStage;
+use serde_json::json;
 
-pub fn begin_pipeline_stage(parent: &Observation, stage: TurnStage) -> Observation {
+pub fn begin_pipeline_stage(parent: &Observation, ctx: &TurnExecutionContext, stage: TurnStage) -> Observation {
     parent.begin(crate::observability::ObservationSpec {
         name: stage_name(stage),
         kind: crate::observability::ObservationKind::Chain,
-        input: None,
+        input: parent.capture_content(&json!({
+            "stage": stage.as_str(),
+            "turn": ctx.observation_input(),
+        })),
         metadata: Vec::new(),
     })
 }
 
-pub fn finish(observation: Observation, result: &Result<(), TurnExecutionError>) {
+pub fn finish(observation: Observation, ctx: &TurnExecutionContext, result: &Result<(), TurnExecutionError>) {
+    let output = result
+        .as_ref()
+        .ok()
+        .and_then(|_| observation.capture_content(&ctx.observation_output()));
     observation.finish(match result {
         Ok(()) => ObservationOutcome {
             status: ObservationStatus::Ok,
+            output,
             ..ObservationOutcome::default()
         },
         Err(error) => ObservationOutcome {

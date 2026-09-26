@@ -69,6 +69,7 @@ impl TurnExecutionPipeline for StoryRepairer {
             "story repairer prompt projected"
         );
         let correction_round = ctx.budget().correction_rounds();
+        let revision_observation = observability::begin_revise_story_text(observation, ctx);
         let scope = ctx
             .llm_call_scope(TurnStage::StoryRepairer)
             .with_correction_round(correction_round);
@@ -78,7 +79,6 @@ impl TurnExecutionPipeline for StoryRepairer {
             story_version,
             issue_count,
         );
-        let revision_observation = observability::begin_revise_story_text(observation);
         let completion_result = self
             .gateway
             .complete_text_composed(

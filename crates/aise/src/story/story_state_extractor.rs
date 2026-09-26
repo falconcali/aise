@@ -77,6 +77,7 @@ impl TurnExecutionPipeline for StoryStateExtractor {
             "story state extractor prompt projected"
         );
         let limits = ctx.budget().state_extraction_limits();
+        let extraction_observation = observability::begin_extract_story_state(observation, ctx);
         let scope = ctx.llm_call_scope(TurnStage::StoryStateExtractor);
         let span = tracing::info_span!(
             "story_state_extractor.extract",
@@ -84,7 +85,6 @@ impl TurnExecutionPipeline for StoryStateExtractor {
             is_reextraction
         );
         let contract = story_state_extraction_contract(limits);
-        let extraction_observation = observability::begin_extract_story_state(observation);
         let outcome = self
             .gateway
             .complete_structured_composed(

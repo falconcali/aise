@@ -4,6 +4,7 @@ use super::model::{
     ObservationSpec, ObservationStatus,
 };
 use opentelemetry::{Array, Context, Value};
+use serde::Serialize;
 use tracing::{Span, field::Empty};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -49,6 +50,10 @@ impl Observation {
 
     pub fn content_capture(&self) -> &ContentCapture {
         &self.content
+    }
+
+    pub fn capture_content<T: Serialize>(&self, value: &T) -> Option<BoundedContent> {
+        self.content.encode(value, self.content.max_observation_bytes()).content
     }
 
     pub fn finish(mut self, outcome: ObservationOutcome) {
@@ -217,3 +222,7 @@ enum ContentDirection {
     Input,
     Output,
 }
+
+#[cfg(test)]
+#[path = "tests/observation_tests.rs"]
+mod tests;
