@@ -43,6 +43,16 @@ fn mapped_keys(span: &SpanData) -> Vec<&str> {
 }
 
 #[test]
+fn maps_observation_name_to_span_name() {
+    let mut batch = vec![span(vec![KeyValue::new("observation.name", "run-turn-pipelines")])];
+    let adapter = LangfuseExportAdapter::new(NoopExporter, StreamingMasker::new(1024, false), TelemetryDiagnostics);
+
+    adapter.map_batch(&mut batch);
+
+    assert_eq!(batch[0].name.as_ref(), "run-turn-pipelines");
+}
+
+#[test]
 fn maps_every_known_temporary_key() {
     let source_keys = [
         "aise.observation.type",

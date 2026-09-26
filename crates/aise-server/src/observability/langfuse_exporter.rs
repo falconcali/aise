@@ -5,6 +5,7 @@ use opentelemetry::{Array, KeyValue, Value};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::{SpanData, SpanExporter};
+use std::borrow::Cow;
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -68,6 +69,9 @@ impl<E: SpanExporter> SpanExporter for LangfuseExportAdapter<E> {
 }
 
 fn map_span(span: &mut SpanData, masker: &StreamingMasker) {
+    if let Some(name) = observation_name(span) {
+        span.name = Cow::Owned(masker.mask(&name));
+    }
     span.attributes = span
         .attributes
         .drain(..)
@@ -90,6 +94,19 @@ fn map_span(span: &mut SpanData, masker: &StreamingMasker) {
     if let Status::Error { description } = &span.status {
         span.status = Status::error(masker.mask(description));
     }
+}
+
+fn observation_name(span: &SpanData) -> Option<String> {
+    span.attributes.iter().find_map(|attribute| {
+        if attribute.key.as_str() == "observation.name" {
+            match &attribute.value {
+                Value::String(value) if !value.as_ref().is_empty() => Some(value.as_ref().to_owned()),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    })
 }
 
 fn map_attribute(attribute: KeyValue, masker: &StreamingMasker) -> Option<KeyValue> {
