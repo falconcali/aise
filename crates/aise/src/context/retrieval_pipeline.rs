@@ -13,6 +13,7 @@ use crate::domain::turn::{
     KnowledgeDelivery, RetrievedCharacterContext, RetrievedContext, RetrievedContextError, RetrievedContextLimits,
     RetrievedKnowledgeItem, RetrievedWorldKnowledge, RoleContextView,
 };
+use crate::observability::Observation;
 use crate::persistence::knowledge_read_port::{KnowledgeFilter, OwnerMemoryQuery, SourceKnowledgeQuery};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
@@ -50,11 +51,11 @@ impl TurnExecutionPipeline for ContextRetrievalPipeline {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        observation: &crate::observability::Observation,
+        observation: &Observation,
     ) -> Result<(), TurnExecutionError> {
-        let operation = observability::begin_retrieve_context_observation(observation, ctx);
+        let operation = observability::begin_retrieve_context(observation, ctx);
         let result = self.execute_inner(ctx).await;
-        observability::end_retrieval_observation(operation, &result);
+        observability::end_retrieval(operation, &result);
         result
     }
 }

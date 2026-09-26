@@ -1,3 +1,4 @@
+use crate::observability::Observation;
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::TurnExecutionError;
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
@@ -15,7 +16,7 @@ impl TurnExecutionPipeline for TurnInitializer {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        _observation: &crate::observability::Observation,
+        _observation: &Observation,
     ) -> Result<(), TurnExecutionError> {
         if ctx.player_contribution().is_empty() {
             Err(TurnExecutionError::invalid_request("empty player contribution"))

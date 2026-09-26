@@ -3,7 +3,7 @@ use crate::observability::{
 };
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub fn begin_extract_story_state_observation(parent: &Observation) -> Observation {
+pub fn begin_extract_story_state(parent: &Observation) -> Observation {
     parent.begin(ObservationSpec {
         name: "extract-story-state",
         kind: ObservationKind::Chain,
@@ -12,7 +12,7 @@ pub fn begin_extract_story_state_observation(parent: &Observation) -> Observatio
     })
 }
 
-pub fn finish_observation(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
+pub fn finish(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
     observation.finish(outcome_for(outcome));
 }
 

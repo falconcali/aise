@@ -2,7 +2,7 @@ use crate::observability::{Attribute, Observation, ObservationError, Observation
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub fn begin_run_turn_pipelines_observation(trace: &Trace) -> Observation {
+pub fn begin_run_turn_pipelines(trace: &Trace) -> Observation {
     trace.begin_observation(crate::observability::ObservationSpec {
         name: "run-turn-pipelines",
         kind: crate::observability::ObservationKind::Chain,
@@ -11,7 +11,7 @@ pub fn begin_run_turn_pipelines_observation(trace: &Trace) -> Observation {
     })
 }
 
-pub fn finish_observation(observation: Observation, ctx: &TurnExecutionContext, result: &Result<(), TurnExecutionError>) {
+pub fn finish(observation: Observation, ctx: &TurnExecutionContext, result: &Result<(), TurnExecutionError>) {
     let metadata = vec![
         Attribute::bool("aise.observation.metadata.retrieval_skipped", ctx.retrieval_skipped()),
         Attribute::bool(

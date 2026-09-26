@@ -2,7 +2,7 @@ use crate::observability::{Observation, ObservationError, ObservationOutcome, Ob
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 use crate::turn::turn_pipeline::TurnStage;
 
-pub fn begin_pipeline_stage_observation(parent: &Observation, stage: TurnStage) -> Observation {
+pub fn begin_pipeline_stage(parent: &Observation, stage: TurnStage) -> Observation {
     parent.begin(crate::observability::ObservationSpec {
         name: stage_name(stage),
         kind: crate::observability::ObservationKind::Chain,
@@ -11,7 +11,7 @@ pub fn begin_pipeline_stage_observation(parent: &Observation, stage: TurnStage) 
     })
 }
 
-pub fn finish_observation(observation: Observation, result: &Result<(), TurnExecutionError>) {
+pub fn finish(observation: Observation, result: &Result<(), TurnExecutionError>) {
     observation.finish(match result {
         Ok(()) => ObservationOutcome {
             status: ObservationStatus::Ok,

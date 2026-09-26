@@ -2,19 +2,19 @@ use crate::domain::ids::TurnNumber;
 use crate::observability::{Attribute, Observation, ObservationError, ObservationOutcome, ObservationStatus, Trace};
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub fn begin_coordinate_story_turn_observation(trace: &Trace) -> Observation {
+pub fn begin_coordinate_story_turn(trace: &Trace) -> Observation {
     begin(trace, "coordinate-story-turn")
 }
 
-pub fn begin_load_story_observation(trace: &Trace) -> Observation {
+pub fn begin_load_story(trace: &Trace) -> Observation {
     begin(trace, "load-story")
 }
 
-pub fn begin_check_idempotency_observation(trace: &Trace) -> Observation {
+pub fn begin_check_idempotency(trace: &Trace) -> Observation {
     begin(trace, "check-idempotency")
 }
 
-pub fn finish_observation<T>(observation: Observation, outcome: &Result<T, TurnExecutionError>) {
+pub fn finish<T>(observation: Observation, outcome: &Result<T, TurnExecutionError>) {
     observation.finish(match outcome {
         Ok(_) => ObservationOutcome {
             status: ObservationStatus::Ok,

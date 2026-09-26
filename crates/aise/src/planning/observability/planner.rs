@@ -4,15 +4,15 @@ use crate::observability::{
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub fn begin_plan_turn_observation(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
-    begin_context_observation(parent, ctx, "plan-turn")
+pub fn begin_plan_turn(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+    begin_context(parent, ctx, "plan-turn")
 }
 
-pub fn begin_project_narrative_observation(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
-    begin_context_observation(parent, ctx, "project-narrative")
+pub fn begin_project_narrative(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+    begin_context(parent, ctx, "project-narrative")
 }
 
-pub fn begin_generate_writer_plan_observation(parent: &Observation) -> Observation {
+pub fn begin_generate_writer_plan(parent: &Observation) -> Observation {
     parent.begin(ObservationSpec {
         name: "generate-writer-plan",
         kind: ObservationKind::Chain,
@@ -21,16 +21,11 @@ pub fn begin_generate_writer_plan_observation(parent: &Observation) -> Observati
     })
 }
 
-pub fn finish_observation(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
+pub fn finish(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
     observation.finish(turn_outcome(outcome));
 }
 
-pub fn end_project_narrative_observation(
-    observation: Observation,
-    graph_revision: u64,
-    node_count: usize,
-    edge_count: usize,
-) {
+pub fn end_project_narrative(observation: Observation, graph_revision: u64, node_count: usize, edge_count: usize) {
     observation.finish(ObservationOutcome {
         status: ObservationStatus::Ok,
         metadata: vec![
@@ -42,7 +37,7 @@ pub fn end_project_narrative_observation(
     });
 }
 
-fn begin_context_observation(parent: &Observation, ctx: &TurnExecutionContext, name: &'static str) -> Observation {
+fn begin_context(parent: &Observation, ctx: &TurnExecutionContext, name: &'static str) -> Observation {
     parent.begin(ObservationSpec {
         name,
         kind: ObservationKind::Chain,

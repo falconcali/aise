@@ -3,7 +3,7 @@ use crate::observability::{
 };
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub fn begin_repair_story_observation(parent: &Observation) -> Observation {
+pub fn begin_repair_story(parent: &Observation) -> Observation {
     parent.begin(ObservationSpec {
         name: "repair-story",
         kind: ObservationKind::Chain,
@@ -12,7 +12,7 @@ pub fn begin_repair_story_observation(parent: &Observation) -> Observation {
     })
 }
 
-pub fn begin_revise_story_text_observation(parent: &Observation) -> Observation {
+pub fn begin_revise_story_text(parent: &Observation) -> Observation {
     parent.begin(ObservationSpec {
         name: "revise-story-text",
         kind: ObservationKind::Generation,
@@ -21,7 +21,7 @@ pub fn begin_revise_story_text_observation(parent: &Observation) -> Observation 
     })
 }
 
-pub fn finish_observation(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
+pub fn finish(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
     observation.finish(outcome_for(outcome));
 }
 

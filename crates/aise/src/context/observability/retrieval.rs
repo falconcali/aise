@@ -4,7 +4,7 @@ use crate::observability::{
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub fn begin_retrieve_context_observation(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+pub fn begin_retrieve_context(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
     parent.begin(ObservationSpec {
         name: "retrieve-context",
         kind: ObservationKind::Retriever,
@@ -16,7 +16,7 @@ pub fn begin_retrieve_context_observation(parent: &Observation, ctx: &TurnExecut
     })
 }
 
-pub fn finish_observation(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
+pub fn finish(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
     observation.finish(match outcome {
         Ok(()) => ObservationOutcome {
             status: ObservationStatus::Ok,

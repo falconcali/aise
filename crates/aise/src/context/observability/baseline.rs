@@ -5,22 +5,22 @@ use crate::observability::{
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_pipeline::TurnStage;
 
-pub fn begin_load_story_snapshot_observation(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
-    begin_observation(parent, ctx, "load-story-snapshot")
+pub fn begin_load_story_snapshot(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+    begin(parent, ctx, "load-story-snapshot")
 }
 
-pub fn begin_activate_world_info_observation(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
-    begin_observation(parent, ctx, "activate-world-info")
+pub fn begin_activate_world_info(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+    begin(parent, ctx, "activate-world-info")
 }
 
-pub fn finish_observation<T, E>(observation: Observation, outcome: &Result<T, E>)
+pub fn finish<T, E>(observation: Observation, outcome: &Result<T, E>)
 where
     E: Clone + Into<ContextError>,
 {
     observation.finish(context_outcome(outcome, TurnStage::BaselineBuilder));
 }
 
-fn begin_observation(parent: &Observation, ctx: &TurnExecutionContext, name: &'static str) -> Observation {
+fn begin(parent: &Observation, ctx: &TurnExecutionContext, name: &'static str) -> Observation {
     parent.begin(ObservationSpec {
         name,
         kind: ObservationKind::Retriever,

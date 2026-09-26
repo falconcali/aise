@@ -4,7 +4,7 @@ use crate::observability::{
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub fn begin_validate_story_observation(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
+pub fn begin_validate_story(parent: &Observation, ctx: &TurnExecutionContext) -> Observation {
     parent.begin(ObservationSpec {
         name: "validate-story",
         kind: ObservationKind::Evaluator,
@@ -16,7 +16,7 @@ pub fn begin_validate_story_observation(parent: &Observation, ctx: &TurnExecutio
     })
 }
 
-pub fn finish_observation(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
+pub fn finish(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
     observation.finish(match outcome {
         Ok(()) => ObservationOutcome {
             status: ObservationStatus::Ok,

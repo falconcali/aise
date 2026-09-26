@@ -3,7 +3,7 @@ use crate::observability::{
 };
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
 
-pub fn begin_think_character_observation(parent: &Observation, role_id: &str) -> Observation {
+pub fn begin_think_character(parent: &Observation, role_id: &str) -> Observation {
     parent.begin(ObservationSpec {
         name: "think-character",
         kind: ObservationKind::Chain,
@@ -12,7 +12,7 @@ pub fn begin_think_character_observation(parent: &Observation, role_id: &str) ->
     })
 }
 
-pub fn finish_observation(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
+pub fn finish(observation: Observation, outcome: &Result<(), TurnExecutionError>) {
     observation.finish(match outcome {
         Ok(()) => ObservationOutcome {
             status: ObservationStatus::Ok,

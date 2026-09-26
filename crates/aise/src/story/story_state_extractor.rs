@@ -6,6 +6,7 @@ use crate::domain::turn::{
 use crate::llm::error::{LlmError, LlmProtocolErrorKind};
 use crate::llm::gateway::LlmGateway;
 use crate::llm::output_contract::{LlmOutputContract, LlmOutputViolation};
+use crate::observability::Observation;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
 use crate::story::observability;
 use crate::story::story_state_extractor_prompt::{
@@ -56,7 +57,7 @@ impl TurnExecutionPipeline for StoryStateExtractor {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        observation: &crate::observability::Observation,
+        observation: &Observation,
     ) -> Result<(), TurnExecutionError> {
         let is_reextraction = ctx.phase() == TurnPhase::StateReextractionRequired;
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;
@@ -83,7 +84,7 @@ impl TurnExecutionPipeline for StoryStateExtractor {
             is_reextraction
         );
         let contract = story_state_extraction_contract(limits);
-        let extraction_observation = observability::begin_extract_story_state_observation(observation);
+        let extraction_observation = observability::begin_extract_story_state(observation);
         let outcome = self
             .gateway
             .complete_structured_composed(
@@ -104,7 +105,7 @@ impl TurnExecutionPipeline for StoryStateExtractor {
                 error.to_string(),
             )
         });
-        observability::end_extraction_observation(extraction_observation, &observation_result);
+        observability::end_extraction(extraction_observation, &observation_result);
         match outcome {
             Ok(structured) => {
                 let dto = structured.value;

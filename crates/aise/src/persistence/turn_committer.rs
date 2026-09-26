@@ -1,4 +1,5 @@
 use crate::domain::narrative::StoryTurn;
+use crate::observability::Observation;
 use crate::persistence::observability;
 use crate::persistence::store::{OutboxRecord, Store, TurnCommitSpec};
 use crate::turn::turn_context::TurnExecutionContext;
@@ -28,7 +29,7 @@ impl TurnExecutionPipeline for TurnCommitter {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        observation: &crate::observability::Observation,
+        observation: &Observation,
     ) -> Result<(), TurnExecutionError> {
         if ctx.phase() != TurnPhase::ReadyToCommit {
             return Err(TurnExecutionError::new(
@@ -129,8 +130,8 @@ impl TurnExecutionPipeline for TurnCommitter {
             llm_calls,
             activation_state_delta,
         };
-        let commit_observation = observability::begin_commit_turn_observation(observation, ctx);
-        let persistence_observation = observability::begin_persist_turn_observation(observation, ctx);
+        let commit_observation = observability::begin_commit_turn(observation, ctx);
+        let persistence_observation = observability::begin_persist_turn(observation, ctx);
         let activation_span = info_span!(
             "knowledge.activation.commit",
             story_id = %story_id,
@@ -143,7 +144,7 @@ impl TurnExecutionPipeline for TurnCommitter {
             error_code = tracing::field::Empty,
         );
         let outcome = self.store.commit_turn(&commit).instrument(activation_span.clone()).await;
-        observability::end_persist_observation(persistence_observation, &outcome);
+        observability::end_persist(persistence_observation, &outcome);
         match &outcome {
             Ok(_) => {
                 activation_span.record("status", "ok");
@@ -155,7 +156,7 @@ impl TurnExecutionPipeline for TurnCommitter {
         }
         let result = outcome?;
         let committed = ctx.set_committed_result(result);
-        observability::finish_observation(commit_observation, &committed);
+        observability::finish(commit_observation, &committed);
         committed
     }
 }

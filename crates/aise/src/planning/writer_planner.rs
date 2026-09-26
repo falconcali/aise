@@ -1,6 +1,7 @@
 use crate::config::{NarrativeConfig, PlannerConfig, RetrievalConfig};
 use crate::domain::asset::validation::BoundedText;
 use crate::llm::gateway::LlmGateway;
+use crate::observability::Observation;
 use crate::planning::error::PlanningError;
 use crate::planning::observability;
 use crate::planning::planner_output::writer_planner_contract;
@@ -43,7 +44,7 @@ impl TurnExecutionPipeline for WriterPlanner {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        observation: &crate::observability::Observation,
+        observation: &Observation,
     ) -> Result<(), TurnExecutionError> {
         let baseline = ctx
             .baseline()
@@ -70,8 +71,8 @@ impl TurnExecutionPipeline for WriterPlanner {
             })?
             .clone();
         let narrative_plan = narrative_projection.plan.clone();
-        let project_observation = observability::begin_project_narrative_observation(observation, ctx);
-        observability::end_project_narrative_observation(
+        let project_observation = observability::begin_project_narrative(observation, ctx);
+        observability::end_project_narrative(
             project_observation,
             snapshot.graph_revision(),
             narrative_plan.active_nodes.len(),

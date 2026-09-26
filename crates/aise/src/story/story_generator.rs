@@ -3,6 +3,7 @@ use crate::domain::asset::validation::BoundedText;
 use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::StoryGeneratorOutput;
 use crate::llm::gateway::LlmGateway;
+use crate::observability::Observation;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
 use crate::story::observability;
 use crate::story::story_generator_prompt::{
@@ -44,7 +45,7 @@ impl TurnExecutionPipeline for StoryGenerator {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        observation: &crate::observability::Observation,
+        observation: &Observation,
     ) -> Result<(), TurnExecutionError> {
         let projection_started = Instant::now();
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;
@@ -146,7 +147,7 @@ impl TurnExecutionPipeline for StoryGenerator {
             writer_knowledge_count,
             constraint_count,
         );
-        let draft_observation = observability::begin_draft_story_text_observation(observation);
+        let draft_observation = observability::begin_draft_story_text(observation);
         let completion_result = self
             .gateway
             .complete_text_composed(
@@ -166,7 +167,7 @@ impl TurnExecutionPipeline for StoryGenerator {
                 error.to_string(),
             )
         });
-        observability::end_generation_observation(draft_observation, &mapped_result);
+        observability::end_generation(draft_observation, &mapped_result);
         let completion = completion_result.map_err(|error| {
             TurnExecutionError::new(
                 TurnFailureKind::Llm,

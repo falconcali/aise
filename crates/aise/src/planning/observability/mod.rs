@@ -1,6 +1,5 @@
 mod planner;
 
 pub use planner::{
-    begin_generate_writer_plan_observation, begin_plan_turn_observation, begin_project_narrative_observation,
-    finish_observation, end_project_narrative_observation,
+    begin_generate_writer_plan, begin_plan_turn, begin_project_narrative, end_project_narrative, finish,
 };

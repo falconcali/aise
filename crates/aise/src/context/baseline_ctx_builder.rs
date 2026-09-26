@@ -18,6 +18,7 @@ use crate::domain::turn::{
     BaselineContext, KnowledgeDelivery, KnowledgeIndexEntry, NarrativeGraphStateIndex, RelevantWorldKnowledge,
     RelevantWorldKnowledgeItem, RoleContextView, RoleIndexEntry, SnapshotLimits,
 };
+use crate::observability::Observation;
 use crate::persistence::knowledge_read_port::KnowledgeIndexQuery;
 use crate::persistence::store::Store;
 use crate::turn::turn_context::{PreparedActivation, TurnExecutionContext};
@@ -79,7 +80,7 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        observation: &crate::observability::Observation,
+        observation: &Observation,
     ) -> Result<(), TurnExecutionError> {
         let story_id = ctx.story_id().clone();
         let limits = SnapshotLimits::from_config(
@@ -88,14 +89,14 @@ impl TurnExecutionPipeline for BaselineContextBuilder {
             &self.asset_limits,
             &self.narrative_config,
         );
-        let snapshot_observation = observability::begin_load_story_snapshot_observation(observation, ctx);
+        let snapshot_observation = observability::begin_load_story_snapshot(observation, ctx);
         let outcome = self.store.load_story_snapshot(&story_id, limits).await;
-        observability::finish_observation(snapshot_observation, &outcome);
+        observability::finish(snapshot_observation, &outcome);
         let snapshot = outcome.map_err(TurnExecutionError::from)?;
 
-        let activation_observation = observability::begin_activate_world_info_observation(observation, ctx);
+        let activation_observation = observability::begin_activate_world_info(observation, ctx);
         let prepared = prepare_baseline(self, &snapshot, ctx.player_contribution(), ctx.turn_number()).await;
-        observability::finish_observation(activation_observation, &prepared);
+        observability::finish(activation_observation, &prepared);
 
         let (baseline, narrative_projection, activation) = prepared.map_err(map_baseline_error)?;
         ctx.set_prepared_context(snapshot, baseline, narrative_projection, activation)

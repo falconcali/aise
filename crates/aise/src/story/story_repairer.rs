@@ -2,6 +2,7 @@ use crate::config::ContextPreparationConfig;
 use crate::domain::asset::validation::BoundedText;
 use crate::domain::turn::StoryGeneratorOutput;
 use crate::llm::gateway::LlmGateway;
+use crate::observability::Observation;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
 use crate::story::observability;
 use crate::story::story_repairer_prompt::{
@@ -42,7 +43,7 @@ impl TurnExecutionPipeline for StoryRepairer {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        observation: &crate::observability::Observation,
+        observation: &Observation,
     ) -> Result<(), TurnExecutionError> {
         let projection = self.projector.project(ctx).map_err(map_projection_error)?;
         let issue_count = projection.context.validation_issues.len();
@@ -77,7 +78,7 @@ impl TurnExecutionPipeline for StoryRepairer {
             story_version,
             issue_count,
         );
-        let revision_observation = observability::begin_revise_story_text_observation(observation);
+        let revision_observation = observability::begin_revise_story_text(observation);
         let completion_result = self
             .gateway
             .complete_text_composed(
@@ -97,7 +98,7 @@ impl TurnExecutionPipeline for StoryRepairer {
                 error.to_string(),
             )
         });
-        observability::end_repair_observation(revision_observation, &mapped_result);
+        observability::end_repair(revision_observation, &mapped_result);
         let completion = completion_result.map_err(|error| {
             TurnExecutionError::new(
                 TurnFailureKind::Llm,

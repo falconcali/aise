@@ -8,6 +8,7 @@ use crate::domain::text::estimate_text_tokens;
 use crate::domain::turn::CharacterDecision;
 use crate::llm::gateway::LlmGateway;
 use crate::llm::output_contract::{LlmOutputContract, LlmOutputViolation};
+use crate::observability::Observation;
 use crate::prompt::{PromptCompositionInput, PromptProfile};
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
@@ -86,7 +87,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        observation: &crate::observability::Observation,
+        observation: &Observation,
     ) -> Result<(), TurnExecutionError> {
         let plan = ctx
             .plan()
@@ -153,7 +154,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                 .llm_call_scope(TurnStage::CharacterThink)
                 .with_character_id(request.role_id.to_string());
             let character_observation =
-                observability::begin_think_character_observation(observation, request.role_id.to_string().as_str());
+                observability::begin_think_character(observation, request.role_id.to_string().as_str());
             let structured_result = self
                 .gateway
                 .complete_structured_composed(
@@ -173,7 +174,7 @@ impl TurnExecutionPipeline for CharacterThinkPipeline {
                     error.to_string(),
                 )
             });
-            observability::finish_observation(character_observation, &mapped_result);
+            observability::finish(character_observation, &mapped_result);
             let structured = structured_result.map_err(|error| {
                 TurnExecutionError::new(
                     TurnFailureKind::Llm,

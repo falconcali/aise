@@ -7,6 +7,7 @@ use crate::domain::story_instance::state::{RelationshipKey, RelationshipState};
 use crate::domain::turn::{
     ExtractionEnrichmentError, KnowledgeEnrichmentContext, ValidatedNarrativeResolution, enrich_extracted_knowledge,
 };
+use crate::observability::Observation;
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_error::TurnExecutionError;
 use crate::turn::turn_pipeline::{TurnExecutionPipeline, TurnStage};
@@ -44,11 +45,11 @@ impl TurnExecutionPipeline for ValidationPipeline {
     async fn execute(
         &self,
         ctx: &mut TurnExecutionContext,
-        observation: &crate::observability::Observation,
+        observation: &Observation,
     ) -> Result<(), TurnExecutionError> {
-        let operation = observability::begin_validate_story_observation(observation, ctx);
+        let operation = observability::begin_validate_story(observation, ctx);
         let result = self.execute_inner(ctx).await;
-        observability::finish_observation(operation, &result);
+        observability::finish(operation, &result);
         result
     }
 }

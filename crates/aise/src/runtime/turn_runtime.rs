@@ -2,6 +2,7 @@ use crate::runtime::turn_pipeline_set::TurnPipelineSet;
 //use crate::turn::turn_budget::CorrectionKind;
 use crate::observability::Trace;
 use crate::runtime::observability;
+use crate::observability::Observation;
 use crate::turn::turn_context::TurnExecutionContext;
 use crate::turn::turn_contract::TurnPhase;
 use crate::turn::turn_error::{TurnExecutionError, TurnFailureKind};
@@ -24,9 +25,9 @@ impl TurnRuntime {
         sink: &dyn TurnEventSink,
         trace: &Trace,
     ) -> Result<(), TurnExecutionError> {
-        let run_observation = observability::begin_run_turn_pipelines_observation(trace);
+        let run_observation = observability::begin_run_turn_pipelines(trace);
         let result = self.run_inner(ctx, sink, &run_observation).await;
-        observability::end_turn_observation(run_observation, ctx, &result);
+        observability::end_turn(run_observation, ctx, &result);
         result
     }
 
@@ -34,7 +35,7 @@ impl TurnRuntime {
         &self,
         ctx: &mut TurnExecutionContext,
         sink: &dyn TurnEventSink,
-        parent: &crate::observability::Observation,
+        parent: &Observation,
     ) -> Result<(), TurnExecutionError> {
         self.execute(self.pipeline_set.initializer(), ctx, sink, parent).await?;
         self.execute(self.pipeline_set.baseline_builder(), ctx, sink, parent).await?;
@@ -105,7 +106,7 @@ impl TurnRuntime {
         pipeline: &dyn TurnExecutionPipeline,
         ctx: &mut TurnExecutionContext,
         sink: &dyn TurnEventSink,
-        parent: &crate::observability::Observation,
+        parent: &Observation,
     ) -> Result<(), TurnExecutionError> {
         let stage = pipeline.stage();
         if let Some(entries) = stage_entry_phases(stage) {
@@ -127,9 +128,9 @@ impl TurnRuntime {
             turn_number: Some(ctx.turn_number()),
             stage,
         });
-        let observation = observability::begin_pipeline_stage_observation(parent, stage);
+        let observation = observability::begin_pipeline_stage(parent, stage);
         let outcome = pipeline.execute(ctx, &observation).await;
-        observability::end_stage_observation(observation, &outcome);
+        observability::end_stage(observation, &outcome);
         if outcome.is_ok() {
             if let Some(exits) = stage_exit_phases(stage) {
                 if !exits.contains(&ctx.phase()) {
