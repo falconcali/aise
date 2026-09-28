@@ -42,3 +42,12 @@ pub struct StoryHistoryInfo {
     pub turns: Vec<StoryTurnInfo>,
     pub next_turn_after: Option<u64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoryContext {
+    pub story_id: StoryId,
+    pub base_revision: u64,
+    pub player_role_id: RoleId,
+    pub opening: Option<StoryOpeningInfo>,
+    pub roles: Vec<RoleStateInfo>,
+}

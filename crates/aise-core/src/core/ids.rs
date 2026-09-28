@@ -1,13 +1,6 @@
+use crate::core::error::CoreError;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-#[error("invalid {field}: {value}")]
-pub struct InvalidId {
-    field: &'static str,
-    value: String,
-}
 
 macro_rules! define_id {
     ($name:ident, $field:literal) => {
