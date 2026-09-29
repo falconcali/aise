@@ -1,4 +1,4 @@
-use crate::core::error::CoreError;
+use crate::core::CoreError;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 
@@ -8,10 +8,10 @@ macro_rules! define_id {
         pub struct $name(String);
 
         impl $name {
-            pub fn try_new(value: impl Into<String>) -> Result<Self, InvalidId> {
+            pub fn try_new(value: impl Into<String>) -> Result<Self, CoreError> {
                 let value = value.into();
                 if value.trim().is_empty() {
-                    return Err(InvalidId { field: $field, value });
+                    return Err(CoreError::InvalidId { field: $field, value });
                 }
                 Ok(Self(value))
             }

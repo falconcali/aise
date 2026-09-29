@@ -1,6 +1,5 @@
+use crate::trace::Trace;
 use std::fmt;
-use async_trait::async_trait;
-use crate::core::story::StoryContext;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipelineStage {
@@ -37,24 +36,32 @@ impl fmt::Display for PipelineStage {
     }
 }
 
+pub struct PipelineRunner<'a> {
+    pub control: &'a TurnControl,
+    pub sink: &'a dyn TurnEventSink,
+    pub trace: &'a Trace
+}
+
+impl PipelineRunner<'_> {
+    pub async fn run<P>(&mut self, pipeline: &P, input: P::Input) -> Result<P::Output, PipelineError> 
+        where P: Pipeline + ?Sized 
+    {
+        let observation = trace::begin_observation(self.trace, pipeline.stage().as_str());
+        pipeline.execute(input, self.control, self.sink, observation).await;
+    }
+}
+
 pub trait Pipeline: Send + Sync {
+    type Input: Send;
+    type Output: Send;
+
     fn stage(&self) -> PipelineStage;
-}
 
-pub struct BaselineContext {
-    pub story_ctx: StoryContext
-}
-
-#[async_trait]
-pub trait BaselinePipeline: Pipeline {
-    async fn execute(&self, story_ctx: &StoryContext) -> Result<BaselineContext, PipelineError>;
-}
-
-pub struct WriterPlan {
-    pub baseline_ctx: BaselineContext
-}
-
-#[async_trait]
-pub trait PlanPipeline: Pipeline {
-    async fn execute(&self, baseline_ctx: &BaselineContext) -> Result<WriterPlan, PipelineError>;
+    async fn execute(
+        &self, 
+        input: Self::Input, 
+        control: &TurnControl, 
+        sink: &dyn TurnEventSink,
+        observation: &Observation
+    ) -> Result<Self::Output, PipelineError>;
 }

@@ -1,11 +1,21 @@
+use std::time::Instant;
 use super::{IdempotencyKey, StoryId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PlayerContribution {
+    Thoughts (String),
+    Actions (String),
+    Speech (String)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnRequest {
-    pub player_contribution: String,
+    pub story_id: StoryId,
+    pub idempotency_key: IdempotencyKey,
+    pub player_input: String,
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +46,26 @@ impl TurnCancellation {
 impl Default for TurnCancellation {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TurnControl {
+    deadline: Instant,
+    cancellation: TurnCancellation,
+}
+
+impl TurnControl {
+    pub fn new(deadline: Instant, cancellation: TurnCancellation) -> Self {
+        Self { deadline, cancellation }
+    }
+
+    pub fn deadline(&self) -> Instant {
+        self.deadline
+    }
+
+    pub fn cancellation(&self) -> &TurnCancellation {
+        &self.cancellation
     }
 }
 
