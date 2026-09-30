@@ -62,6 +62,16 @@ impl Trace {
         Observation::new(spec, Some(&self.context), self.content.clone())
     }
 
+    pub fn begin_observation_with_name(&self, name: &'static str, kind: ObservationKind) -> Observation {
+        let spec = ObservationSpec {
+            name,
+            kind,
+            input: None,
+            metadata: self.propagated.clone(),
+        };
+        Observation::new(spec, Some(&self.context), self.content.clone())
+    }
+
     pub fn bind(&mut self, attributes: Vec<Attribute>) {
         for attribute in attributes {
             if !matches!(

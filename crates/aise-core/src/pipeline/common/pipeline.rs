@@ -1,4 +1,6 @@
-use crate::trace::Trace;
+use crate::core::{TurnControl, TurnEventSink, };
+use crate::pipeline::common::PipelineError;
+use crate::trace::{Trace, Observation, ObservationKind};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,11 +45,12 @@ pub struct PipelineRunner<'a> {
 }
 
 impl PipelineRunner<'_> {
-    pub async fn run<P>(&mut self, pipeline: &P, input: P::Input) -> Result<P::Output, PipelineError>
+    pub async fn run<P>(&self, pipeline: &P, input: P::Input) -> Result<P::Output, PipelineError>
         where P: Pipeline + ?Sized
     {
-        let observation = trace::begin_observation(self.trace, pipeline.stage().as_str());
-        pipeline.execute(input, self.control, self.sink, observation).await;
+        let observation: &Observation = &self.trace.begin_observation_with_name(pipeline.stage().as_str(), ObservationKind::Span);
+        let result = pipeline.execute(input, self.control, self.sink, observation).await;
+        result
     }
 }
 

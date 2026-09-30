@@ -1,10 +1,10 @@
-use crate::core::story::StoryContext;
-use crate::core::PlayerContribution;
-use crate::pipeline::common::Pipeline;
+use crate::core::{ StoryContext, PlayerContribution, TurnControl, TurnEventSink };
+use crate::pipeline::common::{ Pipeline, PipelineStage, PipelineError };
+use crate::trace::Observation;
 
 pub struct PlanInput {
     pub story_ctx: StoryContext,
-    pub player_contributions: PlayerContribution
+    pub player_contribution: PlayerContribution
 }
 
 pub struct PlanOutput {
@@ -17,11 +17,11 @@ impl Pipeline for PlanPipeline {
     type Input = PlanInput;
     type Output = PlanOutput;
 
-    fn stage(&self) -> &'static str {
-        "pipeline_plan"
+    fn stage(&self) -> PipelineStage {
+        PipelineStage::Plan
     }
 
-    fn execute(
+    async fn execute(
         &self,
         input: Self::Input,
         control: &TurnControl,
@@ -30,8 +30,8 @@ impl Pipeline for PlanPipeline {
     ) -> Result<Self::Output, PipelineError> {
         let plan = format!(
             "Story ID: {}\nPlayer Contribution:\n{}",
-            input.story_ctx.story_id.0,
-            input.player_contributions.processed
+            input.story_ctx.story_id,
+            input.player_contribution.processed
         );
 
         Ok(PlanOutput { plan })

@@ -1,6 +1,6 @@
-use crate::pipeline::common::Pipeline;
-use crate::core::StoryContext;
-use crate::core::PlayerContribution;
+use crate::pipeline::common::{Pipeline, PipelineStage, PipelineError};
+use crate::core::{ StoryContext, TurnControl, TurnEventSink, PlayerContribution };
+use crate::trace::{Observation};
 
 pub struct BaselineInput{
     pub story_ctx: StoryContext,
@@ -8,7 +8,7 @@ pub struct BaselineInput{
 }
 
 pub struct BaselineOutput {
-    pub player_contributions: Vec<PlayerContribution>
+    pub player_contribution: PlayerContribution
 }
 
 pub struct BaselinePipeline; 
@@ -17,25 +17,24 @@ impl Pipeline for BaselinePipeline {
     type Input = BaselineInput;
     type Output = BaselineOutput;
 
-    fn stage(&self) -> &'static str {
-        "pipeline_baseline"
+    fn stage(&self) -> PipelineStage {
+        PipelineStage::Baseline
     }
 
-    fn execute(
+    async fn execute(
         &self,
         input: Self::Input,
         control: &TurnControl,
         sink: &dyn TurnEventSink,
         observation: &Observation
     ) -> Result<Self::Output, PipelineError> {
-        let player_contributions = vec![
-            PlayerContribution::Thoughts(input.player_input.clone()),
-            PlayerContribution::Actions(input.player_input.clone()),
-            PlayerContribution::Speech(input.player_input.clone())
-        ];
+        let player_contribution = PlayerContribution { 
+            raw: "I am the player contribution raw. ".to_string(), 
+            processed: "I am the player contribution processed. ".to_string()
+        };
 
         Ok(BaselineOutput {
-            player_contributions
+            player_contribution
         })
     }
 }

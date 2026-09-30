@@ -1,4 +1,5 @@
 mod pipeline;
-mod trace;
+mod error;
 
-pub use pipeline::Pipeline;
+pub use pipeline::{ Pipeline, PipelineStage, PipelineRunner };
+pub use error::PipelineError;
