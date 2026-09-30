@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/aise", "crates/aise-server", "crates/aise-core"]
+members = ["crates/aise", "crates/aise-server", "crates/aise-core", "crates/aise-service"]
+default-members = ["crates/aise-service"]
 
 [workspace.package]
 edition = "2024"
@@ -10,6 +11,9 @@ license = "MIT OR Apache-2.0"
 # Crate-wide lint policy. Each member opts in via `[lints] workspace = true`.
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+module_inception = "allow"
 
 # Single source of truth for dependency versions across members.
 [workspace.dependencies]

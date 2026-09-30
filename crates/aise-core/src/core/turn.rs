@@ -1,17 +1,16 @@
-use std::time::Instant;
 use super::{IdempotencyKey, StoryId};
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PlayerContribution {
-    Thoughts (String),
-    Actions (String),
-    Speech (String)
+pub struct PlayerContribution {
+    pub raw: String,
+    pub processed: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct TurnRequest {
     pub story_id: StoryId,
     pub idempotency_key: IdempotencyKey,
@@ -19,11 +18,23 @@ pub struct TurnRequest {
 }
 
 #[derive(Debug, Clone)]
-pub struct ExecuteTurnSpec {
-    pub story_id: StoryId,
-    pub idempotency_key: IdempotencyKey,
-    pub player_contribution: String,
-    pub cancellation: TurnCancellation,
+pub struct TurnControl {
+    deadline: Instant,
+    cancellation: TurnCancellation,
+}
+
+impl TurnControl {
+    pub fn new(deadline: Instant, cancellation: TurnCancellation) -> Self {
+        Self { deadline, cancellation }
+    }
+
+    pub fn deadline(&self) -> Instant {
+        self.deadline
+    }
+
+    pub fn cancellation(&self) -> &TurnCancellation {
+        &self.cancellation
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -46,26 +57,6 @@ impl TurnCancellation {
 impl Default for TurnCancellation {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct TurnControl {
-    deadline: Instant,
-    cancellation: TurnCancellation,
-}
-
-impl TurnControl {
-    pub fn new(deadline: Instant, cancellation: TurnCancellation) -> Self {
-        Self { deadline, cancellation }
-    }
-
-    pub fn deadline(&self) -> Instant {
-        self.deadline
-    }
-
-    pub fn cancellation(&self) -> &TurnCancellation {
-        &self.cancellation
     }
 }
 

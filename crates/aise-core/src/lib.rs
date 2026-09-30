@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
+mod pipeline;
+pub mod trace;
 
-pub mod config;
 pub mod core;
 pub mod engine;
-pub mod persistence;

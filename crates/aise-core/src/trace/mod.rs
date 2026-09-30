@@ -1,7 +1,11 @@
-pub mod trace;
-pub mod observation;
-pub mod session;
+mod content;
+mod model;
+mod observation;
+mod session;
+mod trace;
 
-pub use trace::Trace;
+pub use content::{CaptureResult, ContentCapture};
+pub use model::*;
 pub use observation::Observation;
-pub use session::Session;
+pub use session::ObservationSession;
+pub use trace::Trace;

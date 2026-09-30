@@ -43,8 +43,8 @@ pub struct PipelineRunner<'a> {
 }
 
 impl PipelineRunner<'_> {
-    pub async fn run<P>(&mut self, pipeline: &P, input: P::Input) -> Result<P::Output, PipelineError> 
-        where P: Pipeline + ?Sized 
+    pub async fn run<P>(&mut self, pipeline: &P, input: P::Input) -> Result<P::Output, PipelineError>
+        where P: Pipeline + ?Sized
     {
         let observation = trace::begin_observation(self.trace, pipeline.stage().as_str());
         pipeline.execute(input, self.control, self.sink, observation).await;
@@ -58,9 +58,9 @@ pub trait Pipeline: Send + Sync {
     fn stage(&self) -> PipelineStage;
 
     async fn execute(
-        &self, 
-        input: Self::Input, 
-        control: &TurnControl, 
+        &self,
+        input: Self::Input,
+        control: &TurnControl,
         sink: &dyn TurnEventSink,
         observation: &Observation
     ) -> Result<Self::Output, PipelineError>;

@@ -48,9 +48,14 @@ name = "aise-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "opentelemetry",
  "serde",
+ "serde_json",
+ "sha2",
  "thiserror",
  "tokio-util",
+ "tracing",
+ "tracing-opentelemetry",
 ]
 
 [[package]]
@@ -58,7 +63,6 @@ name = "aise-server"
 version = "0.1.0"
 dependencies = [
  "aise",
- "aise-core",
  "anyhow",
  "async-trait",
  "axum",
@@ -83,6 +87,15 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "aise-service"
+version = "0.1.0"
+dependencies = [
+ "aise-core",
+ "anyhow",
+ "tokio",
 ]
 
 [[package]]

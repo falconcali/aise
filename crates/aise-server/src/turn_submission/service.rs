@@ -1,9 +1,9 @@
 use super::observability;
 use crate::session::{SessionId, SessionRegistry};
 use crate::tasks::{TurnTaskSpec, TurnTaskSupervisor};
-use aise::turn::turn_contract::TurnCancellation;
-use aise_core::core::{ExecuteTurnSpec, IdempotencyKey, TurnEventSink};
-use aise_core::engine::Engine;
+use aise::AiseEngine;
+use aise::turn::turn_contract::{ExecuteTurnSpec, IdempotencyKey, TurnCancellation, TurnRequest};
+use aise::turn::turn_event::TurnEventSink;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -31,13 +31,13 @@ pub enum TurnSubmissionError {
 }
 
 pub struct TurnSubmissionService {
-    engine: Arc<dyn Engine>,
+    engine: Arc<AiseEngine>,
     registry: Arc<SessionRegistry>,
     tasks: Arc<TurnTaskSupervisor>,
 }
 
 impl TurnSubmissionService {
-    pub fn new(engine: Arc<dyn Engine>, registry: Arc<SessionRegistry>, tasks: Arc<TurnTaskSupervisor>) -> Self {
+    pub fn new(engine: Arc<AiseEngine>, registry: Arc<SessionRegistry>, tasks: Arc<TurnTaskSupervisor>) -> Self {
         Self {
             engine,
             registry,
@@ -72,8 +72,8 @@ impl TurnSubmissionService {
             trace.bind_session(&session);
             trace.finish_span(session_span, Ok(()));
             let validation_span = trace.begin_request_validation();
-            if request.player_contribution.trim().is_empty() {
-                let error = TurnSubmissionError::InvalidRequest("player contribution must not be empty".into());
+            if let Err(error) = TurnRequest::try_new(request.player_contribution.clone()) {
+                let error = TurnSubmissionError::InvalidRequest(error.to_string());
                 trace.finish_span(validation_span, Err(&error));
                 return Err(error);
             }
@@ -96,11 +96,10 @@ impl TurnSubmissionService {
             trace.bind_idempotency_key(idempotency_key.as_str());
             trace.finish_span(validation_span, Ok(()));
             Ok(ExecuteTurnSpec {
-                story_id: aise_core::core::StoryId::try_new(session.story_id.as_str())
-                    .map_err(|error| TurnSubmissionError::InvalidRequest(error.to_string()))?,
+                story_id: session.story_id.clone(),
                 idempotency_key,
                 player_contribution: request.player_contribution,
-                cancellation: aise_core::core::TurnCancellation::new(),
+                cancellation: request.cancellation.clone(),
             })
         }
         .await;
@@ -122,10 +121,14 @@ impl TurnSubmissionService {
         let task = TurnTaskSpec {
             cancellation: request.cancellation,
             future: Box::pin(async move {
-                let result = engine.run_turn(spec, sink.as_ref()).await;
-                trace.finish_core_turn(&result);
-                if let Err(error) = &result {
-                    tracing::error!(error = %error, "turn task failed");
+                let result = engine.run_turn(spec, sink.as_ref(), trace.trace()).await;
+                trace.finish_turn(&result);
+                if let Err(error) = result {
+                    tracing::error!(
+                        error = %error,
+                        error_kind = ?error.kind(),
+                        "turn task failed"
+                    );
                 }
             }),
         };

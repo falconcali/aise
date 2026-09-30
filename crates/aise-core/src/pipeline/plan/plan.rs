@@ -4,7 +4,7 @@ use crate::pipeline::common::Pipeline;
 
 pub struct PlanInput {
     pub story_ctx: StoryContext,
-    pub player_contributions: Vec<PlayerContribution>
+    pub player_contributions: PlayerContribution
 }
 
 pub struct PlanOutput {
@@ -29,9 +29,9 @@ impl Pipeline for PlanPipeline {
         observation: &Observation
     ) -> Result<Self::Output, PipelineError> {
         let plan = format!(
-            "Story ID: {}\nPlayer Contributions:\n{}",
+            "Story ID: {}\nPlayer Contribution:\n{}",
             input.story_ctx.story_id.0,
-            input.player_contributions.iter().map(|c| format!("{:?}", c)).collect::<Vec<_>>().join("\n")
+            input.player_contributions.processed
         );
 
         Ok(PlanOutput { plan })

@@ -1,49 +1,58 @@
-use crate::core::{CommittedTurnInfo, ExecuteTurnSpec, TurnEvent, TurnEventSink, TurnResult};
+use crate::core::{CommittedTurnInfo, EngineError, TurnControl, TurnEvent, TurnEventSink, TurnRequest, TurnResult};
+use crate::pipeline::Runtime;
+use crate::trace::Trace;
 use async_trait::async_trait;
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum EngineError {
-    #[error("turn execution failed: {message}")]
-    Turn { message: String },
-    #[error("engine dependency failed: {message}")]
-    Dependency { message: String },
-    #[error("engine is not initialized")]
-    NotInitialized,
-}
 
 #[async_trait]
 pub trait Engine: Send + Sync {
-    async fn run_turn(&self, spec: ExecuteTurnSpec, sink: &dyn TurnEventSink) -> Result<TurnResult, EngineError>;
+    async fn run_turn(
+        &self,
+        turn_request: TurnRequest,
+        turn_control: TurnControl,
+        sink: &dyn TurnEventSink,
+        trace: &Trace,
+    ) -> Result<TurnResult, EngineError>;
 }
 
 #[derive(Default)]
-pub struct HelloWorldEngine;
+pub struct AiseEngine {
+    runtime: Runtime,
+}
+
+impl AiseEngine {
+    pub fn new() -> Self {
+        Self {
+            runtime: Runtime::new(),
+        }
+    }
+}
 
 #[async_trait]
-impl Engine for HelloWorldEngine {
-    async fn run_turn(&self, _spec: ExecuteTurnSpec, sink: &dyn TurnEventSink) -> Result<TurnResult, EngineError> {
+impl Engine for AiseEngine {
+    async fn run_turn(
+        &self,
+        turn_request: TurnRequest,
+        turn_control: TurnControl,
+        sink: &dyn TurnEventSink,
+        trace: &Trace,
+    ) -> Result<TurnResult, EngineError> {
         sink.emit(TurnEvent::StageStarted {
-            stage: "hello_world".into(),
+            stage: "initialization".to_string(),
         })
         .map_err(|error| EngineError::Turn {
             message: error.to_string(),
         })?;
-        let result = TurnResult {
-            result: CommittedTurnInfo {
-                turn_number: 1,
-                story_revision: 1,
-                story_text: "hello world".into(),
-            },
-            replayed: false,
-        };
+
+        let turn_result = self.runtime.run_turn(turn_request, turn_control, sink, trace).await?;
+
         sink.emit(TurnEvent::Committed {
-            result: result.result.clone(),
-            replayed: result.replayed,
+            result: turn_result.result.clone(),
+            replayed: turn_result.replayed,
         })
         .map_err(|error| EngineError::Turn {
             message: error.to_string(),
         })?;
-        Ok(result)
+
+        Ok(turn_result)
     }
 }

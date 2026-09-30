@@ -4,6 +4,34 @@
     {
       "type": "lldb",
       "request": "launch",
+      "name": "Debug aise-service (CodeLLDB)",
+      "cargo": {
+        "args": ["build", "--workspace"],
+        "manifest": "${workspaceFolder}/Cargo.toml"
+      },
+      "program": "${workspaceFolder}/target/debug/aise-service.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    {
+      "name": "Debug aise-service (cppvsdbg)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/debug/aise-service.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        { "name": "RUST_BACKTRACE", "value": "1" }
+      ],
+      "console": "integratedTerminal",
+      "preLaunchTask": "build"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
       "name": "Debug aise-server (CodeLLDB)",
       "cargo": {
         "args": ["build", "--workspace"],
