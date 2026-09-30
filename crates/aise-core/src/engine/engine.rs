@@ -43,7 +43,10 @@ impl Engine for AiseEngine {
             message: error.to_string(),
         })?;
 
-        let turn_result = self.runtime.run_turn(turn_request, turn_control, sink, trace).await?;
+        let turn_result = self.runtime.run_turn(turn_request, turn_control, sink, trace).await
+            .map_err(|error| EngineError::Turn {
+                message: error.to_string(),
+            })?;
 
         sink.emit(TurnEvent::Committed {
             result: turn_result.result.clone(),

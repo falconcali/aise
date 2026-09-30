@@ -1,12 +1,18 @@
-use crate::core::{CommittedTurnInfo, EngineError, TurnControl, TurnEventSink, TurnRequest, TurnResult, StoryContext};
+use crate::core::{CommittedTurnInfo, TurnControl, TurnEventSink, TurnRequest, TurnResult, StoryContext};
+use crate::pipeline::common::{PipelineRunner, PipelineError};
+use crate::pipeline::baseline::{ BaselinePipeline, BaselineInput };
+use crate::pipeline::plan::{ PlanPipeline, PlanInput };
 use crate::trace::Trace;
-use crate::pipeline::common::{PipelineRunner};
-use crate::pipeline::baseline::{ BaselinePipeline, BaselineInput, BaselineOutput };
-use crate::pipeline::plan::{ PlanPipeline, PlanInput, PlanOutput };
 
 pub struct Runtime {
     baseline: BaselinePipeline,
     plan: PlanPipeline
+}
+
+impl Default for Runtime {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Runtime {
@@ -23,32 +29,26 @@ impl Runtime {
         turn_control: TurnControl,
         sink: &dyn TurnEventSink,
         trace: &Trace,
-    ) -> Result<TurnResult, EngineError> {
+    ) -> Result<TurnResult, PipelineError> {
         let pipeline_runner = PipelineRunner {
             control: &turn_control,
             sink,
             trace
         };
 
-        let baseline_input: BaselineInput = BaselineInput {
+        let baseline_input = BaselineInput {
             story_ctx: StoryContext { story_id: turn_request.story_id.clone() },
             player_input: turn_request.player_input.clone(),
         };
 
-        let baseline_output = pipeline_runner.run(&self.baseline, baseline_input).await
-            .map_err(|error| EngineError::Turn {
-                message: error.to_string(),
-            })?;
+        let baseline_output = pipeline_runner.run(&self.baseline, baseline_input).await?;
 
         let plan_input = PlanInput {
             story_ctx: StoryContext { story_id: turn_request.story_id.clone() },
             player_contribution: baseline_output.player_contribution,
         };
 
-        let plan_output = pipeline_runner.run(&self.plan, plan_input).await
-            .map_err(|error| EngineError::Turn {
-                message: error.to_string(),
-            })?;
+        let plan_output = pipeline_runner.run(&self.plan, plan_input).await?;
 
         Ok(TurnResult {
             result: CommittedTurnInfo {
@@ -58,11 +58,5 @@ impl Runtime {
             },
             replayed: false,
         })
-    }
-}
-
-impl Default for Runtime {
-    fn default() -> Self {
-        Self::new()
     }
 }
