@@ -1,3 +1,3 @@
 mod baseline;
 
-pub(crate) use baseline::{ BaselinePipeline, BaselineInput, BaselineOutput };
+pub(super) use baseline::{ BaselinePipeline, BaselineInput, BaselineOutput };

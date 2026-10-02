@@ -38,6 +38,16 @@ impl fmt::Display for PipelineStage {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ValidateScoreResult {
+    pub name: String,
+    pub description: String,
+
+    pub score: f32,
+    pub target_score: f32,
+    pub advice: String
+}
+
 pub struct PipelineRunner<'a> {
     pub control: &'a TurnControl,
     pub sink: &'a dyn TurnEventSink,

@@ -29,8 +29,8 @@ impl Pipeline for BaselinePipeline {
         observation: &Observation
     ) -> Result<Self::Output, PipelineError> {
         let player_contribution = PlayerContribution { 
-            raw: "I am the player contribution raw. ".to_string(), 
-            processed: "I am the player contribution processed. ".to_string()
+            raw: input.player_input.clone(), 
+            processed: format!("{} (Processed by Baseline)", input.player_input.clone())
         };
 
         Ok(BaselineOutput {
