@@ -1,21 +1,23 @@
 use crate::core::{TurnControl, TurnEventSink};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
+use serde::Serialize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ValidationDecision {
     Accept,
     Reject,
     Repair,
 }
 
+#[derive(Serialize)]
 pub struct ValidateInput {
     pub original_proposal: String,
     pub current_proposal: String,
     pub proposal_version: u32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct ValidateScoreConfig {
     pub name: String,
     pub description: String,
@@ -23,7 +25,7 @@ pub struct ValidateScoreConfig {
     pub target_score: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ValidateScoreResult {
     pub name: String,
     pub description: String,
@@ -33,7 +35,7 @@ pub struct ValidateScoreResult {
     pub issue: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct ValidateOutput {
     pub original_proposal: String,
     pub current_proposal: String,

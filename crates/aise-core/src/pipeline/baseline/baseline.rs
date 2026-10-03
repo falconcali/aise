@@ -2,12 +2,15 @@ use crate::core::{PlayerContribution, StoryContext, TurnControl, TurnEventSink};
 use crate::pipeline::baseline::baseline_trace;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
+use serde::Serialize;
 
+#[derive(Serialize)]
 pub struct BaselineInput {
     pub story_ctx: StoryContext,
     pub player_input: String,
 }
 
+#[derive(Serialize)]
 pub struct BaselineOutput {
     pub player_contribution: PlayerContribution,
 }

@@ -2,7 +2,9 @@ use crate::core::{TurnControl, TurnEventSink};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::pipeline::validate::ValidateScoreResult;
 use crate::trace::Observation;
+use serde::Serialize;
 
+#[derive(Serialize)]
 pub struct RepairInput {
     pub original_proposal: String,
     pub current_proposal: String,
@@ -10,6 +12,7 @@ pub struct RepairInput {
     pub proposal_version: u32,
 }
 
+#[derive(Serialize)]
 pub struct RepairOutput {
     pub original_proposal: String,
     pub current_proposal: String,

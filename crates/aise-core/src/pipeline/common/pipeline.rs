@@ -2,6 +2,7 @@ use crate::core::{TurnControl, TurnEventSink};
 use crate::pipeline::common::PipelineError;
 use crate::pipeline::common::pipeline_trace;
 use crate::trace::{Observation, Trace};
+use serde::Serialize;
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,16 +48,16 @@ pub struct PipelineRunner<'a> {
 
 impl PipelineRunner<'_> {
     pub async fn run<P: Pipeline>(&self, pipeline: &P, input: P::Input) -> Result<P::Output, PipelineError> {
-        let observation = pipeline_trace::begin_pipeline_observation(self.trace, pipeline);
+        let observation = pipeline_trace::begin_observation(self.trace, pipeline, &input);
         let result = pipeline.execute(input, self.control, self.sink, &observation).await;
-        pipeline_trace::finish_pipeline_observation(observation, pipeline, &result);
+        pipeline_trace::finish_observation(observation, pipeline, &result);
         result
     }
 }
 
 pub trait Pipeline: Send + Sync {
-    type Input: Send;
-    type Output: Send;
+    type Input: Send + Serialize;
+    type Output: Send + Serialize;
 
     fn stage(&self) -> PipelineStage;
 

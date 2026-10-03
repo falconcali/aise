@@ -1,11 +1,14 @@
 use crate::core::{TurnControl, TurnEventSink};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
+use serde::Serialize;
 
+#[derive(Serialize)]
 pub struct CommitInput {
     pub query: String,
 }
 
+#[derive(Serialize)]
 pub struct CommitOutput {
     pub result: String,
 }

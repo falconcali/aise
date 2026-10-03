@@ -1,12 +1,15 @@
 use crate::core::{PlayerContribution, StoryContext, TurnControl, TurnEventSink};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
+use serde::Serialize;
 
+#[derive(Serialize)]
 pub struct PlanInput {
     pub story_ctx: StoryContext,
     pub player_contribution: PlayerContribution,
 }
 
+#[derive(Serialize)]
 pub struct PlanOutput {
     pub plan: String,
 }

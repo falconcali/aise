@@ -1,18 +1,26 @@
 use crate::pipeline::common::{Pipeline, PipelineError};
-use crate::trace::{Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationStatus, Trace};
+use crate::trace::{
+    Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus, Trace,
+};
 
-pub fn begin_pipeline_observation<P: Pipeline>(trace: &Trace, pipeline: &P) -> Observation {
-    trace.begin_observation_with_name(pipeline.stage().as_str(), ObservationKind::Chain)
+pub fn begin_observation<P: Pipeline>(trace: &Trace, pipeline: &P, input: &P::Input) -> Observation {
+    trace.begin_observation(ObservationSpec {
+        name: pipeline.stage().as_str(),
+        kind: ObservationKind::Chain,
+        input: trace.root().capture_content(input),
+        metadata: Vec::new(),
+    })
 }
 
-pub fn finish_pipeline_observation<P: Pipeline>(
+pub fn finish_observation<P: Pipeline>(
     observation: Observation,
     pipeline: &P,
     result: &Result<P::Output, PipelineError>,
 ) {
-    let outcome = match &result {
-        Ok(_) => ObservationOutcome {
+    let outcome = match result {
+        Ok(output) => ObservationOutcome {
             status: ObservationStatus::Ok,
+            output: observation.capture_content(output),
             ..ObservationOutcome::default()
         },
         Err(error) => ObservationOutcome {

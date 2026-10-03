@@ -1,11 +1,12 @@
 use super::content::ContentCapture;
 use super::model::{
-    Attribute, ObservationKind, ObservationSpec, SessionSpec, TRACE_ENVIRONMENT, TRACE_METADATA_IDEMPOTENCY_KEY_DIGEST,
-    TRACE_METADATA_STORY_ID, TRACE_METADATA_TURN_NUMBER, TRACE_NAME, TRACE_RELEASE, TRACE_TAGS, TraceOutcome,
-    TraceSpec,
+    Attribute, BoundedContent, ObservationKind, ObservationSpec, SessionSpec, TRACE_ENVIRONMENT,
+    TRACE_METADATA_IDEMPOTENCY_KEY_DIGEST, TRACE_METADATA_STORY_ID, TRACE_METADATA_TURN_NUMBER, TRACE_NAME,
+    TRACE_RELEASE, TRACE_TAGS, TraceOutcome, TraceSpec,
 };
 use super::observation::Observation;
 use opentelemetry::Context;
+use serde::Serialize;
 
 pub struct Trace {
     pub(crate) root: Option<Observation>,
@@ -62,16 +63,6 @@ impl Trace {
         Observation::new(spec, Some(&self.context), self.content.clone())
     }
 
-    pub fn begin_observation_with_name(&self, name: &'static str, kind: ObservationKind) -> Observation {
-        let spec = ObservationSpec {
-            name,
-            kind,
-            input: None,
-            metadata: self.propagated.clone(),
-        };
-        Observation::new(spec, Some(&self.context), self.content.clone())
-    }
-
     pub fn bind(&mut self, attributes: Vec<Attribute>) {
         for attribute in attributes {
             if !matches!(
@@ -103,6 +94,10 @@ impl Trace {
 
     pub fn content_capture(&self) -> &ContentCapture {
         &self.content
+    }
+
+    pub fn capture_content<T: Serialize>(&self, value: &T) -> Option<BoundedContent> {
+        self.content.encode(value, self.content.max_observation_bytes()).content
     }
 
     pub fn finish(mut self, outcome: TraceOutcome) {
