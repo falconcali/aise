@@ -1,4 +1,5 @@
 use crate::core::{CommittedTurnInfo, StoryContext, TurnControl, TurnEventSink, TurnRequest, TurnResult};
+use crate::llm::LlmGateway;
 use crate::pipeline::baseline::{BaselineInput, BaselinePipeline};
 use crate::pipeline::commit::{CommitInput, CommitPipeline};
 use crate::pipeline::common::{PipelineError, PipelineRunner};
@@ -10,6 +11,7 @@ use crate::pipeline::retrieval::{RetrievalInput, RetrievalPipeline};
 use crate::pipeline::think::{ThinkInput, ThinkPipeline};
 use crate::pipeline::validate::{ValidateInput, ValidatePipeline, ValidationDecision};
 use crate::trace::Trace;
+use std::sync::Arc;
 
 pub struct Runtime {
     baseline: BaselinePipeline,
@@ -23,16 +25,10 @@ pub struct Runtime {
     commit: CommitPipeline,
 }
 
-impl Default for Runtime {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Runtime {
-    pub fn new() -> Self {
+    pub fn new(gateway: Arc<LlmGateway>) -> Self {
         Self {
-            baseline: BaselinePipeline,
+            baseline: BaselinePipeline::new(gateway),
             plan: PlanPipeline,
             retrieval: RetrievalPipeline,
             think: ThinkPipeline,

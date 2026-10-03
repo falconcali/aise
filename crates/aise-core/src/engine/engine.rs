@@ -1,7 +1,9 @@
 use crate::core::{CommittedTurnInfo, EngineError, TurnControl, TurnEvent, TurnEventSink, TurnRequest, TurnResult};
+use crate::llm::LlmGateway;
 use crate::pipeline::Runtime;
 use crate::trace::Trace;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 #[async_trait]
 pub trait Engine: Send + Sync {
@@ -14,15 +16,14 @@ pub trait Engine: Send + Sync {
     ) -> Result<TurnResult, EngineError>;
 }
 
-#[derive(Default)]
 pub struct AiseEngine {
     runtime: Runtime,
 }
 
 impl AiseEngine {
-    pub fn new() -> Self {
+    pub fn new(gateway: Arc<LlmGateway>) -> Self {
         Self {
-            runtime: Runtime::new(),
+            runtime: Runtime::new(gateway),
         }
     }
 }

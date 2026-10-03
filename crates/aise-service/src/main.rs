@@ -5,6 +5,7 @@ use aise_core::core::{
     TurnEventSink, TurnRequest, TurnResult,
 };
 use aise_core::engine::{AiseEngine, Engine};
+use aise_core::llm::{LlmConfig, LlmGateway, OpenAiCompatProvider};
 use aise_core::trace::{
     Attribute, ContentCapture, ObservabilityContentConfig, ObservationError, ObservationSession, ObservationStatus,
     SessionOutcome, SessionSpec, TRACE_ENVIRONMENT, TRACE_METADATA_STORY_ID, TRACE_METADATA_TURN_NUMBER, TRACE_RELEASE,
@@ -12,6 +13,8 @@ use aise_core::trace::{
 };
 use anyhow::Context;
 use observability::{DETECTOR_OVERLAP_BYTES, ObservabilityConfig, ObservabilityRuntime, TelemetryDiagnostics};
+use std::str::FromStr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::filter_fn;
@@ -24,6 +27,8 @@ const DEFAULT_STORY_ID: &str = "default-story";
 const DEFAULT_IDEMPOTENCY_KEY: &str = "default-turn";
 const DEFAULT_PLAYER_INPUT: &str = "继续这个故事。";
 const DEFAULT_TURN_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
+const DEFAULT_LLM_TIMEOUT_MS: u64 = 20_000;
 
 struct ConsoleTurnEventSink;
 
@@ -52,7 +57,8 @@ async fn run_default_turn(observability_config: &ObservabilityConfig) -> anyhow:
     };
     let control = TurnControl::new(Instant::now() + DEFAULT_TURN_TIMEOUT, TurnCancellation::new());
     let (session, mut trace) = begin_default_trace(observability_config);
-    let result = AiseEngine::new()
+    let gateway = build_llm_gateway()?;
+    let result = AiseEngine::new(gateway)
         .run_turn(request, control, &ConsoleTurnEventSink, &trace)
         .await;
     let trace_outcome = trace_outcome(&trace, &result);
@@ -72,6 +78,39 @@ async fn run_default_turn(observability_config: &ObservabilityConfig) -> anyhow:
 
     println!("{}", result.result.story_text);
     Ok(())
+}
+
+fn build_llm_gateway() -> anyhow::Result<Arc<LlmGateway>> {
+    let config = load_llm_config()?;
+    let provider = Arc::new(OpenAiCompatProvider::new(&config));
+    Ok(Arc::new(LlmGateway::new(provider, config)))
+}
+
+fn load_llm_config() -> anyhow::Result<LlmConfig> {
+    Ok(LlmConfig {
+        base_url: required_env("AISE_LLM_BASE_URL")?,
+        api_key: required_env("AISE_LLM_API_KEY")?,
+        model: required_env("AISE_LLM_MODEL")?,
+        temperature: parsed_env("AISE_LLM_TEMPERATURE", DEFAULT_LLM_TEMPERATURE)?,
+        timeout_ms: parsed_env("AISE_LLM_TIMEOUT_MS", DEFAULT_LLM_TIMEOUT_MS)?,
+    })
+}
+
+fn required_env(name: &str) -> anyhow::Result<String> {
+    std::env::var(name).with_context(|| format!("missing required environment variable {name}"))
+}
+
+fn parsed_env<T>(name: &str, default: T) -> anyhow::Result<T>
+where
+    T: FromStr,
+    T::Err: std::error::Error + Send + Sync + 'static,
+{
+    match std::env::var(name) {
+        Ok(value) => value
+            .parse::<T>()
+            .with_context(|| format!("invalid value for environment variable {name}")),
+        Err(_) => Ok(default),
+    }
 }
 
 fn initialize_observability() -> (ObservabilityConfig, ObservabilityRuntime) {

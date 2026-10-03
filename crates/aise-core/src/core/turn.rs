@@ -52,6 +52,10 @@ impl TurnCancellation {
     pub fn is_cancelled(&self) -> bool {
         self.0.is_cancelled()
     }
+
+    pub async fn cancelled(&self) {
+        self.0.cancelled().await;
+    }
 }
 
 impl Default for TurnCancellation {

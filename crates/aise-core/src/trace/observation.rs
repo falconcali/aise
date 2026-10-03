@@ -12,11 +12,17 @@ pub struct Observation {
     pub(crate) span: Span,
     pub(crate) context: Context,
     pub(crate) content: ContentCapture,
+    pub(crate) propagated: Vec<Attribute>,
     finished: bool,
 }
 
 impl Observation {
-    pub(crate) fn new(spec: ObservationSpec, parent: Option<&Context>, content: ContentCapture) -> Self {
+    pub(crate) fn new(
+        spec: ObservationSpec,
+        parent: Option<&Context>,
+        content: ContentCapture,
+        propagated: Vec<Attribute>,
+    ) -> Self {
         let span = tracing::span!(
             target: "aise::observation",
             parent: None,
@@ -33,10 +39,12 @@ impl Observation {
             context: span.context(),
             span,
             content,
+            propagated,
             finished: false,
         };
         observation.record_static(super::model::OBSERVATION_TYPE, spec.kind.as_str());
         observation.record_static(super::model::SCHEMA_VERSION, "2");
+        observation.record_attributes(observation.propagated.clone());
         observation.record_attributes(spec.metadata);
         if let Some(input) = spec.input {
             observation.record_content(input, ContentDirection::Input);
@@ -45,7 +53,7 @@ impl Observation {
     }
 
     pub fn begin(&self, spec: ObservationSpec) -> Observation {
-        Self::new(spec, Some(&self.context), self.content.clone())
+        Self::new(spec, Some(&self.context), self.content.clone(), self.propagated.clone())
     }
 
     pub fn content_capture(&self) -> &ContentCapture {

@@ -25,7 +25,7 @@ impl Trace {
         if let Some(id) = &session.id {
             metadata.push(Attribute::string(super::model::SESSION_ID, id.clone()));
         }
-        let propagated = metadata
+        let propagated: Vec<Attribute> = metadata
             .iter()
             .filter(|attribute| is_propagated(attribute.key))
             .cloned()
@@ -39,6 +39,7 @@ impl Trace {
             },
             None,
             content.clone(),
+            propagated.clone(),
         );
         let context = root.context.clone();
         let mut trace = Self {
@@ -56,11 +57,8 @@ impl Trace {
         self.root.as_ref().expect("trace root exists")
     }
 
-    pub fn begin_observation(&self, mut spec: ObservationSpec) -> Observation {
-        let mut metadata = self.propagated.clone();
-        metadata.append(&mut spec.metadata);
-        spec.metadata = metadata;
-        Observation::new(spec, Some(&self.context), self.content.clone())
+    pub fn begin_observation(&self, spec: ObservationSpec) -> Observation {
+        Observation::new(spec, Some(&self.context), self.content.clone(), self.propagated.clone())
     }
 
     pub fn bind(&mut self, attributes: Vec<Attribute>) {
@@ -90,6 +88,7 @@ impl Trace {
             }
             self.context = self.root().context.clone();
         }
+        self.root.as_mut().expect("trace root exists").propagated = self.propagated.clone();
     }
 
     pub fn content_capture(&self) -> &ContentCapture {
