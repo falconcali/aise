@@ -1,6 +1,6 @@
-use crate::core::{TurnControl, TurnEventSink, };
+use crate::core::{TurnControl, TurnEventSink};
 use crate::pipeline::common::PipelineError;
-use crate::trace::{Trace, Observation, ObservationKind};
+use crate::trace::{Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationStatus, Trace};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,28 +38,38 @@ impl fmt::Display for PipelineStage {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ValidateScoreResult {
-    pub name: String,
-    pub description: String,
-
-    pub score: f32,
-    pub target_score: f32,
-    pub advice: String
-}
-
 pub struct PipelineRunner<'a> {
     pub control: &'a TurnControl,
     pub sink: &'a dyn TurnEventSink,
-    pub trace: &'a Trace
+    pub trace: &'a Trace,
 }
 
 impl PipelineRunner<'_> {
     pub async fn run<P>(&self, pipeline: &P, input: P::Input) -> Result<P::Output, PipelineError>
-        where P: Pipeline + ?Sized
+    where
+        P: Pipeline + ?Sized,
     {
-        let observation: &Observation = &self.trace.begin_observation_with_name(pipeline.stage().as_str(), ObservationKind::Span);
-        let result = pipeline.execute(input, self.control, self.sink, observation).await;
+        let observation = self
+            .trace
+            .begin_observation_with_name(pipeline.stage().as_str(), ObservationKind::Span);
+        let result = pipeline.execute(input, self.control, self.sink, &observation).await;
+        let outcome = match &result {
+            Ok(_) => ObservationOutcome {
+                status: ObservationStatus::Ok,
+                ..ObservationOutcome::default()
+            },
+            Err(error) => ObservationOutcome {
+                status: ObservationStatus::Error,
+                error: Some(ObservationError {
+                    code: "pipeline_stage_failed".into(),
+                    failure_kind: "pipeline".into(),
+                    stage: Some(pipeline.stage().as_str().into()),
+                    message: error.to_string(),
+                }),
+                ..ObservationOutcome::default()
+            },
+        };
+        observation.finish(outcome);
         result
     }
 }
@@ -75,6 +85,6 @@ pub trait Pipeline: Send + Sync {
         input: Self::Input,
         control: &TurnControl,
         sink: &dyn TurnEventSink,
-        observation: &Observation
+        observation: &Observation,
     ) -> Result<Self::Output, PipelineError>;
 }

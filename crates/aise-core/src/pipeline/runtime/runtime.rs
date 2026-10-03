@@ -1,14 +1,14 @@
-use crate::core::{CommittedTurnInfo, TurnControl, TurnEventSink, TurnRequest, TurnResult, StoryContext};
-use crate::pipeline::common::{PipelineRunner, PipelineError};
-use crate::pipeline::baseline::{ BaselinePipeline, BaselineInput };
-use crate::pipeline::plan::{ PlanPipeline, PlanInput };
-use crate::pipeline::retrieval::{ RetrievalPipeline, RetrievalInput };
-use crate::pipeline::think::{ ThinkPipeline, ThinkInput };
-use crate::pipeline::generate::{ GeneratePipeline, GenerateInput };
-use crate::pipeline::validate::{ ValidatePipeline, ValidateInput };
-use crate::pipeline::repair::{ RepairPipeline, RepairInput };
-use crate::pipeline::extract::{ ExtractPipeline, ExtractInput };
-use crate::pipeline::commit::{ CommitPipeline, CommitInput };
+use crate::core::{CommittedTurnInfo, StoryContext, TurnControl, TurnEventSink, TurnRequest, TurnResult};
+use crate::pipeline::baseline::{BaselineInput, BaselinePipeline};
+use crate::pipeline::commit::{CommitInput, CommitPipeline};
+use crate::pipeline::common::{PipelineError, PipelineRunner};
+use crate::pipeline::extract::{ExtractInput, ExtractPipeline};
+use crate::pipeline::generate::{GenerateInput, GeneratePipeline};
+use crate::pipeline::plan::{PlanInput, PlanPipeline};
+use crate::pipeline::repair::{RepairInput, RepairPipeline};
+use crate::pipeline::retrieval::{RetrievalInput, RetrievalPipeline};
+use crate::pipeline::think::{ThinkInput, ThinkPipeline};
+use crate::pipeline::validate::{ValidateInput, ValidatePipeline, ValidationDecision};
 use crate::trace::Trace;
 
 pub struct Runtime {
@@ -37,7 +37,10 @@ impl Runtime {
             retrieval: RetrievalPipeline,
             think: ThinkPipeline,
             generate: GeneratePipeline,
-            validate: ValidatePipeline { score_configs: vec![] },
+            validate: ValidatePipeline {
+                score_configs: vec![],
+                validation_budget: 10,
+            },
             repair: RepairPipeline,
             extract: ExtractPipeline,
             commit: CommitPipeline,
@@ -54,18 +57,22 @@ impl Runtime {
         let pipeline_runner = PipelineRunner {
             control: &turn_control,
             sink,
-            trace
+            trace,
         };
 
         let baseline_input = BaselineInput {
-            story_ctx: StoryContext { story_id: turn_request.story_id.clone() },
+            story_ctx: StoryContext {
+                story_id: turn_request.story_id.clone(),
+            },
             player_input: turn_request.player_input.clone(),
         };
 
         let baseline_output = pipeline_runner.run(&self.baseline, baseline_input).await?;
 
         let plan_input = PlanInput {
-            story_ctx: StoryContext { story_id: turn_request.story_id.clone() },
+            story_ctx: StoryContext {
+                story_id: turn_request.story_id.clone(),
+            },
             player_contribution: baseline_output.player_contribution,
         };
 
@@ -90,30 +97,49 @@ impl Runtime {
         let generate_output = pipeline_runner.run(&self.generate, generate_input).await?;
 
         let validate_input = ValidateInput {
-            query: generate_output.result,
+            original_proposal: generate_output.result.clone(),
+            current_proposal: generate_output.result,
+            proposal_version: 1,
         };
 
         let mut validate_output = pipeline_runner.run(&self.validate, validate_input).await?;
-        let mut cached_validate_result = validate_output.result;
+        let mut validate_history = vec![validate_output.clone()];
 
-        while !validate_output.is_valid {
+        while validate_output.decision == ValidationDecision::Repair {
             let repair_input = RepairInput {
-                query: cached_validate_result,
+                original_proposal: validate_output.original_proposal,
+                current_proposal: validate_output.current_proposal,
                 scores: validate_output.scores,
+                proposal_version: validate_output.proposal_version,
             };
 
             let repair_output = pipeline_runner.run(&self.repair, repair_input).await?;
 
             let validate_input = ValidateInput {
-                query: repair_output.result,
+                original_proposal: repair_output.original_proposal,
+                current_proposal: repair_output.current_proposal,
+                proposal_version: repair_output.proposal_version,
             };
 
             validate_output = pipeline_runner.run(&self.validate, validate_input).await?;
-            cached_validate_result = validate_output.result;
+            validate_history.push(validate_output.clone());
+        }
+
+        if validate_output.decision == ValidationDecision::Reject {
+            validate_output = validate_history
+                .into_iter()
+                .max_by(|left, right| {
+                    let left_score = left.scores.iter().map(|score| score.score).sum::<f32>();
+                    let right_score = right.scores.iter().map(|score| score.score).sum::<f32>();
+                    left_score.total_cmp(&right_score)
+                })
+                .expect("validation history is initialized with the first validation result");
+
+            validate_output.decision = ValidationDecision::Reject;
         }
 
         let extract_input = ExtractInput {
-            query: cached_validate_result,
+            query: validate_output.current_proposal,
         };
 
         let extract_output = pipeline_runner.run(&self.extract, extract_input).await?;

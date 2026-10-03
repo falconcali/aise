@@ -9,6 +9,9 @@ pub enum PipelineError {
 
 impl PipelineError {
     pub fn new(stage: PipelineStage, message: impl Into<String>) -> Self {
-        Self::StageFailed { stage, message: message.into() }
+        Self::StageFailed {
+            stage,
+            message: message.into(),
+        }
     }
 }

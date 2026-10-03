@@ -1,14 +1,19 @@
-use crate::pipeline::common::{Pipeline, PipelineStage, PipelineError, ValidateScoreResult};
 use crate::core::{TurnControl, TurnEventSink};
+use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
+use crate::pipeline::validate::ValidateScoreResult;
 use crate::trace::Observation;
 
 pub struct RepairInput {
-    pub query: String,
-    pub scores: Vec<ValidateScoreResult>
+    pub original_proposal: String,
+    pub current_proposal: String,
+    pub scores: Vec<ValidateScoreResult>,
+    pub proposal_version: u32,
 }
 
 pub struct RepairOutput {
-    pub result: String
+    pub original_proposal: String,
+    pub current_proposal: String,
+    pub proposal_version: u32,
 }
 
 pub struct RepairPipeline;
@@ -26,8 +31,12 @@ impl Pipeline for RepairPipeline {
         input: Self::Input,
         control: &TurnControl,
         sink: &dyn TurnEventSink,
-        observation: &Observation
+        observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
-        Ok(RepairOutput { result: input.query })
+        Ok(RepairOutput {
+            original_proposal: input.original_proposal,
+            current_proposal: input.current_proposal,
+            proposal_version: input.proposal_version,
+        })
     }
 }

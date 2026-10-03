@@ -1,5 +1,5 @@
-mod pipeline;
 mod error;
+mod pipeline;
 
-pub use pipeline::{ Pipeline, PipelineStage, PipelineRunner, ValidateScoreResult };
 pub use error::PipelineError;
+pub use pipeline::{Pipeline, PipelineRunner, PipelineStage};
