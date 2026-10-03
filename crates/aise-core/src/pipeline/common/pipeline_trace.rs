@@ -2,7 +2,7 @@ use crate::pipeline::common::{Pipeline, PipelineError};
 use crate::trace::{Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationStatus, Trace};
 
 pub fn begin_pipeline_observation<P: Pipeline>(trace: &Trace, pipeline: &P) -> Observation {
-    trace.begin_observation_with_name(pipeline.stage().as_str(), ObservationKind::Span)
+    trace.begin_observation_with_name(pipeline.stage().as_str(), ObservationKind::Chain)
 }
 
 pub fn finish_pipeline_observation<P: Pipeline>(
