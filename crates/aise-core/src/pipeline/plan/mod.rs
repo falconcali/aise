@@ -1,3 +1,3 @@
 mod plan;
 
-pub(super) use plan::{ PlanPipeline, PlanInput, PlanOutput };
+pub(super) use plan::{PlanInput, PlanOutput, PlanPipeline};

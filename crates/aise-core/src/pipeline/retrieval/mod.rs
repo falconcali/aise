@@ -1,3 +1,3 @@
 mod retrieval;
 
-pub(super) use retrieval::{RetrievalPipeline, RetrievalInput, RetrievalOutput};
+pub(super) use retrieval::{RetrievalInput, RetrievalOutput, RetrievalPipeline};

@@ -1,3 +1,3 @@
 mod extract;
 
-pub(super) use extract::{ExtractPipeline, ExtractInput, ExtractOutput};
+pub(super) use extract::{ExtractInput, ExtractOutput, ExtractPipeline};

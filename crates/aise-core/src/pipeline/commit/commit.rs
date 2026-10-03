@@ -1,13 +1,13 @@
-use crate::pipeline::common::{Pipeline, PipelineStage, PipelineError};
 use crate::core::{TurnControl, TurnEventSink};
+use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
 
 pub struct CommitInput {
-    pub query: String
+    pub query: String,
 }
 
 pub struct CommitOutput {
-    pub result: String
+    pub result: String,
 }
 
 pub struct CommitPipeline;
@@ -25,7 +25,7 @@ impl Pipeline for CommitPipeline {
         input: Self::Input,
         control: &TurnControl,
         sink: &dyn TurnEventSink,
-        observation: &Observation
+        observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         Ok(CommitOutput { result: input.query })
     }

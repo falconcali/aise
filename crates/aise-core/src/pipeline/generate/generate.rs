@@ -1,13 +1,13 @@
-use crate::pipeline::common::{Pipeline, PipelineStage, PipelineError};
 use crate::core::{TurnControl, TurnEventSink};
+use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
 
 pub struct GenerateInput {
-    pub query: String
+    pub query: String,
 }
 
 pub struct GenerateOutput {
-    pub result: String
+    pub result: String,
 }
 
 pub struct GeneratePipeline;
@@ -25,7 +25,7 @@ impl Pipeline for GeneratePipeline {
         input: Self::Input,
         control: &TurnControl,
         sink: &dyn TurnEventSink,
-        observation: &Observation
+        observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         Ok(GenerateOutput { result: input.query })
     }

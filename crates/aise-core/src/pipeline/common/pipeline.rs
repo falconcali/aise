@@ -1,6 +1,6 @@
 use crate::core::{TurnControl, TurnEventSink};
-use crate::pipeline::common::PipelineError;
-use crate::trace::{Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationStatus, Trace};
+use crate::pipeline::common::{PipelineError, begin_pipeline_observation, finish_pipeline_observation};
+use crate::trace::{Observation, Trace};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,31 +45,11 @@ pub struct PipelineRunner<'a> {
 }
 
 impl PipelineRunner<'_> {
-    pub async fn run<P>(&self, pipeline: &P, input: P::Input) -> Result<P::Output, PipelineError>
-    where
-        P: Pipeline + ?Sized,
+    pub async fn run<P: Pipeline>(&self, pipeline: &P, input: P::Input) -> Result<P::Output, PipelineError>
     {
-        let observation = self
-            .trace
-            .begin_observation_with_name(pipeline.stage().as_str(), ObservationKind::Span);
+        let observation = begin_pipeline_observation(self.trace, pipeline);
         let result = pipeline.execute(input, self.control, self.sink, &observation).await;
-        let outcome = match &result {
-            Ok(_) => ObservationOutcome {
-                status: ObservationStatus::Ok,
-                ..ObservationOutcome::default()
-            },
-            Err(error) => ObservationOutcome {
-                status: ObservationStatus::Error,
-                error: Some(ObservationError {
-                    code: "pipeline_stage_failed".into(),
-                    failure_kind: "pipeline".into(),
-                    stage: Some(pipeline.stage().as_str().into()),
-                    message: error.to_string(),
-                }),
-                ..ObservationOutcome::default()
-            },
-        };
-        observation.finish(outcome);
+        finish_pipeline_observation(observation, pipeline, &result);
         result
     }
 }

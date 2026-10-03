@@ -1,3 +1,3 @@
 mod generate;
 
-pub(super) use generate::{GeneratePipeline, GenerateInput, GenerateOutput};
+pub(super) use generate::{GenerateInput, GenerateOutput, GeneratePipeline};

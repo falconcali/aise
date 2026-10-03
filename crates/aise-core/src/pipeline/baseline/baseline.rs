@@ -1,17 +1,17 @@
-use crate::pipeline::common::{Pipeline, PipelineStage, PipelineError};
-use crate::core::{ StoryContext, TurnControl, TurnEventSink, PlayerContribution };
-use crate::trace::{Observation};
+use crate::core::{PlayerContribution, StoryContext, TurnControl, TurnEventSink};
+use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
+use crate::trace::Observation;
 
-pub struct BaselineInput{
+pub struct BaselineInput {
     pub story_ctx: StoryContext,
-    pub player_input: String
+    pub player_input: String,
 }
 
 pub struct BaselineOutput {
-    pub player_contribution: PlayerContribution
+    pub player_contribution: PlayerContribution,
 }
 
-pub struct BaselinePipeline; 
+pub struct BaselinePipeline;
 
 impl Pipeline for BaselinePipeline {
     type Input = BaselineInput;
@@ -26,15 +26,13 @@ impl Pipeline for BaselinePipeline {
         input: Self::Input,
         control: &TurnControl,
         sink: &dyn TurnEventSink,
-        observation: &Observation
+        observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
-        let player_contribution = PlayerContribution { 
-            raw: input.player_input.clone(), 
-            processed: format!("{} (Processed by Baseline)", input.player_input.clone())
+        let player_contribution = PlayerContribution {
+            raw: input.player_input.clone(),
+            processed: format!("{} (Processed by Baseline)", input.player_input.clone()),
         };
 
-        Ok(BaselineOutput {
-            player_contribution
-        })
+        Ok(BaselineOutput { player_contribution })
     }
 }

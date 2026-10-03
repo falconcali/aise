@@ -1,3 +1,3 @@
 mod repair;
 
-pub(super) use repair::{RepairPipeline, RepairInput, RepairOutput};
+pub(super) use repair::{RepairInput, RepairOutput, RepairPipeline};
