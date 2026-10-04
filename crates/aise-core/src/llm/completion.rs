@@ -6,6 +6,19 @@ pub struct LlmCompletionSpec {
     pub messages: Vec<Message>,
 }
 
+#[derive(Clone, Debug)]
+pub struct LlmCompletionResult {
+    pub content: String,
+}
+
+impl From<LlmCompletionResponse> for LlmCompletionResult {
+    fn from(response: LlmCompletionResponse) -> Self {
+        Self {
+            content: response.content,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LlmCompletionFinishReason {
     Stop,

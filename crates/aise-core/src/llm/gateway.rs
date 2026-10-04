@@ -1,6 +1,6 @@
 use crate::core::TurnControl;
 use crate::llm::llm_trace;
-use crate::llm::{LlmCompletionRequest, LlmCompletionResponse, LlmCompletionSpec, LlmConfig, LlmError, LlmProvider};
+use crate::llm::{LlmCompletionRequest, LlmCompletionResponse, LlmCompletionSpec, LlmCompletionResult, LlmConfig, LlmError, LlmProvider};
 use crate::trace::Observation;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -19,12 +19,16 @@ impl LlmGateway {
         spec: LlmCompletionSpec,
         control: &TurnControl,
         observation: &Observation,
-    ) -> Result<LlmCompletionResponse, LlmError> {
+    ) -> Result<LlmCompletionResult, LlmError> {
         let req = self.build_request(spec);
         let provider_observation = llm_trace::begin_provider_call(observation, &req);
         let rsp = self.call_provider(req, control).await;
         llm_trace::finish_provider_call(provider_observation, &rsp);
-        rsp
+
+        match rsp {
+            Ok(rsp) => Ok(rsp.into()),
+            Err(e) => Err(e),
+        }
     }
 
     fn build_request(&self, spec: LlmCompletionSpec) -> LlmCompletionRequest {

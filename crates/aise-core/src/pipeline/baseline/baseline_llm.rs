@@ -1,5 +1,5 @@
 use crate::core::TurnControl;
-use crate::llm::{LlmCompletionSpec, LlmError, LlmGateway, Message, MessageRole};
+use crate::llm::{LlmCompletionResult, LlmCompletionSpec, LlmError, LlmGateway, Message, MessageRole};
 use crate::trace::Observation;
 
 pub async fn process_player_input(
@@ -7,7 +7,7 @@ pub async fn process_player_input(
     input: &str,
     turn_control: &TurnControl,
     observation: &Observation,
-) -> Result<String, LlmError> {
+) -> Result<LlmCompletionResult, LlmError> {
     let spec = LlmCompletionSpec {
         messages: vec![
             Message {
@@ -21,6 +21,5 @@ pub async fn process_player_input(
         ],
     };
 
-    let response = gateway.complete(spec, turn_control, observation).await?;
-    Ok(response.content)
+    return gateway.complete(spec, turn_control, observation).await;
 }
