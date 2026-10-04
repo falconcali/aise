@@ -1,5 +1,6 @@
 use crate::llm::LlmError;
 use crate::pipeline::common::PipelineStage;
+use crate::prompt::PromptError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -19,6 +20,15 @@ impl PipelineError {
 
 impl From<LlmError> for PipelineError {
     fn from(error: LlmError) -> Self {
+        Self::StageFailed {
+            stage: PipelineStage::Baseline,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<PromptError> for PipelineError {
+    fn from(error: PromptError) -> Self {
         Self::StageFailed {
             stage: PipelineStage::Baseline,
             message: error.to_string(),

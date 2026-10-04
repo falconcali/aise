@@ -10,6 +10,7 @@ use crate::pipeline::repair::{RepairInput, RepairPipeline};
 use crate::pipeline::retrieval::{RetrievalInput, RetrievalPipeline};
 use crate::pipeline::think::{ThinkInput, ThinkPipeline};
 use crate::pipeline::validate::{ValidateInput, ValidatePipeline, ValidationDecision};
+use crate::prompt::Prompt;
 use crate::trace::Trace;
 use std::sync::Arc;
 
@@ -26,9 +27,9 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub fn new(gateway: Arc<LlmGateway>) -> Self {
+    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>) -> Self {
         Self {
-            baseline: BaselinePipeline::new(gateway),
+            baseline: BaselinePipeline::new(gateway, prompt),
             plan: PlanPipeline,
             retrieval: RetrievalPipeline,
             think: ThinkPipeline,

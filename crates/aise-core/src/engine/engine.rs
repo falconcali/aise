@@ -1,6 +1,7 @@
 use crate::core::{CommittedTurnInfo, EngineError, TurnControl, TurnEvent, TurnEventSink, TurnRequest, TurnResult};
 use crate::llm::LlmGateway;
 use crate::pipeline::Runtime;
+use crate::prompt::Prompt;
 use crate::trace::Trace;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -21,9 +22,9 @@ pub struct AiseEngine {
 }
 
 impl AiseEngine {
-    pub fn new(gateway: Arc<LlmGateway>) -> Self {
+    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>) -> Self {
         Self {
-            runtime: Runtime::new(gateway),
+            runtime: Runtime::new(gateway, prompt),
         }
     }
 }

@@ -1,7 +1,7 @@
 use crate::llm::{
-    LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider, Message,
-    MessageRole,
+    LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
 };
+use crate::core::{ChatMessage, ChatMessageRole};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -94,10 +94,10 @@ fn to_chat_request(request: &LlmCompletionRequest) -> OpenAiChatRequest<'_> {
     }
 }
 
-fn to_chat_message(message: &Message) -> OpenAiChatMessage<'_> {
+fn to_chat_message(message: &ChatMessage) -> OpenAiChatMessage<'_> {
     let role = match message.role {
-        MessageRole::System => "system",
-        MessageRole::User => "user",
+        ChatMessageRole::System => "system",
+        ChatMessageRole::User => "user",
     };
     OpenAiChatMessage {
         role,

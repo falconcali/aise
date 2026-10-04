@@ -1,9 +1,10 @@
-use crate::prompt::{Prompt, PromptError, PromptSpec, PromptResult};
-use crate::trace::Observation;
+use crate::prompt::{Prompt, PromptError, PromptSpec, RenderedPrompt};
 
-pub fn process_player_input(prompt: &Prompt, input: &str, observation: &Observation) -> Result<PromptResult, PromptError> {
-    let spec = PromptSpec {
-    };
+pub fn process_player_input(
+    prompt: &Prompt,
+    input: &str,
+) -> Result<RenderedPrompt, PromptError> {
+    let spec = PromptSpec {};
 
-    return prompt.render(spec, observation);
+    return prompt.render(spec);
 }

@@ -1,6 +1,9 @@
 use crate::core::TurnControl;
 use crate::llm::llm_trace;
-use crate::llm::{LlmCompletionRequest, LlmCompletionResponse, LlmCompletionSpec, LlmCompletionResult, LlmConfig, LlmError, LlmProvider};
+use crate::llm::{
+    LlmCompletionRequest, LlmCompletionResponse, LlmCompletionResult, LlmCompletionSpec, LlmConfig, LlmError,
+    LlmProvider,
+};
 use crate::trace::Observation;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

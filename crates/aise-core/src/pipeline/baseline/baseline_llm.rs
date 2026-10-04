@@ -1,25 +1,22 @@
-use crate::core::TurnControl;
-use crate::llm::{LlmCompletionResult, LlmCompletionSpec, LlmError, LlmGateway, Message, MessageRole};
+use crate::core::{ChatMessage, PlayerContribution, TurnControl};
+use crate::llm::{LlmCompletionSpec, LlmError, LlmGateway};
 use crate::trace::Observation;
 
 pub async fn process_player_input(
     gateway: &LlmGateway,
-    input: &str,
+    input: &String,
+    messages: Vec<ChatMessage>,
     turn_control: &TurnControl,
     observation: &Observation,
-) -> Result<LlmCompletionResult, LlmError> {
-    let spec = LlmCompletionSpec {
-        messages: vec![
-            Message {
-                role: MessageRole::System,
-                content: "把用户的输入处理的更加文艺丰满一些, 不要过于生硬.".into(),
-            },
-            Message {
-                role: MessageRole::User,
-                content: input.to_string(),
-            },
-        ],
+) -> Result<PlayerContribution, LlmError> {
+    let llm_spec = LlmCompletionSpec {
+        messages,
     };
 
-    return gateway.complete(spec, turn_control, observation).await;
+    let llm_result = gateway.complete(llm_spec, turn_control, observation).await?;
+
+    return Ok(PlayerContribution {
+        raw: input.clone(),
+        processed: llm_result.content,
+    });
 }

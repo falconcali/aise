@@ -2,6 +2,7 @@ mod activation;
 mod asset;
 pub mod error;
 mod ids;
+mod message;
 mod story;
 pub mod turn;
 
@@ -19,3 +20,4 @@ pub use turn::{
 };
 
 pub use error::{CoreError, EngineError};
+pub use message::{ChatMessage, ChatMessageRole};

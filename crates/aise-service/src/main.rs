@@ -6,6 +6,7 @@ use aise_core::core::{
 };
 use aise_core::engine::{AiseEngine, Engine};
 use aise_core::llm::{LlmConfig, LlmGateway, OpenAiCompatProvider};
+use aise_core::prompt::{Prompt, PromptConfig};
 use aise_core::trace::{
     Attribute, ContentCapture, ObservabilityContentConfig, ObservationError, ObservationSession, ObservationStatus,
     SessionOutcome, SessionSpec, TRACE_ENVIRONMENT, TRACE_METADATA_STORY_ID, TRACE_METADATA_TURN_NUMBER, TRACE_RELEASE,
@@ -58,7 +59,8 @@ async fn run_default_turn(observability_config: &ObservabilityConfig) -> anyhow:
     let control = TurnControl::new(Instant::now() + DEFAULT_TURN_TIMEOUT, TurnCancellation::new());
     let (session, mut trace) = begin_default_trace(observability_config);
     let gateway = build_llm_gateway()?;
-    let result = AiseEngine::new(gateway)
+    let prompt = build_prompt()?;
+    let result = AiseEngine::new(gateway, prompt)
         .run_turn(request, control, &ConsoleTurnEventSink, &trace)
         .await;
     let trace_outcome = trace_outcome(&trace, &result);
@@ -86,6 +88,12 @@ fn build_llm_gateway() -> anyhow::Result<Arc<LlmGateway>> {
     Ok(Arc::new(LlmGateway::new(provider, config)))
 }
 
+fn build_prompt() -> anyhow::Result<Arc<Prompt>> {
+    let config = load_prompt_config()?;
+    let prompt = Prompt::new(config)?;
+    Ok(Arc::new(prompt))
+}
+
 fn load_llm_config() -> anyhow::Result<LlmConfig> {
     Ok(LlmConfig {
         base_url: required_env("AISE_LLM_BASE_URL")?,
@@ -94,6 +102,10 @@ fn load_llm_config() -> anyhow::Result<LlmConfig> {
         temperature: parsed_env("AISE_LLM_TEMPERATURE", DEFAULT_LLM_TEMPERATURE)?,
         timeout_ms: parsed_env("AISE_LLM_TIMEOUT_MS", DEFAULT_LLM_TIMEOUT_MS)?,
     })
+}
+
+fn load_prompt_config() -> anyhow::Result<PromptConfig> {
+    Ok(PromptConfig {})
 }
 
 fn required_env(name: &str) -> anyhow::Result<String> {

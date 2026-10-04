@@ -1,9 +1,9 @@
-use crate::llm::Message;
+use crate::core::ChatMessage;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug)]
 pub struct LlmCompletionSpec {
-    pub messages: Vec<Message>,
+    pub messages: Vec<ChatMessage>,
 }
 
 #[derive(Clone, Debug)]
@@ -31,7 +31,7 @@ pub enum LlmCompletionFinishReason {
 #[derive(Clone, Debug, Serialize)]
 pub struct LlmCompletionRequest {
     pub model: String,
-    pub messages: Vec<Message>,
+    pub messages: Vec<ChatMessage>,
     pub temperature: f32,
 }
 
