@@ -10,7 +10,7 @@
 
 ## 1. Goal
 
-Replace the placeholder `aise-core::prompt` with a data-driven Prompt library that loads a TOML manifest and CSI/RC/FTI Minijinja templates once in `Prompt::new`, and renders them in strict mode in `Prompt::render` into exactly three `ChatMessage`s (System, User, System). The only shipped resource is `baseline.process_player_input`.
+Replace the placeholder `aise-core::prompt` with a data-driven Prompt library that loads a TOML manifest and CSI/RC/FTI Minijinja templates once in `Prompt::new`, and renders them in strict mode in `Prompt::render` into exactly three `ChatMessage`s (System, User, System). Each render is recorded as one `prompt_render` child observation under the caller-supplied `Observation`. The only shipped resource is `baseline.process_player_input`.
 
 ---
 
@@ -19,14 +19,15 @@ Replace the placeholder `aise-core::prompt` with a data-driven Prompt library th
 ### 2.1 In Scope
 
 - Rewrite `crates/aise-core/src/prompt/config.rs`, `error.rs`, `prompt.rs`, `mod.rs`.
-- Add `crates/aise-core/src/prompt/manifest.rs`, `loader.rs`, `renderer.rs`.
+- Add `crates/aise-core/src/prompt/manifest.rs`, `loader.rs`, `renderer.rs`, `prompt_trace.rs`.
 - Add `crates/aise-core/assets/prompts/index.toml` with exactly one entry: `baseline.process_player_input`.
 - Add the three Baseline templates under `crates/aise-core/assets/prompts/{csi,rc,fti}/` with the content in §3.8.
 - Add unit tests `crates/aise-core/src/prompt/tests/{loader,renderer,prompt}_tests.rs`.
 - Delete `crates/aise-core/src/prompt/test/.gitkeep` (and the empty `test/` directory).
-- Add `minijinja.workspace = true` and `toml.workspace = true` to `crates/aise-core/Cargo.toml`.
+- Add `minijinja.workspace = true` and `toml.workspace = true` to `crates/aise-core/Cargo.toml`, and enable the serde `rc` feature (`serde = { workspace = true, features = ["rc"] }`) so `RenderedPrompt` can serialize its `Arc<str>` Prompt ID.
 - Compile fixes only at:
   - `crates/aise-core/src/pipeline/baseline/baseline_prompt.rs` (§3.9).
+  - `crates/aise-core/src/pipeline/baseline/baseline.rs` passing its `&Observation` to `baseline_prompt::process_player_input` (§3.9).
   - `crates/aise-service/src/main.rs` `load_prompt_config` (§3.9).
 
 ### 2.2 Non-Goals
@@ -43,7 +44,8 @@ Replace the placeholder `aise-core::prompt` with a data-driven Prompt library th
 - Does not add hot reload, file watching, or runtime manifest mutation.
 - Does not split `PromptVars` into per-layer maps (`RcPromptVars` / `FtiPromptVars` MUST NOT exist).
 - Does not change `core`, `llm`, `engine`, `pipeline`, `trace`, or `aise-service` behavior beyond the compile fixes in §3.9.
-- Does not add `serde_yaml` or any dependency other than `minijinja` and `toml`.
+- Does not add `serde_yaml` or any dependency other than `minijinja` and `toml`; the only feature change is serde `rc`.
+- Does not change the `trace` content capture policy; `prompt_render` content is governed by the existing `ContentCapture` of the parent observation.
 - Does not call a remote LLM from Prompt unit tests and does not test model output semantics.
 - Does not make the prompt directory configurable in `aise-service` (no environment variable, no config file); the directory is a fixed constant (§3.9).
 - Does not place any resource file under `crates/aise-core/src/`.
@@ -82,6 +84,7 @@ crates/aise-core/
         ├── loader.rs
         ├── renderer.rs
         ├── prompt.rs
+        ├── prompt_trace.rs
         └── tests/
             ├── loader_tests.rs
             ├── renderer_tests.rs
@@ -98,6 +101,7 @@ mod error;
 mod loader;
 mod manifest;
 mod prompt;
+mod prompt_trace;
 mod renderer;
 
 pub use config::PromptConfig;
@@ -116,7 +120,7 @@ mod tests;
 
 `loader.rs` → `tests/loader_tests.rs`, `renderer.rs` → `tests/renderer_tests.rs`, `prompt.rs` → `tests/prompt_tests.rs`.
 
-Allowed imports inside `prompt/`: `std`, `serde`, `serde_json`, `thiserror`, `minijinja`, `toml`, `tracing`, `crate::core::{ChatMessage, ChatMessageRole}`, `crate::prompt::*`. Forbidden: `crate::llm`, `crate::pipeline`, `crate::engine`, `crate::trace`, persistence, service.
+Allowed imports inside `prompt/`: `std`, `serde`, `serde_json`, `thiserror`, `minijinja`, `toml`, `tracing`, `crate::core::{ChatMessage, ChatMessageRole}`, `crate::trace` (observation types only, used by `prompt.rs` and `prompt_trace.rs`), `crate::prompt::*`. Forbidden: `crate::llm`, `crate::pipeline`, `crate::engine`, persistence, service.
 
 ### 3.2 Config — `config.rs`
 
@@ -335,7 +339,7 @@ pub(crate) fn template_name(prompt_id: &str, layer: PromptLayer) -> String;
 ```rust
 pub type PromptVars = HashMap<String, serde_json::Value>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PromptSpec<'a> {
     prompt_id: &'a str,
     vars: PromptVars,
@@ -347,7 +351,7 @@ impl<'a> PromptSpec<'a> {
     pub fn vars(&self) -> &PromptVars;
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RenderedPrompt {
     prompt_id: Arc<str>,
     messages: Vec<ChatMessage>,
@@ -367,11 +371,35 @@ pub struct Prompt {
 impl Prompt {
     pub fn new(config: PromptConfig) -> Result<Self, PromptError>;
     pub fn prompt_ids(&self) -> impl Iterator<Item = &str>;
-    pub fn render(&self, spec: PromptSpec<'_>) -> Result<RenderedPrompt, PromptError>;
+    pub fn render(&self, spec: PromptSpec<'_>, observation: &Observation) -> Result<RenderedPrompt, PromptError>;
 }
 ```
 
 `Prompt` MUST be `Send + Sync` (shared as `Arc<Prompt>` by `AiseEngine::new` at `crates/aise-core/src/engine/engine.rs:25`).
+
+`render` wraps a private `inner_render(spec)` that holds the catalog lookup and three-layer rendering; `render` itself only opens the observation, calls `inner_render`, and finishes the observation (`R-CODE-08`).
+
+### 3.7.1 Render observation — `prompt_trace.rs`
+
+```rust
+pub fn begin_prompt_render(observation: &Observation, spec: &PromptSpec) -> Observation;
+pub fn finish_prompt_render(observation: Observation, result: &Result<RenderedPrompt, PromptError>);
+```
+
+| Field | Value |
+|---|---|
+| `name` | `"prompt_render"` |
+| `kind` | `ObservationKind::Span` |
+| `input` | `observation.capture_content(&spec)` |
+| `metadata` | empty |
+| success `status` / `output` | `ObservationStatus::Ok` / `observation.capture_content(&rendered_prompt)` |
+| failure `status` | `ObservationStatus::Error` |
+| failure `error.code` | `"prompt_render_failed"` |
+| failure `error.failure_kind` | `"prompt"` |
+| failure `error.stage` | `Some("prompt_render")` |
+| failure `error.message` | `error.to_string()` |
+
+The pattern mirrors `crates/aise-core/src/llm/llm_trace.rs` and `crates/aise-core/src/pipeline/baseline/baseline_trace.rs`.
 
 ### 3.8 Baseline Player Input resource
 
@@ -432,15 +460,27 @@ Return only the processed contribution text. Do not include headings, labels, an
 
 ```rust
 use crate::prompt::{Prompt, PromptError, PromptSpec, PromptVars, RenderedPrompt};
+use crate::trace::Observation;
 use serde_json::Value;
 
 const PROCESS_PLAYER_INPUT_PROMPT_ID: &str = "baseline.process_player_input";
 const PLAYER_INPUT_VAR: &str = "player_input";
 
-pub fn process_player_input(prompt: &Prompt, input: &str) -> Result<RenderedPrompt, PromptError> {
+pub fn process_player_input(
+    prompt: &Prompt,
+    input: &str,
+    observation: &Observation,
+) -> Result<RenderedPrompt, PromptError> {
     let vars = PromptVars::from([(PLAYER_INPUT_VAR.to_owned(), Value::String(input.to_owned()))]);
-    prompt.render(PromptSpec::new(PROCESS_PLAYER_INPUT_PROMPT_ID, vars))
+    prompt.render(PromptSpec::new(PROCESS_PLAYER_INPUT_PROMPT_ID, vars), observation)
 }
+```
+
+`crates/aise-core/src/pipeline/baseline/baseline.rs` `BaselinePipeline::process_player_input` passes its `observation` parameter through:
+
+```rust
+let rendered_prompt =
+    baseline_prompt::process_player_input(self.prompt.as_ref(), &input.player_input, observation)?;
 ```
 
 `crates/aise-service/src/main.rs` `load_prompt_config` (final form; constants placed with the existing `DEFAULT_*` constants):
@@ -461,7 +501,7 @@ fn load_prompt_config() -> anyhow::Result<PromptConfig> {
 }
 ```
 
-No other file outside `crates/aise-core/src/prompt/`, `crates/aise-core/assets/prompts/`, and `crates/aise-core/Cargo.toml` changes. `PipelineError: From<PromptError>` at `crates/aise-core/src/pipeline/common/error.rs:30` stays unchanged.
+No other file outside `crates/aise-core/src/prompt/`, `crates/aise-core/assets/prompts/`, `crates/aise-core/Cargo.toml`, and the call sites above changes. `PipelineError: From<PromptError>` at `crates/aise-core/src/pipeline/common/error.rs:30` stays unchanged.
 
 ---
 
@@ -492,6 +532,7 @@ No other file outside `crates/aise-core/src/prompt/`, `crates/aise-core/assets/p
 18. **R-18**: `RenderedPrompt.prompt_id` is a clone of the catalog's `Arc<str>` key, not a new allocation of the ID.
 19. **R-19**: `render` performs no file I/O, no TOML parsing, no `add_template*` call, and no template compilation.
 20. **R-20**: `into_messages` moves the `Vec<ChatMessage>` out without cloning.
+21. **R-21**: Every `render` call, including `PromptNotFound` and `TemplateRender` failures, opens exactly one `prompt_render` child of the supplied `observation` before lookup and finishes it exactly once after `inner_render` returns, using the fields in §3.7.1. The `Result` returned to the caller is the one recorded; observation recording never changes it.
 
 ### 4.3 Error Handling
 
@@ -508,8 +549,9 @@ No other file outside `crates/aise-core/src/prompt/`, `crates/aise-core/assets/p
 ### 4.5 Observability
 
 - On `Prompt::new` success, emit exactly one `tracing::info!(target: "aise::prompt", prompt_count, total_template_bytes, "prompt catalog loaded")` with structured fields (`R-OBS-04`).
-- `render` emits no log or span; failures surface through `PromptError` to the caller.
-- No log, span, or error contains template bodies or variable values.
+- `render` emits no `tracing` log; it records exactly one `prompt_render` observation (§3.7.1, R-21), and failures still surface through `PromptError` to the caller.
+- The `prompt_render` input (`PromptSpec`, including variable values) and output (`RenderedPrompt`, including rendered messages) are captured only through `Observation::capture_content`, so the parent's `ContentCapture` policy decides whether they are recorded, truncated, or omitted. No other capture path exists.
+- No `tracing` log and no `PromptError` contains template bodies or variable values.
 
 ---
 
@@ -520,8 +562,9 @@ No other file outside `crates/aise-core/src/prompt/`, `crates/aise-core/assets/p
 - [ ] Files under `crates/aise-core/src/prompt/` and `crates/aise-core/assets/prompts/` match §3.1 exactly; `rg --files crates/aise-core/src/prompt` lists no `test/` directory.
 - [ ] `rg --files crates/aise-core/src -g "*.j2" -g "*.toml"` returns zero matches.
 - [ ] `mod.rs` matches §3.1 and contains only `mod` / `pub use` lines.
-- [ ] `git diff --stat` touches only `crates/aise-core/src/prompt/**`, `crates/aise-core/assets/prompts/**`, `crates/aise-core/Cargo.toml`, `crates/aise-core/src/pipeline/baseline/baseline_prompt.rs`, `crates/aise-service/src/main.rs`, and `Cargo.lock`.
-- [ ] `rg -n "crate::(llm|pipeline|engine|trace)" crates/aise-core/src/prompt` returns zero matches.
+- [ ] `git diff --stat` touches only `crates/aise-core/src/prompt/**`, `crates/aise-core/assets/prompts/**`, `crates/aise-core/Cargo.toml`, `crates/aise-core/src/pipeline/baseline/baseline_prompt.rs`, `crates/aise-core/src/pipeline/baseline/baseline.rs`, `crates/aise-service/src/main.rs`, and `Cargo.lock`.
+- [ ] `rg -n "crate::(llm|pipeline|engine)" crates/aise-core/src/prompt` returns zero matches.
+- [ ] `rg -l "crate::trace" crates/aise-core/src/prompt -g "!**/tests/**"` lists only `prompt.rs` and `prompt_trace.rs`.
 - [ ] `rg -n "PromptSourceConfig|RcPromptVars|FtiPromptVars|slots\.yaml|serde_yaml|Hello, world" crates/aise-core crates/aise-service` returns zero matches.
 - [ ] `rg -n "TemplateNotFound|ParsingFailed|RenderingFailed|ValidationFailed" crates/aise-core/src` returns zero matches.
 - [ ] `rg -n "crates/aise/" crates/aise-core` returns zero matches.
@@ -557,6 +600,8 @@ Fixtures are written to a unique directory under `std::env::temp_dir()` created 
 
 ### 5.4 Tests — `tests/prompt_tests.rs`
 
+Every `render` call goes through a test helper that builds an `ObservationSession` and `Trace` with `ContentCapturePolicy::FullContent` and passes `trace.root()` as the `Observation`.
+
 - [ ] `bundled_catalog_has_single_prompt` → `prompt_ids()` yields exactly `["baseline.process_player_input"]`.
 - [ ] `renders_baseline_three_messages_in_order` → roles `[System, User, System]`; RC content contains the supplied `player_input`; CSI and FTI equal their template files.
 - [ ] `same_vars_feed_all_layers` → a fixture prompt referencing one variable in CSI, RC, and FTI renders it in all three messages.
@@ -581,5 +626,6 @@ Fixtures are written to a unique directory under `std::env::temp_dir()` created 
 - Current placeholder: `crates/aise-core/src/prompt/prompt.rs:25`, `crates/aise-core/src/prompt/config.rs:4`, `crates/aise-core/src/prompt/error.rs:4`
 - Prior art (old implementation, migration source only): `crates/aise/src/prompt/renderer.rs:20`, `crates/aise/src/prompt/loader.rs:106`
 - Test wiring precedent: `crates/aise-core/src/trace/observation.rs:235`
-- Callers: `crates/aise-core/src/pipeline/baseline/baseline_prompt.rs:3`, `crates/aise-core/src/pipeline/baseline/baseline.rs:61`, `crates/aise-service/src/main.rs:107`
+- Callers: `crates/aise-core/src/pipeline/baseline/baseline_prompt.rs:8`, `crates/aise-core/src/pipeline/baseline/baseline.rs:61`, `crates/aise-service/src/main.rs:107`
+- Trace pattern precedent: `crates/aise-core/src/llm/llm_trace.rs`, `crates/aise-core/src/pipeline/baseline/baseline_trace.rs`
 - Guardrails: `AGENTS.md`, `doc/agents/guardrails/`

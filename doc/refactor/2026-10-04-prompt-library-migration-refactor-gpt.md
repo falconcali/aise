@@ -75,6 +75,7 @@
 | 4 | `crates/aise-core/src/prompt/loader.rs` | 新增 | P1 | Phase 1 | 有界读取和资源校验 |
 | 5 | `crates/aise-core/src/prompt/renderer.rs` | 新增 | P1 | Phase 1 | Minijinja 环境、模板注册和严格渲染 |
 | 6 | `crates/aise-core/src/prompt/prompt.rs` | 重写 | P1 | Phase 2 | 实现公开类型、Catalog 和渲染入口 |
+| 6a | `crates/aise-core/src/prompt/prompt_trace.rs` | 新增 | P1 | Phase 2 | 为每次渲染记录 `prompt_render` Observation |
 | 7 | `crates/aise-core/src/prompt/mod.rs` | 调整 | P1 | Phase 2 | 仅保留模块声明和 re-export |
 | 8 | `crates/aise-core/assets/prompts/index.toml` | 新增 | P1 | Phase 2 | 只注册 `baseline.process_player_input` |
 | 9 | `crates/aise-core/assets/prompts/csi/baseline-process-player-input.md.j2` | 新增 | P1 | Phase 2 | Baseline Player Input CSI |
@@ -83,8 +84,8 @@
 | 12 | `crates/aise-core/src/prompt/tests/loader_tests.rs` | 新增 | P1 | Phase 3 | 加载、路径和容量测试 |
 | 13 | `crates/aise-core/src/prompt/tests/renderer_tests.rs` | 新增 | P1 | Phase 3 | 编译、Strict 模式和三层顺序测试 |
 | 14 | `crates/aise-core/src/prompt/tests/prompt_tests.rs` | 新增 | P1 | Phase 3 | 公开 API 和 `RenderedPrompt` 测试 |
-| 15 | `crates/aise-core/Cargo.toml` | 最小调整 | P1 | Phase 1 | 仅增加编译所需的 `minijinja` 和 `toml` |
-| 16 | Prompt API 调用点 | 编译修复 | P1 | Phase 3 | 仅修复签名变化导致的编译错误，不改变调用方职责 |
+| 15 | `crates/aise-core/Cargo.toml` | 最小调整 | P1 | Phase 1 | 增加编译所需的 `minijinja` 和 `toml`，并为 `serde` 开启 `rc` feature |
+| 16 | Prompt API 调用点 | 编译修复 | P1 | Phase 3 | 仅修复签名变化导致的编译错误，包括把 Pipeline 已有的 `&Observation` 传给 `Prompt::render`，不改变调用方职责 |
 
 ### Deletions
 
@@ -100,6 +101,7 @@
 - `manifest.rs` — Manifest 反序列化模型。
 - `loader.rs` — 文件读取、边界检查和 Catalog 构建。
 - `renderer.rs` — Minijinja 编译与渲染。
+- `prompt_trace.rs` — `prompt_render` Observation 的开始与结束。
 - `crates/aise-core/assets/prompts/` — 只包含 `baseline.process_player_input` 的 Manifest 条目和三个模板。
 - `tests/` — 与源文件一一对应的单元测试。
 
@@ -119,12 +121,14 @@ flowchart LR
     Prompt["prompt::Prompt"] --> Config["prompt::PromptConfig"]
     Prompt --> Loader["prompt::loader"]
     Prompt --> Renderer["prompt::renderer"]
+    Prompt --> PromptTrace["prompt::prompt_trace"]
+    PromptTrace --> Trace["trace::Observation"]
     Loader --> Manifest["prompt::manifest"]
     Loader --> Assets["aise-core/assets/prompts"]
     Renderer --> Assets
 ```
 
-Prompt 模块可以使用现有的 `core::ChatMessage`，但本次不修改 Core。Prompt 模块不得导入 `crate::llm`、具体 Pipeline、Runtime、Service 或持久化模块。
+Prompt 模块可以使用现有的 `core::ChatMessage`，但本次不修改 Core。Prompt 模块可以使用 `crate::trace` 的 Observation 类型记录渲染过程，与 `llm::llm_trace` 的做法一致。Prompt 模块不得导入 `crate::llm`、具体 Pipeline、Runtime、Service 或持久化模块。
 
 ### 2. Directory structure
 
@@ -148,6 +152,7 @@ crates/aise-core/
         ├── loader.rs
         ├── renderer.rs
         ├── prompt.rs
+        ├── prompt_trace.rs
         └── tests/
             ├── loader_tests.rs
             ├── renderer_tests.rs
@@ -219,9 +224,12 @@ impl Prompt {
     pub fn render(
         &self,
         spec: PromptSpec<'_>,
+        observation: &Observation,
     ) -> Result<RenderedPrompt, PromptError>;
 }
 ```
+
+每次 `render` 在调用方传入的 `observation` 下创建一个名为 `prompt_render` 的子 Observation：输入是 `PromptSpec`，成功时输出是 `RenderedPrompt`，失败时记录 `prompt_render_failed` 错误。`PromptSpec` 和 `RenderedPrompt` 因此实现 `Serialize`，内容是否被记录由父 Observation 的 `ContentCapture` 策略决定。
 
 ### 4. Manifest
 
@@ -385,7 +393,7 @@ Renderer 必须：
 - 模板编译失败。
 - CSI、RC 或 FTI 渲染失败。
 
-错误必须携带可定位的 Prompt ID、模板层或资源路径。Prompt 库返回 typed error，不记录模板正文，不吞掉底层错误。
+错误必须携带可定位的 Prompt ID、模板层或资源路径。Prompt 库返回 typed error，错误和 `tracing` 日志不包含模板正文或变量值，不吞掉底层错误。渲染失败同时记录在 `prompt_render` Observation 上。
 
 ---
 
@@ -409,7 +417,8 @@ Renderer 必须：
 - **Core / LLM / Pipeline / Runtime**：不做架构或行为修改；只允许必要的编译修复。
 - **Prompt assets**：在 `crates/aise-core/assets/prompts/` 只建立 `baseline.process_player_input` 的 TOML Manifest 条目和 CSI/RC/FTI 资源。
 - **Config**：`PromptConfig` 增加目录与容量限制；调用点只需补齐构造参数。`aise-service` 以固定常量指向 `crates/aise-core/assets/prompts/`，不提供环境变量或配置文件形式的目录配置项。
-- **Dependencies**：`aise-core` 增加 workspace 已固定的 `minijinja` 和 `toml`；不增加 `serde_yaml`。
+- **Dependencies**：`aise-core` 增加 workspace 已固定的 `minijinja` 和 `toml`，并为 `serde` 开启 `rc` feature；不增加 `serde_yaml`。
+- **Observability**：Langfuse/OTel trace 中每次 Prompt 渲染新增一个 `prompt_render` span，位于调用方 Pipeline 的 Observation 之下。
 - **旧 `aise` crate**：只作为实现和资源迁移来源，不与新 Prompt 库建立依赖。
 
 ---
@@ -450,7 +459,8 @@ Renderer 必须：
 - [ ] Prompt 数量、单模板大小和模板总大小具有非零上限。
 - [ ] Manifest 拒绝空 ID、重复 ID、缺失层、绝对路径和父目录跳转。
 - [ ] 不迁移 Slot、Pack、Resolver、Policy、Profile Registry、Metadata、领域 View 和 `TrustedPromptSource`。
-- [ ] Prompt 模块不导入 `crate::llm`、具体 Pipeline、Runtime、Service 或持久化模块。
+- [ ] Prompt 模块不导入 `crate::llm`、具体 Pipeline、Runtime、Service 或持久化模块；`crate::trace` 只用于 `prompt_render` Observation。
+- [ ] 每次 `Prompt::render` 恰好创建并结束一个 `prompt_render` Observation，成功和失败都会记录。
 - [ ] 不新增玩家输入清洗、安全策略或业务内容改写。
 - [ ] `crates/aise-core` 不引用 `crates/aise/assets/prompts/` 作为运行时资源。
 - [ ] 单元测试位于 `prompt/tests/<source>_tests.rs`。
@@ -480,5 +490,5 @@ Renderer 必须：
 - 三条消息合并或角色调整。
 - Pipeline 输入输出设计。
 - LLM Completion、Provider 和 Gateway 设计。
-- Trace 内容策略和业务可观测性。
+- Trace 内容策略（`prompt_render` 沿用父 Observation 的 `ContentCapture`，不新增策略）和 Prompt 渲染以外的业务可观测性。
 - Writer Planner、Character Think、Story Generator、Story Repairer 和 Story State Extractor 的 Prompt 资源迁移。

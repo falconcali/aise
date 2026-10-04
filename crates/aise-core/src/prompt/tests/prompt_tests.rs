@@ -1,4 +1,7 @@
 use super::*;
+use crate::trace::{
+    ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
+};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,6 +21,33 @@ fn config(dir: &Path) -> PromptConfig {
 
 fn bundled_prompt() -> Prompt {
     Prompt::new(config(Path::new(BUNDLED_PROMPT_DIRECTORY))).expect("bundled prompt loads")
+}
+
+fn test_trace() -> Trace {
+    let session = ObservationSession::begin(
+        SessionSpec {
+            id: None,
+            user_id: None,
+            metadata: Vec::new(),
+        },
+        ContentCapture::new(ObservabilityContentConfig {
+            policy: ContentCapturePolicy::FullContent,
+            max_field_bytes: 1024,
+            max_observation_bytes: 2048,
+            detector_overlap_bytes: 0,
+        }),
+    );
+    session.begin_trace(TraceSpec {
+        name: "prompt-test",
+        input: None,
+        metadata: Vec::new(),
+        tags: Vec::new(),
+    })
+}
+
+fn render(prompt: &Prompt, spec: PromptSpec<'_>) -> Result<RenderedPrompt, PromptError> {
+    let trace = test_trace();
+    prompt.render(spec, trace.root())
 }
 
 fn fixture_dir(name: &str) -> PathBuf {
@@ -62,9 +92,11 @@ fn bundled_catalog_has_single_prompt() {
 #[test]
 fn renders_baseline_three_messages_in_order() {
     let prompt = bundled_prompt();
-    let rendered = prompt
-        .render(PromptSpec::new(BASELINE_PROMPT_ID, player_input_vars("I open the door.")))
-        .expect("render");
+    let rendered = render(
+        &prompt,
+        PromptSpec::new(BASELINE_PROMPT_ID, player_input_vars("I open the door.")),
+    )
+    .expect("render");
     let messages = rendered.messages();
     let roles = messages.iter().map(|message| message.role.clone()).collect::<Vec<_>>();
     assert_eq!(
@@ -88,9 +120,11 @@ fn same_vars_feed_all_layers() {
     fs::write(dir.join("r.j2"), "rc {{ v }}").expect("write rc");
     fs::write(dir.join("f.j2"), "fti {{ v }}").expect("write fti");
     let prompt = Prompt::new(config(&dir)).expect("fixture prompt loads");
-    let rendered = prompt
-        .render(PromptSpec::new("shared", PromptVars::from([("v".to_owned(), json!("value"))])))
-        .expect("render");
+    let rendered = render(
+        &prompt,
+        PromptSpec::new("shared", PromptVars::from([("v".to_owned(), json!("value"))])),
+    )
+    .expect("render");
     let contents = rendered
         .messages()
         .iter()
@@ -102,18 +136,15 @@ fn same_vars_feed_all_layers() {
 #[test]
 fn unknown_prompt_id_is_not_found() {
     let prompt = bundled_prompt();
-    let error = prompt
-        .render(PromptSpec::new("unknown.prompt", PromptVars::new()))
-        .expect_err("render should fail");
+    let error = render(&prompt, PromptSpec::new("unknown.prompt", PromptVars::new())).expect_err("render should fail");
     assert!(matches!(error, PromptError::PromptNotFound { ref prompt_id } if prompt_id == "unknown.prompt"));
 }
 
 #[test]
 fn missing_player_input_fails() {
     let prompt = bundled_prompt();
-    let error = prompt
-        .render(PromptSpec::new(BASELINE_PROMPT_ID, PromptVars::new()))
-        .expect_err("render should fail");
+    let error =
+        render(&prompt, PromptSpec::new(BASELINE_PROMPT_ID, PromptVars::new())).expect_err("render should fail");
     assert!(matches!(
         error,
         PromptError::TemplateRender {
@@ -129,18 +160,15 @@ fn renders_after_resource_directory_deleted() {
     copy_bundled_assets(&dir);
     let prompt = Prompt::new(config(&dir)).expect("copied prompt loads");
     fs::remove_dir_all(&dir).expect("delete fixture dir");
-    let rendered = prompt
-        .render(PromptSpec::new(BASELINE_PROMPT_ID, player_input_vars("hello")))
-        .expect("render after delete");
+    let rendered =
+        render(&prompt, PromptSpec::new(BASELINE_PROMPT_ID, player_input_vars("hello"))).expect("render after delete");
     assert_eq!(rendered.messages().len(), 3);
 }
 
 #[test]
 fn rendered_prompt_exposes_id_and_messages() {
     let prompt = bundled_prompt();
-    let rendered = prompt
-        .render(PromptSpec::new(BASELINE_PROMPT_ID, player_input_vars("wave")))
-        .expect("render");
+    let rendered = render(&prompt, PromptSpec::new(BASELINE_PROMPT_ID, player_input_vars("wave"))).expect("render");
     assert_eq!(rendered.prompt_id(), BASELINE_PROMPT_ID);
     let expected = rendered.messages().to_vec();
     assert_eq!(rendered.into_messages(), expected);

@@ -3,6 +3,7 @@ mod error;
 mod loader;
 mod manifest;
 mod prompt;
+mod prompt_trace;
 mod renderer;
 
 pub use config::PromptConfig;

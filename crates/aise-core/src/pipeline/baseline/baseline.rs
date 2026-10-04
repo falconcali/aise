@@ -58,7 +58,8 @@ impl BaselinePipeline {
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<PlayerContribution, PipelineError> {
-        let rendered_prompt = baseline_prompt::process_player_input(self.prompt.as_ref(), &input.player_input)?;
+        let rendered_prompt =
+            baseline_prompt::process_player_input(self.prompt.as_ref(), &input.player_input, observation)?;
 
         let player_contribution = baseline_llm::process_player_input(
             self.gateway.as_ref(),
