@@ -9,9 +9,7 @@ pub async fn process_player_input(
     turn_control: &TurnControl,
     observation: &Observation,
 ) -> Result<PlayerContribution, LlmError> {
-    let llm_spec = LlmCompletionSpec {
-        messages,
-    };
+    let llm_spec = LlmCompletionSpec { messages };
 
     let llm_result = gateway.complete(llm_spec, turn_control, observation).await?;
 

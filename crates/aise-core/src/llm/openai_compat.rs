@@ -1,7 +1,7 @@
+use crate::core::{ChatMessage, ChatMessageRole};
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
 };
-use crate::core::{ChatMessage, ChatMessageRole};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 

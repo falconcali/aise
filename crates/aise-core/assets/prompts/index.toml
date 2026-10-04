@@ -1,0 +1,5 @@
+[[prompts]]
+id = "baseline.process_player_input"
+csi = "csi/baseline-process-player-input.md.j2"
+rc = "rc/baseline-process-player-input.md.j2"
+fti = "fti/baseline-process-player-input.md.j2"

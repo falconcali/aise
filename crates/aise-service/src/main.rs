@@ -14,6 +14,7 @@ use aise_core::trace::{
 };
 use anyhow::Context;
 use observability::{DETECTOR_OVERLAP_BYTES, ObservabilityConfig, ObservabilityRuntime, TelemetryDiagnostics};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -30,6 +31,10 @@ const DEFAULT_PLAYER_INPUT: &str = "继续这个故事。";
 const DEFAULT_TURN_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
 const DEFAULT_LLM_TIMEOUT_MS: u64 = 20_000;
+const DEFAULT_PROMPT_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../aise-core/assets/prompts");
+const DEFAULT_PROMPT_MAX_PROMPTS: usize = 16;
+const DEFAULT_PROMPT_MAX_TEMPLATE_BYTES: usize = 64 * 1024;
+const DEFAULT_PROMPT_MAX_TOTAL_TEMPLATE_BYTES: usize = 1024 * 1024;
 
 struct ConsoleTurnEventSink;
 
@@ -105,7 +110,12 @@ fn load_llm_config() -> anyhow::Result<LlmConfig> {
 }
 
 fn load_prompt_config() -> anyhow::Result<PromptConfig> {
-    Ok(PromptConfig {})
+    Ok(PromptConfig {
+        directory: PathBuf::from(DEFAULT_PROMPT_DIRECTORY),
+        max_prompts: DEFAULT_PROMPT_MAX_PROMPTS,
+        max_template_bytes: DEFAULT_PROMPT_MAX_TEMPLATE_BYTES,
+        max_total_template_bytes: DEFAULT_PROMPT_MAX_TOTAL_TEMPLATE_BYTES,
+    })
 }
 
 fn required_env(name: &str) -> anyhow::Result<String> {

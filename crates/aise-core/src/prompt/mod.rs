@@ -1,7 +1,11 @@
 mod config;
 mod error;
+mod loader;
+mod manifest;
 mod prompt;
+mod renderer;
 
 pub use config::PromptConfig;
 pub use error::PromptError;
-pub use prompt::{Prompt, PromptSpec, RenderedPrompt};
+pub use manifest::PromptLayer;
+pub use prompt::{Prompt, PromptSpec, PromptVars, RenderedPrompt};
