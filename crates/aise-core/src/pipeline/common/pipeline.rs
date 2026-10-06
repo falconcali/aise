@@ -50,11 +50,11 @@ impl PipelineRunner<'_> {
     pub async fn run<P: Pipeline>(
         &self,
         pipeline: &P,
-        story_ctx: &StoryContext,
         input: P::Input,
+        story_ctx: &StoryContext,
     ) -> Result<P::Output, PipelineError> {
         let observation = pipeline_trace::begin_observation(self.trace, pipeline, &input);
-        let result = pipeline.execute(story_ctx, input, self.control, self.sink, &observation).await;
+        let result = pipeline.execute(input, story_ctx, self.control, self.sink, &observation).await;
         pipeline_trace::finish_observation(observation, pipeline, &result);
         result
     }
@@ -68,8 +68,8 @@ pub trait Pipeline: Send + Sync {
 
     async fn execute(
         &self,
-        story_ctx: &StoryContext,
         input: Self::Input,
+        story_ctx: &StoryContext,
         control: &TurnControl,
         sink: &dyn TurnEventSink,
         observation: &Observation,

@@ -25,8 +25,8 @@ impl Pipeline for RetrievalPipeline {
 
     async fn execute(
         &self,
-        story_ctx: &StoryContext,
         input: Self::Input,
+        story_ctx: &StoryContext,
         control: &TurnControl,
         sink: &dyn TurnEventSink,
         observation: &Observation,
