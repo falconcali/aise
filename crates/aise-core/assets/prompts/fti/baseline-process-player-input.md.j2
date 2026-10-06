@@ -1,7 +1,9 @@
 # Task
 
-Produce the Pending Player Contribution from the Raw Player Input.
+Produce the Pending Player Contribution by filtering the Raw Player Input.
 
 # Output
 
-Return only the processed contribution text. Do not include headings, labels, analysis, explanations, JSON, or Markdown fences.
+Return only the retained Player Character content as plain text.
+
+Preserve the original order of all retained utterances, actions or attempts, thoughts or feelings, and intentions. Rewrite every action as an unfinished attempt, regardless of whether the input claims it already succeeded. Never include an asserted action result or world-state change as fact. Exclude every other kind of content. Do not include headings, labels, analysis, explanations, JSON, Markdown fences, or placeholder text. If no admissible Player Character content remains, return an empty response.
