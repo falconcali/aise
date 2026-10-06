@@ -1,5 +1,7 @@
-use crate::core::{CommittedTurnInfo, EngineError, TurnControl, TurnEvent, TurnEventSink, TurnRequest, TurnResult};
+use super::{EngineError, StoryCreationSpec, StoryFactory};
+use crate::core::{StoryId, StoryInstanceInfo, TurnControl, TurnEvent, TurnEventSink, TurnRequest, TurnResult};
 use crate::llm::LlmGateway;
+use crate::persistence::StoryStore;
 use crate::pipeline::Runtime;
 use crate::prompt::Prompt;
 use crate::trace::Trace;
@@ -8,6 +10,10 @@ use std::sync::Arc;
 
 #[async_trait]
 pub trait Engine: Send + Sync {
+    async fn create_story(&self, spec: StoryCreationSpec) -> Result<StoryInstanceInfo, EngineError>;
+    async fn remove_story(&self, story_id: &StoryId) -> Result<(), EngineError>;
+    async fn get_story_info(&self, story_id: &StoryId) -> Result<StoryInstanceInfo, EngineError>;
+
     async fn run_turn(
         &self,
         turn_request: TurnRequest,
@@ -19,18 +25,34 @@ pub trait Engine: Send + Sync {
 
 pub struct AiseEngine {
     runtime: Runtime,
+    factory: StoryFactory,
+    story_store: Arc<dyn StoryStore>,
 }
 
 impl AiseEngine {
-    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>) -> Self {
+    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, store: Arc<dyn StoryStore>) -> Self {
         Self {
             runtime: Runtime::new(gateway, prompt),
+            factory: StoryFactory::new(Arc::clone(&store)),
+            story_store: Arc::clone(&store),
         }
     }
 }
 
 #[async_trait]
 impl Engine for AiseEngine {
+    async fn create_story(&self, spec: StoryCreationSpec) -> Result<StoryInstanceInfo, EngineError> {
+        self.factory.create_story(spec).await
+    }
+
+    async fn remove_story(&self, story_id: &StoryId) -> Result<(), EngineError> {
+        self.factory.remove_story(story_id).await
+    }
+
+    async fn get_story_info(&self, story_id: &StoryId) -> Result<StoryInstanceInfo, EngineError> {
+        self.story_store.get_info(story_id).await.map_err(EngineError::from)
+    }
+
     async fn run_turn(
         &self,
         turn_request: TurnRequest,

@@ -1,11 +1,12 @@
 #![forbid(unsafe_code)]
 
 use aise_core::core::{
-    EngineError, IdempotencyKey, StoryId, TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError,
-    TurnEventSink, TurnRequest, TurnResult,
+    CharacterCardRef, CharacterId, IdempotencyKey, PackId, PackRef, PlayerId, RoleId, SemanticVersion, Sha256Digest,
+    StoryId, TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError, TurnEventSink, TurnRequest, TurnResult,
 };
-use aise_core::engine::{AiseEngine, Engine};
+use aise_core::engine::{AiseEngine, Engine, EngineError, StoryCreationSpec};
 use aise_core::llm::{LlmConfig, LlmGateway, OpenAiCompatProvider};
+use aise_core::persistence::{StoryStore, StoryStoreMem};
 use aise_core::prompt::{Prompt, PromptConfig};
 use aise_core::trace::{
     Attribute, ContentCapture, ObservabilityContentConfig, ObservationError, ObservationSession, ObservationStatus,
@@ -25,7 +26,6 @@ use uuid::Uuid;
 
 pub mod observability;
 
-const DEFAULT_STORY_ID: &str = "default-story";
 const DEFAULT_IDEMPOTENCY_KEY: &str = "default-turn";
 const DEFAULT_PLAYER_INPUT: &str = "继续这个故事。";
 const DEFAULT_TURN_TIMEOUT: Duration = Duration::from_secs(30);
@@ -56,18 +56,22 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run_default_turn(observability_config: &ObservabilityConfig) -> anyhow::Result<()> {
+    let gateway = build_llm_gateway()?;
+    let prompt = build_prompt()?;
+    let store: Arc<dyn StoryStore> = Arc::new(StoryStoreMem::new());
+    let engine = AiseEngine::new(gateway, prompt, store);
+    let story = engine
+        .create_story(default_story_creation_spec()?)
+        .await
+        .map_err(|error| anyhow::anyhow!(error))?;
     let request = TurnRequest {
-        story_id: StoryId::try_new(DEFAULT_STORY_ID).context("invalid default story id")?,
+        story_id: story.story_id.clone(),
         idempotency_key: IdempotencyKey::try_new(DEFAULT_IDEMPOTENCY_KEY).context("invalid default idempotency key")?,
         player_input: DEFAULT_PLAYER_INPUT.to_owned(),
     };
     let control = TurnControl::new(Instant::now() + DEFAULT_TURN_TIMEOUT, TurnCancellation::new());
-    let (session, mut trace) = begin_default_trace(observability_config);
-    let gateway = build_llm_gateway()?;
-    let prompt = build_prompt()?;
-    let result = AiseEngine::new(gateway, prompt)
-        .run_turn(request, control, &ConsoleTurnEventSink, &trace)
-        .await;
+    let (session, mut trace) = begin_default_trace(observability_config, &story.story_id);
+    let result = engine.run_turn(request, control, &ConsoleTurnEventSink, &trace).await;
     let trace_outcome = trace_outcome(&trace, &result);
     let status = trace_outcome.status;
     if let Ok(turn_result) = &result {
@@ -85,6 +89,27 @@ async fn run_default_turn(observability_config: &ObservabilityConfig) -> anyhow:
 
     println!("{}", result.result.story_text);
     Ok(())
+}
+
+fn default_story_creation_spec() -> anyhow::Result<StoryCreationSpec> {
+    let player_role = RoleId::try_new("player").context("invalid default player role")?;
+    let character = CharacterCardRef {
+        character_id: CharacterId::try_new("default-character").context("invalid default character id")?,
+        version: SemanticVersion::try_new("0.0.0").context("invalid default character version")?,
+        digest: Sha256Digest::try_new("default-character-digest").context("invalid default character digest")?,
+    };
+    let mut cast = std::collections::BTreeMap::new();
+    cast.insert(player_role.clone(), character);
+    Ok(StoryCreationSpec {
+        pack_ref: PackRef {
+            pack_id: PackId::try_new("default-pack").context("invalid default pack id")?,
+            version: SemanticVersion::try_new("0.0.0").context("invalid default pack version")?,
+            digest: Sha256Digest::try_new("default-pack-digest").context("invalid default pack digest")?,
+        },
+        cast,
+        player_id: PlayerId::try_new("default-player").context("invalid default player id")?,
+        player_role,
+    })
 }
 
 fn build_llm_gateway() -> anyhow::Result<Arc<LlmGateway>> {
@@ -171,7 +196,7 @@ fn initialize_observability() -> (ObservabilityConfig, ObservabilityRuntime) {
     (config, components.runtime)
 }
 
-fn begin_default_trace(config: &ObservabilityConfig) -> (ObservationSession, Trace) {
+fn begin_default_trace(config: &ObservabilityConfig, story_id: &StoryId) -> (ObservationSession, Trace) {
     let content = ContentCapture::new(ObservabilityContentConfig {
         policy: config.content_policy.clone(),
         max_field_bytes: config.max_field_bytes,
@@ -196,8 +221,8 @@ fn begin_default_trace(config: &ObservabilityConfig) -> (ObservationSession, Tra
         ],
         tags: vec!["story-turn".to_owned()],
     });
-    trace.bind(vec![Attribute::string(TRACE_METADATA_STORY_ID, DEFAULT_STORY_ID)]);
-    tracing::info!(session_id, story_id = DEFAULT_STORY_ID, "observation session started");
+    trace.bind(vec![Attribute::string(TRACE_METADATA_STORY_ID, story_id.to_string())]);
+    tracing::info!(session_id, story_id = %story_id, "observation session started");
     (session, trace)
 }
 

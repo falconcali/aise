@@ -71,6 +71,10 @@ impl StoryStoreMem {
     }
 }
 
+#[cfg(test)]
+#[path = "test/story_store_mem_tests.rs"]
+mod tests;
+
 impl Default for StoryStoreMem {
     fn default() -> Self {
         Self::new()
@@ -79,12 +83,13 @@ impl Default for StoryStoreMem {
 
 #[async_trait]
 impl StoryStore for StoryStoreMem {
-    async fn create(&self, spec: &StoryInstanceSpec) -> Result<StoryInstanceInfo, PersistenceError> {
+    async fn create(&self, spec: StoryInstanceSpec) -> Result<StoryInstanceInfo, PersistenceError> {
+        let now = Utc::now();
         let context = StoryContext {
-            story_id: spec.story_id.clone(),
-            pack_ref: spec.pack_ref.clone(),
-            cast: spec.cast.clone(),
-            player: spec.player_role.clone(),
+            story_id: spec.story_id,
+            pack_ref: spec.pack_ref,
+            cast: spec.cast,
+            player: spec.player_role,
             turn_number: TurnNumber::new(0),
             summary: None,
             rencent_turns: std::collections::VecDeque::new(),
@@ -92,10 +97,10 @@ impl StoryStore for StoryStoreMem {
             world_state: WorldState {},
         };
         let info = StoryInstanceInfo {
-            story_id: spec.story_id.clone(),
+            story_id: context.story_id.clone(),
             description: String::new(),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: now,
+            updated_at: now,
             life_cycle: StoryLifeCycle::Active,
         };
         let stored = StoredStory {
@@ -104,13 +109,19 @@ impl StoryStore for StoryStoreMem {
             committed: HashMap::new(),
         };
         let mut stories = self.stories.write().await;
-        if stories.contains_key(&spec.story_id) {
+        if stories.contains_key(&info.story_id) {
             return Err(PersistenceError::ConstraintViolation {
                 constraint: "story_id already exists".to_owned(),
             });
         }
-        stories.insert(spec.story_id.clone(), stored);
+        stories.insert(info.story_id.clone(), stored);
         Ok(info)
+    }
+
+    async fn remove(&self, story_id: &StoryId) -> Result<(), PersistenceError> {
+        let mut stories = self.stories.write().await;
+        stories.remove(story_id).ok_or(PersistenceError::NotFound)?;
+        Ok(())
     }
 
     async fn get_info(&self, story_id: &StoryId) -> Result<StoryInstanceInfo, PersistenceError> {
