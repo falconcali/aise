@@ -1,4 +1,4 @@
-use crate::core::{TurnControl, TurnEventSink};
+use crate::core::{StoryContext, TurnControl, TurnEventSink};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
 use serde::Serialize;
@@ -59,6 +59,7 @@ impl Pipeline for ValidatePipeline {
 
     async fn execute(
         &self,
+        story_ctx: &StoryContext,
         input: Self::Input,
         control: &TurnControl,
         sink: &dyn TurnEventSink,

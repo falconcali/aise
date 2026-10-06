@@ -5,7 +5,6 @@ use serde::Serialize;
 
 #[derive(Serialize)]
 pub struct PlanInput {
-    pub story_ctx: StoryContext,
     pub player_contribution: PlayerContribution,
 }
 
@@ -26,6 +25,7 @@ impl Pipeline for PlanPipeline {
 
     async fn execute(
         &self,
+        story_ctx: &StoryContext,
         input: Self::Input,
         control: &TurnControl,
         sink: &dyn TurnEventSink,
@@ -33,7 +33,7 @@ impl Pipeline for PlanPipeline {
     ) -> Result<Self::Output, PipelineError> {
         let plan = format!(
             "Story ID: {}\nPlayer Contribution:\n{}",
-            input.story_ctx.story_id, input.player_contribution.processed
+            story_ctx.story_id, input.player_contribution.processed
         );
 
         Ok(PlanOutput { plan })

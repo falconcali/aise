@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 #[derive(Serialize)]
 pub struct BaselineInput {
-    pub story_ctx: StoryContext,
     pub player_input: String,
 }
 
@@ -39,6 +38,7 @@ impl Pipeline for BaselinePipeline {
 
     async fn execute(
         &self,
+        story_ctx: &StoryContext,
         input: Self::Input,
         control: &TurnControl,
         sink: &dyn TurnEventSink,

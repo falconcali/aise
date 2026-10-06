@@ -1,9 +1,7 @@
-use super::{EngineError, StoryCreationSpec, StoryFactory};
-use crate::core::{StoryId, StoryInstanceInfo, TurnControl, TurnEvent, TurnEventSink, TurnRequest, TurnResult};
-use crate::llm::LlmGateway;
+use super::{AiseFactory, EngineConfig, EngineError, StoryCreationSpec};
+use crate::core::{StoryCommit, StoryId, StoryInstanceInfo, TurnControl, TurnEvent, TurnEventSink, TurnRequest};
 use crate::persistence::StoryStore;
 use crate::pipeline::Runtime;
-use crate::prompt::Prompt;
 use crate::trace::Trace;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -20,33 +18,34 @@ pub trait Engine: Send + Sync {
         turn_control: TurnControl,
         sink: &dyn TurnEventSink,
         trace: &Trace,
-    ) -> Result<TurnResult, EngineError>;
+    ) -> Result<StoryCommit, EngineError>;
 }
 
 pub struct AiseEngine {
     runtime: Runtime,
-    factory: StoryFactory,
     story_store: Arc<dyn StoryStore>,
 }
 
 impl AiseEngine {
-    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, store: Arc<dyn StoryStore>) -> Self {
-        Self {
-            runtime: Runtime::new(gateway, prompt),
-            factory: StoryFactory::new(Arc::clone(&store)),
-            story_store: Arc::clone(&store),
-        }
+    pub fn new(engine_config: EngineConfig) -> Result<Self, EngineError> {
+        let gateway = AiseFactory.create_llm_gateway(engine_config.llm_config);
+        let prompt = AiseFactory.create_prompt(engine_config.prompt_config)?;
+        let store = AiseFactory.create_story_store(engine_config.persistence_config);
+        Ok(Self {
+            runtime: Runtime::new(gateway, Arc::new(prompt)),
+            story_store: store,
+        })
     }
 }
 
 #[async_trait]
 impl Engine for AiseEngine {
     async fn create_story(&self, spec: StoryCreationSpec) -> Result<StoryInstanceInfo, EngineError> {
-        self.factory.create_story(spec).await
+        AiseFactory.create_story(Arc::clone(&self.story_store), spec).await
     }
 
     async fn remove_story(&self, story_id: &StoryId) -> Result<(), EngineError> {
-        self.factory.remove_story(story_id).await
+        AiseFactory.remove_story(Arc::clone(&self.story_store), story_id).await
     }
 
     async fn get_story_info(&self, story_id: &StoryId) -> Result<StoryInstanceInfo, EngineError> {
@@ -59,7 +58,7 @@ impl Engine for AiseEngine {
         turn_control: TurnControl,
         sink: &dyn TurnEventSink,
         trace: &Trace,
-    ) -> Result<TurnResult, EngineError> {
+    ) -> Result<StoryCommit, EngineError> {
         sink.emit(TurnEvent::StageStarted {
             stage: "initialization".to_string(),
         })
@@ -67,22 +66,26 @@ impl Engine for AiseEngine {
             message: error.to_string(),
         })?;
 
-        let turn_result = self
-            .runtime
-            .run_turn(turn_request, turn_control, sink, trace)
+        let story_ctx = self
+            .story_store
+            .load(&turn_request.story_id)
             .await
             .map_err(|error| EngineError::Turn {
                 message: error.to_string(),
             })?;
 
-        sink.emit(TurnEvent::Committed {
-            result: turn_result.result.clone(),
-            replayed: turn_result.replayed,
-        })
-        .map_err(|error| EngineError::Turn {
+        let story_commit = self
+            .runtime
+            .run_turn(&story_ctx, turn_request, turn_control, sink, trace)
+            .await
+            .map_err(|error| EngineError::Turn {
+                message: error.to_string(),
+            })?;
+
+        sink.emit(TurnEvent::Committed).map_err(|error| EngineError::Turn {
             message: error.to_string(),
         })?;
 
-        Ok(turn_result)
+        Ok(story_commit)
     }
 }

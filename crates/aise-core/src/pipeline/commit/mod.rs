@@ -1,3 +1,3 @@
 mod commit;
 
-pub(super) use commit::{CommitInput, CommitOutput, CommitPipeline};
+pub(super) use commit::{CommitInput, CommitPipeline};

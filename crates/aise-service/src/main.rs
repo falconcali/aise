@@ -2,12 +2,11 @@
 
 use aise_core::core::{
     CharacterCardRef, CharacterId, IdempotencyKey, PackId, PackRef, PlayerId, RoleId, SemanticVersion, Sha256Digest,
-    StoryId, TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError, TurnEventSink, TurnRequest, TurnResult,
+    StoryCommit, StoryId, TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError, TurnEventSink, TurnRequest,
 };
-use aise_core::engine::{AiseEngine, Engine, EngineError, StoryCreationSpec};
-use aise_core::llm::{LlmConfig, LlmGateway, OpenAiCompatProvider};
-use aise_core::persistence::{StoryStore, StoryStoreMem};
-use aise_core::prompt::{Prompt, PromptConfig};
+use aise_core::engine::{AiseEngine, Engine, EngineConfig, EngineError, StoryCreationSpec};
+use aise_core::llm::{LlmConfig, LlmProviderType};
+use aise_core::prompt::PromptConfig;
 use aise_core::trace::{
     Attribute, ContentCapture, ObservabilityContentConfig, ObservationError, ObservationSession, ObservationStatus,
     SessionOutcome, SessionSpec, TRACE_ENVIRONMENT, TRACE_METADATA_STORY_ID, TRACE_METADATA_TURN_NUMBER, TRACE_RELEASE,
@@ -17,7 +16,6 @@ use anyhow::Context;
 use observability::{DETECTOR_OVERLAP_BYTES, ObservabilityConfig, ObservabilityRuntime, TelemetryDiagnostics};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::filter_fn;
@@ -56,10 +54,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run_default_turn(observability_config: &ObservabilityConfig) -> anyhow::Result<()> {
-    let gateway = build_llm_gateway()?;
-    let prompt = build_prompt()?;
-    let store: Arc<dyn StoryStore> = Arc::new(StoryStoreMem::new());
-    let engine = AiseEngine::new(gateway, prompt, store);
+    let engine = AiseEngine::new(build_engine_config()?).context("engine initialization failed")?;
     let story = engine
         .create_story(default_story_creation_spec()?)
         .await
@@ -74,10 +69,10 @@ async fn run_default_turn(observability_config: &ObservabilityConfig) -> anyhow:
     let result = engine.run_turn(request, control, &ConsoleTurnEventSink, &trace).await;
     let trace_outcome = trace_outcome(&trace, &result);
     let status = trace_outcome.status;
-    if let Ok(turn_result) = &result {
+    if let Ok(story_commit) = &result {
         trace.bind(vec![Attribute::u64(
             TRACE_METADATA_TURN_NUMBER,
-            turn_result.result.turn_number,
+            story_commit.turn.turn_number.value(),
         )]);
     }
     trace.finish(trace_outcome);
@@ -87,7 +82,7 @@ async fn run_default_turn(observability_config: &ObservabilityConfig) -> anyhow:
     });
     let result = result.context("default turn failed")?;
 
-    println!("{}", result.result.story_text);
+    println!("{}", result.turn.turn_segment.text());
     Ok(())
 }
 
@@ -112,20 +107,17 @@ fn default_story_creation_spec() -> anyhow::Result<StoryCreationSpec> {
     })
 }
 
-fn build_llm_gateway() -> anyhow::Result<Arc<LlmGateway>> {
-    let config = load_llm_config()?;
-    let provider = Arc::new(OpenAiCompatProvider::new(&config));
-    Ok(Arc::new(LlmGateway::new(provider, config)))
-}
-
-fn build_prompt() -> anyhow::Result<Arc<Prompt>> {
-    let config = load_prompt_config()?;
-    let prompt = Prompt::new(config)?;
-    Ok(Arc::new(prompt))
+fn build_engine_config() -> anyhow::Result<EngineConfig> {
+    Ok(EngineConfig {
+        llm_config: load_llm_config()?,
+        prompt_config: load_prompt_config()?,
+        persistence_config: Default::default(),
+    })
 }
 
 fn load_llm_config() -> anyhow::Result<LlmConfig> {
     Ok(LlmConfig {
+        provider: LlmProviderType::OpenAiCompat,
         base_url: required_env("AISE_LLM_BASE_URL")?,
         api_key: required_env("AISE_LLM_API_KEY")?,
         model: required_env("AISE_LLM_MODEL")?,
@@ -226,13 +218,16 @@ fn begin_default_trace(config: &ObservabilityConfig, story_id: &StoryId) -> (Obs
     (session, trace)
 }
 
-fn trace_outcome(trace: &Trace, result: &Result<TurnResult, EngineError>) -> TraceOutcome {
+fn trace_outcome(trace: &Trace, result: &Result<StoryCommit, EngineError>) -> TraceOutcome {
     match result {
-        Ok(turn_result) => TraceOutcome {
+        Ok(story_commit) => TraceOutcome {
             status: ObservationStatus::Ok,
             output: trace
                 .content_capture()
-                .encode(&turn_result.result.story_text, trace.content_capture().max_observation_bytes())
+                .encode(
+                    &story_commit.turn.turn_segment.text().to_owned(),
+                    trace.content_capture().max_observation_bytes(),
+                )
                 .content,
             ..TraceOutcome::default()
         },

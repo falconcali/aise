@@ -66,22 +66,9 @@ impl Default for TurnCancellation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommittedTurnInfo {
-    pub turn_number: u64,
-    pub story_revision: u64,
-    pub story_text: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TurnResult {
-    pub result: CommittedTurnInfo,
-    pub replayed: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TurnEvent {
     StageStarted { stage: String },
-    Committed { result: CommittedTurnInfo, replayed: bool },
+    Committed,
     Failed { code: String },
     Cancelled { code: String },
     Conflict { code: String },

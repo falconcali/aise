@@ -20,8 +20,8 @@ pub use story::{
     StorySummary,
 };
 pub use turn::{
-    CommittedTurnInfo, PlayerContribution, Turn, TurnCancellation, TurnControl, TurnEvaluation, TurnEvent,
-    TurnEventDeliveryError, TurnEventSink, TurnNumber, TurnRequest, TurnResult, TurnSegment, TurnStatus,
+    PlayerContribution, Turn, TurnCancellation, TurnControl, TurnEvaluation, TurnEvent, TurnEventDeliveryError,
+    TurnEventSink, TurnNumber, TurnRequest, TurnSegment, TurnStatus,
 };
 
 pub use change::Change;

@@ -1,4 +1,4 @@
-use crate::core::{TurnControl, TurnEventSink};
+use crate::core::{StoryContext, TurnControl, TurnEventSink};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::pipeline::validate::ValidateScoreResult;
 use crate::trace::Observation;
@@ -31,6 +31,7 @@ impl Pipeline for RepairPipeline {
 
     async fn execute(
         &self,
+        story_ctx: &StoryContext,
         input: Self::Input,
         control: &TurnControl,
         sink: &dyn TurnEventSink,

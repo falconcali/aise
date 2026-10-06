@@ -9,7 +9,7 @@ mod provider;
 pub use completion::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmCompletionResult, LlmCompletionSpec,
 };
-pub use config::LlmConfig;
+pub use config::{LlmConfig, LlmProviderType};
 pub use error::LlmError;
 pub use gateway::LlmGateway;
 pub use openai_compat::OpenAiCompatProvider;

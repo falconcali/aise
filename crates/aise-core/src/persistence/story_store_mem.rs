@@ -1,3 +1,4 @@
+use super::config::StoryStoreConfig;
 use super::error::PersistenceError;
 use super::story_store::StoryStore;
 use crate::core::{
@@ -10,25 +11,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-const DEFAULT_MAX_RECENT_TURNS: usize = 32;
-
-#[derive(Debug, Clone)]
-pub struct StoryStoreMemConfig {
-    pub max_recent_turns: usize,
-}
-
-impl Default for StoryStoreMemConfig {
-    fn default() -> Self {
-        Self {
-            max_recent_turns: DEFAULT_MAX_RECENT_TURNS,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct StoryStoreMem {
     stories: Arc<RwLock<HashMap<StoryId, StoredStory>>>,
-    config: StoryStoreMemConfig,
+    config: StoryStoreConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -40,10 +26,10 @@ struct StoredStory {
 
 impl StoryStoreMem {
     pub fn new() -> Self {
-        Self::with_config(StoryStoreMemConfig::default())
+        Self::with_config(StoryStoreConfig::default())
     }
 
-    pub fn with_config(config: StoryStoreMemConfig) -> Self {
+    pub fn with_config(config: StoryStoreConfig) -> Self {
         Self {
             stories: Arc::new(RwLock::new(HashMap::new())),
             config,

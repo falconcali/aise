@@ -3,6 +3,7 @@ use crate::core::{
     Change, IdempotencyKey, PackId, PackRef, PlayerId, RoleId, SemanticVersion, Sha256Digest, StoryCommit, StoryId,
     StoryInstanceSpec, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus, WorldChange,
 };
+use crate::persistence::StoryStoreType;
 
 fn story_id(value: &str) -> StoryId {
     StoryId::try_new(value).expect("test story id should be valid")
@@ -106,7 +107,10 @@ async fn commits_turn_and_returns_idempotent_result() {
 
 #[tokio::test]
 async fn removes_turns_covered_by_summary_before_window_trim() {
-    let store = StoryStoreMem::with_config(StoryStoreMemConfig { max_recent_turns: 8 });
+    let store = StoryStoreMem::with_config(StoryStoreConfig {
+        store_type: StoryStoreType::Memory,
+        max_recent_turns: 8,
+    });
     let spec = story_spec("story-1");
     store.create(spec.clone()).await.expect("story creation should succeed");
 
