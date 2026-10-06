@@ -131,6 +131,7 @@ flowchart LR
   Hist["Full turn history<br/>+ idempotency index"]
   RT["Runtime"]
   P["Pipelines<br/>(read-only &StoryContext)"]
+  S["Summarize pipeline<br/>(only when window overflows)"]
   C["Commit stage"]
 
   Pack -- "PackRef (id + version + digest)" --> Ctx
@@ -139,6 +140,8 @@ flowchart LR
   Ctx --> RT
   RT --> P
   P -- "proposal / scores / WorldChange" --> C
+  RT -- "overflow decision" --> S
+  S -- "validated summary change" --> C
   C -- "StoryCommit (base_turn_number)" --> Store
 ```
 
@@ -408,8 +411,10 @@ pub enum EntryOp {
 4. 各 Pipeline 通过 `execute` 的独立参数 `&StoryContext` 只读访问。Input 只携带本阶段的数据；trace 只记录 `story_id`、`turn_number` 等标识字段，不序列化整份 Context。
 5. Validate / Repair 结束：Accept 时 `status = Accepted`；Reject 时从验证历史中取评分最高的版本，`status = Rejected`。
 6. Extract 产出 `WorldChange`，并完成 §3.5 的确定性校验。Rejected 的版本同样必须通过这一步。
-7. 组装 `StoryCommit`，其中 `turn.turn_number = base_turn_number + 1`，并调用 `commit`。
-8. 发送 `TurnEvent::Committed`，携带 `TurnStatus`；然后释放 permit。
+7. 根据当前快照和本轮追加后的窗口长度判断是否需要 summary。窗口会溢出时，Runtime 调度 Summarize pipeline；该 pipeline 只读取当前快照中需要被淘汰的轮次以及 Pack opening 或现有 summary，生成候选 summary。
+8. 对候选 summary 执行确定性校验。通过后将其转换为 `StateChange::Replace(StorySummary)`；不需要 summary 时使用 `StateChange::Unchanged`。
+9. 组装 `StoryCommit`，其中 `turn.turn_number = base_turn_number + 1`，并调用 `commit`。
+10. 发送 `TurnEvent::Committed`，携带 `TurnStatus`；然后释放 permit。
 
 #### 5.3 前文选择与 summary 规则
 
@@ -425,7 +430,8 @@ Baseline 选择前文的规则：
 1. **summary 第一次生成之前，窗口不淘汰任何轮次。** 被挤出窗口的轮次必须已经被 summary 覆盖。
 2. **第一次生成 summary 时，输入必须包含 opening。** 之后更新 summary 的输入是“上一版 summary + 本次要被挤出窗口的轮次”。
 3. **summary 在 Commit 中同步更新**，与本轮记录作为同一次提交写入（`StoryCommit.summary`）。
-4. 生成 summary 的 LLM 调用归属哪个阶段（Extract，还是在 Commit 之前新增一个 Summarize 阶段）：`TBD`。该调用必须经过 `LlmGateway`（`R-CONC-04`），Commit 本身不调用 LLM。
+4. **采用独立的 Summarize pipeline。** 它位于 Commit 之前，由 `TurnRuntime` 编排，只在本轮追加后窗口长度会超过 N 时运行。它读取当前 `StoryContext` 和固定版本 Pack 的 `start.opening`，调用 `LlmGateway` 生成候选 summary；Commit 不调用 LLM。
+5. **summary 生成结果必须先校验再提交。** 确定性校验至少检查文本长度不超过 `max_summary_bytes`、`covered_through` 等于本次被淘汰的最后一轮，且不小于旧 summary 的 `covered_through`。校验通过后才允许进入 `StoryCommit.summary`。
 
 触发条件：如果本轮追加后窗口长度会超过 N，本轮就必须产出 `StateChange::Replace(StorySummary)`。
 
@@ -467,6 +473,7 @@ Baseline 选择前文的规则：
 - **版本号用什么？** 用 `turn_number`。前提是 StoryContext 只能由 Turn Commit 修改。
 - **历史放在哪里？** StoryContext 只保留最近 N 轮，完整历史和幂等索引由 Store 持有。
 - **opening 放在哪里？** 不进入 StoryContext，按 summary 是否存在选择前文。
+- **summary 在哪里生成？** 由独立的 Summarize pipeline 按需生成，经过确定性校验后由 Commit 与本轮记录一起原子写入；Commit 本身不调用 LLM。
 - **世界状态如何表示？** 两层模型：第一层整体替换最终值，第二层按 key 执行 Set / Remove；同时保存当前值和每轮变化记录。
 - **Reject 之后怎么办？** 仍然提交验证历史中评分最高的版本，`status = Rejected`；该版本的 `WorldChange` 也必须通过确定性校验。
 - **`state` 与 `status` 是否合并？** 不合并，改名区分：`lifecycle` 表示生命周期，`world` 表示世界内容，`TurnStatus` 表示单轮提交结果。
@@ -507,7 +514,7 @@ Baseline 选择前文的规则：
 ## Roadmap
 
 - **Phase 0**：在 `core` 中定义类型并删除 `*Info` 旧类型；实现 `StoryStore` 及其内存版；Runtime 加载快照并传给 Pipeline；Commit 写入 `StoryTurn`（`WorldChange` 先为空）。对应 spec：`doc/exec/2026-10-04-story-context-data-phase-0-spec-opus.md`（`TBD`）。
-- **Phase 1**：Extract 产出 `WorldChange` 并完成确定性校验；Baseline 按 §5.3 选择前文；生成 summary 并实施窗口不变量。
+- **Phase 1**：Extract 产出 `WorldChange` 并完成确定性校验；Baseline 按 §5.3 选择前文；实现按需运行的 Summarize pipeline，生成并校验 summary，实施窗口不变量。
 - **Phase 2**：接入 Narrative Graph 状态和 World Info 激活计时；`StoryStore` 的数据库实现。
 
 ---

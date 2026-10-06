@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter};
 
 macro_rules! define_id {
     ($name:ident, $field:literal) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         pub struct $name(String);
 
         impl $name {

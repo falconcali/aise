@@ -1,5 +1,6 @@
 use crate::core::{CommittedTurnInfo, StoryContext, TurnControl, TurnEventSink, TurnRequest, TurnResult};
 use crate::llm::LlmGateway;
+use crate::prompt::Prompt;
 use crate::pipeline::baseline::{BaselineInput, BaselinePipeline};
 use crate::pipeline::commit::{CommitInput, CommitPipeline};
 use crate::pipeline::common::{PipelineError, PipelineRunner};
@@ -10,7 +11,6 @@ use crate::pipeline::repair::{RepairInput, RepairPipeline};
 use crate::pipeline::retrieval::{RetrievalInput, RetrievalPipeline};
 use crate::pipeline::think::{ThinkInput, ThinkPipeline};
 use crate::pipeline::validate::{ValidateInput, ValidatePipeline, ValidationDecision};
-use crate::prompt::Prompt;
 use crate::trace::Trace;
 use std::sync::Arc;
 
@@ -60,6 +60,7 @@ impl Runtime {
         let baseline_input = BaselineInput {
             story_ctx: StoryContext {
                 story_id: turn_request.story_id.clone(),
+                ..StoryContext::new()
             },
             player_input: turn_request.player_input.clone(),
         };
@@ -69,6 +70,7 @@ impl Runtime {
         let plan_input = PlanInput {
             story_ctx: StoryContext {
                 story_id: turn_request.story_id.clone(),
+                ..StoryContext::new()
             },
             player_contribution: baseline_output.player_contribution,
         };

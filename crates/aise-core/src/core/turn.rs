@@ -1,8 +1,9 @@
-use super::{IdempotencyKey, StoryId};
+use super::{IdempotencyKey, StoryId, WorldChange};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerContribution {
@@ -107,4 +108,78 @@ pub enum TurnEventDeliveryError {
 
 pub trait TurnEventSink: Send + Sync {
     fn emit(&self, event: TurnEvent) -> Result<(), TurnEventDeliveryError>;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TurnNumber(u64);
+
+impl TurnNumber {
+    pub fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub fn increment(&self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    pub fn value(&self) -> u64 {
+        self.0
+    }
+}
+
+impl Default for TurnNumber {
+    fn default() -> Self {
+        Self(0)
+    }
+}
+
+impl Display for TurnNumber {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TurnSegment(String);
+
+impl TurnSegment {
+    pub fn new(text: String) -> Self {
+        Self(text)
+    }
+
+    pub fn text(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl Display for TurnSegment {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TurnEvaluation {
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TurnStatus {
+    Accepted,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Turn {
+    pub turn_number: TurnNumber,
+    pub idempotency_key: IdempotencyKey,
+    pub player_contribution: PlayerContribution,
+    pub turn_segment: TurnSegment,
+    pub world_change: WorldChange,
+    pub turn_evaluation: TurnEvaluation,
+    pub turn_status: TurnStatus,
 }
