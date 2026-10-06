@@ -1,6 +1,5 @@
-use crate::core::story::{StoryCommit, StoryContext, StoryInstanceInfo, StoryInstanceSpec};
-use crate::core::{IdempotencyKey, StoryId};
 use super::error::PersistenceError;
+use crate::core::{IdempotencyKey, StoryCommit, StoryContext, StoryId, StoryInstanceInfo, StoryInstanceSpec};
 use async_trait::async_trait;
 
 #[async_trait]

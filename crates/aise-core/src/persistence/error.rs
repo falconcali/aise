@@ -1,5 +1,5 @@
+use crate::core::StoryId;
 use thiserror::Error;
-use crate::core::ids::StoryId;
 
 #[derive(Error, Debug)]
 pub enum PersistenceError {

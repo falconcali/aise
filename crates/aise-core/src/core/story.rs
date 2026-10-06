@@ -1,12 +1,11 @@
 use super::{
-    CharacterId, RoleId, StoryId, PackId, PlayerId, SemanticVersion, Sha256Digest, TurnNumber,
-    Turn, WorldState, Change
+    Change, CharacterId, PackId, PlayerId, RoleId, SemanticVersion, Sha256Digest, StoryId, Turn, TurnNumber, WorldState,
 };
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
-use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackRef {
@@ -29,7 +28,6 @@ pub struct StoryInstanceSpec {
     pub cast: BTreeMap<RoleId, CharacterCardRef>,
     pub player_id: PlayerId,
     pub player_role: RoleId,
-    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

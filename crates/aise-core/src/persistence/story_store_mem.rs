@@ -1,7 +1,9 @@
 use super::error::PersistenceError;
 use super::story_store::StoryStore;
-use crate::core::story::{StoryCommit, StoryContext, StoryInstanceInfo, StoryInstanceSpec};
-use crate::core::{IdempotencyKey, StoryId};
+use crate::core::{
+    IdempotencyKey, StoryCommit, StoryContext, StoryId, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle,
+    TurnNumber, WorldState,
+};
 use async_trait::async_trait;
 use chrono::Utc;
 use std::collections::HashMap;
@@ -53,6 +55,20 @@ impl StoryStoreMem {
             context.rencent_turns.pop_front();
         }
     }
+
+    fn remove_summarized_turns(context: &mut StoryContext) {
+        let Some(summary) = context.summary.as_ref() else {
+            return;
+        };
+        let covered_through = summary.covered_through.value();
+        while context
+            .rencent_turns
+            .front()
+            .is_some_and(|turn| turn.turn_number.value() <= covered_through)
+        {
+            context.rencent_turns.pop_front();
+        }
+    }
 }
 
 impl Default for StoryStoreMem {
@@ -63,27 +79,24 @@ impl Default for StoryStoreMem {
 
 #[async_trait]
 impl StoryStore for StoryStoreMem {
-    async fn create(
-        &self,
-        spec: &StoryInstanceSpec,
-    ) -> Result<StoryInstanceInfo, PersistenceError> {
+    async fn create(&self, spec: &StoryInstanceSpec) -> Result<StoryInstanceInfo, PersistenceError> {
         let context = StoryContext {
             story_id: spec.story_id.clone(),
             pack_ref: spec.pack_ref.clone(),
             cast: spec.cast.clone(),
             player: spec.player_role.clone(),
-            turn_number: crate::core::TurnNumber::new(0),
+            turn_number: TurnNumber::new(0),
             summary: None,
             rencent_turns: std::collections::VecDeque::new(),
-            life_cycle: crate::core::story::StoryLifeCycle::Active,
-            world_state: crate::core::WorldState::default(),
+            life_cycle: StoryLifeCycle::Active,
+            world_state: WorldState {},
         };
         let info = StoryInstanceInfo {
             story_id: spec.story_id.clone(),
             description: String::new(),
-            created_at: spec.created_at,
-            updated_at: spec.created_at,
-            life_cycle: crate::core::story::StoryLifeCycle::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            life_cycle: StoryLifeCycle::Active,
         };
         let stored = StoredStory {
             context,
@@ -128,15 +141,13 @@ impl StoryStore for StoryStoreMem {
 
     async fn commit(&self, commit: &StoryCommit) -> Result<StoryCommit, PersistenceError> {
         let mut stories = self.stories.write().await;
-        let story = stories
-            .get_mut(&commit.story_id)
-            .ok_or(PersistenceError::NotFound)?;
+        let story = stories.get_mut(&commit.story_id).ok_or(PersistenceError::NotFound)?;
         let idempotency_key = commit.turn.idempotency_key.clone();
         if let Some(existing) = story.committed.get(&idempotency_key) {
             return Ok(existing.clone());
         }
         let expected_turn_number = story.context.turn_number.increment();
-        if commit.turn.turn_number != expected_turn_number {
+        if commit.turn.turn_number.value() != expected_turn_number.value() {
             return Err(PersistenceError::ConstraintViolation {
                 constraint: "turn number does not follow the current story context".to_owned(),
             });
@@ -145,8 +156,24 @@ impl StoryStore for StoryStoreMem {
         next_context.turn_number = commit.turn.turn_number.clone();
         next_context.rencent_turns.push_back(commit.turn.clone());
         if let crate::core::Change::Replaced(summary) = &commit.summary {
+            if summary.covered_through.value() > commit.turn.turn_number.value() {
+                return Err(PersistenceError::ConstraintViolation {
+                    constraint: "summary covers a future turn".to_owned(),
+                });
+            }
+            if story
+                .context
+                .summary
+                .as_ref()
+                .is_some_and(|previous| summary.covered_through.value() < previous.covered_through.value())
+            {
+                return Err(PersistenceError::ConstraintViolation {
+                    constraint: "summary coverage cannot move backwards".to_owned(),
+                });
+            }
             next_context.summary = Some(summary.clone());
         }
+        Self::remove_summarized_turns(&mut next_context);
         Self::trim_recent_turns(&mut next_context, self.config.max_recent_turns);
         story.context = next_context;
         story.info.updated_at = Utc::now();

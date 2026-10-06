@@ -1,12 +1,12 @@
 mod activation;
 mod asset;
+mod change;
 pub mod error;
 mod ids;
 mod message;
 mod story;
-mod world;
-mod change;
 pub mod turn;
+mod world;
 
 pub use activation::{
     ActivationPreviewRequest, ActivationPreviewResult, ActivationTarget, GenerationTrigger, KnowledgeDelivery,
@@ -15,14 +15,14 @@ pub use asset::{CharacterCardInfo, PackInfo, PackSummaryInfo, ValidationIssue, V
 pub use ids::{
     CharacterId, IdempotencyKey, KnowledgeSourceId, PackId, PlayerId, RoleId, SemanticVersion, Sha256Digest, StoryId,
 };
-pub use story::{StoryContext, StoryInstanceInfo, StoryInstanceSpec};
+pub use story::{StoryCommit, StoryContext, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle};
 pub use turn::{
-    CommittedTurnInfo, PlayerContribution, TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError,
-    TurnEventSink, TurnRequest, TurnResult, TurnNumber, Turn,
+    CommittedTurnInfo, PlayerContribution, Turn, TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError,
+    TurnEventSink, TurnNumber, TurnRequest, TurnResult,
 };
 
-pub use world::{WorldState, WorldChange};
-pub use change::{Change};
+pub use change::Change;
+pub use world::{WorldChange, WorldState};
 
 pub use error::{CoreError, EngineError};
 pub use message::{ChatMessage, ChatMessageRole};

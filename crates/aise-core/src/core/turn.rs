@@ -1,9 +1,9 @@
 use super::{IdempotencyKey, StoryId, WorldChange};
 use serde::{Deserialize, Serialize};
+use std::fmt::{Display, Formatter};
 use std::time::Instant;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerContribution {
@@ -162,10 +162,8 @@ impl Display for TurnSegment {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TurnEvaluation {
-}
+pub struct TurnEvaluation {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TurnStatus {
