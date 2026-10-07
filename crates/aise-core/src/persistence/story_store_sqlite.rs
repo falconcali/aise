@@ -52,7 +52,7 @@ impl StoryStore for StoryStoreSqlite {
         self.fake_store.find_committed(story_id, idempotency_key).await
     }
 
-    async fn commit(&self, commit: &StoryCommit) -> Result<StoryCommit, PersistenceError> {
+    async fn commit(&self, commit: StoryCommit) -> Result<StoryCommit, PersistenceError> {
         self.fake_store.commit(commit).await
     }
 

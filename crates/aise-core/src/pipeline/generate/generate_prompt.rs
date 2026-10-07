@@ -27,7 +27,7 @@ pub async fn generate_story(
         (STORY_GOAL_VAR.to_owned(), Value::String(input.story_goal.clone())),
         (
             PLAYER_CONTRIBUTION_VAR.to_owned(),
-            Value::String(input.processed_player_contribution.clone()),
+            Value::String(input.player_contribution.processed.clone()),
         ),
     ]);
     prompt

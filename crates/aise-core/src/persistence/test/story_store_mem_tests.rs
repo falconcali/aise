@@ -87,10 +87,10 @@ async fn commits_turn_and_returns_idempotent_result() {
     store.create(spec.clone()).await.expect("story creation should succeed");
     let first = commit(&spec.story_id, 1, "key-1", Change::Unchanged);
 
-    let committed = store.commit(&first).await.expect("commit should succeed");
+    let committed = store.commit(first.clone()).await.expect("commit should succeed");
     assert_eq!(committed.turn.turn_number.value(), 1);
 
-    let replayed = store.commit(&first).await.expect("replayed commit should succeed");
+    let replayed = store.commit(first).await.expect("replayed commit should succeed");
     assert_eq!(replayed.turn.turn_number.value(), 1);
 
     let found = store
@@ -116,7 +116,7 @@ async fn removes_turns_covered_by_summary_before_window_trim() {
 
     for turn_number in 1..=4 {
         let turn = commit(&spec.story_id, turn_number, &format!("key-{turn_number}"), Change::Unchanged);
-        store.commit(&turn).await.expect("turn commit should succeed");
+        store.commit(turn).await.expect("turn commit should succeed");
     }
 
     let summary = StorySummary {
@@ -124,7 +124,7 @@ async fn removes_turns_covered_by_summary_before_window_trim() {
         covered_through: TurnNumber::new(3),
     };
     let turn = commit(&spec.story_id, 5, "key-5", Change::Replaced(summary));
-    store.commit(&turn).await.expect("summary commit should succeed");
+    store.commit(turn).await.expect("summary commit should succeed");
 
     let loaded = store.load(&spec.story_id).await.expect("story should load");
     assert_eq!(
@@ -148,7 +148,7 @@ async fn rejects_invalid_turn_number_and_future_summary() {
     store.create(spec.clone()).await.expect("story creation should succeed");
 
     let invalid_turn = commit(&spec.story_id, 2, "key-2", Change::Unchanged);
-    let error = store.commit(&invalid_turn).await.expect_err("turn conflict should fail");
+    let error = store.commit(invalid_turn).await.expect_err("turn conflict should fail");
     assert!(matches!(error, PersistenceError::ConstraintViolation { .. }));
 
     let future_summary = commit(
@@ -160,6 +160,6 @@ async fn rejects_invalid_turn_number_and_future_summary() {
             covered_through: TurnNumber::new(2),
         }),
     );
-    let error = store.commit(&future_summary).await.expect_err("future summary should fail");
+    let error = store.commit(future_summary).await.expect_err("future summary should fail");
     assert!(matches!(error, PersistenceError::ConstraintViolation { .. }));
 }

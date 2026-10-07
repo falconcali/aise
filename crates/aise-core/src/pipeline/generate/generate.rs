@@ -1,4 +1,4 @@
-use crate::core::{StoryContext, TurnControl, TurnEventSink};
+use crate::core::{PlayerContribution, StoryContext, TurnControl, TurnEventSink};
 use crate::llm::LlmGateway;
 use crate::persistence::StoryStore;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
@@ -11,12 +11,13 @@ use std::sync::Arc;
 #[derive(Serialize)]
 pub struct GenerateInput {
     pub story_goal: String,
-    pub processed_player_contribution: String,
+    pub player_contribution: PlayerContribution,
 }
 
 #[derive(Serialize)]
 pub struct GenerateOutput {
     pub result: String,
+    pub player_contribution: PlayerContribution,
 }
 
 pub struct GeneratePipeline {
@@ -75,10 +76,13 @@ impl Pipeline for GeneratePipeline {
         let generate_observation = generate_trace::begin_story_generation(
             observation,
             &input.story_goal,
-            &input.processed_player_contribution,
+            &input.player_contribution.processed,
         );
         let result = self.generate_story(&input, story_ctx, control, &generate_observation).await;
         generate_trace::finish_story_generation(generate_observation, &result);
-        result.map(|result| GenerateOutput { result })
+        result.map(|result| GenerateOutput {
+            result,
+            player_contribution: input.player_contribution,
+        })
     }
 }

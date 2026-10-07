@@ -1,4 +1,6 @@
-use crate::core::{StoryCommit, StoryContext, TurnControl, TurnEventSink, TurnRequest};
+use crate::core::{
+    StoryCommit, StoryContext, TurnControl, TurnEvaluation, TurnEventSink, TurnRequest, TurnSegment, WorldChange,
+};
 use crate::llm::LlmGateway;
 use crate::persistence::StoryStore;
 use crate::pipeline::baseline::{BaselineInput, BaselinePipeline};
@@ -41,7 +43,7 @@ impl Runtime {
             },
             repair: RepairPipeline,
             extract: ExtractPipeline,
-            commit: CommitPipeline,
+            commit: CommitPipeline::new(Arc::clone(&story_store)),
         }
     }
 
@@ -66,13 +68,13 @@ impl Runtime {
         let baseline_output = pipeline_runner.run(&self.baseline, baseline_input, story_ctx).await?;
 
         let plan_input = PlanInput {
-            player_contribution: baseline_output.player_contribution,
+            player_contribution: baseline_output.player_contribution.clone(),
         };
 
         let plan_output = pipeline_runner.run(&self.plan, plan_input, story_ctx).await?;
         let mut generate_input = GenerateInput {
             story_goal: plan_output.plan.clone(),
-            processed_player_contribution: plan_output.processed_player_contribution.clone(),
+            player_contribution: plan_output.player_contribution.clone(),
         };
 
         if plan_output.requires_retrieval() {
@@ -97,6 +99,7 @@ impl Runtime {
             original_proposal: generate_output.result.clone(),
             current_proposal: generate_output.result,
             proposal_version: 1,
+            player_contribution: generate_output.player_contribution,
         };
 
         let mut validate_output = pipeline_runner.run(&self.validate, validate_input, story_ctx).await?;
@@ -108,6 +111,7 @@ impl Runtime {
                 current_proposal: validate_output.current_proposal,
                 scores: validate_output.scores,
                 proposal_version: validate_output.proposal_version,
+                player_contribution: validate_output.player_contribution,
             };
 
             let repair_output = pipeline_runner.run(&self.repair, repair_input, story_ctx).await?;
@@ -116,6 +120,7 @@ impl Runtime {
                 original_proposal: repair_output.original_proposal,
                 current_proposal: repair_output.current_proposal,
                 proposal_version: repair_output.proposal_version,
+                player_contribution: repair_output.player_contribution,
             };
 
             validate_output = pipeline_runner.run(&self.validate, validate_input, story_ctx).await?;
@@ -137,12 +142,17 @@ impl Runtime {
 
         let extract_input = ExtractInput {
             query: validate_output.current_proposal,
+            player_contribution: validate_output.player_contribution,
         };
 
         let extract_output = pipeline_runner.run(&self.extract, extract_input, story_ctx).await?;
 
-        let commit_input = CommitInput {
-            query: extract_output.result,
+        let commit_input: CommitInput = CommitInput {
+            player_contribution: extract_output.player_contribution,
+            idempotency_key: turn_request.idempotency_key,
+            turn_segment: TurnSegment::new(extract_output.result),
+            world_change: WorldChange {},
+            turn_evaluation: TurnEvaluation {},
         };
 
         pipeline_runner.run(&self.commit, commit_input, story_ctx).await

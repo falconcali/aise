@@ -136,7 +136,7 @@ impl StoryStore for StoryStoreMem {
         Ok(story.committed.get(idempotency_key).cloned())
     }
 
-    async fn commit(&self, commit: &StoryCommit) -> Result<StoryCommit, PersistenceError> {
+    async fn commit(&self, commit: StoryCommit) -> Result<StoryCommit, PersistenceError> {
         let mut stories = self.stories.write().await;
         let story = stories.get_mut(&commit.story_id).ok_or(PersistenceError::NotFound)?;
         let idempotency_key = commit.turn.idempotency_key.clone();
@@ -175,7 +175,7 @@ impl StoryStore for StoryStoreMem {
         story.context = next_context;
         story.info.updated_at = Utc::now();
         story.committed.insert(idempotency_key, commit.clone());
-        Ok(commit.clone())
+        Ok(commit)
     }
 
     async fn get_pack(&self, pack_id: &PackId) -> Result<StoryPack, PersistenceError> {

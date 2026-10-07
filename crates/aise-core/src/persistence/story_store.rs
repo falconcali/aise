@@ -15,7 +15,7 @@ pub trait StoryStore: Send + Sync {
         story_id: &StoryId,
         idempotency_key: &IdempotencyKey,
     ) -> Result<Option<StoryCommit>, PersistenceError>;
-    async fn commit(&self, commit: &StoryCommit) -> Result<StoryCommit, PersistenceError>;
+    async fn commit(&self, commit: StoryCommit) -> Result<StoryCommit, PersistenceError>;
 
     async fn get_pack(&self, pack_id: &PackId) -> Result<StoryPack, PersistenceError>;
 }

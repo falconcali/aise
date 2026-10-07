@@ -1,4 +1,4 @@
-use crate::core::{StoryContext, TurnControl, TurnEventSink};
+use crate::core::{PlayerContribution, StoryContext, TurnControl, TurnEventSink};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
 use serde::Serialize;
@@ -15,6 +15,8 @@ pub struct ValidateInput {
     pub original_proposal: String,
     pub current_proposal: String,
     pub proposal_version: u32,
+
+    pub player_contribution: PlayerContribution,
 }
 
 #[derive(Clone, Serialize)]
@@ -42,6 +44,7 @@ pub struct ValidateOutput {
     pub scores: Vec<ValidateScoreResult>,
     pub proposal_version: u32,
     pub decision: ValidationDecision,
+    pub player_contribution: PlayerContribution,
 }
 
 pub struct ValidatePipeline {
@@ -81,6 +84,7 @@ impl Pipeline for ValidatePipeline {
                     issue: "Not so good".to_string(),
                 })
                 .collect(),
+            player_contribution: input.player_contribution,
         })
     }
 }

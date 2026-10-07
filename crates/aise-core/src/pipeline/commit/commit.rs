@@ -1,17 +1,34 @@
 use crate::core::{
     Change, IdempotencyKey, PlayerContribution, StoryCommit, StoryContext, Turn, TurnControl, TurnEvaluation,
-    TurnEventSink, TurnSegment, TurnStatus, WorldChange,
+    TurnEventSink, TurnSegment, TurnStatus, TurnNumber, WorldChange,
 };
+use crate::persistence::StoryStore;
+use crate::pipeline::commit::commit_trace;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
 use serde::Serialize;
+use std::sync::Arc;
 
 #[derive(Serialize)]
 pub struct CommitInput {
-    pub query: String,
+    pub player_contribution: PlayerContribution,
+    pub idempotency_key: IdempotencyKey,
+    pub turn_segment: TurnSegment,
+    pub world_change: WorldChange,
+    pub turn_evaluation: TurnEvaluation,
 }
 
-pub struct CommitPipeline;
+pub struct CommitPipeline {
+    story_store: Arc<dyn StoryStore>,
+}
+
+impl CommitPipeline {
+    pub fn new(store: Arc<dyn StoryStore>) -> Self {
+        Self {
+            story_store: Arc::clone(&store),
+        }
+    }
+}
 
 impl Pipeline for CommitPipeline {
     type Input = CommitInput;
@@ -29,22 +46,27 @@ impl Pipeline for CommitPipeline {
         sink: &dyn TurnEventSink,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
-        Ok(StoryCommit {
+        let story_commit = StoryCommit {
             story_id: story_ctx.story_id.clone(),
             turn: Turn {
-                turn_number: story_ctx.turn_number.clone(),
-                idempotency_key: IdempotencyKey::try_new("temporary-key")
-                    .map_err(|error| PipelineError::new(PipelineStage::Commit, error.to_string()))?,
-                player_contribution: PlayerContribution {
-                    raw: String::new(),
-                    processed: String::new(),
-                },
-                turn_segment: TurnSegment::new(input.query),
-                world_change: WorldChange {},
-                turn_evaluation: TurnEvaluation {},
+                turn_number: TurnNumber::new(story_ctx.turn_number.value() + 1),
+                idempotency_key: input.idempotency_key,
+                player_contribution: input.player_contribution,
+                turn_segment: input.turn_segment,
+                world_change: input.world_change,
+                turn_evaluation: input.turn_evaluation,
                 turn_status: TurnStatus::Accepted,
             },
             summary: Change::Unchanged,
-        })
+        };
+
+        let commit_observation = commit_trace::begin_commit(observation, &story_commit);
+        let result = self
+            .story_store
+            .commit(story_commit)
+            .await
+            .map_err(|error| PipelineError::new(PipelineStage::Commit, error.to_string()));
+        commit_trace::finish_commit(commit_observation, &result);
+        result
     }
 }

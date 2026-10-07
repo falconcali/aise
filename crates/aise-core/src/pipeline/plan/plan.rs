@@ -16,7 +16,7 @@ pub struct PlanInput {
 #[derive(Serialize)]
 pub struct PlanOutput {
     pub plan: String,
-    pub processed_player_contribution: String,
+    pub player_contribution: PlayerContribution,
 }
 
 impl PlanOutput {
@@ -91,7 +91,7 @@ impl Pipeline for PlanPipeline {
         plan_trace::finish_plan(plan_observation, &result);
         result.map(|plan| PlanOutput {
             plan,
-            processed_player_contribution: input.player_contribution.processed.clone(),
+            player_contribution: input.player_contribution,
         })
     }
 }

@@ -1,4 +1,4 @@
-use crate::core::{StoryContext, TurnControl, TurnEventSink};
+use crate::core::{PlayerContribution, StoryContext, TurnControl, TurnEventSink};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
 use serde::Serialize;
@@ -6,11 +6,13 @@ use serde::Serialize;
 #[derive(Serialize)]
 pub struct ExtractInput {
     pub query: String,
+    pub player_contribution: PlayerContribution,
 }
 
 #[derive(Serialize)]
 pub struct ExtractOutput {
     pub result: String,
+    pub player_contribution: PlayerContribution,
 }
 
 pub struct ExtractPipeline;
@@ -31,6 +33,9 @@ impl Pipeline for ExtractPipeline {
         sink: &dyn TurnEventSink,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
-        Ok(ExtractOutput { result: input.query })
+        Ok(ExtractOutput {
+            result: input.query,
+            player_contribution: input.player_contribution,
+        })
     }
 }
