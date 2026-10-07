@@ -9,3 +9,9 @@ id = "plan.process_story_plan"
 csi = "csi/plan-process-story-plan.md.j2"
 rc = "rc/plan-process-story-plan.md.j2"
 fti = "fti/plan-process-story-plan.md.j2"
+
+[[prompts]]
+id = "generate.generate_story"
+csi = "csi/generate-generate-story.md.j2"
+rc = "rc/generate-generate-story.md.j2"
+fti = "fti/generate-generate-story.md.j2"

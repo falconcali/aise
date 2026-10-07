@@ -87,12 +87,11 @@ fn copy_bundled_assets(dir: &Path) {
 }
 
 #[test]
-fn bundled_catalog_has_single_prompt() {
+fn bundled_catalog_has_expected_prompts() {
     let prompt = bundled_prompt();
-    assert_eq!(
-        prompt.prompt_ids().collect::<Vec<_>>(),
-        vec![BASELINE_PROMPT_ID, PLAN_PROMPT_ID]
-    );
+    let mut prompt_ids = prompt.prompt_ids().collect::<Vec<_>>();
+    prompt_ids.sort_unstable();
+    assert_eq!(prompt_ids, vec![BASELINE_PROMPT_ID, "generate.generate_story", PLAN_PROMPT_ID]);
 }
 
 #[test]

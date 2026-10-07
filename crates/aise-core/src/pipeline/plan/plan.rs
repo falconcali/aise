@@ -16,6 +16,17 @@ pub struct PlanInput {
 #[derive(Serialize)]
 pub struct PlanOutput {
     pub plan: String,
+    pub processed_player_contribution: String,
+}
+
+impl PlanOutput {
+    pub fn requires_retrieval(&self) -> bool {
+        return false;
+    }
+
+    pub fn requires_character_thinking(&self) -> bool {
+        return false;
+    }
 }
 
 pub struct PlanPipeline {
@@ -78,6 +89,9 @@ impl Pipeline for PlanPipeline {
             .process_story_plan(story_ctx, &input.player_contribution, control, &plan_observation)
             .await;
         plan_trace::finish_plan(plan_observation, &result);
-        result.map(|plan| PlanOutput { plan })
+        result.map(|plan| PlanOutput {
+            plan,
+            processed_player_contribution: input.player_contribution.processed.clone(),
+        })
     }
 }

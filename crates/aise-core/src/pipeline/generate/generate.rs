@@ -1,11 +1,17 @@
 use crate::core::{StoryContext, TurnControl, TurnEventSink};
+use crate::llm::LlmGateway;
+use crate::persistence::StoryStore;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
+use crate::pipeline::generate::{generate_llm, generate_prompt, generate_trace};
+use crate::prompt::Prompt;
 use crate::trace::Observation;
 use serde::Serialize;
+use std::sync::Arc;
 
 #[derive(Serialize)]
 pub struct GenerateInput {
-    pub query: String,
+    pub story_goal: String,
+    pub processed_player_contribution: String,
 }
 
 #[derive(Serialize)]
@@ -13,7 +19,42 @@ pub struct GenerateOutput {
     pub result: String,
 }
 
-pub struct GeneratePipeline;
+pub struct GeneratePipeline {
+    gateway: Arc<LlmGateway>,
+    prompt: Arc<Prompt>,
+    story_store: Arc<dyn StoryStore>,
+}
+
+impl GeneratePipeline {
+    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, story_store: Arc<dyn StoryStore>) -> Self {
+        Self {
+            gateway,
+            prompt,
+            story_store,
+        }
+    }
+
+    async fn generate_story(
+        &self,
+        input: &GenerateInput,
+        story_ctx: &StoryContext,
+        control: &TurnControl,
+        observation: &Observation,
+    ) -> Result<String, PipelineError> {
+        let rendered_prompt = generate_prompt::generate_story(
+            self.prompt.as_ref(),
+            story_ctx,
+            input,
+            self.story_store.as_ref(),
+            observation,
+        )
+        .await?;
+
+        generate_llm::generate_story(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
+            .await
+            .map_err(|error| PipelineError::new(PipelineStage::Generate, error.to_string()))
+    }
+}
 
 impl Pipeline for GeneratePipeline {
     type Input = GenerateInput;
@@ -28,9 +69,16 @@ impl Pipeline for GeneratePipeline {
         input: Self::Input,
         story_ctx: &StoryContext,
         control: &TurnControl,
-        sink: &dyn TurnEventSink,
+        _sink: &dyn TurnEventSink,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
-        Ok(GenerateOutput { result: input.query })
+        let generate_observation = generate_trace::begin_story_generation(
+            observation,
+            &input.story_goal,
+            &input.processed_player_contribution,
+        );
+        let result = self.generate_story(&input, story_ctx, control, &generate_observation).await;
+        generate_trace::finish_story_generation(generate_observation, &result);
+        result.map(|result| GenerateOutput { result })
     }
 }

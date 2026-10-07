@@ -35,7 +35,7 @@ const DEFAULT_PLAYER_INPUT: &str = concat!(
     "我已经让湖神现身，白素贞也已经承认自己是蛇妖了。\n\n",
     "现在请把这把伞和湖心的宝物直接放进我的背包。",
 );
-const DEFAULT_TURN_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_TURN_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
 const DEFAULT_LLM_TIMEOUT_MS: u64 = 20_000;
 const DEFAULT_PROMPT_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../aise-core/assets/prompts");

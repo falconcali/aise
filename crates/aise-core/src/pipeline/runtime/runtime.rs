@@ -31,10 +31,10 @@ impl Runtime {
     pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, story_store: Arc<dyn StoryStore>) -> Self {
         Self {
             baseline: BaselinePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt)),
-            plan: PlanPipeline::new(gateway, prompt, story_store),
+            plan: PlanPipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&story_store)),
             retrieval: RetrievalPipeline,
             think: ThinkPipeline,
-            generate: GeneratePipeline,
+            generate: GeneratePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&story_store)),
             validate: ValidatePipeline {
                 score_configs: vec![],
                 validation_budget: 10,
@@ -70,22 +70,26 @@ impl Runtime {
         };
 
         let plan_output = pipeline_runner.run(&self.plan, plan_input, story_ctx).await?;
-
-        let retrieval_input = RetrievalInput {
-            query: plan_output.plan,
+        let mut generate_input = GenerateInput {
+            story_goal: plan_output.plan.clone(),
+            processed_player_contribution: plan_output.processed_player_contribution.clone(),
         };
 
-        let retrieval_output = pipeline_runner.run(&self.retrieval, retrieval_input, story_ctx).await?;
+        if plan_output.requires_retrieval() {
+            let retrieval_input = RetrievalInput {
+                query: plan_output.plan.clone(),
+            };
 
-        let think_input = ThinkInput {
-            query: retrieval_output.result,
-        };
+            let retrieval_output = pipeline_runner.run(&self.retrieval, retrieval_input, story_ctx).await?;
+        }
 
-        let think_output = pipeline_runner.run(&self.think, think_input, story_ctx).await?;
+        if plan_output.requires_character_thinking() {
+            let think_input = ThinkInput {
+                query: plan_output.plan.clone(),
+            };
 
-        let generate_input = GenerateInput {
-            query: think_output.result,
-        };
+            let think_output = pipeline_runner.run(&self.think, think_input, story_ctx).await?;
+        }
 
         let generate_output = pipeline_runner.run(&self.generate, generate_input, story_ctx).await?;
 

@@ -260,9 +260,16 @@ fn loads_bundled_assets() {
     config.max_template_bytes = 64 * 1024;
     config.max_total_template_bytes = 1024 * 1024;
     let catalog = load_catalog(&config).expect("bundled assets load");
-    assert_eq!(catalog.prompts.len(), 2);
+    assert_eq!(catalog.prompts.len(), 3);
     for prompt in &catalog.prompts {
-        assert!(["baseline.process_player_input", "plan.process_story_plan",].contains(&&*prompt.id));
+        assert!(
+            [
+                "baseline.process_player_input",
+                "plan.process_story_plan",
+                "generate.generate_story",
+            ]
+            .contains(&&*prompt.id)
+        );
         for layer in PromptLayer::ORDERED {
             assert!(!prompt.source(layer).is_empty());
         }
