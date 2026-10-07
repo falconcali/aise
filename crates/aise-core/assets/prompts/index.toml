@@ -3,3 +3,9 @@ id = "baseline.process_player_input"
 csi = "csi/baseline-process-player-input.md.j2"
 rc = "rc/baseline-process-player-input.md.j2"
 fti = "fti/baseline-process-player-input.md.j2"
+
+[[prompts]]
+id = "plan.process_story_plan"
+csi = "csi/plan-process-story-plan.md.j2"
+rc = "rc/plan-process-story-plan.md.j2"
+fti = "fti/plan-process-story-plan.md.j2"

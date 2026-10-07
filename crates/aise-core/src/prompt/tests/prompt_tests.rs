@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 const BUNDLED_PROMPT_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/prompts");
 const BASELINE_PROMPT_ID: &str = "baseline.process_player_input";
 const BASELINE_TEMPLATE_FILE: &str = "baseline-process-player-input.md.j2";
+const PLAN_PROMPT_ID: &str = "plan.process_story_plan";
 
 fn config(dir: &Path) -> PromptConfig {
     PromptConfig {
@@ -72,21 +73,26 @@ fn bundled_template(layer: PromptLayer) -> String {
 fn copy_bundled_assets(dir: &Path) {
     fs::copy(Path::new(BUNDLED_PROMPT_DIRECTORY).join("index.toml"), dir.join("index.toml")).expect("copy manifest");
     for layer in PromptLayer::ORDERED {
-        fs::create_dir_all(dir.join(layer.as_str())).expect("create layer dir");
-        fs::copy(
-            Path::new(BUNDLED_PROMPT_DIRECTORY)
-                .join(layer.as_str())
-                .join(BASELINE_TEMPLATE_FILE),
-            dir.join(layer.as_str()).join(BASELINE_TEMPLATE_FILE),
-        )
-        .expect("copy template");
+        let source_dir = Path::new(BUNDLED_PROMPT_DIRECTORY).join(layer.as_str());
+        let target_dir = dir.join(layer.as_str());
+        fs::create_dir_all(&target_dir).expect("create layer dir");
+        for entry in fs::read_dir(source_dir).expect("read layer dir") {
+            let entry = entry.expect("read layer entry");
+            let source = entry.path();
+            if source.is_file() {
+                fs::copy(&source, target_dir.join(entry.file_name())).expect("copy template");
+            }
+        }
     }
 }
 
 #[test]
 fn bundled_catalog_has_single_prompt() {
     let prompt = bundled_prompt();
-    assert_eq!(prompt.prompt_ids().collect::<Vec<_>>(), vec![BASELINE_PROMPT_ID]);
+    assert_eq!(
+        prompt.prompt_ids().collect::<Vec<_>>(),
+        vec![BASELINE_PROMPT_ID, PLAN_PROMPT_ID]
+    );
 }
 
 #[test]

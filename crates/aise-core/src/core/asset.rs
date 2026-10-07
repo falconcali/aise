@@ -1,3 +1,4 @@
+use crate::core::PackId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,4 +41,11 @@ pub struct ValidationIssue {
     pub code: String,
     pub path: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoryPack {
+    pub pack_id: PackId,
+    pub title: String,
+    pub Opening: String,
 }

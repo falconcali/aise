@@ -2,7 +2,9 @@ use super::config::StoryStoreConfig;
 use super::error::PersistenceError;
 use super::story_store::StoryStore;
 use super::story_store_mem::StoryStoreMem;
-use crate::core::{IdempotencyKey, StoryCommit, StoryContext, StoryId, StoryInstanceInfo, StoryInstanceSpec};
+use crate::core::{
+    IdempotencyKey, PackId, StoryCommit, StoryContext, StoryId, StoryInstanceInfo, StoryInstanceSpec, StoryPack,
+};
 use async_trait::async_trait;
 
 #[derive(Debug)]
@@ -52,5 +54,9 @@ impl StoryStore for StoryStoreSqlite {
 
     async fn commit(&self, commit: &StoryCommit) -> Result<StoryCommit, PersistenceError> {
         self.fake_store.commit(commit).await
+    }
+
+    async fn get_pack(&self, pack_id: &PackId) -> Result<StoryPack, PersistenceError> {
+        self.fake_store.get_pack(pack_id).await
     }
 }

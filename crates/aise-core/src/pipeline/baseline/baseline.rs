@@ -26,6 +26,27 @@ impl BaselinePipeline {
     pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>) -> Self {
         Self { gateway, prompt }
     }
+
+    async fn process_player_input(
+        &self,
+        input: &BaselineInput,
+        control: &TurnControl,
+        observation: &Observation,
+    ) -> Result<PlayerContribution, PipelineError> {
+        let rendered_prompt =
+            baseline_prompt::process_player_input(self.prompt.as_ref(), &input.player_input, observation)?;
+
+        let player_contribution = baseline_llm::process_player_input(
+            self.gateway.as_ref(),
+            &input.player_input,
+            rendered_prompt.into_messages(),
+            control,
+            observation,
+        )
+        .await?;
+
+        Ok(player_contribution)
+    }
 }
 
 impl Pipeline for BaselinePipeline {
@@ -48,28 +69,5 @@ impl Pipeline for BaselinePipeline {
         let result = self.process_player_input(&input, control, &baseline_observation).await;
         baseline_trace::finish_player_contribution(baseline_observation, &result);
         result.map(|player_contribution| BaselineOutput { player_contribution })
-    }
-}
-
-impl BaselinePipeline {
-    async fn process_player_input(
-        &self,
-        input: &BaselineInput,
-        control: &TurnControl,
-        observation: &Observation,
-    ) -> Result<PlayerContribution, PipelineError> {
-        let rendered_prompt =
-            baseline_prompt::process_player_input(self.prompt.as_ref(), &input.player_input, observation)?;
-
-        let player_contribution = baseline_llm::process_player_input(
-            self.gateway.as_ref(),
-            &input.player_input,
-            rendered_prompt.into_messages(),
-            control,
-            observation,
-        )
-        .await?;
-
-        Ok(player_contribution)
     }
 }

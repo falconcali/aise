@@ -2,8 +2,8 @@ use super::config::StoryStoreConfig;
 use super::error::PersistenceError;
 use super::story_store::StoryStore;
 use crate::core::{
-    IdempotencyKey, StoryCommit, StoryContext, StoryId, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle,
-    TurnNumber, WorldState,
+    IdempotencyKey, PackId, StoryCommit, StoryContext, StoryId, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle,
+    StoryPack, TurnNumber, WorldState,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -176,5 +176,13 @@ impl StoryStore for StoryStoreMem {
         story.info.updated_at = Utc::now();
         story.committed.insert(idempotency_key, commit.clone());
         Ok(commit.clone())
+    }
+
+    async fn get_pack(&self, pack_id: &PackId) -> Result<StoryPack, PersistenceError> {
+        Ok(StoryPack {
+            pack_id: pack_id.clone(),
+            title: "白蛇传".to_string(),
+            Opening: "许仙在西湖游船靠岸时，天色忽然阴沉下来。细密的雨丝打湿了青石桥面，行人纷纷避入檐下。一个白衣女子站在断桥边，没有带伞，正望着湖面出神。她回头看向许仙，礼貌地问能否借伞同行。许仙把雨伞递过去时，远处传来一声闷雷，湖心荡开一圈不合时宜的涟漪。女子自称白素贞，并说日后一定归还这把伞。".to_string(),
+        })
     }
 }

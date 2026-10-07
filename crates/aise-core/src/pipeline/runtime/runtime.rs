@@ -1,5 +1,6 @@
 use crate::core::{StoryCommit, StoryContext, TurnControl, TurnEventSink, TurnRequest};
 use crate::llm::LlmGateway;
+use crate::persistence::StoryStore;
 use crate::pipeline::baseline::{BaselineInput, BaselinePipeline};
 use crate::pipeline::commit::{CommitInput, CommitPipeline};
 use crate::pipeline::common::{PipelineError, PipelineRunner};
@@ -27,10 +28,10 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>) -> Self {
+    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, story_store: Arc<dyn StoryStore>) -> Self {
         Self {
-            baseline: BaselinePipeline::new(gateway, prompt),
-            plan: PlanPipeline,
+            baseline: BaselinePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt)),
+            plan: PlanPipeline::new(gateway, prompt, story_store),
             retrieval: RetrievalPipeline,
             think: ThinkPipeline,
             generate: GeneratePipeline,

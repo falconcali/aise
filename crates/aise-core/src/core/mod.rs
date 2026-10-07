@@ -11,7 +11,7 @@ mod world;
 pub use activation::{
     ActivationPreviewRequest, ActivationPreviewResult, ActivationTarget, GenerationTrigger, KnowledgeDelivery,
 };
-pub use asset::{CharacterCardInfo, PackInfo, PackSummaryInfo, ValidationIssue, ValidationReport};
+pub use asset::{CharacterCardInfo, PackInfo, PackSummaryInfo, StoryPack, ValidationIssue, ValidationReport};
 pub use ids::{
     CharacterId, IdempotencyKey, KnowledgeSourceId, PackId, PlayerId, RoleId, SemanticVersion, Sha256Digest, StoryId,
 };
