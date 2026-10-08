@@ -59,7 +59,12 @@ fn fixture_dir(name: &str) -> PathBuf {
 }
 
 fn player_input_vars(input: &str) -> PromptVars {
-    PromptVars::from([("player_input".to_owned(), Value::String(input.to_owned()))])
+    PromptVars::from([
+        ("player_input".to_owned(), Value::String(input.to_owned())),
+        ("story_summary".to_owned(), Value::String(String::new())),
+        ("story_opening".to_owned(), Value::String(String::new())),
+        ("recent_story".to_owned(), Value::String(String::new())),
+    ])
 }
 
 fn bundled_template(layer: PromptLayer) -> String {

@@ -1,5 +1,6 @@
 use crate::core::{PlayerContribution, StoryContext, TurnControl, TurnEventSink};
 use crate::llm::LlmGateway;
+use crate::persistence::StoryStore;
 use crate::pipeline::baseline::{baseline_llm, baseline_prompt, baseline_trace};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::prompt::Prompt;
@@ -20,21 +21,33 @@ pub struct BaselineOutput {
 pub struct BaselinePipeline {
     gateway: Arc<LlmGateway>,
     prompt: Arc<Prompt>,
+    story_store: Arc<dyn StoryStore>,
 }
 
 impl BaselinePipeline {
-    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>) -> Self {
-        Self { gateway, prompt }
+    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, story_store: Arc<dyn StoryStore>) -> Self {
+        Self {
+            gateway,
+            prompt,
+            story_store,
+        }
     }
 
     async fn process_player_input(
         &self,
         input: &BaselineInput,
+        story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<PlayerContribution, PipelineError> {
-        let rendered_prompt =
-            baseline_prompt::process_player_input(self.prompt.as_ref(), &input.player_input, observation)?;
+        let rendered_prompt = baseline_prompt::process_player_input(
+            self.prompt.as_ref(),
+            story_ctx,
+            &input.player_input,
+            self.story_store.as_ref(),
+            observation,
+        )
+        .await?;
 
         let player_contribution = baseline_llm::process_player_input(
             self.gateway.as_ref(),
@@ -66,8 +79,10 @@ impl Pipeline for BaselinePipeline {
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         let baseline_observation = baseline_trace::begin_player_contribution(observation, &input.player_input);
-        let result = self.process_player_input(&input, control, &baseline_observation).await;
+        let result = self
+            .process_player_input(&input, story_ctx, control, &baseline_observation)
+            .await;
         baseline_trace::finish_player_contribution(baseline_observation, &result);
-        result.map(|player_contribution| BaselineOutput { player_contribution })
+        result.map(|player_contribution: PlayerContribution| BaselineOutput { player_contribution })
     }
 }

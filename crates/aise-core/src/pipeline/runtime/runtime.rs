@@ -32,7 +32,7 @@ pub struct Runtime {
 impl Runtime {
     pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, story_store: Arc<dyn StoryStore>) -> Self {
         Self {
-            baseline: BaselinePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt)),
+            baseline: BaselinePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&story_store)),
             plan: PlanPipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&story_store)),
             retrieval: RetrievalPipeline,
             think: ThinkPipeline,

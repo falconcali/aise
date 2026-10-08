@@ -1,6 +1,6 @@
 use crate::core::{
     Change, IdempotencyKey, PlayerContribution, StoryCommit, StoryContext, Turn, TurnControl, TurnEvaluation,
-    TurnEventSink, TurnSegment, TurnStatus, TurnNumber, WorldChange,
+    TurnEventSink, TurnNumber, TurnSegment, TurnStatus, WorldChange,
 };
 use crate::persistence::StoryStore;
 use crate::pipeline::commit::commit_trace;
@@ -23,10 +23,8 @@ pub struct CommitPipeline {
 }
 
 impl CommitPipeline {
-    pub fn new(store: Arc<dyn StoryStore>) -> Self {
-        Self {
-            story_store: Arc::clone(&store),
-        }
+    pub fn new(story_store: Arc<dyn StoryStore>) -> Self {
+        Self { story_store }
     }
 }
 

@@ -36,16 +36,15 @@ impl StoryStoreMem {
         }
     }
 
-    fn trim_recent_turns(context: &mut StoryContext, max_recent_turns: usize) {
-        while context.rencent_turns.len() > max_recent_turns {
+    fn adjust_rencent_turns(context: &mut StoryContext, max_rencent_turns: usize) {
+        while context.rencent_turns.len() > max_rencent_turns {
             context.rencent_turns.pop_front();
         }
-    }
 
-    fn remove_summarized_turns(context: &mut StoryContext) {
         let Some(summary) = context.summary.as_ref() else {
             return;
         };
+
         let covered_through = summary.covered_through.value();
         while context
             .rencent_turns
@@ -170,8 +169,7 @@ impl StoryStore for StoryStoreMem {
             }
             next_context.summary = Some(summary.clone());
         }
-        Self::remove_summarized_turns(&mut next_context);
-        Self::trim_recent_turns(&mut next_context, self.config.max_recent_turns);
+        Self::adjust_rencent_turns(&mut next_context, self.config.max_recent_turns);
         story.context = next_context;
         story.info.updated_at = Utc::now();
         story.committed.insert(idempotency_key, commit.clone());

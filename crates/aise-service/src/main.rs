@@ -37,7 +37,7 @@ const DEFAULT_PLAYER_INPUT: &str = concat!(
 );
 const DEFAULT_TURN_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
-const DEFAULT_LLM_TIMEOUT_MS: u64 = 20_000;
+const DEFAULT_LLM_TIMEOUT_MS: u64 = 60_000;
 const DEFAULT_PROMPT_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../aise-core/assets/prompts");
 const DEFAULT_PROMPT_MAX_PROMPTS: usize = 16;
 const DEFAULT_PROMPT_MAX_TEMPLATE_BYTES: usize = 64 * 1024;
