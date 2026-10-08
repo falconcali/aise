@@ -12,5 +12,5 @@ mod validate;
 
 pub(crate) mod runtime;
 pub use common::PipelineConfig;
-pub use summary::SummaryConfig;
 pub(crate) use runtime::Runtime;
+pub use summary::SummaryConfig;

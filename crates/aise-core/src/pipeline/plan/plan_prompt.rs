@@ -18,7 +18,7 @@ pub async fn process_plan(
     story_store: &dyn StoryStore,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
-    let story_opening = pipeline_prompt::load_continuation_opening(PipelineStage::Plan, story_ctx, story_store).await?;
+    let story_opening = pipeline_prompt::load_story_opening(PipelineStage::Plan, story_ctx, story_store).await?;
     let vars = plan_vars(story_ctx, player_contribution, story_opening);
     prompt
         .render(PromptSpec::new(PROCESS_STORY_PLAN_PROMPT_ID, vars), observation)

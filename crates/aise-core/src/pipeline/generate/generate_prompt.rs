@@ -20,8 +20,7 @@ pub async fn generate_story(
     story_store: &dyn StoryStore,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
-    let story_opening =
-        pipeline_prompt::load_continuation_opening(PipelineStage::Generate, story_ctx, story_store).await?;
+    let story_opening = pipeline_prompt::load_story_opening(PipelineStage::Generate, story_ctx, story_store).await?;
     let vars = generate_vars(story_ctx, input, story_opening);
     prompt
         .render(PromptSpec::new(GENERATE_STORY_PROMPT_ID, vars), observation)

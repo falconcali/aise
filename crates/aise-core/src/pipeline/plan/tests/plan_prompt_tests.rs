@@ -121,15 +121,19 @@ async fn new_story_context_has_opening_then_input() {
 }
 
 #[tokio::test]
-async fn recent_story_replaces_opening_as_continuation_point() {
+async fn recent_story_without_summary_keeps_opening_before_recent_story() {
     let mut story_ctx = StoryContext::new();
     story_ctx.rencent_turns.push_back(accepted_turn(1, "The door creaks."));
+    let store = StoryStoreMem::new();
+    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").Opening;
 
     let content = runtime_context(&story_ctx, "I wave.").await;
 
     assert_eq!(
         content,
-        "## Recent Story\n\nThe door creaks.\n\n## Pending Player Input\n\nI wave."
+        format!(
+            "## Story Opening\n\n{opening}\n\n## Recent Story\n\nThe door creaks.\n\n## Pending Player Input\n\nI wave."
+        )
     );
 }
 

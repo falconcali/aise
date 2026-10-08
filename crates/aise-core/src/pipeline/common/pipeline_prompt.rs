@@ -31,25 +31,6 @@ pub(in crate::pipeline) async fn load_story_opening(
     if story_summary(story_ctx).is_some() {
         return Ok(String::new());
     }
-    fetch_story_opening(stage, story_ctx, story_store).await
-}
-
-pub(in crate::pipeline) async fn load_continuation_opening(
-    stage: PipelineStage,
-    story_ctx: &StoryContext,
-    story_store: &dyn StoryStore,
-) -> Result<String, PipelineError> {
-    if story_summary(story_ctx).is_some() || !recent_story(story_ctx).is_empty() {
-        return Ok(String::new());
-    }
-    fetch_story_opening(stage, story_ctx, story_store).await
-}
-
-async fn fetch_story_opening(
-    stage: PipelineStage,
-    story_ctx: &StoryContext,
-    story_store: &dyn StoryStore,
-) -> Result<String, PipelineError> {
     let story_pack = story_store
         .get_pack(&story_ctx.pack_ref.pack_id)
         .await

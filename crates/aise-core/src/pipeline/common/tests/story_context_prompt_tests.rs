@@ -74,43 +74,29 @@ async fn opening_is_loaded_only_when_summary_is_absent() {
 }
 
 #[tokio::test]
-async fn continuation_opening_is_loaded_only_without_summary_and_recent_story() {
+async fn opening_is_loaded_when_summary_is_absent_even_with_recent_story() {
     let store = StoryStoreMem::new();
     let mut story_ctx = StoryContext::new();
-
-    let opening = load_continuation_opening(PipelineStage::Plan, &story_ctx, &store)
-        .await
-        .expect("opening loads");
-    assert!(!opening.is_empty());
-
     story_ctx
         .rencent_turns
         .push_back(turn(1, "The door creaks.", TurnStatus::Accepted));
-    let opening = load_continuation_opening(PipelineStage::Plan, &story_ctx, &store)
-        .await
-        .expect("opening skipped for recent story");
-    assert!(opening.is_empty());
 
-    story_ctx.rencent_turns.clear();
-    story_ctx.summary = Some(summary("Earlier events.", 1));
-    let opening = load_continuation_opening(PipelineStage::Generate, &story_ctx, &store)
-        .await
-        .expect("opening skipped for summary");
-    assert!(opening.is_empty());
-}
-
-#[tokio::test]
-async fn continuation_opening_is_loaded_when_recent_story_is_only_rejected_or_blank() {
-    let store = StoryStoreMem::new();
-    let mut story_ctx = StoryContext::new();
-    story_ctx
-        .rencent_turns
-        .push_back(turn(1, "The door creaks.", TurnStatus::Rejected));
-    story_ctx.rencent_turns.push_back(turn(2, "  ", TurnStatus::Accepted));
-
-    let opening = load_continuation_opening(PipelineStage::Plan, &story_ctx, &store)
+    let opening = load_story_opening(PipelineStage::Plan, &story_ctx, &store)
         .await
         .expect("opening loads");
 
     assert!(!opening.is_empty());
+}
+
+#[tokio::test]
+async fn opening_is_skipped_when_summary_is_present_even_without_recent_story() {
+    let store = StoryStoreMem::new();
+    let mut story_ctx = StoryContext::new();
+    story_ctx.summary = Some(summary("Earlier events.", 1));
+
+    let opening = load_story_opening(PipelineStage::Generate, &story_ctx, &store)
+        .await
+        .expect("opening skipped");
+
+    assert!(opening.is_empty());
 }
