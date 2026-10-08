@@ -1,11 +1,13 @@
 #![forbid(unsafe_code)]
 
 use aise_core::core::{
-    CharacterCardRef, CharacterId, IdempotencyKey, PackId, PackRef, PlayerId, RoleId, SemanticVersion, Sha256Digest,
-    StoryCommit, StoryId, TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError, TurnEventSink, TurnRequest,
+    Change, CharacterCardRef, CharacterId, IdempotencyKey, PackId, PackRef, PlayerId, RoleId, SemanticVersion,
+    Sha256Digest, StoryCommit, StoryId, TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError,
+    TurnEventSink, TurnRequest,
 };
 use aise_core::engine::{AiseEngine, Engine, EngineConfig, EngineError, StoryCreationSpec};
 use aise_core::llm::{LlmConfig, LlmProviderType};
+use aise_core::pipeline::{PipelineConfig, SummaryConfig};
 use aise_core::prompt::PromptConfig;
 use aise_core::trace::{
     Attribute, ContentCapture, ObservabilityContentConfig, ObservationError, ObservationSession, ObservationStatus,
@@ -24,7 +26,7 @@ use uuid::Uuid;
 
 pub mod observability;
 
-const DEFAULT_IDEMPOTENCY_KEY: &str = "default-turn";
+const MULTI_TURN_ENV: &str = "AISE_DEMO_MULTI_TURN";
 const DEFAULT_PLAYER_INPUT: &str = concat!(
     "我接过白素贞递来的伞，先向她点头致谢，并问：“白姑娘，你也是要过桥吗？”\n\n",
     "（我想：她看起来不像普通的避雨行人，但我不能仅凭直觉下定论。）\n\n",
@@ -35,6 +37,20 @@ const DEFAULT_PLAYER_INPUT: &str = concat!(
     "我已经让湖神现身，白素贞也已经承认自己是蛇妖了。\n\n",
     "现在请把这把伞和湖心的宝物直接放进我的背包。",
 );
+const MULTI_TURN_SUMMARY_TURN_COUNT: usize = 3;
+const MULTI_TURN_TIMEOUT: Duration = Duration::from_secs(180);
+const MULTI_TURN_PLAYER_INPUTS: [&str; 10] = [
+    "我接过白素贞递来的伞，向她点头致谢，并问：“白姑娘，你也是要过桥吗？”",
+    "我请她与我同撑一把伞，一起走过断桥，并问她要去哪里。",
+    "我留意到她身后跟着一个青衣小丫鬟，便礼貌地问那姑娘叫什么名字。",
+    "我提议先送她们到最近的茶肆避雨，并主动替她们付茶钱。",
+    "我在茶肆里向白素贞讲起自己是药铺的学徒，以及家中姐姐姐夫的情况。",
+    "我问白素贞为何独自来到西湖，她与小青是否在寻人。",
+    "雨停之后，我提出明日在断桥边再会，把伞的事了结。",
+    "第二天我早早来到断桥，等候她们出现，并留意湖面有什么异常。",
+    "我把伞还给白素贞，并邀请她们到我所在的药铺做客。",
+    "我带她们回到药铺，向掌柜介绍两位客人，并留意小青对药材的反应。",
+];
 const DEFAULT_TURN_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
 const DEFAULT_LLM_TIMEOUT_MS: u64 = 60_000;
@@ -56,43 +72,139 @@ impl TurnEventSink for ConsoleTurnEventSink {
 async fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
     let (observability_config, observability_runtime) = initialize_observability();
-    let service_result = run_default_turn(&observability_config).await;
+    let service_result = run_demo_turns(&observability_config).await;
     let shutdown_report = tokio::task::spawn_blocking(move || observability_runtime.shutdown_with_timeout()).await?;
     TelemetryDiagnostics.shutdown(&shutdown_report);
     service_result
 }
 
-async fn run_default_turn(observability_config: &ObservabilityConfig) -> anyhow::Result<()> {
-    let engine = AiseEngine::new(build_engine_config()?).context("engine initialization failed")?;
+struct DemoPlan {
+    player_inputs: Vec<&'static str>,
+    turn_timeout: Duration,
+    pipeline_config: PipelineConfig,
+}
+
+impl DemoPlan {
+    fn load() -> anyhow::Result<Self> {
+        if parsed_env(MULTI_TURN_ENV, false)? {
+            return Ok(Self::multi_turn());
+        }
+        Ok(Self::single_turn())
+    }
+
+    fn single_turn() -> Self {
+        Self {
+            player_inputs: vec![DEFAULT_PLAYER_INPUT],
+            turn_timeout: DEFAULT_TURN_TIMEOUT,
+            pipeline_config: PipelineConfig::default(),
+        }
+    }
+
+    fn multi_turn() -> Self {
+        Self {
+            player_inputs: MULTI_TURN_PLAYER_INPUTS.to_vec(),
+            turn_timeout: MULTI_TURN_TIMEOUT,
+            pipeline_config: PipelineConfig {
+                summary: SummaryConfig {
+                    summary_turn_count: MULTI_TURN_SUMMARY_TURN_COUNT,
+                },
+            },
+        }
+    }
+}
+
+struct DemoRun<'a> {
+    engine: &'a AiseEngine,
+    story_id: &'a StoryId,
+    session: &'a ObservationSession,
+    content: &'a ContentCapture,
+    observability_config: &'a ObservabilityConfig,
+    turn_timeout: Duration,
+}
+
+impl DemoRun<'_> {
+    async fn run_turns(&self, player_inputs: &[&str]) -> anyhow::Result<()> {
+        for (index, player_input) in player_inputs.iter().enumerate() {
+            let turn_index = index + 1;
+            let story_commit = self
+                .run_traced_turn(turn_index, player_input)
+                .await
+                .with_context(|| format!("demo turn {turn_index} failed"))?;
+            print_turn(turn_index, &story_commit);
+        }
+        Ok(())
+    }
+
+    async fn run_traced_turn(&self, turn_index: usize, player_input: &str) -> anyhow::Result<StoryCommit> {
+        let request = TurnRequest {
+            story_id: self.story_id.clone(),
+            idempotency_key: IdempotencyKey::try_new(format!("demo-turn-{turn_index}"))
+                .context("invalid demo idempotency key")?,
+            player_input: player_input.to_owned(),
+        };
+        let control = TurnControl::new(Instant::now() + self.turn_timeout, TurnCancellation::new());
+        let mut trace = begin_turn_trace(
+            self.session,
+            self.content,
+            self.observability_config,
+            self.story_id,
+            turn_index,
+            player_input,
+        );
+        let result = self.engine.run_turn(request, control, &ConsoleTurnEventSink, &trace).await;
+        let trace_outcome = trace_outcome(&trace, &result);
+        if let Ok(story_commit) = &result {
+            trace.bind(vec![Attribute::u64(
+                TRACE_METADATA_TURN_NUMBER,
+                story_commit.turn.turn_number.value(),
+            )]);
+        }
+        trace.finish(trace_outcome);
+        result.map_err(anyhow::Error::from)
+    }
+}
+
+async fn run_demo_turns(observability_config: &ObservabilityConfig) -> anyhow::Result<()> {
+    let plan = DemoPlan::load()?;
+    let engine =
+        AiseEngine::new(build_engine_config(plan.pipeline_config.clone())?).context("engine initialization failed")?;
     let story = engine
         .create_story(default_story_creation_spec()?)
         .await
         .map_err(|error| anyhow::anyhow!(error))?;
-    let request = TurnRequest {
-        story_id: story.story_id.clone(),
-        idempotency_key: IdempotencyKey::try_new(DEFAULT_IDEMPOTENCY_KEY).context("invalid default idempotency key")?,
-        player_input: DEFAULT_PLAYER_INPUT.to_owned(),
+    let (session, content) = begin_demo_session(observability_config);
+    let run = DemoRun {
+        engine: &engine,
+        story_id: &story.story_id,
+        session: &session,
+        content: &content,
+        observability_config,
+        turn_timeout: plan.turn_timeout,
     };
-    let control = TurnControl::new(Instant::now() + DEFAULT_TURN_TIMEOUT, TurnCancellation::new());
-    let (session, mut trace) = begin_default_trace(observability_config, &story.story_id);
-    let result = engine.run_turn(request, control, &ConsoleTurnEventSink, &trace).await;
-    let trace_outcome = trace_outcome(&trace, &result);
-    let status = trace_outcome.status;
-    if let Ok(story_commit) = &result {
-        trace.bind(vec![Attribute::u64(
-            TRACE_METADATA_TURN_NUMBER,
-            story_commit.turn.turn_number.value(),
-        )]);
-    }
-    trace.finish(trace_outcome);
+    let result = run.run_turns(&plan.player_inputs).await;
+    let status = if result.is_ok() {
+        ObservationStatus::Ok
+    } else {
+        ObservationStatus::Error
+    };
     session.finish(SessionOutcome {
         status,
         metadata: Vec::new(),
     });
-    let result = result.context("default turn failed")?;
+    result
+}
 
-    println!("{}", result.turn.turn_segment.text());
-    Ok(())
+fn print_turn(turn_index: usize, story_commit: &StoryCommit) {
+    println!("===== turn {turn_index} =====");
+    println!("{}", story_commit.turn.turn_segment.text());
+    match &story_commit.summary {
+        Change::Unchanged => println!("----- summary: unchanged -----"),
+        Change::Replaced(summary) => println!(
+            "----- summary: replaced, covered_through={} -----\n{}",
+            summary.covered_through.value(),
+            summary.text
+        ),
+    }
 }
 
 fn default_story_creation_spec() -> anyhow::Result<StoryCreationSpec> {
@@ -116,12 +228,12 @@ fn default_story_creation_spec() -> anyhow::Result<StoryCreationSpec> {
     })
 }
 
-fn build_engine_config() -> anyhow::Result<EngineConfig> {
+fn build_engine_config(pipeline_config: PipelineConfig) -> anyhow::Result<EngineConfig> {
     Ok(EngineConfig {
         llm_config: load_llm_config()?,
         prompt_config: load_prompt_config()?,
         persistence_config: Default::default(),
-        pipeline_config: Default::default(),
+        pipeline_config,
     })
 }
 
@@ -198,7 +310,7 @@ fn initialize_observability() -> (ObservabilityConfig, ObservabilityRuntime) {
     (config, components.runtime)
 }
 
-fn begin_default_trace(config: &ObservabilityConfig, story_id: &StoryId) -> (ObservationSession, Trace) {
+fn begin_demo_session(config: &ObservabilityConfig) -> (ObservationSession, ContentCapture) {
     let content = ContentCapture::new(ObservabilityContentConfig {
         policy: config.content_policy.clone(),
         max_field_bytes: config.max_field_bytes,
@@ -214,18 +326,30 @@ fn begin_default_trace(config: &ObservabilityConfig, story_id: &StoryId) -> (Obs
         },
         content.clone(),
     );
+    tracing::info!(session_id, "observation session started");
+    (session, content)
+}
+
+fn begin_turn_trace(
+    session: &ObservationSession,
+    content: &ContentCapture,
+    config: &ObservabilityConfig,
+    story_id: &StoryId,
+    turn_index: usize,
+    player_input: &str,
+) -> Trace {
     let mut trace = session.begin_trace(TraceSpec {
-        name: "default-turn",
-        input: content.encode(&DEFAULT_PLAYER_INPUT, content.max_observation_bytes()).content,
+        name: "demo-turn",
+        input: content.encode(&player_input, content.max_observation_bytes()).content,
         metadata: vec![
             Attribute::string(TRACE_ENVIRONMENT, config.environment.clone()),
             Attribute::string(TRACE_RELEASE, config.release.clone()),
         ],
-        tags: vec!["story-turn".to_owned()],
+        tags: vec!["story-turn".to_owned(), format!("demo-turn-{turn_index}")],
     });
     trace.bind(vec![Attribute::string(TRACE_METADATA_STORY_ID, story_id.to_string())]);
-    tracing::info!(session_id, story_id = %story_id, "observation session started");
-    (session, trace)
+    tracing::info!(story_id = %story_id, turn_index, "observation trace started");
+    trace
 }
 
 fn trace_outcome(trace: &Trace, result: &Result<StoryCommit, EngineError>) -> TraceOutcome {

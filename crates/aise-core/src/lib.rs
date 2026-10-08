@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-mod pipeline;
+pub mod pipeline;
 pub mod trace;
 
 pub mod core;
