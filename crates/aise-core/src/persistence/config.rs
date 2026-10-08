@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-const DEFAULT_MAX_RECENT_TURNS: usize = 16;
+const DEFAULT_MAX_RECENT_TURNS: usize = 4096;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

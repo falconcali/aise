@@ -3,6 +3,7 @@ use crate::core::{
 };
 use crate::llm::LlmGateway;
 use crate::persistence::StoryStore;
+use crate::pipeline::PipelineConfig;
 use crate::pipeline::baseline::{BaselineInput, BaselinePipeline};
 use crate::pipeline::commit::{CommitInput, CommitPipeline};
 use crate::pipeline::common::{PipelineError, PipelineRunner};
@@ -11,6 +12,7 @@ use crate::pipeline::generate::{GenerateInput, GeneratePipeline};
 use crate::pipeline::plan::{PlanInput, PlanPipeline};
 use crate::pipeline::repair::{RepairInput, RepairPipeline};
 use crate::pipeline::retrieval::{RetrievalInput, RetrievalPipeline};
+use crate::pipeline::summary::{SummaryInput, SummaryPipeline};
 use crate::pipeline::think::{ThinkInput, ThinkPipeline};
 use crate::pipeline::validate::{ValidateInput, ValidatePipeline, ValidationDecision};
 use crate::prompt::Prompt;
@@ -26,11 +28,17 @@ pub struct Runtime {
     validate: ValidatePipeline,
     repair: RepairPipeline,
     extract: ExtractPipeline,
+    summary: SummaryPipeline,
     commit: CommitPipeline,
 }
 
 impl Runtime {
-    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, story_store: Arc<dyn StoryStore>) -> Self {
+    pub fn new(
+        gateway: Arc<LlmGateway>,
+        prompt: Arc<Prompt>,
+        story_store: Arc<dyn StoryStore>,
+        pipeline_config: PipelineConfig,
+    ) -> Self {
         Self {
             baseline: BaselinePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&story_store)),
             plan: PlanPipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&story_store)),
@@ -43,6 +51,12 @@ impl Runtime {
             },
             repair: RepairPipeline,
             extract: ExtractPipeline,
+            summary: SummaryPipeline::new(
+                Arc::clone(&gateway),
+                Arc::clone(&prompt),
+                Arc::clone(&story_store),
+                pipeline_config.summary,
+            ),
             commit: CommitPipeline::new(Arc::clone(&story_store)),
         }
     }
@@ -147,12 +161,19 @@ impl Runtime {
 
         let extract_output = pipeline_runner.run(&self.extract, extract_input, story_ctx).await?;
 
+        let summary_input = SummaryInput {
+            pending_turn_number: story_ctx.turn_number.increment(),
+        };
+
+        let summary_output = pipeline_runner.run(&self.summary, summary_input, story_ctx).await?;
+
         let commit_input: CommitInput = CommitInput {
             player_contribution: extract_output.player_contribution,
             idempotency_key: turn_request.idempotency_key,
             turn_segment: TurnSegment::new(extract_output.result),
             world_change: WorldChange {},
             turn_evaluation: TurnEvaluation {},
+            summary: summary_output.summary,
         };
 
         pipeline_runner.run(&self.commit, commit_input, story_ctx).await

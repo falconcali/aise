@@ -1,5 +1,6 @@
 use crate::llm::LlmConfig;
 use crate::persistence::PersistanceConfig;
+use crate::pipeline::PipelineConfig;
 use crate::prompt::PromptConfig;
 use serde::Deserialize;
 
@@ -9,6 +10,7 @@ pub struct EngineConfig {
     pub llm_config: LlmConfig,
     pub prompt_config: PromptConfig,
     pub persistence_config: PersistanceConfig,
+    pub pipeline_config: PipelineConfig,
 }
 
 impl Default for EngineConfig {
@@ -17,6 +19,7 @@ impl Default for EngineConfig {
             llm_config: LlmConfig::default(),
             prompt_config: PromptConfig::default(),
             persistence_config: PersistanceConfig::default(),
+            pipeline_config: PipelineConfig::default(),
         }
     }
 }

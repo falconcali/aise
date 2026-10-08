@@ -1,4 +1,4 @@
-use crate::core::{StoryContext, TurnStatus};
+use crate::core::{StoryContext, Turn, TurnStatus};
 use crate::persistence::StoryStore;
 use crate::pipeline::common::{PipelineError, PipelineStage};
 
@@ -11,9 +11,11 @@ pub(in crate::pipeline) fn story_summary(story_ctx: &StoryContext) -> Option<&st
 }
 
 pub(in crate::pipeline) fn recent_story(story_ctx: &StoryContext) -> String {
-    story_ctx
-        .rencent_turns
-        .iter()
+    turns_story(story_ctx.rencent_turns.iter())
+}
+
+pub(in crate::pipeline) fn turns_story<'a>(turns: impl Iterator<Item = &'a Turn>) -> String {
+    turns
         .filter(|turn| matches!(turn.turn_status, TurnStatus::Accepted))
         .map(|turn| turn.turn_segment.text().trim())
         .filter(|segment| !segment.is_empty())

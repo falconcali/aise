@@ -15,6 +15,7 @@ pub enum PipelineStage {
     Validate,
     Repair,
     Extract,
+    Summary,
     Commit,
 }
 
@@ -29,6 +30,7 @@ impl PipelineStage {
             PipelineStage::Validate => "validate",
             PipelineStage::Repair => "repair",
             PipelineStage::Extract => "extract",
+            PipelineStage::Summary => "summary",
             PipelineStage::Commit => "commit",
         }
     }

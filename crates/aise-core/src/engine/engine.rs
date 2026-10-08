@@ -32,7 +32,7 @@ impl AiseEngine {
         let prompt = AiseFactory.create_prompt(engine_config.prompt_config)?;
         let store = AiseFactory.create_story_store(engine_config.persistence_config);
         Ok(Self {
-            runtime: Runtime::new(gateway, Arc::new(prompt), Arc::clone(&store)),
+            runtime: Runtime::new(gateway, Arc::new(prompt), Arc::clone(&store), engine_config.pipeline_config),
             story_store: store,
         })
     }

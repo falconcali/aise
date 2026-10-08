@@ -96,7 +96,15 @@ fn bundled_catalog_has_expected_prompts() {
     let prompt = bundled_prompt();
     let mut prompt_ids = prompt.prompt_ids().collect::<Vec<_>>();
     prompt_ids.sort_unstable();
-    assert_eq!(prompt_ids, vec![BASELINE_PROMPT_ID, "generate.generate_story", PLAN_PROMPT_ID]);
+    assert_eq!(
+        prompt_ids,
+        vec![
+            BASELINE_PROMPT_ID,
+            "generate.generate_story",
+            PLAN_PROMPT_ID,
+            "summary.summarize_story"
+        ]
+    );
 }
 
 #[test]

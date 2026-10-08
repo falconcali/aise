@@ -1,6 +1,6 @@
 use crate::core::{
-    Change, IdempotencyKey, PlayerContribution, StoryCommit, StoryContext, Turn, TurnControl, TurnEvaluation,
-    TurnEventSink, TurnNumber, TurnSegment, TurnStatus, WorldChange,
+    Change, IdempotencyKey, PlayerContribution, StoryCommit, StoryContext, StorySummary, Turn, TurnControl,
+    TurnEvaluation, TurnEventSink, TurnNumber, TurnSegment, TurnStatus, WorldChange,
 };
 use crate::persistence::StoryStore;
 use crate::pipeline::commit::commit_trace;
@@ -16,6 +16,7 @@ pub struct CommitInput {
     pub turn_segment: TurnSegment,
     pub world_change: WorldChange,
     pub turn_evaluation: TurnEvaluation,
+    pub summary: Change<StorySummary>,
 }
 
 pub struct CommitPipeline {
@@ -55,7 +56,7 @@ impl Pipeline for CommitPipeline {
                 turn_evaluation: input.turn_evaluation,
                 turn_status: TurnStatus::Accepted,
             },
-            summary: Change::Unchanged,
+            summary: input.summary,
         };
 
         let commit_observation = commit_trace::begin_commit(observation, &story_commit);

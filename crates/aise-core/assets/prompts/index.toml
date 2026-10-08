@@ -15,3 +15,9 @@ id = "generate.generate_story"
 csi = "csi/generate-generate-story.md.j2"
 rc = "rc/generate-generate-story.md.j2"
 fti = "fti/generate-generate-story.md.j2"
+
+[[prompts]]
+id = "summary.summarize_story"
+csi = "csi/summary-summarize-story.md.j2"
+rc = "rc/summary-summarize-story.md.j2"
+fti = "fti/summary-summarize-story.md.j2"

@@ -121,6 +121,7 @@ fn build_engine_config() -> anyhow::Result<EngineConfig> {
         llm_config: load_llm_config()?,
         prompt_config: load_prompt_config()?,
         persistence_config: Default::default(),
+        pipeline_config: Default::default(),
     })
 }
 
