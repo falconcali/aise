@@ -33,7 +33,7 @@ fn summary_vars(story_ctx: &StoryContext, covered_turns: usize, story_opening: S
         (STORY_OPENING_VAR.to_owned(), Value::String(story_opening)),
         (
             STORY_TO_SUMMARIZE_VAR.to_owned(),
-            Value::String(pipeline_prompt::turns_story(story_ctx.rencent_turns.iter().take(covered_turns))),
+            Value::String(pipeline_prompt::turns_story(story_ctx.recent_turns.iter().take(covered_turns))),
         ),
     ])
 }

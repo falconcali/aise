@@ -95,10 +95,10 @@ fn vars_with_summary_carry_trimmed_summary_and_segments_only() {
     let mut story_ctx = StoryContext::new();
     story_ctx.summary = Some(summary("  Earlier events.  ", 1));
     story_ctx
-        .rencent_turns
+        .recent_turns
         .push_back(turn(2, "The door creaks.", TurnStatus::Accepted));
     story_ctx
-        .rencent_turns
+        .recent_turns
         .push_back(turn(3, "The hall is dark.", TurnStatus::Accepted));
     let vars = player_input_vars(&story_ctx, "I look around.", String::new());
 
@@ -126,7 +126,7 @@ async fn new_story_runtime_context_orders_opening_recent_story_and_input() {
     let store = StoryStoreMem::new();
     let mut story_ctx = StoryContext::new();
     story_ctx
-        .rencent_turns
+        .recent_turns
         .push_back(turn(1, "The door creaks.", TurnStatus::Accepted));
     let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").Opening;
 
@@ -145,7 +145,7 @@ async fn summarized_story_runtime_context_omits_opening() {
     let mut story_ctx = StoryContext::new();
     story_ctx.summary = Some(summary("Earlier events.", 1));
     story_ctx
-        .rencent_turns
+        .recent_turns
         .push_back(turn(2, "The door creaks.", TurnStatus::Accepted));
 
     let content = runtime_context(&story_ctx, "I wave.").await;

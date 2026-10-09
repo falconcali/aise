@@ -67,7 +67,7 @@ pub struct StoryContext {
     pub player: RoleId,
     pub turn_number: TurnNumber,
     pub summary: Option<StorySummary>,
-    pub rencent_turns: VecDeque<Turn>,
+    pub recent_turns: VecDeque<Turn>,
     pub life_cycle: StoryLifeCycle,
     pub world_state: WorldState,
 }
@@ -85,7 +85,7 @@ impl StoryContext {
             player: RoleId::try_new("player").expect("valid default role id"),
             turn_number: TurnNumber::new(0),
             summary: None,
-            rencent_turns: VecDeque::new(),
+            recent_turns: VecDeque::new(),
             life_cycle: StoryLifeCycle::Active,
             world_state: WorldState {},
         }

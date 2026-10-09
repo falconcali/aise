@@ -60,7 +60,7 @@ async fn creates_and_loads_story_context_and_info() {
     assert_eq!(loaded.player, spec.player_role);
     assert_eq!(loaded.turn_number.value(), 0);
     assert!(loaded.summary.is_none());
-    assert!(loaded.rencent_turns.is_empty());
+    assert!(loaded.recent_turns.is_empty());
 
     let loaded_info = store.get_info(&spec.story_id).await.expect("story info should load");
     assert_eq!(loaded_info.story_id, info.story_id);
@@ -102,7 +102,7 @@ async fn commits_turn_and_returns_idempotent_result() {
 
     let loaded = store.load(&spec.story_id).await.expect("story should load");
     assert_eq!(loaded.turn_number.value(), 1);
-    assert_eq!(loaded.rencent_turns.len(), 1);
+    assert_eq!(loaded.recent_turns.len(), 1);
 }
 
 #[tokio::test]
@@ -133,7 +133,7 @@ async fn removes_turns_covered_by_summary_before_window_trim() {
     );
     assert_eq!(
         loaded
-            .rencent_turns
+            .recent_turns
             .iter()
             .map(|turn| turn.turn_number.value())
             .collect::<Vec<_>>(),

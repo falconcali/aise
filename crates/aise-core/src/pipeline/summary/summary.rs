@@ -72,7 +72,7 @@ impl SummaryPipeline {
         if self.config.summary_turn_count == 0 {
             return 0;
         }
-        (story_ctx.rencent_turns.len() + 1).saturating_sub(self.config.summary_turn_count)
+        (story_ctx.recent_turns.len() + 1).saturating_sub(self.config.summary_turn_count)
     }
 }
 
@@ -99,7 +99,7 @@ impl Pipeline for SummaryPipeline {
             });
         }
 
-        let covered_through = story_ctx.rencent_turns[covered_turns - 1].turn_number.clone();
+        let covered_through = story_ctx.recent_turns[covered_turns - 1].turn_number.clone();
         let summary_observation =
             summary_trace::begin_summary(observation, &input.pending_turn_number, covered_turns, &covered_through);
         let result = self

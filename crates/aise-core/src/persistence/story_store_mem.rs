@@ -37,8 +37,8 @@ impl StoryStoreMem {
     }
 
     fn adjust_rencent_turns(context: &mut StoryContext, max_rencent_turns: usize) {
-        while context.rencent_turns.len() > max_rencent_turns {
-            context.rencent_turns.pop_front();
+        while context.recent_turns.len() > max_rencent_turns {
+            context.recent_turns.pop_front();
         }
 
         let Some(summary) = context.summary.as_ref() else {
@@ -47,11 +47,11 @@ impl StoryStoreMem {
 
         let covered_through = summary.covered_through.value();
         while context
-            .rencent_turns
+            .recent_turns
             .front()
             .is_some_and(|turn| turn.turn_number.value() <= covered_through)
         {
-            context.rencent_turns.pop_front();
+            context.recent_turns.pop_front();
         }
     }
 }
@@ -77,7 +77,7 @@ impl StoryStore for StoryStoreMem {
             player: spec.player_role,
             turn_number: TurnNumber::new(0),
             summary: None,
-            rencent_turns: std::collections::VecDeque::new(),
+            recent_turns: std::collections::VecDeque::new(),
             life_cycle: StoryLifeCycle::Active,
             world_state: WorldState {},
         };
@@ -150,7 +150,7 @@ impl StoryStore for StoryStoreMem {
         }
         let mut next_context = story.context.clone();
         next_context.turn_number = commit.turn.turn_number.clone();
-        next_context.rencent_turns.push_back(commit.turn.clone());
+        next_context.recent_turns.push_back(commit.turn.clone());
         if let crate::core::Change::Replaced(summary) = &commit.summary {
             if summary.covered_through.value() > commit.turn.turn_number.value() {
                 return Err(PersistenceError::ConstraintViolation {

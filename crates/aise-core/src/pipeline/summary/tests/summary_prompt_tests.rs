@@ -83,9 +83,9 @@ async fn runtime_context(story_ctx: &StoryContext, covered_turns: usize) -> Stri
 fn vars_carry_only_the_covered_leading_turns() {
     let mut story_ctx = StoryContext::new();
     story_ctx.summary = Some(summary("  Earlier events.  "));
-    story_ctx.rencent_turns.push_back(accepted_turn(2, "The door creaks."));
-    story_ctx.rencent_turns.push_back(accepted_turn(3, "The hall is dark."));
-    story_ctx.rencent_turns.push_back(accepted_turn(4, "A candle flickers."));
+    story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
+    story_ctx.recent_turns.push_back(accepted_turn(3, "The hall is dark."));
+    story_ctx.recent_turns.push_back(accepted_turn(4, "A candle flickers."));
 
     let vars = summary_vars(&story_ctx, 2, String::new());
 
@@ -97,7 +97,7 @@ fn vars_carry_only_the_covered_leading_turns() {
 #[tokio::test]
 async fn first_summary_context_has_opening_then_story_to_summarize() {
     let mut story_ctx = StoryContext::new();
-    story_ctx.rencent_turns.push_back(accepted_turn(1, "The door creaks."));
+    story_ctx.recent_turns.push_back(accepted_turn(1, "The door creaks."));
     let store = StoryStoreMem::new();
     let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").Opening;
 
@@ -113,8 +113,8 @@ async fn first_summary_context_has_opening_then_story_to_summarize() {
 async fn merge_context_orders_previous_summary_then_story_to_summarize() {
     let mut story_ctx = StoryContext::new();
     story_ctx.summary = Some(summary("Earlier events."));
-    story_ctx.rencent_turns.push_back(accepted_turn(2, "The door creaks."));
-    story_ctx.rencent_turns.push_back(accepted_turn(3, "The hall is dark."));
+    story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
+    story_ctx.recent_turns.push_back(accepted_turn(3, "The hall is dark."));
 
     let content = runtime_context(&story_ctx, 1).await;
 

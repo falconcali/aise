@@ -46,12 +46,12 @@ fn summary_is_trimmed() {
 fn recent_story_skips_rejected_turns_and_blank_segments() {
     let mut story_ctx = StoryContext::new();
     story_ctx
-        .rencent_turns
+        .recent_turns
         .push_back(turn(1, "The door creaks.", TurnStatus::Rejected));
     story_ctx
-        .rencent_turns
+        .recent_turns
         .push_back(turn(2, "  The hall is dark.  ", TurnStatus::Accepted));
-    story_ctx.rencent_turns.push_back(turn(3, "  ", TurnStatus::Accepted));
+    story_ctx.recent_turns.push_back(turn(3, "  ", TurnStatus::Accepted));
 
     assert_eq!(recent_story(&story_ctx), "The hall is dark.");
 }
@@ -78,7 +78,7 @@ async fn opening_is_loaded_when_summary_is_absent_even_with_recent_story() {
     let store = StoryStoreMem::new();
     let mut story_ctx = StoryContext::new();
     story_ctx
-        .rencent_turns
+        .recent_turns
         .push_back(turn(1, "The door creaks.", TurnStatus::Accepted));
 
     let opening = load_story_opening(PipelineStage::Plan, &story_ctx, &store)

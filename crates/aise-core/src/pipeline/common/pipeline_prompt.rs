@@ -11,7 +11,7 @@ pub(in crate::pipeline) fn story_summary(story_ctx: &StoryContext) -> Option<&st
 }
 
 pub(in crate::pipeline) fn recent_story(story_ctx: &StoryContext) -> String {
-    turns_story(story_ctx.rencent_turns.iter())
+    turns_story(story_ctx.recent_turns.iter())
 }
 
 pub(in crate::pipeline) fn turns_story<'a>(turns: impl Iterator<Item = &'a Turn>) -> String {

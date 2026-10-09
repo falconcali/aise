@@ -104,7 +104,7 @@ fn accepted_turn(number: u64) -> Turn {
 fn story_context(turn_count: u64) -> StoryContext {
     let mut story_ctx = StoryContext::new();
     for number in 1..=turn_count {
-        story_ctx.rencent_turns.push_back(accepted_turn(number));
+        story_ctx.recent_turns.push_back(accepted_turn(number));
     }
     story_ctx.turn_number = TurnNumber::new(turn_count);
     story_ctx
