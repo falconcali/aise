@@ -1,6 +1,6 @@
 use crate::core::asset::AssetError;
 use crate::core::role::{RoleActor, RoleBody};
-use crate::core::{BoundedText, FactBody, FactId, NarrativeGraph, RoleId, RumorBody, RumorId, SemanticVersion};
+use crate::core::{BoundedText, FactBody, FactId, NarrativeGraph, PackId, RoleId, RumorBody, RumorId, SemanticVersion};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[serde(deny_unknown_fields)]
 pub struct StoryPack {
     pub spec: StoryPackSpec,
+    pub pack_id: PackId,
     pub meta: StoryPackMeta,
     pub profile: StoryPackProfile,
     pub roles: BTreeMap<RoleId, RoleBody>,

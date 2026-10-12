@@ -1,10 +1,10 @@
 use super::*;
+use crate::core::tests::store_with_default_pack;
 use crate::core::{
     IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus,
     WorldChange,
 };
 use crate::prompt::PromptConfig;
-use crate::test_support::store_with_default_pack;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
 };
@@ -113,7 +113,7 @@ async fn new_story_runtime_context_has_opening_then_input() {
     let store = store_with_default_pack().await;
     let opening = store
         .pack_store()
-        .get_pack(&story_ctx.pack_ref.pack_id)
+        .get_pack(&story_ctx.pack_ref)
         .await
         .expect("pack loads")
         .opening
@@ -136,7 +136,7 @@ async fn new_story_runtime_context_orders_opening_recent_story_and_input() {
         .push_back(turn(1, "The door creaks.", TurnStatus::Accepted));
     let opening = store
         .pack_store()
-        .get_pack(&story_ctx.pack_ref.pack_id)
+        .get_pack(&story_ctx.pack_ref)
         .await
         .expect("pack loads")
         .opening

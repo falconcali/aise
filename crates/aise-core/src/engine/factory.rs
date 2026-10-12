@@ -1,6 +1,6 @@
 use crate::core::{
-    AssetConfig, CharacterCard, CharacterCardRef, NarrativeGraph, PackId, PackRef, PlayerId, RoleActor, RoleId,
-    StoryId, StoryInstanceInfo, StoryInstanceSpec, StoryPack,
+    AssetConfig, CharacterCard, CharacterCardRef, NarrativeGraph, PlayerId, RoleActor, RoleId, StoryAssetSpec, StoryId,
+    StoryInstanceInfo, StoryInstanceSpec, StoryPack,
 };
 use crate::engine::EngineError;
 use crate::llm::{LlmConfig, LlmGateway, LlmProviderType, OpenAiCompatProvider};
@@ -11,66 +11,51 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub struct StoryCreationSpec {
-    pub pack_ref: PackRef,
-    pub cast: BTreeMap<RoleId, RoleActor>,
+    pub story_pack: StoryPack,
+    pub cast: BTreeMap<RoleId, RoleActorSpec>,
     pub player_id: PlayerId,
     pub player_role: RoleId,
+}
+
+pub enum RoleActorSpec {
+    Default,
+    Card(Box<CharacterCard>),
+}
+
+struct FrozenStory {
+    assets: StoryAssetSpec,
+    instance: StoryInstanceSpec,
+}
+
+struct FrozenCast {
+    actors: BTreeMap<RoleId, RoleActor>,
+    cards: Vec<(CharacterCardRef, CharacterCard)>,
 }
 
 pub struct AiseFactory;
 
 impl AiseFactory {
-    pub async fn import_story_pack(
-        &self,
-        store: Arc<Store>,
-        asset_config: &AssetConfig,
-        json: &str,
-    ) -> Result<PackRef, EngineError> {
-        let story_pack = StoryPack::from_json(json, asset_config)?;
-        store
-            .pack_store()
-            .import_pack(self.generate_pack_id(), story_pack)
-            .await
-            .map_err(EngineError::from)
-    }
-
-    pub async fn import_character_card(
-        &self,
-        store: Arc<Store>,
-        asset_config: &AssetConfig,
-        json: &str,
-    ) -> Result<CharacterCardRef, EngineError> {
-        let card = CharacterCard::from_json(json, asset_config)?;
-        store.pack_store().import_character_card(card).await.map_err(EngineError::from)
-    }
-
     pub async fn create_story(
         &self,
         store: Arc<Store>,
+        asset_config: &AssetConfig,
         spec: StoryCreationSpec,
     ) -> Result<StoryInstanceInfo, EngineError> {
-        let story_pack = store.pack_store().get_pack(&spec.pack_ref.pack_id).await?;
-        let cast = story_pack.resolve_cast(&spec.player_role, spec.cast)?;
-        self.ensure_cast_cards(&store, &cast).await?;
-        let narrative = story_pack
-            .narrative
-            .as_ref()
-            .map(NarrativeGraph::initial_state)
-            .unwrap_or_default();
-        let story_instance_spec = StoryInstanceSpec {
-            story_id: self.generate_story_id(),
-            pack_ref: spec.pack_ref,
-            cast,
-            player_id: spec.player_id,
-            player_role: spec.player_role,
-            narrative,
-        };
-
-        store.story_store().create(story_instance_spec).await.map_err(EngineError::from)
+        let story = self.freeze_story(self.generate_story_id(), spec, asset_config)?;
+        let story_id = story.instance.story_id.clone();
+        store.pack_store().retain(&story_id, story.assets).await?;
+        match store.story_store().create(story.instance).await {
+            Ok(info) => Ok(info),
+            Err(error) => {
+                self.release_story_assets(&store, &story_id).await;
+                Err(EngineError::from(error))
+            }
+        }
     }
 
     pub async fn remove_story(&self, store: Arc<Store>, story_id: &StoryId) -> Result<(), EngineError> {
-        store.story_store().remove(story_id).await.map_err(EngineError::from)
+        store.story_store().remove(story_id).await?;
+        store.pack_store().release(story_id).await.map_err(EngineError::from)
     }
 
     pub fn create_llm_gateway(&self, llm_config: LlmConfig) -> Arc<LlmGateway> {
@@ -90,21 +75,76 @@ impl AiseFactory {
         Arc::new(Store::new(persistence_config))
     }
 
-    async fn ensure_cast_cards(&self, store: &Store, cast: &BTreeMap<RoleId, RoleActor>) -> Result<(), EngineError> {
-        for actor in cast.values() {
-            if let RoleActor::Card(card_ref) = actor {
-                store.pack_store().get_character_card(card_ref).await?;
-            }
+    fn freeze_story(
+        &self,
+        story_id: StoryId,
+        spec: StoryCreationSpec,
+        asset_config: &AssetConfig,
+    ) -> Result<FrozenStory, EngineError> {
+        spec.story_pack.validate(asset_config)?;
+        let frozen_cast = self.freeze_cast(spec.cast, asset_config)?;
+        let cast = spec.story_pack.resolve_cast(&spec.player_role, frozen_cast.actors)?;
+        let pack_ref = spec.story_pack.pack_ref()?;
+        let narrative = spec
+            .story_pack
+            .narrative
+            .as_ref()
+            .map(NarrativeGraph::initial_state)
+            .unwrap_or_default();
+        Ok(FrozenStory {
+            instance: StoryInstanceSpec {
+                story_id,
+                pack_ref: pack_ref.clone(),
+                cast,
+                player_id: spec.player_id,
+                player_role: spec.player_role,
+                narrative,
+            },
+            assets: StoryAssetSpec {
+                pack_ref,
+                pack: spec.story_pack,
+                cards: frozen_cast.cards,
+            },
+        })
+    }
+
+    fn freeze_cast(
+        &self,
+        cast: BTreeMap<RoleId, RoleActorSpec>,
+        asset_config: &AssetConfig,
+    ) -> Result<FrozenCast, EngineError> {
+        let mut frozen_cast = FrozenCast {
+            actors: BTreeMap::new(),
+            cards: Vec::new(),
+        };
+        for (role_id, actor) in cast {
+            let actor = match actor {
+                RoleActorSpec::Default => RoleActor::Default,
+                RoleActorSpec::Card(card) => {
+                    card.validate(asset_config)?;
+                    let card_ref = card.card_ref()?;
+                    frozen_cast.cards.push((card_ref.clone(), *card));
+                    RoleActor::Card(card_ref)
+                }
+            };
+            frozen_cast.actors.insert(role_id, actor);
         }
-        Ok(())
+        Ok(frozen_cast)
+    }
+
+    async fn release_story_assets(&self, store: &Store, story_id: &StoryId) {
+        if let Err(error) = store.pack_store().release(story_id).await {
+            tracing::error!(
+                target: "aise::engine",
+                story_id = %story_id,
+                error = %error,
+                "story asset release failed"
+            );
+        }
     }
 
     fn generate_story_id(&self) -> StoryId {
         StoryId::try_new(format!("story-{}", Uuid::new_v4())).expect("generated story id must be valid")
-    }
-
-    fn generate_pack_id(&self) -> PackId {
-        PackId::try_new(format!("pack-{}", Uuid::new_v4())).expect("generated pack id must be valid")
     }
 }
 

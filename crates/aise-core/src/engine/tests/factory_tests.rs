@@ -1,85 +1,141 @@
 use super::*;
-use crate::core::{SemanticVersion, Sha256Digest};
-use crate::test_support::{SNAKE_PACK_JSON, XU_XIAN_CARD_JSON};
-
-const LEGACY_V5_PACK_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/snake_pack.json"));
+use crate::core::tests::{snake_pack, xu_xian_card};
+use crate::core::{BoundedText, PackRef};
+use crate::persistence::PersistenceError;
 
 fn role_id(value: &str) -> RoleId {
     RoleId::try_new(value).expect("test role id should be valid")
 }
 
-fn creation_spec(pack_ref: PackRef, cast: BTreeMap<RoleId, RoleActor>) -> StoryCreationSpec {
+fn snake_pack_ref() -> PackRef {
+    snake_pack().pack_ref().expect("pack ref should compute")
+}
+
+fn creation_spec(cast: BTreeMap<RoleId, RoleActorSpec>, player_role: &str) -> StoryCreationSpec {
     StoryCreationSpec {
-        pack_ref,
+        story_pack: snake_pack(),
         cast,
         player_id: PlayerId::try_new("player").expect("test player id should be valid"),
-        player_role: role_id("xu_xian"),
+        player_role: role_id(player_role),
     }
 }
 
-async fn import_snake_pack(store: &Arc<Store>) -> PackRef {
-    AiseFactory
-        .import_story_pack(Arc::clone(store), &AssetConfig::default(), SNAKE_PACK_JSON)
-        .await
-        .expect("snake pack should import")
+async fn create_story(
+    store: &Arc<Store>,
+    asset_config: &AssetConfig,
+    spec: StoryCreationSpec,
+) -> Result<StoryInstanceInfo, EngineError> {
+    AiseFactory.create_story(Arc::clone(store), asset_config, spec).await
 }
 
 #[tokio::test]
-async fn imported_story_pack_is_available_to_the_store() {
+async fn created_story_pins_a_frozen_pack_snapshot() {
     let store = AiseFactory.create_store(PersistanceConfig::default());
 
-    let pack_ref = import_snake_pack(&store).await;
-
-    assert!(pack_ref.pack_id.as_str().starts_with("pack-"));
-    let pack = store.pack_store().get_pack(&pack_ref.pack_id).await.expect("pack should load");
-    assert_eq!(pack_ref.version, pack.meta.version);
-}
-
-#[tokio::test]
-async fn legacy_story_pack_json_is_rejected_as_asset_error() {
-    let store = AiseFactory.create_store(PersistanceConfig::default());
-
-    let error = AiseFactory
-        .import_story_pack(store, &AssetConfig::default(), LEGACY_V5_PACK_JSON)
-        .await
-        .expect_err("legacy pack should fail");
-    assert!(matches!(error, EngineError::Asset { .. }));
-}
-
-#[tokio::test]
-async fn story_can_cast_an_imported_character_card() {
-    let store = AiseFactory.create_store(PersistanceConfig::default());
-    let pack_ref = import_snake_pack(&store).await;
-    let card_ref = AiseFactory
-        .import_character_card(Arc::clone(&store), &AssetConfig::default(), XU_XIAN_CARD_JSON)
-        .await
-        .expect("card should import");
-    let cast = BTreeMap::from([(role_id("xu_xian"), RoleActor::Card(card_ref))]);
-
-    let info = AiseFactory
-        .create_story(Arc::clone(&store), creation_spec(pack_ref, cast))
+    let info = create_story(&store, &AssetConfig::default(), creation_spec(BTreeMap::new(), "xu_xian"))
         .await
         .expect("story should be created");
 
     let story_ctx = store.story_store().load(&info.story_id).await.expect("story should load");
-    assert!(matches!(story_ctx.cast[&role_id("xu_xian")], RoleActor::Card(_)));
+    assert_eq!(story_ctx.pack_ref.pack_id, snake_pack().pack_id);
+    assert_eq!(story_ctx.pack_ref.version, snake_pack_ref().version);
+    assert_eq!(story_ctx.pack_ref.digest, snake_pack_ref().digest);
+    let pack = store
+        .pack_store()
+        .get_pack(&story_ctx.pack_ref)
+        .await
+        .expect("pack snapshot should load");
+    assert_eq!(pack.opening, snake_pack().opening);
+}
+
+#[tokio::test]
+async fn story_can_cast_a_character_card() {
+    let store = AiseFactory.create_store(PersistanceConfig::default());
+    let cast = BTreeMap::from([(role_id("xu_xian"), RoleActorSpec::Card(Box::new(xu_xian_card())))]);
+
+    let info = create_story(&store, &AssetConfig::default(), creation_spec(cast, "xu_xian"))
+        .await
+        .expect("story should be created");
+
+    let story_ctx = store.story_store().load(&info.story_id).await.expect("story should load");
+    let RoleActor::Card(card_ref) = &story_ctx.cast[&role_id("xu_xian")] else {
+        panic!("xu_xian should be cast with a card");
+    };
+    let card = store
+        .pack_store()
+        .get_character_card(card_ref)
+        .await
+        .expect("card snapshot should load");
+    assert_eq!(card.card_id, xu_xian_card().card_id);
     assert!(matches!(story_ctx.cast[&role_id("bai_suzhen")], RoleActor::Default));
 }
 
 #[tokio::test]
-async fn story_with_unknown_character_card_is_rejected() {
+async fn story_pack_violating_asset_limits_is_rejected() {
     let store = AiseFactory.create_store(PersistanceConfig::default());
-    let pack_ref = import_snake_pack(&store).await;
-    let card_ref = CharacterCardRef {
-        card_id: crate::core::CharacterCardId::try_new("ghost").expect("test card id should be valid"),
-        version: SemanticVersion::try_new("1.0.0").expect("test version should be valid"),
-        digest: Sha256Digest::try_new("digest").expect("test digest should be valid"),
+    let asset_config = AssetConfig {
+        max_label_bytes: 4,
+        ..AssetConfig::default()
     };
-    let cast = BTreeMap::from([(role_id("xu_xian"), RoleActor::Card(card_ref))]);
 
-    let error = AiseFactory
-        .create_story(store, creation_spec(pack_ref, cast))
+    let error = create_story(&store, &asset_config, creation_spec(BTreeMap::new(), "xu_xian"))
         .await
-        .expect_err("unknown card should fail");
-    assert!(matches!(error, EngineError::Persistence { .. }));
+        .expect_err("oversized pack should fail");
+
+    assert!(matches!(error, EngineError::Asset { .. }));
+    assert!(matches!(
+        store.pack_store().get_pack(&snake_pack_ref()).await,
+        Err(PersistenceError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn character_card_violating_asset_limits_is_rejected() {
+    let store = AiseFactory.create_store(PersistanceConfig::default());
+    let mut card = xu_xian_card();
+    card.name = BoundedText::try_new("x".repeat(512), "name", 1024).expect("test name should fit");
+    let cast = BTreeMap::from([(role_id("xu_xian"), RoleActorSpec::Card(Box::new(card)))]);
+
+    let error = create_story(&store, &AssetConfig::default(), creation_spec(cast, "xu_xian"))
+        .await
+        .expect_err("oversized card should fail");
+
+    assert!(matches!(error, EngineError::Asset { .. }));
+    assert!(matches!(
+        store.pack_store().get_pack(&snake_pack_ref()).await,
+        Err(PersistenceError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn non_playable_player_role_is_rejected_without_retaining_assets() {
+    let store = AiseFactory.create_store(PersistanceConfig::default());
+
+    let error = create_story(&store, &AssetConfig::default(), creation_spec(BTreeMap::new(), "bai_suzhen"))
+        .await
+        .expect_err("non playable role should fail");
+
+    assert!(matches!(error, EngineError::Asset { .. }));
+    assert!(matches!(
+        store.pack_store().get_pack(&snake_pack_ref()).await,
+        Err(PersistenceError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn removing_story_releases_its_asset_snapshots() {
+    let store = AiseFactory.create_store(PersistanceConfig::default());
+    let info = create_story(&store, &AssetConfig::default(), creation_spec(BTreeMap::new(), "xu_xian"))
+        .await
+        .expect("story should be created");
+
+    AiseFactory
+        .remove_story(Arc::clone(&store), &info.story_id)
+        .await
+        .expect("story should be removed");
+
+    assert!(matches!(
+        store.pack_store().get_pack(&snake_pack_ref()).await,
+        Err(PersistenceError::NotFound)
+    ));
 }

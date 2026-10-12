@@ -1,6 +1,6 @@
 use super::*;
+use crate::core::tests::snake_pack;
 use crate::core::{NarrativeNodeId, NodeStatus};
-use crate::test_support::snake_pack;
 use serde_json::json;
 
 fn pack_with_narrative() -> StoryPack {

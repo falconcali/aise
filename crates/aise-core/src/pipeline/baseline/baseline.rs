@@ -35,7 +35,7 @@ impl BaselinePipeline {
         let story_pack = self
             .store
             .pack_store()
-            .get_pack(&story_ctx.pack_ref.pack_id)
+            .get_pack(&story_ctx.pack_ref)
             .await
             .map_err(|error| PipelineError::new(PipelineStage::Baseline, error.to_string()))?;
         baseline_narrative::project_narrative(&story_pack, story_ctx)

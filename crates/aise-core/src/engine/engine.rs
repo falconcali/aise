@@ -1,7 +1,7 @@
 use super::{AiseFactory, EngineConfig, EngineError, StoryCreationSpec};
 use crate::core::{
-    AssetConfig, CharacterCardRef, PackRef, StoryCommit, StoryId, StoryInstanceInfo, StoryLifeCycle, TurnControl,
-    TurnEvent, TurnEventSink, TurnRequest,
+    AssetConfig, StoryCommit, StoryId, StoryInstanceInfo, StoryLifeCycle, TurnControl, TurnEvent, TurnEventSink,
+    TurnRequest,
 };
 use crate::persistence::Store;
 use crate::pipeline::Runtime;
@@ -11,8 +11,6 @@ use std::sync::Arc;
 
 #[async_trait]
 pub trait Engine: Send + Sync {
-    async fn import_story_pack(&self, json: &str) -> Result<PackRef, EngineError>;
-    async fn import_character_card(&self, json: &str) -> Result<CharacterCardRef, EngineError>;
     async fn create_story(&self, spec: StoryCreationSpec) -> Result<StoryInstanceInfo, EngineError>;
     async fn remove_story(&self, story_id: &StoryId) -> Result<(), EngineError>;
     async fn get_story_info(&self, story_id: &StoryId) -> Result<StoryInstanceInfo, EngineError>;
@@ -47,20 +45,10 @@ impl AiseEngine {
 
 #[async_trait]
 impl Engine for AiseEngine {
-    async fn import_story_pack(&self, json: &str) -> Result<PackRef, EngineError> {
-        AiseFactory
-            .import_story_pack(Arc::clone(&self.store), &self.asset_config, json)
-            .await
-    }
-
-    async fn import_character_card(&self, json: &str) -> Result<CharacterCardRef, EngineError> {
-        AiseFactory
-            .import_character_card(Arc::clone(&self.store), &self.asset_config, json)
-            .await
-    }
-
     async fn create_story(&self, spec: StoryCreationSpec) -> Result<StoryInstanceInfo, EngineError> {
-        AiseFactory.create_story(Arc::clone(&self.store), spec).await
+        AiseFactory
+            .create_story(Arc::clone(&self.store), &self.asset_config, spec)
+            .await
     }
 
     async fn remove_story(&self, story_id: &StoryId) -> Result<(), EngineError> {

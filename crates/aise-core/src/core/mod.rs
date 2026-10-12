@@ -12,6 +12,9 @@ mod story;
 pub mod turn;
 mod world;
 
+#[cfg(test)]
+pub(crate) mod tests;
+
 pub use activation::ActivationRule;
 pub use asset::{
     AssetConfig, AssetError, CharacterCard, CharacterCardSpec, CharacterMeta, PlayDefinition, StoryPack, StoryPackMeta,
@@ -31,7 +34,8 @@ pub use role::{
     CharacterCardRef, CharacterProfile, DialogueExample, MemoryBody, MemoryEntry, RoleActor, RoleBody, RoleEntry,
 };
 pub use story::{
-    PackRef, StoryCommit, StoryContext, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle, StorySummary,
+    PackRef, StoryAssetSpec, StoryCommit, StoryContext, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle,
+    StorySummary,
 };
 pub use turn::{
     PlayerContribution, Turn, TurnCancellation, TurnControl, TurnEvaluation, TurnEvent, TurnEventDeliveryError,

@@ -2,7 +2,7 @@ use super::config::PackStoreConfig;
 use super::error::PersistenceError;
 use super::pack_store::PackStore;
 use super::pack_store_mem::PackStoreMem;
-use crate::core::{CharacterCard, CharacterCardRef, PackId, PackRef, StoryPack};
+use crate::core::{CharacterCard, CharacterCardRef, PackRef, StoryAssetSpec, StoryId, StoryPack};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -27,16 +27,16 @@ impl Default for PackStoreSqlite {
 
 #[async_trait]
 impl PackStore for PackStoreSqlite {
-    async fn import_pack(&self, pack_id: PackId, pack: StoryPack) -> Result<PackRef, PersistenceError> {
-        self.fake_store.import_pack(pack_id, pack).await
+    async fn retain(&self, story_id: &StoryId, assets: StoryAssetSpec) -> Result<(), PersistenceError> {
+        self.fake_store.retain(story_id, assets).await
     }
 
-    async fn get_pack(&self, pack_id: &PackId) -> Result<Arc<StoryPack>, PersistenceError> {
-        self.fake_store.get_pack(pack_id).await
+    async fn release(&self, story_id: &StoryId) -> Result<(), PersistenceError> {
+        self.fake_store.release(story_id).await
     }
 
-    async fn import_character_card(&self, card: CharacterCard) -> Result<CharacterCardRef, PersistenceError> {
-        self.fake_store.import_character_card(card).await
+    async fn get_pack(&self, pack_ref: &PackRef) -> Result<Arc<StoryPack>, PersistenceError> {
+        self.fake_store.get_pack(pack_ref).await
     }
 
     async fn get_character_card(&self, card_ref: &CharacterCardRef) -> Result<Arc<CharacterCard>, PersistenceError> {

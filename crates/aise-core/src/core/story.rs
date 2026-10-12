@@ -1,6 +1,6 @@
 use super::{
-    Change, NarrativeState, PackId, PlayerId, RoleActor, RoleId, SemanticVersion, Sha256Digest, StoryId, Turn,
-    TurnNumber, WorldState,
+    Change, CharacterCard, CharacterCardRef, NarrativeState, PackId, PlayerId, RoleActor, RoleId, SemanticVersion,
+    Sha256Digest, StoryId, StoryPack, Turn, TurnNumber, WorldState,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,13 @@ pub struct PackRef {
     pub pack_id: PackId,
     pub version: SemanticVersion,
     pub digest: Sha256Digest,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoryAssetSpec {
+    pub pack_ref: PackRef,
+    pub pack: StoryPack,
+    pub cards: Vec<(CharacterCardRef, CharacterCard)>,
 }
 
 #[derive(Debug, Clone)]

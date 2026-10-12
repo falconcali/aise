@@ -53,7 +53,7 @@ impl Pipeline for ExtractPipeline {
         let story_pack = self
             .store
             .pack_store()
-            .get_pack(&story_ctx.pack_ref.pack_id)
+            .get_pack(&story_ctx.pack_ref)
             .await
             .map_err(|error| PipelineError::new(PipelineStage::Extract, error.to_string()))?;
         let semantic_results = BTreeMap::new();

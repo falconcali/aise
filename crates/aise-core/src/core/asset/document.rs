@@ -1,5 +1,5 @@
-use crate::core::Sha256Digest;
 use crate::core::asset::{AssetConfig, AssetError, CharacterCard, StoryPack};
+use crate::core::{CharacterCardRef, PackRef, Sha256Digest};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
@@ -17,6 +17,14 @@ impl StoryPack {
     pub fn digest(&self) -> Result<Sha256Digest, AssetError> {
         canonical_digest(STORY_PACK_ASSET, self)
     }
+
+    pub fn pack_ref(&self) -> Result<PackRef, AssetError> {
+        Ok(PackRef {
+            pack_id: self.pack_id.clone(),
+            version: self.meta.version.clone(),
+            digest: self.digest()?,
+        })
+    }
 }
 
 impl CharacterCard {
@@ -28,6 +36,14 @@ impl CharacterCard {
 
     pub fn digest(&self) -> Result<Sha256Digest, AssetError> {
         canonical_digest(CHARACTER_CARD_ASSET, self)
+    }
+
+    pub fn card_ref(&self) -> Result<CharacterCardRef, AssetError> {
+        Ok(CharacterCardRef {
+            card_id: self.card_id.clone(),
+            version: self.meta.version.clone(),
+            digest: self.digest()?,
+        })
     }
 }
 

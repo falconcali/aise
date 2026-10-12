@@ -1,6 +1,6 @@
 use super::*;
+use crate::core::tests::{DEMO_PACK_JSON, SNAKE_PACK_JSON, XU_XIAN_CARD_JSON, demo_pack, snake_pack, xu_xian_card};
 use crate::core::{CharacterCardId, RoleId};
-use crate::test_support::{DEMO_PACK_JSON, SNAKE_PACK_JSON, XU_XIAN_CARD_JSON, demo_pack, snake_pack, xu_xian_card};
 
 const LEGACY_V5_PACK_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/snake_pack.json"));
 
@@ -98,4 +98,26 @@ fn digest_is_stable_hex_and_content_sensitive() {
     assert_ne!(digest, other);
     assert_eq!(digest.as_str().len(), 64);
     assert!(digest.as_str().chars().all(|ch| ch.is_ascii_hexdigit()));
+}
+
+#[test]
+fn pack_ref_pins_pack_id_version_and_digest() {
+    let pack = snake_pack();
+
+    let pack_ref = pack.pack_ref().expect("pack ref should compute");
+
+    assert_eq!(pack_ref.pack_id, pack.pack_id);
+    assert_eq!(pack_ref.version, pack.meta.version);
+    assert_eq!(pack_ref.digest, pack.digest().expect("digest should compute"));
+}
+
+#[test]
+fn card_ref_pins_card_id_version_and_digest() {
+    let card = xu_xian_card();
+
+    let card_ref = card.card_ref().expect("card ref should compute");
+
+    assert_eq!(card_ref.card_id, card.card_id);
+    assert_eq!(card_ref.version, card.meta.version);
+    assert_eq!(card_ref.digest, card.digest().expect("digest should compute"));
 }

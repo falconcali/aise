@@ -1,4 +1,4 @@
-use crate::core::{AssetConfig, CharacterCard, StoryContext, StoryPack};
+use crate::core::{AssetConfig, CharacterCard, StoryAssetSpec, StoryContext, StoryPack};
 use crate::persistence::Store;
 
 pub(crate) const SNAKE_PACK_JSON: &str =
@@ -22,10 +22,18 @@ pub(crate) fn xu_xian_card() -> CharacterCard {
 
 pub(crate) async fn store_with_default_pack() -> Store {
     let store = Store::default();
+    let story_ctx = StoryContext::new();
     store
         .pack_store()
-        .import_pack(StoryContext::new().pack_ref.pack_id, snake_pack())
+        .retain(
+            &story_ctx.story_id,
+            StoryAssetSpec {
+                pack_ref: story_ctx.pack_ref,
+                pack: snake_pack(),
+                cards: Vec::new(),
+            },
+        )
         .await
-        .expect("default pack should be stored");
+        .expect("default pack should be retained");
     store
 }

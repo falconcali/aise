@@ -1,4 +1,4 @@
-use crate::core::{AssetError, CoreError, StoryId};
+use crate::core::{CoreError, StoryId};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -13,6 +13,4 @@ pub enum PersistenceError {
     Unavailable { message: String },
     #[error("persistance invalid data: {0}")]
     InvalidData(#[from] CoreError),
-    #[error("persistance invalid asset: {0}")]
-    InvalidAsset(#[from] AssetError),
 }

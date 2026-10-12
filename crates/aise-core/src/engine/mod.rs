@@ -6,4 +6,4 @@ mod factory;
 pub use config::EngineConfig;
 pub use engine::{AiseEngine, Engine};
 pub use error::EngineError;
-pub use factory::{AiseFactory, StoryCreationSpec};
+pub use factory::{AiseFactory, RoleActorSpec, StoryCreationSpec};

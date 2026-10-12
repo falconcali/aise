@@ -1,10 +1,10 @@
 #![forbid(unsafe_code)]
 
 use aise_core::core::{
-    AssetConfig, Change, CharacterCardRef, IdempotencyKey, PackRef, PlayerId, RoleActor, RoleId, StoryCommit, StoryId,
-    StoryInstanceInfo, TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError, TurnEventSink, TurnRequest,
+    AssetConfig, Change, CharacterCard, IdempotencyKey, PlayerId, RoleId, StoryCommit, StoryId, StoryInstanceInfo,
+    StoryPack, TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError, TurnEventSink, TurnRequest,
 };
-use aise_core::engine::{AiseEngine, Engine, EngineConfig, EngineError, StoryCreationSpec};
+use aise_core::engine::{AiseEngine, Engine, EngineConfig, EngineError, RoleActorSpec, StoryCreationSpec};
 use aise_core::llm::{LlmConfig, LlmProviderType};
 use aise_core::pipeline::{PipelineConfig, SummaryConfig};
 use aise_core::prompt::PromptConfig;
@@ -208,18 +208,13 @@ fn print_turn(turn_index: usize, story_commit: &StoryCommit) {
 }
 
 async fn create_demo_story(engine: &AiseEngine) -> anyhow::Result<StoryInstanceInfo> {
-    let pack_json = read_demo_asset(DEMO_STORY_PACK_PATH).await?;
-    let card_json = read_demo_asset(DEMO_CHARACTER_CARD_PATH).await?;
-    let pack_ref = engine
-        .import_story_pack(&pack_json)
-        .await
-        .context("demo story pack import failed")?;
-    let card_ref = engine
-        .import_character_card(&card_json)
-        .await
-        .context("demo character card import failed")?;
+    let asset_config = AssetConfig::default();
+    let story_pack = StoryPack::from_json(&read_demo_asset(DEMO_STORY_PACK_PATH).await?, &asset_config)
+        .context("demo story pack parse failed")?;
+    let card = CharacterCard::from_json(&read_demo_asset(DEMO_CHARACTER_CARD_PATH).await?, &asset_config)
+        .context("demo character card parse failed")?;
     engine
-        .create_story(demo_story_creation_spec(pack_ref, card_ref)?)
+        .create_story(demo_story_creation_spec(story_pack, card)?)
         .await
         .context("demo story creation failed")
 }
@@ -230,11 +225,11 @@ async fn read_demo_asset(path: &str) -> anyhow::Result<String> {
         .with_context(|| format!("failed to read demo asset {path}"))
 }
 
-fn demo_story_creation_spec(pack_ref: PackRef, card_ref: CharacterCardRef) -> anyhow::Result<StoryCreationSpec> {
+fn demo_story_creation_spec(story_pack: StoryPack, card: CharacterCard) -> anyhow::Result<StoryCreationSpec> {
     let player_role = RoleId::try_new(DEMO_PLAYER_ROLE).context("invalid demo player role")?;
     Ok(StoryCreationSpec {
-        pack_ref,
-        cast: std::collections::BTreeMap::from([(player_role.clone(), RoleActor::Card(card_ref))]),
+        story_pack,
+        cast: std::collections::BTreeMap::from([(player_role.clone(), RoleActorSpec::Card(Box::new(card)))]),
         player_id: PlayerId::try_new(DEMO_PLAYER_ID).context("invalid demo player id")?,
         player_role,
     })

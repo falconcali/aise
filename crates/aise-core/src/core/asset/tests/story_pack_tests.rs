@@ -17,6 +17,7 @@ fn role(name: &str) -> serde_json::Value {
 fn pack_json() -> serde_json::Value {
     json!({
         "spec": "aise_story_v1",
+        "pack_id": "pack-1",
         "meta": { "creator": "aise", "version": "1.0.0" },
         "profile": {
             "title": "白蛇传",
@@ -57,6 +58,22 @@ fn deserializes_pack_with_keyed_seeds_and_optional_activation() {
     assert!(pack.seed_facts.contains_key(&FactId::try_new("fact-1").expect("valid fact id")));
     let memories = &pack.roles[&role_id("xu_xian")].seed_memories;
     assert!(memories.contains_key(&crate::core::MemoryId::try_new("memory-1").expect("valid memory id")));
+}
+
+#[test]
+fn rejects_pack_without_pack_id() {
+    let mut value = pack_json();
+    value.as_object_mut().expect("pack json is an object").remove("pack_id");
+
+    assert!(serde_json::from_value::<StoryPack>(value).is_err());
+}
+
+#[test]
+fn rejects_empty_pack_id() {
+    let mut value = pack_json();
+    value["pack_id"] = json!(" ");
+
+    assert!(serde_json::from_value::<StoryPack>(value).is_err());
 }
 
 #[test]

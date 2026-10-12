@@ -4,6 +4,7 @@ use serde_json::json;
 fn pack_json() -> serde_json::Value {
     json!({
         "spec": "aise_story_v1",
+        "pack_id": "pack-1",
         "meta": { "creator": "aise", "version": "1.0.0" },
         "profile": {
             "title": "白蛇传",

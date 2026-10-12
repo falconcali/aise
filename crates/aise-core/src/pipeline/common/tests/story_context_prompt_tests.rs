@@ -1,8 +1,8 @@
 use super::*;
+use crate::core::tests::store_with_default_pack;
 use crate::core::{
     IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, WorldChange,
 };
-use crate::test_support::store_with_default_pack;
 
 fn summary(text: &str, covered_through: u64) -> StorySummary {
     StorySummary {
