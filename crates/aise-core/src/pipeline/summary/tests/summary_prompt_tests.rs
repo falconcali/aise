@@ -99,7 +99,7 @@ async fn first_summary_context_has_opening_then_story_to_summarize() {
     let mut story_ctx = StoryContext::new();
     story_ctx.recent_turns.push_back(accepted_turn(1, "The door creaks."));
     let store = StoryStoreMem::new();
-    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").Opening;
+    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").opening;
 
     let content = runtime_context(&story_ctx, 1).await;
 

@@ -31,10 +31,12 @@ macro_rules! define_id {
 
 define_id!(CharacterId, "character_id");
 define_id!(IdempotencyKey, "idempotency_key");
-define_id!(KnowledgeSourceId, "knowledge_source_id");
 define_id!(PackId, "pack_id");
 define_id!(PlayerId, "player_id");
 define_id!(RoleId, "role_id");
 define_id!(SemanticVersion, "version");
 define_id!(Sha256Digest, "digest");
 define_id!(StoryId, "story_id");
+define_id!(MemoryId, "memory_id");
+define_id!(FactId, "fact_id");
+define_id!(RumorId, "rumor_id");

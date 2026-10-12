@@ -1,4 +1,4 @@
-use crate::core::StoryId;
+use crate::core::{CoreError, StoryId};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -11,4 +11,6 @@ pub enum PersistenceError {
     ConstraintViolation { constraint: String },
     #[error("persistance unavailable: {message}")]
     Unavailable { message: String },
+    #[error("persistance invalid data: {0}")]
+    InvalidData(#[from] CoreError),
 }

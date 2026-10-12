@@ -118,7 +118,7 @@ fn vars_with_summary_and_recent_story_carry_both() {
 async fn new_story_context_has_opening_then_goal_and_contribution() {
     let story_ctx = StoryContext::new();
     let store = StoryStoreMem::new();
-    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").Opening;
+    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").opening;
 
     let content = runtime_context(&story_ctx, &generate_input("Goal.", "I wave.")).await;
 
@@ -135,7 +135,7 @@ async fn recent_story_without_summary_keeps_opening_before_recent_story() {
     let mut story_ctx = StoryContext::new();
     story_ctx.recent_turns.push_back(accepted_turn(1, "The door creaks."));
     let store = StoryStoreMem::new();
-    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").Opening;
+    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").opening;
 
     let content = runtime_context(&story_ctx, &generate_input("Goal.", "I wave.")).await;
 

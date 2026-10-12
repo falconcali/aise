@@ -111,7 +111,7 @@ fn vars_with_summary_carry_trimmed_summary_and_segments_only() {
 async fn new_story_runtime_context_has_opening_then_input() {
     let story_ctx = StoryContext::new();
     let store = StoryStoreMem::new();
-    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").Opening;
+    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").opening;
 
     let content = runtime_context(&story_ctx, "I wave.").await;
 
@@ -128,7 +128,7 @@ async fn new_story_runtime_context_orders_opening_recent_story_and_input() {
     story_ctx
         .recent_turns
         .push_back(turn(1, "The door creaks.", TurnStatus::Accepted));
-    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").Opening;
+    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").opening;
 
     let content = runtime_context(&story_ctx, "I wave.").await;
 

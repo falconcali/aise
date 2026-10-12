@@ -2,14 +2,18 @@ use super::config::StoryStoreConfig;
 use super::error::PersistenceError;
 use super::story_store::StoryStore;
 use crate::core::{
-    IdempotencyKey, PackId, StoryCommit, StoryContext, StoryId, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle,
-    StoryPack, TurnNumber, WorldState,
+    BoundedText, IdempotencyKey, PackId, PlayDefinition, RoleId, SemanticVersion, StoryCommit, StoryContext, StoryId,
+    StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle, StoryPack, StoryPackMeta, StoryPackProfile, StoryPackSpec,
+    TurnNumber, WorldState,
 };
 use async_trait::async_trait;
 use chrono::Utc;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+const DEFAULT_PACK_TEXT_LIMIT: usize = 8192;
+const DEFAULT_PACK_OPENING: &str = "许仙在西湖游船靠岸时，天色忽然阴沉下来。细密的雨丝打湿了青石桥面，行人纷纷避入檐下。一个白衣女子站在断桥边，没有带伞，正望着湖面出神。她回头看向许仙，礼貌地问能否借伞同行。许仙把雨伞递过去时，远处传来一声闷雷，湖心荡开一圈不合时宜的涟漪。女子自称白素贞，并说日后一定归还这把伞。";
 
 #[derive(Debug)]
 pub struct StoryStoreMem {
@@ -53,6 +57,38 @@ impl StoryStoreMem {
         {
             context.recent_turns.pop_front();
         }
+    }
+
+    fn bounded(value: &str, field: &'static str) -> Result<BoundedText, PersistenceError> {
+        Ok(BoundedText::try_new(value, field, DEFAULT_PACK_TEXT_LIMIT)?)
+    }
+
+    fn build_default_pack() -> Result<StoryPack, PersistenceError> {
+        Ok(StoryPack {
+            spec: StoryPackSpec::V1,
+            meta: StoryPackMeta {
+                creator: Self::bounded("aise", "creator")?,
+                version: SemanticVersion::try_new("1.0.0")?,
+                tags: Vec::new(),
+            },
+            profile: StoryPackProfile {
+                title: Self::bounded("白蛇传", "title")?,
+                description: None,
+                genre: Vec::new(),
+                theme: Vec::new(),
+                tone: Vec::new(),
+                point_of_vew: Self::bounded("第三人称", "point_of_view")?,
+                tense: Self::bounded("过去时", "tense")?,
+            },
+            roles: BTreeMap::new(),
+            play: PlayDefinition {
+                play_role: RoleId::try_new("protagonist")?,
+            },
+            opening: Self::bounded(DEFAULT_PACK_OPENING, "opening")?,
+            seed_facts: Vec::new(),
+            seed_rumors: Vec::new(),
+            constraints: Vec::new(),
+        })
     }
 }
 
@@ -176,11 +212,7 @@ impl StoryStore for StoryStoreMem {
         Ok(commit)
     }
 
-    async fn get_pack(&self, pack_id: &PackId) -> Result<StoryPack, PersistenceError> {
-        Ok(StoryPack {
-            pack_id: pack_id.clone(),
-            title: "白蛇传".to_string(),
-            Opening: "许仙在西湖游船靠岸时，天色忽然阴沉下来。细密的雨丝打湿了青石桥面，行人纷纷避入檐下。一个白衣女子站在断桥边，没有带伞，正望着湖面出神。她回头看向许仙，礼貌地问能否借伞同行。许仙把雨伞递过去时，远处传来一声闷雷，湖心荡开一圈不合时宜的涟漪。女子自称白素贞，并说日后一定归还这把伞。".to_string(),
-        })
+    async fn get_pack(&self, _pack_id: &PackId) -> Result<StoryPack, PersistenceError> {
+        Self::build_default_pack()
     }
 }

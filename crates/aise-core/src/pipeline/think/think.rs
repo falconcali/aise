@@ -10,7 +10,7 @@ pub struct ThinkInput {
 
 #[derive(Serialize)]
 pub struct ThinkOutput {
-    pub result: String,
+    pub result: String, // 不仅输出决策，也可以按planner的要求输出记忆，用于更好的续写故事。
 }
 
 pub struct ThinkPipeline;
