@@ -1,37 +1,28 @@
-use crate::core::{BoundedText, CharacterId, SemanticVersion};
+use crate::core::role::CharacterProfile;
+use crate::core::{BoundedText, CharacterCardId, SemanticVersion};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CharacterCard {
-    pub character_id: CharacterId,
+    pub spec: CharacterCardSpec,
+    pub card_id: CharacterCardId,
+    pub name: BoundedText,
     pub meta: CharacterMeta,
     pub profile: CharacterProfile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CharacterCardSpec {
+    #[serde(rename = "aise_char_v1")]
+    V1,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CharacterMeta {
-    pub creator: Option<BoundedText>,
+    pub creator: BoundedText,
     pub version: SemanticVersion,
     #[serde(default)]
     pub tags: Vec<BoundedText>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CharacterProfile {
-    pub name: BoundedText,
-    pub appearance: Option<BoundedText>,
-    pub personality: Option<BoundedText>,
-    pub speaking_style: Option<BoundedText>,
-    #[serde(default)]
-    pub dialogue_examples: Vec<DialogueExample>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DialogueExample {
-    pub situation: BoundedText,
-    pub response: BoundedText,
 }

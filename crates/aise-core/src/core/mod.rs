@@ -5,22 +5,33 @@ mod change;
 pub mod error;
 mod ids;
 mod knowledge;
-mod memory;
 mod message;
+mod narrative;
+mod role;
 mod story;
 pub mod turn;
 mod world;
 
-pub use asset::{PlayDefinition, StoryPack, StoryPackMeta, StoryPackProfile, StoryPackSpec};
-pub use ids::{
-    CharacterId, FactId, IdempotencyKey, MemoryId, PackId, PlayerId, RoleId, RumorId, SemanticVersion, Sha256Digest,
-    StoryId,
+pub use activation::ActivationRule;
+pub use asset::{
+    AssetConfig, AssetError, CharacterCard, CharacterCardSpec, CharacterMeta, PlayDefinition, StoryPack, StoryPackMeta,
+    StoryPackProfile, StoryPackSpec,
 };
-pub use knowledge::{FactBody, FactEntry, RetrievalHint, RumorBody, RumorEntry};
-pub use memory::{MemoryBody, MemoryEntry};
+pub use ids::{
+    CharacterCardId, CharacterId, FactId, IdempotencyKey, MemoryId, NarrativeConditionId, NarrativeNodeId, PackId,
+    PlayerId, RoleId, RumorId, SemanticVersion, Sha256Digest, StoryId,
+};
+pub use knowledge::{EntryOrigin, FactBody, FactEntry, Recallable, RetrievalHint, RumorBody, RumorEntry};
+pub use narrative::{
+    ActiveConstraint, ConstraintWindow, NarrativeCondition, NarrativeConfig, NarrativeConstraint, NarrativeDirection,
+    NarrativeError, NarrativeGraph, NarrativeInput, NarrativeNode, NarrativePlan, NarrativeResolution, NarrativeState,
+    NarrativeTransition, NodeStatus, SemanticQuery, Truth,
+};
+pub use role::{
+    CharacterCardRef, CharacterProfile, DialogueExample, MemoryBody, MemoryEntry, RoleActor, RoleBody, RoleEntry,
+};
 pub use story::{
-    CharacterCardRef, PackRef, StoryCommit, StoryContext, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle,
-    StorySummary,
+    PackRef, StoryCommit, StoryContext, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle, StorySummary,
 };
 pub use turn::{
     PlayerContribution, Turn, TurnCancellation, TurnControl, TurnEvaluation, TurnEvent, TurnEventDeliveryError,

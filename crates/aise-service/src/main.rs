@@ -1,9 +1,8 @@
 #![forbid(unsafe_code)]
 
 use aise_core::core::{
-    Change, CharacterCardRef, CharacterId, IdempotencyKey, PackId, PackRef, PlayerId, RoleId, SemanticVersion,
-    Sha256Digest, StoryCommit, StoryId, TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError,
-    TurnEventSink, TurnRequest,
+    Change, IdempotencyKey, PackId, PackRef, PlayerId, RoleId, SemanticVersion, Sha256Digest, StoryCommit, StoryId,
+    TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError, TurnEventSink, TurnRequest,
 };
 use aise_core::engine::{AiseEngine, Engine, EngineConfig, EngineError, StoryCreationSpec};
 use aise_core::llm::{LlmConfig, LlmProviderType};
@@ -208,21 +207,14 @@ fn print_turn(turn_index: usize, story_commit: &StoryCommit) {
 }
 
 fn default_story_creation_spec() -> anyhow::Result<StoryCreationSpec> {
-    let player_role = RoleId::try_new("player").context("invalid default player role")?;
-    let character = CharacterCardRef {
-        character_id: CharacterId::try_new("default-character").context("invalid default character id")?,
-        version: SemanticVersion::try_new("0.0.0").context("invalid default character version")?,
-        digest: Sha256Digest::try_new("default-character-digest").context("invalid default character digest")?,
-    };
-    let mut cast = std::collections::BTreeMap::new();
-    cast.insert(player_role.clone(), character);
+    let player_role = RoleId::try_new("protagonist").context("invalid default player role")?;
     Ok(StoryCreationSpec {
         pack_ref: PackRef {
             pack_id: PackId::try_new("default-pack").context("invalid default pack id")?,
             version: SemanticVersion::try_new("0.0.0").context("invalid default pack version")?,
             digest: Sha256Digest::try_new("default-pack-digest").context("invalid default pack digest")?,
         },
-        cast,
+        cast: std::collections::BTreeMap::new(),
         player_id: PlayerId::try_new("default-player").context("invalid default player id")?,
         player_role,
     })

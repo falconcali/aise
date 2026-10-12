@@ -1,3 +1,4 @@
+use crate::core::AssetConfig;
 use serde::Deserialize;
 
 const DEFAULT_MAX_RECENT_TURNS: usize = 4096;
@@ -14,6 +15,8 @@ pub enum StoryStoreType {
 pub struct StoryStoreConfig {
     pub store_type: StoryStoreType,
     pub max_recent_turns: usize,
+    #[serde(default)]
+    pub asset: AssetConfig,
 }
 
 impl Default for StoryStoreConfig {
@@ -21,6 +24,7 @@ impl Default for StoryStoreConfig {
         Self {
             store_type: StoryStoreType::Memory,
             max_recent_turns: DEFAULT_MAX_RECENT_TURNS,
+            asset: AssetConfig::default(),
         }
     }
 }

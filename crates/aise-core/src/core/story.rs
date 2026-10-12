@@ -1,7 +1,6 @@
 use super::{
-    Change, CharacterId, PackId, PlayerId, RoleId, SemanticVersion, Sha256Digest, StoryId, Turn, TurnNumber, WorldState,
+    Change, PackId, PlayerId, RoleActor, RoleId, SemanticVersion, Sha256Digest, StoryId, Turn, TurnNumber, WorldState,
 };
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -14,18 +13,11 @@ pub struct PackRef {
     pub digest: Sha256Digest,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CharacterCardRef {
-    pub character_id: CharacterId,
-    pub version: SemanticVersion,
-    pub digest: Sha256Digest,
-}
-
 #[derive(Debug, Clone)]
 pub struct StoryInstanceSpec {
     pub story_id: StoryId,
     pub pack_ref: PackRef,
-    pub cast: BTreeMap<RoleId, CharacterCardRef>,
+    pub cast: BTreeMap<RoleId, RoleActor>,
     pub player_id: PlayerId,
     pub player_role: RoleId,
 }
@@ -63,7 +55,7 @@ pub struct StoryCommit {
 pub struct StoryContext {
     pub story_id: StoryId,
     pub pack_ref: PackRef,
-    pub cast: BTreeMap<RoleId, CharacterCardRef>,
+    pub cast: BTreeMap<RoleId, RoleActor>,
     pub player: RoleId,
     pub turn_number: TurnNumber,
     pub summary: Option<StorySummary>,

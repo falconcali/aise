@@ -1,5 +1,5 @@
 use crate::core::activation::ActivationRule;
-use crate::core::knowledge::RetrievalHint;
+use crate::core::knowledge::{EntryOrigin, Recallable, RetrievalHint};
 use crate::core::{BoundedText, FactId};
 use serde::{Deserialize, Serialize};
 
@@ -7,14 +7,28 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct FactBody {
     pub content: BoundedText,
+    #[serde(default)]
     pub activation: ActivationRule,
     pub retrieval: RetrievalHint,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct FactEntry {
-    pub fact_id: FactId,
-    pub fact_body: FactBody,
-    pub created_at_ms: u64,
+    pub id: FactId,
+    pub origin: EntryOrigin,
+    pub body: FactBody,
+}
+
+impl Recallable for FactBody {
+    fn content(&self) -> &BoundedText {
+        &self.content
+    }
+
+    fn activation(&self) -> &ActivationRule {
+        &self.activation
+    }
+
+    fn retrieval(&self) -> &RetrievalHint {
+        &self.retrieval
+    }
 }

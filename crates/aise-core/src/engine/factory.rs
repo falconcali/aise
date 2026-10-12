@@ -1,4 +1,4 @@
-use crate::core::{CharacterCardRef, PackRef, PlayerId, RoleId, StoryId, StoryInstanceInfo, StoryInstanceSpec};
+use crate::core::{PackRef, PlayerId, RoleActor, RoleId, StoryId, StoryInstanceInfo, StoryInstanceSpec};
 use crate::engine::EngineError;
 use crate::llm::{LlmConfig, LlmGateway, LlmProviderType, OpenAiCompatProvider};
 use crate::persistence::{PersistanceConfig, StoryStore, StoryStoreMem, StoryStoreSqlite, StoryStoreType};
@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 pub struct StoryCreationSpec {
     pub pack_ref: PackRef,
-    pub cast: BTreeMap<RoleId, CharacterCardRef>,
+    pub cast: BTreeMap<RoleId, RoleActor>,
     pub player_id: PlayerId,
     pub player_role: RoleId,
 }
@@ -22,10 +22,12 @@ impl AiseFactory {
         story_store: Arc<dyn StoryStore>,
         spec: StoryCreationSpec,
     ) -> Result<StoryInstanceInfo, EngineError> {
+        let story_pack = story_store.get_pack(&spec.pack_ref.pack_id).await?;
+        let cast = story_pack.resolve_cast(&spec.player_role, spec.cast)?;
         let story_instance_spec = StoryInstanceSpec {
             story_id: self.generate_story_id(),
             pack_ref: spec.pack_ref,
-            cast: spec.cast,
+            cast,
             player_id: spec.player_id,
             player_role: spec.player_role,
         };

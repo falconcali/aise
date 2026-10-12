@@ -5,6 +5,7 @@ use std::fmt::{Display, Formatter};
 macro_rules! define_id {
     ($name:ident, $field:literal) => {
         #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+        #[serde(try_from = "String", into = "String")]
         pub struct $name(String);
 
         impl $name {
@@ -21,6 +22,20 @@ macro_rules! define_id {
             }
         }
 
+        impl TryFrom<String> for $name {
+            type Error = CoreError;
+
+            fn try_from(value: String) -> Result<Self, Self::Error> {
+                Self::try_new(value)
+            }
+        }
+
+        impl From<$name> for String {
+            fn from(id: $name) -> Self {
+                id.0
+            }
+        }
+
         impl Display for $name {
             fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
                 formatter.write_str(&self.0)
@@ -29,6 +44,7 @@ macro_rules! define_id {
     };
 }
 
+define_id!(CharacterCardId, "character_card_id");
 define_id!(CharacterId, "character_id");
 define_id!(IdempotencyKey, "idempotency_key");
 define_id!(PackId, "pack_id");
@@ -40,3 +56,5 @@ define_id!(StoryId, "story_id");
 define_id!(MemoryId, "memory_id");
 define_id!(FactId, "fact_id");
 define_id!(RumorId, "rumor_id");
+define_id!(NarrativeNodeId, "narrative_node_id");
+define_id!(NarrativeConditionId, "narrative_condition_id");

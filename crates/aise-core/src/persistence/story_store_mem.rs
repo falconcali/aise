@@ -2,17 +2,21 @@ use super::config::StoryStoreConfig;
 use super::error::PersistenceError;
 use super::story_store::StoryStore;
 use crate::core::{
-    BoundedText, IdempotencyKey, PackId, PlayDefinition, RoleId, SemanticVersion, StoryCommit, StoryContext, StoryId,
-    StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle, StoryPack, StoryPackMeta, StoryPackProfile, StoryPackSpec,
-    TurnNumber, WorldState,
+    BoundedText, CharacterProfile, IdempotencyKey, PackId, PlayDefinition, RetrievalHint, RoleBody, RoleId,
+    SemanticVersion, StoryCommit, StoryContext, StoryId, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle,
+    StoryPack, StoryPackMeta, StoryPackProfile, StoryPackSpec, TurnNumber, WorldState,
 };
 use async_trait::async_trait;
 use chrono::Utc;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 const DEFAULT_PACK_TEXT_LIMIT: usize = 8192;
+const DEFAULT_PLAYER_ROLE: &str = "protagonist";
+const DEFAULT_PLAYER_ROLE_NAME: &str = "许仙";
+const DEFAULT_PLAYER_ROLE_BACKSTORY: &str = "杭州药铺的年轻伙计，为人老实厚道，在西湖断桥边的雨中遇见白素贞。";
+const DEFAULT_PLAYER_ROLE_RETRIEVAL: &str = "许仙 药铺伙计 断桥借伞";
 const DEFAULT_PACK_OPENING: &str = "许仙在西湖游船靠岸时，天色忽然阴沉下来。细密的雨丝打湿了青石桥面，行人纷纷避入檐下。一个白衣女子站在断桥边，没有带伞，正望着湖面出神。她回头看向许仙，礼貌地问能否借伞同行。许仙把雨伞递过去时，远处传来一声闷雷，湖心荡开一圈不合时宜的涟漪。女子自称白素贞，并说日后一定归还这把伞。";
 
 #[derive(Debug)]
@@ -63,8 +67,9 @@ impl StoryStoreMem {
         Ok(BoundedText::try_new(value, field, DEFAULT_PACK_TEXT_LIMIT)?)
     }
 
-    fn build_default_pack() -> Result<StoryPack, PersistenceError> {
-        Ok(StoryPack {
+    fn build_default_pack(&self) -> Result<StoryPack, PersistenceError> {
+        let player_role = RoleId::try_new(DEFAULT_PLAYER_ROLE)?;
+        let story_pack = StoryPack {
             spec: StoryPackSpec::V1,
             meta: StoryPackMeta {
                 creator: Self::bounded("aise", "creator")?,
@@ -74,20 +79,39 @@ impl StoryStoreMem {
             profile: StoryPackProfile {
                 title: Self::bounded("白蛇传", "title")?,
                 description: None,
-                genre: Vec::new(),
-                theme: Vec::new(),
-                tone: Vec::new(),
-                point_of_vew: Self::bounded("第三人称", "point_of_view")?,
+                genres: Vec::new(),
+                themes: Vec::new(),
+                tones: Vec::new(),
+                point_of_view: Self::bounded("第三人称", "point_of_view")?,
                 tense: Self::bounded("过去时", "tense")?,
             },
-            roles: BTreeMap::new(),
+            roles: BTreeMap::from([(player_role.clone(), Self::build_default_player_role()?)]),
             play: PlayDefinition {
-                play_role: RoleId::try_new("protagonist")?,
+                playable_roles: BTreeSet::from([player_role]),
             },
             opening: Self::bounded(DEFAULT_PACK_OPENING, "opening")?,
-            seed_facts: Vec::new(),
-            seed_rumors: Vec::new(),
+            seed_facts: BTreeMap::new(),
+            seed_rumors: BTreeMap::new(),
             constraints: Vec::new(),
+        };
+        story_pack.validate(&self.config.asset)?;
+        Ok(story_pack)
+    }
+
+    fn build_default_player_role() -> Result<RoleBody, PersistenceError> {
+        Ok(RoleBody {
+            name: Self::bounded(DEFAULT_PLAYER_ROLE_NAME, "name")?,
+            alias: Vec::new(),
+            backstory: Self::bounded(DEFAULT_PLAYER_ROLE_BACKSTORY, "backstory")?,
+            activation: Default::default(),
+            retrieval: RetrievalHint::try_new(DEFAULT_PLAYER_ROLE_RETRIEVAL)?,
+            default_profile: CharacterProfile {
+                appearance: None,
+                personality: None,
+                speaking_style: None,
+                dialogue_examples: Vec::new(),
+            },
+            seed_memories: BTreeMap::new(),
         })
     }
 }
@@ -213,6 +237,6 @@ impl StoryStore for StoryStoreMem {
     }
 
     async fn get_pack(&self, _pack_id: &PackId) -> Result<StoryPack, PersistenceError> {
-        Self::build_default_pack()
+        self.build_default_pack()
     }
 }

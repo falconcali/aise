@@ -110,6 +110,7 @@ async fn removes_turns_covered_by_summary_before_window_trim() {
     let store = StoryStoreMem::with_config(StoryStoreConfig {
         store_type: StoryStoreType::Memory,
         max_recent_turns: 8,
+        ..StoryStoreConfig::default()
     });
     let spec = story_spec("story-1");
     store.create(spec.clone()).await.expect("story creation should succeed");

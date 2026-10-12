@@ -1,7 +1,8 @@
-use super::CharacterProfile;
-use crate::core::{BoundedText, FactBody, MemoryBody, RoleId, RumorBody, SemanticVersion};
+use crate::core::asset::AssetError;
+use crate::core::role::{RoleActor, RoleBody};
+use crate::core::{BoundedText, FactBody, FactId, RoleId, RumorBody, RumorId, SemanticVersion};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -9,14 +10,13 @@ pub struct StoryPack {
     pub spec: StoryPackSpec,
     pub meta: StoryPackMeta,
     pub profile: StoryPackProfile,
-    #[serde(default)]
-    pub roles: BTreeMap<RoleId, RoleProfile>,
+    pub roles: BTreeMap<RoleId, RoleBody>,
     pub play: PlayDefinition,
     pub opening: BoundedText,
     #[serde(default)]
-    pub seed_facts: Vec<FactBody>,
+    pub seed_facts: BTreeMap<FactId, FactBody>,
     #[serde(default)]
-    pub seed_rumors: Vec<RumorBody>,
+    pub seed_rumors: BTreeMap<RumorId, RumorBody>,
     #[serde(default)]
     pub constraints: Vec<BoundedText>,
 }
@@ -41,27 +41,46 @@ pub struct StoryPackMeta {
 pub struct StoryPackProfile {
     pub title: BoundedText,
     pub description: Option<BoundedText>,
-    pub genre: Vec<BoundedText>,
-    pub theme: Vec<BoundedText>,
-    pub tone: Vec<BoundedText>,
-    pub point_of_vew: BoundedText,
+    #[serde(default)]
+    pub genres: Vec<BoundedText>,
+    #[serde(default)]
+    pub themes: Vec<BoundedText>,
+    #[serde(default)]
+    pub tones: Vec<BoundedText>,
+    pub point_of_view: BoundedText,
     pub tense: BoundedText,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RoleProfile {
-    pub name: BoundedText,
-    #[serde(default)]
-    pub alias: Vec<BoundedText>,
-    pub backstory: BoundedText,
-    pub retrieval_hint: BoundedText,
-    pub default_profile: CharacterProfile,
-    pub seed_memories: Vec<MemoryBody>,
+pub struct PlayDefinition {
+    pub playable_roles: BTreeSet<RoleId>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PlayDefinition {
-    pub play_role: RoleId,
+impl StoryPack {
+    pub fn resolve_cast(
+        &self,
+        player_role: &RoleId,
+        mut cast: BTreeMap<RoleId, RoleActor>,
+    ) -> Result<BTreeMap<RoleId, RoleActor>, AssetError> {
+        if !self.play.playable_roles.contains(player_role) {
+            return Err(AssetError::RoleNotPlayable {
+                role_id: player_role.to_string(),
+            });
+        }
+        if let Some(role_id) = cast.keys().find(|role_id| !self.roles.contains_key(*role_id)) {
+            return Err(AssetError::UnknownRole {
+                field: "cast",
+                role_id: role_id.to_string(),
+            });
+        }
+        for role_id in self.roles.keys() {
+            cast.entry(role_id.clone()).or_insert(RoleActor::Default);
+        }
+        Ok(cast)
+    }
 }
+
+#[cfg(test)]
+#[path = "tests/story_pack_tests.rs"]
+mod tests;
