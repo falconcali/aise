@@ -1,3 +1,4 @@
+use crate::core::AssetConfig;
 use crate::llm::LlmConfig;
 use crate::persistence::PersistanceConfig;
 use crate::pipeline::PipelineConfig;
@@ -11,6 +12,7 @@ pub struct EngineConfig {
     pub prompt_config: PromptConfig,
     pub persistence_config: PersistanceConfig,
     pub pipeline_config: PipelineConfig,
+    pub asset_config: AssetConfig,
 }
 
 impl Default for EngineConfig {
@@ -20,6 +22,7 @@ impl Default for EngineConfig {
             prompt_config: PromptConfig::default(),
             persistence_config: PersistanceConfig::default(),
             pipeline_config: PipelineConfig::default(),
+            asset_config: AssetConfig::default(),
         }
     }
 }

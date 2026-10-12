@@ -1,18 +1,10 @@
 use super::*;
 use crate::core::{NarrativeNodeId, NodeStatus};
-use crate::persistence::Store;
+use crate::test_support::snake_pack;
 use serde_json::json;
 
 fn text(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", usize::MAX).expect("test text should fit")
-}
-
-async fn default_pack() -> StoryPack {
-    Store::default()
-        .pack_store()
-        .get_pack(&StoryContext::new().pack_ref.pack_id)
-        .await
-        .expect("default pack loads")
 }
 
 fn graph() -> crate::core::NarrativeGraph {
@@ -28,10 +20,11 @@ fn graph() -> crate::core::NarrativeGraph {
     .expect("test graph should deserialize")
 }
 
-#[tokio::test]
-async fn pack_without_narrative_projects_only_global_constraints() {
-    let mut pack = default_pack().await;
+#[test]
+fn pack_without_narrative_projects_only_global_constraints() {
+    let mut pack = snake_pack();
     pack.constraints = vec![text("Modern technology appears.")];
+    pack.narrative = None;
 
     let output = project_narrative(&pack, &StoryContext::new()).expect("projection should succeed");
 
@@ -40,9 +33,9 @@ async fn pack_without_narrative_projects_only_global_constraints() {
     assert_eq!(output.constraints, [text("Modern technology appears.")]);
 }
 
-#[tokio::test]
-async fn global_constraints_come_before_active_node_constraints() {
-    let mut pack = default_pack().await;
+#[test]
+fn global_constraints_come_before_active_node_constraints() {
+    let mut pack = snake_pack();
     pack.constraints = vec![text("Modern technology appears.")];
     pack.narrative = Some(graph());
     let mut story_ctx = StoryContext::new();

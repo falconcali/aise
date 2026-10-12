@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use aise_core::core::{
-    Change, IdempotencyKey, PackId, PackRef, PlayerId, RoleId, SemanticVersion, Sha256Digest, StoryCommit, StoryId,
-    TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError, TurnEventSink, TurnRequest,
+    AssetConfig, Change, CharacterCardRef, IdempotencyKey, PackRef, PlayerId, RoleActor, RoleId, StoryCommit, StoryId,
+    StoryInstanceInfo, TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError, TurnEventSink, TurnRequest,
 };
 use aise_core::engine::{AiseEngine, Engine, EngineConfig, EngineError, StoryCreationSpec};
 use aise_core::llm::{LlmConfig, LlmProviderType};
@@ -57,6 +57,10 @@ const DEFAULT_PROMPT_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../
 const DEFAULT_PROMPT_MAX_PROMPTS: usize = 16;
 const DEFAULT_PROMPT_MAX_TEMPLATE_BYTES: usize = 64 * 1024;
 const DEFAULT_PROMPT_MAX_TOTAL_TEMPLATE_BYTES: usize = 1024 * 1024;
+const DEMO_STORY_PACK_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/snake_pack_v1.json");
+const DEMO_CHARACTER_CARD_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/xu_xian_card_v1.json");
+const DEMO_PLAYER_ID: &str = "default-player";
+const DEMO_PLAYER_ROLE: &str = "xu_xian";
 
 struct ConsoleTurnEventSink;
 
@@ -167,10 +171,7 @@ async fn run_demo_turns(observability_config: &ObservabilityConfig) -> anyhow::R
     let plan = DemoPlan::load()?;
     let engine =
         AiseEngine::new(build_engine_config(plan.pipeline_config.clone())?).context("engine initialization failed")?;
-    let story = engine
-        .create_story(default_story_creation_spec()?)
-        .await
-        .map_err(|error| anyhow::anyhow!(error))?;
+    let story = create_demo_story(&engine).await?;
     let (session, content) = begin_demo_session(observability_config);
     let run = DemoRun {
         engine: &engine,
@@ -206,16 +207,35 @@ fn print_turn(turn_index: usize, story_commit: &StoryCommit) {
     }
 }
 
-fn default_story_creation_spec() -> anyhow::Result<StoryCreationSpec> {
-    let player_role = RoleId::try_new("protagonist").context("invalid default player role")?;
+async fn create_demo_story(engine: &AiseEngine) -> anyhow::Result<StoryInstanceInfo> {
+    let pack_json = read_demo_asset(DEMO_STORY_PACK_PATH).await?;
+    let card_json = read_demo_asset(DEMO_CHARACTER_CARD_PATH).await?;
+    let pack_ref = engine
+        .import_story_pack(&pack_json)
+        .await
+        .context("demo story pack import failed")?;
+    let card_ref = engine
+        .import_character_card(&card_json)
+        .await
+        .context("demo character card import failed")?;
+    engine
+        .create_story(demo_story_creation_spec(pack_ref, card_ref)?)
+        .await
+        .context("demo story creation failed")
+}
+
+async fn read_demo_asset(path: &str) -> anyhow::Result<String> {
+    tokio::fs::read_to_string(path)
+        .await
+        .with_context(|| format!("failed to read demo asset {path}"))
+}
+
+fn demo_story_creation_spec(pack_ref: PackRef, card_ref: CharacterCardRef) -> anyhow::Result<StoryCreationSpec> {
+    let player_role = RoleId::try_new(DEMO_PLAYER_ROLE).context("invalid demo player role")?;
     Ok(StoryCreationSpec {
-        pack_ref: PackRef {
-            pack_id: PackId::try_new("default-pack").context("invalid default pack id")?,
-            version: SemanticVersion::try_new("0.0.0").context("invalid default pack version")?,
-            digest: Sha256Digest::try_new("default-pack-digest").context("invalid default pack digest")?,
-        },
-        cast: std::collections::BTreeMap::new(),
-        player_id: PlayerId::try_new("default-player").context("invalid default player id")?,
+        pack_ref,
+        cast: std::collections::BTreeMap::from([(player_role.clone(), RoleActor::Card(card_ref))]),
+        player_id: PlayerId::try_new(DEMO_PLAYER_ID).context("invalid demo player id")?,
         player_role,
     })
 }
@@ -226,6 +246,7 @@ fn build_engine_config(pipeline_config: PipelineConfig) -> anyhow::Result<Engine
         prompt_config: load_prompt_config()?,
         persistence_config: Default::default(),
         pipeline_config,
+        asset_config: AssetConfig::default(),
     })
 }
 

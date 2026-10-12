@@ -3,8 +3,8 @@ use crate::core::{
     IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus,
     WorldChange,
 };
-use crate::persistence::Store;
 use crate::prompt::PromptConfig;
+use crate::test_support::store_with_default_pack;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
 };
@@ -71,7 +71,7 @@ fn var<'a>(vars: &'a PromptVars, name: &str) -> &'a str {
 }
 
 async fn runtime_context(story_ctx: &StoryContext, input: &str) -> String {
-    let store = Store::default();
+    let store = store_with_default_pack().await;
     let trace = test_trace();
     let rendered = process_player_input(&bundled_prompt(), story_ctx, input, &store, trace.root())
         .await
@@ -110,13 +110,14 @@ fn vars_with_summary_carry_trimmed_summary_and_segments_only() {
 #[tokio::test]
 async fn new_story_runtime_context_has_opening_then_input() {
     let story_ctx = StoryContext::new();
-    let store = Store::default();
+    let store = store_with_default_pack().await;
     let opening = store
         .pack_store()
         .get_pack(&story_ctx.pack_ref.pack_id)
         .await
         .expect("pack loads")
-        .opening;
+        .opening
+        .clone();
 
     let content = runtime_context(&story_ctx, "I wave.").await;
 
@@ -128,7 +129,7 @@ async fn new_story_runtime_context_has_opening_then_input() {
 
 #[tokio::test]
 async fn new_story_runtime_context_orders_opening_recent_story_and_input() {
-    let store = Store::default();
+    let store = store_with_default_pack().await;
     let mut story_ctx = StoryContext::new();
     story_ctx
         .recent_turns
@@ -138,7 +139,8 @@ async fn new_story_runtime_context_orders_opening_recent_story_and_input() {
         .get_pack(&story_ctx.pack_ref.pack_id)
         .await
         .expect("pack loads")
-        .opening;
+        .opening
+        .clone();
 
     let content = runtime_context(&story_ctx, "I wave.").await;
 

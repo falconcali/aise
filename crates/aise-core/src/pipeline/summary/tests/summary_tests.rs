@@ -6,8 +6,8 @@ use crate::core::{
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
 };
-use crate::persistence::Store;
 use crate::prompt::PromptConfig;
+use crate::test_support::store_with_default_pack;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
 };
@@ -48,7 +48,7 @@ impl TurnEventSink for NullSink {
     }
 }
 
-fn pipeline(content: Result<String, &'static str>, summary_turn_count: usize) -> SummaryPipeline {
+async fn pipeline(content: Result<String, &'static str>, summary_turn_count: usize) -> SummaryPipeline {
     let prompt = Prompt::new(PromptConfig {
         directory: Path::new(BUNDLED_PROMPT_DIRECTORY).to_path_buf(),
         max_prompts: 16,
@@ -59,7 +59,7 @@ fn pipeline(content: Result<String, &'static str>, summary_turn_count: usize) ->
     SummaryPipeline::new(
         Arc::new(LlmGateway::new(Arc::new(FixedProvider { content }), LlmConfig::default())),
         Arc::new(prompt),
-        Arc::new(Store::default()),
+        Arc::new(store_with_default_pack().await),
         SummaryConfig { summary_turn_count },
     )
 }
@@ -119,25 +119,25 @@ async fn run(pipeline: &SummaryPipeline, story_ctx: &StoryContext) -> Result<Sum
     pipeline.execute(input, story_ctx, &control, &NullSink, trace.root()).await
 }
 
-#[test]
-fn no_turns_are_covered_while_recent_turns_fit_the_window() {
-    let pipeline = pipeline(Ok("unused".to_owned()), 6);
+#[tokio::test]
+async fn no_turns_are_covered_while_recent_turns_fit_the_window() {
+    let pipeline = pipeline(Ok("unused".to_owned()), 6).await;
 
     assert_eq!(pipeline.covered_turn_count(&story_context(0)), 0);
     assert_eq!(pipeline.covered_turn_count(&story_context(5)), 0);
 }
 
-#[test]
-fn overflow_beyond_the_window_after_commit_is_covered() {
-    let pipeline = pipeline(Ok("unused".to_owned()), 6);
+#[tokio::test]
+async fn overflow_beyond_the_window_after_commit_is_covered() {
+    let pipeline = pipeline(Ok("unused".to_owned()), 6).await;
 
     assert_eq!(pipeline.covered_turn_count(&story_context(6)), 1);
     assert_eq!(pipeline.covered_turn_count(&story_context(8)), 3);
 }
 
-#[test]
-fn zero_turn_count_disables_summary() {
-    let pipeline = pipeline(Ok("unused".to_owned()), 0);
+#[tokio::test]
+async fn zero_turn_count_disables_summary() {
+    let pipeline = pipeline(Ok("unused".to_owned()), 0).await;
 
     assert_eq!(pipeline.covered_turn_count(&story_context(0)), 0);
     assert_eq!(pipeline.covered_turn_count(&story_context(3)), 0);
@@ -145,7 +145,7 @@ fn zero_turn_count_disables_summary() {
 
 #[tokio::test]
 async fn zero_turn_count_leaves_summary_unchanged_without_calling_llm() {
-    let pipeline = pipeline(Err("must not be called"), 0);
+    let pipeline = pipeline(Err("must not be called"), 0).await;
 
     let output = run(&pipeline, &story_context(20)).await.expect("summary stage");
 
@@ -154,7 +154,7 @@ async fn zero_turn_count_leaves_summary_unchanged_without_calling_llm() {
 
 #[tokio::test]
 async fn below_threshold_leaves_summary_unchanged() {
-    let pipeline = pipeline(Ok("unused".to_owned()), 6);
+    let pipeline = pipeline(Ok("unused".to_owned()), 6).await;
 
     let output = run(&pipeline, &story_context(5)).await.expect("summary stage");
 
@@ -163,7 +163,7 @@ async fn below_threshold_leaves_summary_unchanged() {
 
 #[tokio::test]
 async fn overflow_replaces_summary_and_advances_coverage() {
-    let pipeline = pipeline(Ok("  Merged summary.  ".to_owned()), 6);
+    let pipeline = pipeline(Ok("  Merged summary.  ".to_owned()), 6).await;
 
     let output = run(&pipeline, &story_context(7)).await.expect("summary stage");
 
@@ -176,7 +176,7 @@ async fn overflow_replaces_summary_and_advances_coverage() {
 
 #[tokio::test]
 async fn llm_failure_fails_the_stage() {
-    let pipeline = pipeline(Err("boom"), 6);
+    let pipeline = pipeline(Err("boom"), 6).await;
 
     let error = run(&pipeline, &story_context(6)).await.err().expect("stage fails");
 
@@ -186,7 +186,7 @@ async fn llm_failure_fails_the_stage() {
 
 #[tokio::test]
 async fn blank_summary_fails_the_stage() {
-    let pipeline = pipeline(Ok("   ".to_owned()), 6);
+    let pipeline = pipeline(Ok("   ".to_owned()), 6).await;
 
     let error = run(&pipeline, &story_context(6)).await.err().expect("stage fails");
 

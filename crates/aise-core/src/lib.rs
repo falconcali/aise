@@ -7,3 +7,5 @@ pub mod engine;
 pub mod llm;
 pub mod persistence;
 pub mod prompt;
+#[cfg(test)]
+mod test_support;

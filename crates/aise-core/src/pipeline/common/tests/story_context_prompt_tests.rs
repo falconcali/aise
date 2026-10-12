@@ -2,7 +2,7 @@ use super::*;
 use crate::core::{
     IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, WorldChange,
 };
-use crate::persistence::Store;
+use crate::test_support::store_with_default_pack;
 
 fn summary(text: &str, covered_through: u64) -> StorySummary {
     StorySummary {
@@ -58,7 +58,7 @@ fn recent_story_skips_rejected_turns_and_blank_segments() {
 
 #[tokio::test]
 async fn opening_is_loaded_only_when_summary_is_absent() {
-    let store = Store::default();
+    let store = store_with_default_pack().await;
     let mut story_ctx = StoryContext::new();
 
     let opening = load_story_opening(PipelineStage::Baseline, &story_ctx, &store)
@@ -75,7 +75,7 @@ async fn opening_is_loaded_only_when_summary_is_absent() {
 
 #[tokio::test]
 async fn opening_is_loaded_when_summary_is_absent_even_with_recent_story() {
-    let store = Store::default();
+    let store = store_with_default_pack().await;
     let mut story_ctx = StoryContext::new();
     story_ctx
         .recent_turns
@@ -90,7 +90,7 @@ async fn opening_is_loaded_when_summary_is_absent_even_with_recent_story() {
 
 #[tokio::test]
 async fn opening_is_skipped_when_summary_is_present_even_without_recent_story() {
-    let store = Store::default();
+    let store = store_with_default_pack().await;
     let mut story_ctx = StoryContext::new();
     story_ctx.summary = Some(summary("Earlier events.", 1));
 

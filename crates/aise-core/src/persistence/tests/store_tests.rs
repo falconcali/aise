@@ -1,13 +1,22 @@
 use super::*;
 use crate::core::{PackId, StoryId};
 use crate::persistence::PersistenceError;
+use crate::test_support::{snake_pack, xu_xian_card};
+
+fn pack_id() -> PackId {
+    PackId::try_new("pack").expect("test pack id should be valid")
+}
 
 #[tokio::test]
 async fn store_exposes_pack_store() {
     let store = Store::default();
-    let pack_id = PackId::try_new("pack").expect("test pack id should be valid");
 
-    let pack = store.pack_store().get_pack(&pack_id).await.expect("pack should load");
+    store
+        .pack_store()
+        .import_pack(pack_id(), snake_pack())
+        .await
+        .expect("pack should import");
+    let pack = store.pack_store().get_pack(&pack_id()).await.expect("pack should load");
     assert!(!pack.opening.as_str().is_empty());
 }
 
@@ -36,7 +45,21 @@ async fn store_builds_sqlite_placeholders_from_config() {
             ..PackStoreConfig::default()
         },
     });
-    let pack_id = PackId::try_new("pack").expect("test pack id should be valid");
 
-    store.pack_store().get_pack(&pack_id).await.expect("pack should load");
+    store
+        .pack_store()
+        .import_pack(pack_id(), snake_pack())
+        .await
+        .expect("pack should import");
+    store.pack_store().get_pack(&pack_id()).await.expect("pack should load");
+    let card_ref = store
+        .pack_store()
+        .import_character_card(xu_xian_card())
+        .await
+        .expect("card should import");
+    store
+        .pack_store()
+        .get_character_card(&card_ref)
+        .await
+        .expect("card should load");
 }

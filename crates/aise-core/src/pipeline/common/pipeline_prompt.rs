@@ -53,7 +53,7 @@ pub(in crate::pipeline) async fn load_story_opening(
         .get_pack(&story_ctx.pack_ref.pack_id)
         .await
         .map_err(|error| PipelineError::new(stage, error.to_string()))?;
-    Ok(story_pack.opening.into_string())
+    Ok(story_pack.opening.as_str().to_owned())
 }
 
 #[cfg(test)]

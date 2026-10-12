@@ -1,6 +1,7 @@
 use crate::core::NarrativeConfig;
 use serde::Deserialize;
 
+const DEFAULT_MAX_DOCUMENT_BYTES: usize = 1024 * 1024;
 const DEFAULT_MAX_LABEL_BYTES: usize = 256;
 const DEFAULT_MAX_TEXT_BYTES: usize = 4096;
 const DEFAULT_MAX_OPENING_BYTES: usize = 16384;
@@ -12,6 +13,7 @@ const DEFAULT_MAX_SEED_MEMORIES_PER_ROLE: usize = 64;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssetConfig {
+    pub max_document_bytes: usize,
     pub max_label_bytes: usize,
     pub max_text_bytes: usize,
     pub max_opening_bytes: usize,
@@ -26,6 +28,7 @@ pub struct AssetConfig {
 impl Default for AssetConfig {
     fn default() -> Self {
         Self {
+            max_document_bytes: DEFAULT_MAX_DOCUMENT_BYTES,
             max_label_bytes: DEFAULT_MAX_LABEL_BYTES,
             max_text_bytes: DEFAULT_MAX_TEXT_BYTES,
             max_opening_bytes: DEFAULT_MAX_OPENING_BYTES,

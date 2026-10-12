@@ -1,14 +1,10 @@
 use super::*;
 use crate::core::{NarrativeNodeId, NodeStatus};
-use crate::persistence::Store;
+use crate::test_support::snake_pack;
 use serde_json::json;
 
-async fn pack_with_narrative() -> StoryPack {
-    let mut pack = Store::default()
-        .pack_store()
-        .get_pack(&StoryContext::new().pack_ref.pack_id)
-        .await
-        .expect("default pack loads");
+fn pack_with_narrative() -> StoryPack {
+    let mut pack = snake_pack();
     pack.narrative = Some(
         serde_json::from_value(json!({ "nodes": {
             "arrival": {
@@ -33,9 +29,9 @@ fn context_at(turn: u64, arrival: NodeStatus) -> StoryContext {
     story_ctx
 }
 
-#[tokio::test]
-async fn pack_without_narrative_changes_nothing() {
-    let mut pack = pack_with_narrative().await;
+#[test]
+fn pack_without_narrative_changes_nothing() {
+    let mut pack = pack_with_narrative();
     pack.narrative = None;
 
     let change = resolve_narrative(&pack, &StoryContext::new(), &BTreeMap::new());
@@ -44,25 +40,17 @@ async fn pack_without_narrative_changes_nothing() {
     assert!(matches!(change.life_cycle, Change::Unchanged));
 }
 
-#[tokio::test]
-async fn no_transition_keeps_narrative_unchanged() {
-    let change = resolve_narrative(
-        &pack_with_narrative().await,
-        &context_at(0, NodeStatus::Active),
-        &BTreeMap::new(),
-    );
+#[test]
+fn no_transition_keeps_narrative_unchanged() {
+    let change = resolve_narrative(&pack_with_narrative(), &context_at(0, NodeStatus::Active), &BTreeMap::new());
 
     assert!(matches!(change.narrative, Change::Unchanged));
     assert!(matches!(change.life_cycle, Change::Unchanged));
 }
 
-#[tokio::test]
-async fn resolution_uses_the_pending_turn_number() {
-    let change = resolve_narrative(
-        &pack_with_narrative().await,
-        &context_at(1, NodeStatus::Active),
-        &BTreeMap::new(),
-    );
+#[test]
+fn resolution_uses_the_pending_turn_number() {
+    let change = resolve_narrative(&pack_with_narrative(), &context_at(1, NodeStatus::Active), &BTreeMap::new());
 
     let Change::Replaced(narrative) = change.narrative else {
         panic!("narrative should change when the pending turn reaches the condition");

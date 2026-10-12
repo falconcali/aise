@@ -1,7 +1,8 @@
-use crate::core::AssetConfig;
 use serde::Deserialize;
 
 const DEFAULT_MAX_RECENT_TURNS: usize = 4096;
+const DEFAULT_MAX_PACKS: usize = 128;
+const DEFAULT_MAX_CHARACTER_CARDS: usize = 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -30,15 +31,16 @@ impl Default for StoryStoreConfig {
 #[serde(deny_unknown_fields)]
 pub struct PackStoreConfig {
     pub store_type: StoreType,
-    #[serde(default)]
-    pub asset: AssetConfig,
+    pub max_packs: usize,
+    pub max_character_cards: usize,
 }
 
 impl Default for PackStoreConfig {
     fn default() -> Self {
         Self {
             store_type: StoreType::Memory,
-            asset: AssetConfig::default(),
+            max_packs: DEFAULT_MAX_PACKS,
+            max_character_cards: DEFAULT_MAX_CHARACTER_CARDS,
         }
     }
 }

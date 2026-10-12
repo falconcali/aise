@@ -1,0 +1,70 @@
+{
+  "spec": "aise_story_v1",
+  "meta": {
+    "creator": "aise",
+    "version": "0.1.0",
+    "tags": ["demo", "mystery"]
+  },
+  "profile": {
+    "title": "林间木屋",
+    "description": "一个关于林间木屋的短篇探索故事包，用于演示故事包导入与叙事图推进。",
+    "genres": ["悬疑"],
+    "themes": ["探索"],
+    "tones": ["紧张"],
+    "point_of_view": "第二人称",
+    "tense": "现在时"
+  },
+  "roles": {
+    "protagonist": {
+      "name": "旅人",
+      "backstory": "一个在林间木屋醒来的旅人，对昨晚的记忆模糊不清。",
+      "retrieval": "旅人：在林间木屋醒来、失去昨夜记忆的人",
+      "default_profile": {
+        "personality": "谨慎而好奇，重视真相与安全，害怕被困和失去记忆。",
+        "speaking_style": "口语化，表达详略适中。"
+      }
+    }
+  },
+  "play": {
+    "playable_roles": ["protagonist"]
+  },
+  "opening": "你在一阵木柴爆裂声中睁开眼，发现自己靠坐在木屋的壁炉旁。火光将摇晃的影子投上墙壁，空气里混着松脂、泥土和淡淡的血腥味。你记不起昨夜发生了什么，只摸到外套口袋里一把冰冷的黄铜钥匙。窗外是浓得化不开的黑暗，风正拨弄屋檐下的铃铛。忽然，林间传来踩断枯枝的脆响，沉重的脚步穿过落叶，径直朝木门逼近。门闩随之轻轻震了一下。",
+  "seed_facts": {
+    "lodge_is_remote": {
+      "content": "木屋位于人迹罕至的密林深处，最近的村落要走上大半天。",
+      "retrieval": "木屋所处的地理环境与孤立程度"
+    },
+    "brass_key_opens_cellar": {
+      "content": "外套口袋里的黄铜钥匙配的是壁炉旁那扇地窖门，钥匙柄上刻着一个模糊的编号。",
+      "retrieval": "黄铜钥匙的用途：打开壁炉旁的地窖门"
+    },
+    "cellar_holds_the_guest_log": {
+      "content": "地窖里堆着旧柴火和一本住客登记簿，最后一页的名字被人用刀刮去了。",
+      "retrieval": "地窖中的住客登记簿与被刮去的名字"
+    },
+    "footsteps_are_the_forest_warden": {
+      "content": "夜里逼近木门的脚步属于巡林人，他每隔几日会来查看木屋，随身带着猎枪和灯笼。",
+      "retrieval": "屋外脚步声的来源：定期巡查的巡林人"
+    },
+    "lodge_was_a_ranger_station": {
+      "content": "木屋原本是护林站，二十年前因为一次山火被废弃，之后只作临时落脚处使用。",
+      "retrieval": "木屋的来历：废弃的护林站"
+    }
+  },
+  "seed_rumors": {
+    "rumor_lodge_is_cursed": {
+      "content": "附近猎户说这间木屋受了诅咒，在里面过夜的人会忘掉前一天发生的事。",
+      "retrieval": "关于木屋受诅咒、令人失忆的猎户传闻"
+    }
+  },
+  "narrative": {
+    "nodes": {
+      "node_wake": {
+        "title": "苏醒",
+        "dramatic_focus": "探查木屋，弄清楚处境。",
+        "activate_when": { "type": "story_started" },
+        "complete_when": { "type": "turn_reaches", "turn": 2 }
+      }
+    }
+  }
+}

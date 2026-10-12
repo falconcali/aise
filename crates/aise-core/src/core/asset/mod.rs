@@ -1,5 +1,6 @@
 mod character_card;
 mod config;
+mod document;
 mod error;
 mod story_pack;
 mod validate;

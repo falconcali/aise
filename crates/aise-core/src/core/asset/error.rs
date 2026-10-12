@@ -3,6 +3,19 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AssetError {
+    #[error("{asset} document too large (actual: {actual}, maximum: {maximum})")]
+    DocumentTooLarge {
+        asset: &'static str,
+        actual: usize,
+        maximum: usize,
+    },
+
+    #[error("{asset} document is malformed: {message}")]
+    MalformedDocument { asset: &'static str, message: String },
+
+    #[error("{asset} digest failed: {message}")]
+    DigestFailed { asset: &'static str, message: String },
+
     #[error("asset text too long: {field} (actual: {actual}, maximum: {maximum})")]
     TextTooLong {
         field: &'static str,

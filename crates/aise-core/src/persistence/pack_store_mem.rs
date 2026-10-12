@@ -2,22 +2,38 @@ use super::config::PackStoreConfig;
 use super::error::PersistenceError;
 use super::pack_store::PackStore;
 use crate::core::{
-    BoundedText, CharacterProfile, PackId, PlayDefinition, RetrievalHint, RoleBody, RoleId, SemanticVersion, StoryPack,
-    StoryPackMeta, StoryPackProfile, StoryPackSpec,
+    CharacterCard, CharacterCardId, CharacterCardRef, PackId, PackRef, SemanticVersion, Sha256Digest, StoryPack,
 };
 use async_trait::async_trait;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-const DEFAULT_PACK_TEXT_LIMIT: usize = 8192;
-const DEFAULT_PLAYER_ROLE: &str = "protagonist";
-const DEFAULT_PLAYER_ROLE_NAME: &str = "许仙";
-const DEFAULT_PLAYER_ROLE_BACKSTORY: &str = "杭州药铺的年轻伙计，为人老实厚道，在西湖断桥边的雨中遇见白素贞。";
-const DEFAULT_PLAYER_ROLE_RETRIEVAL: &str = "许仙 药铺伙计 断桥借伞";
-const DEFAULT_PACK_OPENING: &str = "许仙在西湖游船靠岸时，天色忽然阴沉下来。细密的雨丝打湿了青石桥面，行人纷纷避入檐下。一个白衣女子站在断桥边，没有带伞，正望着湖面出神。她回头看向许仙，礼貌地问能否借伞同行。许仙把雨伞递过去时，远处传来一声闷雷，湖心荡开一圈不合时宜的涟漪。女子自称白素贞，并说日后一定归还这把伞。";
+type CardKey = (CharacterCardId, SemanticVersion);
 
 #[derive(Debug)]
 pub struct PackStoreMem {
+    assets: RwLock<StoredAssets>,
     config: PackStoreConfig,
+}
+
+#[derive(Debug, Default)]
+struct StoredAssets {
+    packs: HashMap<PackId, StoredPack>,
+    pack_ids_by_digest: HashMap<Sha256Digest, PackId>,
+    cards: HashMap<CardKey, StoredCard>,
+}
+
+#[derive(Debug)]
+struct StoredPack {
+    pack_ref: PackRef,
+    pack: Arc<StoryPack>,
+}
+
+#[derive(Debug)]
+struct StoredCard {
+    card_ref: CharacterCardRef,
+    card: Arc<CharacterCard>,
 }
 
 impl PackStoreMem {
@@ -26,60 +42,10 @@ impl PackStoreMem {
     }
 
     pub fn with_config(config: PackStoreConfig) -> Self {
-        Self { config }
-    }
-
-    fn bounded(value: &str, field: &'static str) -> Result<BoundedText, PersistenceError> {
-        Ok(BoundedText::try_new(value, field, DEFAULT_PACK_TEXT_LIMIT)?)
-    }
-
-    fn build_default_pack(&self) -> Result<StoryPack, PersistenceError> {
-        let player_role = RoleId::try_new(DEFAULT_PLAYER_ROLE)?;
-        let story_pack = StoryPack {
-            spec: StoryPackSpec::V1,
-            meta: StoryPackMeta {
-                creator: Self::bounded("aise", "creator")?,
-                version: SemanticVersion::try_new("1.0.0")?,
-                tags: Vec::new(),
-            },
-            profile: StoryPackProfile {
-                title: Self::bounded("白蛇传", "title")?,
-                description: None,
-                genres: Vec::new(),
-                themes: Vec::new(),
-                tones: Vec::new(),
-                point_of_view: Self::bounded("第三人称", "point_of_view")?,
-                tense: Self::bounded("过去时", "tense")?,
-            },
-            roles: BTreeMap::from([(player_role.clone(), Self::build_default_player_role()?)]),
-            play: PlayDefinition {
-                playable_roles: BTreeSet::from([player_role]),
-            },
-            opening: Self::bounded(DEFAULT_PACK_OPENING, "opening")?,
-            seed_facts: BTreeMap::new(),
-            seed_rumors: BTreeMap::new(),
-            constraints: Vec::new(),
-            narrative: None,
-        };
-        story_pack.validate(&self.config.asset)?;
-        Ok(story_pack)
-    }
-
-    fn build_default_player_role() -> Result<RoleBody, PersistenceError> {
-        Ok(RoleBody {
-            name: Self::bounded(DEFAULT_PLAYER_ROLE_NAME, "name")?,
-            alias: Vec::new(),
-            backstory: Self::bounded(DEFAULT_PLAYER_ROLE_BACKSTORY, "backstory")?,
-            activation: Default::default(),
-            retrieval: RetrievalHint::try_new(DEFAULT_PLAYER_ROLE_RETRIEVAL)?,
-            default_profile: CharacterProfile {
-                appearance: None,
-                personality: None,
-                speaking_style: None,
-                dialogue_examples: Vec::new(),
-            },
-            seed_memories: BTreeMap::new(),
-        })
+        Self {
+            assets: RwLock::new(StoredAssets::default()),
+            config,
+        }
     }
 }
 
@@ -89,10 +55,116 @@ impl Default for PackStoreMem {
     }
 }
 
+impl StoredAssets {
+    fn insert_pack(
+        &mut self,
+        pack_ref: PackRef,
+        pack: StoryPack,
+        max_packs: usize,
+    ) -> Result<PackRef, PersistenceError> {
+        if let Some(existing) = self
+            .pack_ids_by_digest
+            .get(&pack_ref.digest)
+            .and_then(|pack_id| self.packs.get(pack_id))
+        {
+            return Ok(existing.pack_ref.clone());
+        }
+        if self.packs.contains_key(&pack_ref.pack_id) {
+            return Err(constraint_violation("pack_id already exists"));
+        }
+        if self.packs.len() >= max_packs {
+            return Err(constraint_violation("pack store capacity reached"));
+        }
+        self.pack_ids_by_digest
+            .insert(pack_ref.digest.clone(), pack_ref.pack_id.clone());
+        self.packs.insert(
+            pack_ref.pack_id.clone(),
+            StoredPack {
+                pack_ref: pack_ref.clone(),
+                pack: Arc::new(pack),
+            },
+        );
+        Ok(pack_ref)
+    }
+
+    fn insert_card(
+        &mut self,
+        card_ref: CharacterCardRef,
+        card: CharacterCard,
+        max_cards: usize,
+    ) -> Result<CharacterCardRef, PersistenceError> {
+        let key = (card_ref.card_id.clone(), card_ref.version.clone());
+        if let Some(existing) = self.cards.get(&key) {
+            if existing.card_ref.digest == card_ref.digest {
+                return Ok(existing.card_ref.clone());
+            }
+            return Err(constraint_violation(
+                "character card version already exists with different content",
+            ));
+        }
+        if self.cards.len() >= max_cards {
+            return Err(constraint_violation("character card store capacity reached"));
+        }
+        self.cards.insert(
+            key,
+            StoredCard {
+                card_ref: card_ref.clone(),
+                card: Arc::new(card),
+            },
+        );
+        Ok(card_ref)
+    }
+
+    fn find_card(&self, card_ref: &CharacterCardRef) -> Result<Arc<CharacterCard>, PersistenceError> {
+        let key = (card_ref.card_id.clone(), card_ref.version.clone());
+        match self.cards.get(&key) {
+            Some(stored) if stored.card_ref.digest == card_ref.digest => Ok(Arc::clone(&stored.card)),
+            Some(_) => Err(constraint_violation("character card digest mismatch")),
+            None => Err(PersistenceError::NotFound),
+        }
+    }
+}
+
+fn constraint_violation(constraint: &str) -> PersistenceError {
+    PersistenceError::ConstraintViolation {
+        constraint: constraint.to_owned(),
+    }
+}
+
 #[async_trait]
 impl PackStore for PackStoreMem {
-    async fn get_pack(&self, _pack_id: &PackId) -> Result<StoryPack, PersistenceError> {
-        self.build_default_pack()
+    async fn import_pack(&self, pack_id: PackId, pack: StoryPack) -> Result<PackRef, PersistenceError> {
+        let pack_ref = PackRef {
+            pack_id,
+            version: pack.meta.version.clone(),
+            digest: pack.digest()?,
+        };
+        self.assets.write().await.insert_pack(pack_ref, pack, self.config.max_packs)
+    }
+
+    async fn get_pack(&self, pack_id: &PackId) -> Result<Arc<StoryPack>, PersistenceError> {
+        let assets = self.assets.read().await;
+        assets
+            .packs
+            .get(pack_id)
+            .map(|stored| Arc::clone(&stored.pack))
+            .ok_or(PersistenceError::NotFound)
+    }
+
+    async fn import_character_card(&self, card: CharacterCard) -> Result<CharacterCardRef, PersistenceError> {
+        let card_ref = CharacterCardRef {
+            card_id: card.card_id.clone(),
+            version: card.meta.version.clone(),
+            digest: card.digest()?,
+        };
+        self.assets
+            .write()
+            .await
+            .insert_card(card_ref, card, self.config.max_character_cards)
+    }
+
+    async fn get_character_card(&self, card_ref: &CharacterCardRef) -> Result<Arc<CharacterCard>, PersistenceError> {
+        self.assets.read().await.find_card(card_ref)
     }
 }
 

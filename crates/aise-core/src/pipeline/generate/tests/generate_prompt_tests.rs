@@ -3,8 +3,8 @@ use crate::core::{
     BoundedText, IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment,
     TurnStatus, WorldChange,
 };
-use crate::persistence::Store;
 use crate::prompt::PromptConfig;
+use crate::test_support::store_with_default_pack;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
 };
@@ -82,7 +82,7 @@ fn var<'a>(vars: &'a PromptVars, name: &str) -> &'a str {
 }
 
 async fn runtime_context(story_ctx: &StoryContext, input: &GenerateInput) -> String {
-    let store = Store::default();
+    let store = store_with_default_pack().await;
     let trace = test_trace();
     let rendered = generate_story(&bundled_prompt(), story_ctx, input, &store, trace.root())
         .await
@@ -118,13 +118,14 @@ fn vars_with_summary_and_recent_story_carry_both() {
 #[tokio::test]
 async fn new_story_context_has_opening_then_goal_and_contribution() {
     let story_ctx = StoryContext::new();
-    let store = Store::default();
+    let store = store_with_default_pack().await;
     let opening = store
         .pack_store()
         .get_pack(&story_ctx.pack_ref.pack_id)
         .await
         .expect("pack loads")
-        .opening;
+        .opening
+        .clone();
 
     let content = runtime_context(&story_ctx, &generate_input("Goal.", "I wave.")).await;
 
@@ -140,13 +141,14 @@ async fn new_story_context_has_opening_then_goal_and_contribution() {
 async fn recent_story_without_summary_keeps_opening_before_recent_story() {
     let mut story_ctx = StoryContext::new();
     story_ctx.recent_turns.push_back(accepted_turn(1, "The door creaks."));
-    let store = Store::default();
+    let store = store_with_default_pack().await;
     let opening = store
         .pack_store()
         .get_pack(&story_ctx.pack_ref.pack_id)
         .await
         .expect("pack loads")
-        .opening;
+        .opening
+        .clone();
 
     let content = runtime_context(&story_ctx, &generate_input("Goal.", "I wave.")).await;
 
