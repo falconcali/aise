@@ -1,6 +1,6 @@
-use crate::core::{PlayerContribution, StoryContext, TurnControl, TurnEventSink};
+use crate::core::{BoundedText, PlayerContribution, StoryContext, TurnControl, TurnEventSink};
 use crate::llm::LlmGateway;
-use crate::persistence::StoryStore;
+use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::pipeline::generate::{generate_llm, generate_prompt, generate_trace};
 use crate::prompt::Prompt;
@@ -12,6 +12,7 @@ use std::sync::Arc;
 pub struct GenerateInput {
     pub story_goal: String,
     pub player_contribution: PlayerContribution,
+    pub constraints: Vec<BoundedText>,
 }
 
 #[derive(Serialize)]
@@ -23,16 +24,12 @@ pub struct GenerateOutput {
 pub struct GeneratePipeline {
     gateway: Arc<LlmGateway>,
     prompt: Arc<Prompt>,
-    story_store: Arc<dyn StoryStore>,
+    store: Arc<Store>,
 }
 
 impl GeneratePipeline {
-    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, story_store: Arc<dyn StoryStore>) -> Self {
-        Self {
-            gateway,
-            prompt,
-            story_store,
-        }
+    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, store: Arc<Store>) -> Self {
+        Self { gateway, prompt, store }
     }
 
     async fn generate_story(
@@ -42,14 +39,9 @@ impl GeneratePipeline {
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<String, PipelineError> {
-        let rendered_prompt = generate_prompt::generate_story(
-            self.prompt.as_ref(),
-            story_ctx,
-            input,
-            self.story_store.as_ref(),
-            observation,
-        )
-        .await?;
+        let rendered_prompt =
+            generate_prompt::generate_story(self.prompt.as_ref(), story_ctx, input, self.store.as_ref(), observation)
+                .await?;
 
         generate_llm::generate_story(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
             .await

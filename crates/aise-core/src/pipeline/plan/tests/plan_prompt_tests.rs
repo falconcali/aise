@@ -1,8 +1,9 @@
 use super::*;
 use crate::core::{
-    IdempotencyKey, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus, WorldChange,
+    BoundedText, IdempotencyKey, NarrativeDirection, NarrativeNodeId, PlayerContribution, StorySummary, Turn,
+    TurnEvaluation, TurnNumber, TurnSegment, TurnStatus, WorldChange,
 };
-use crate::persistence::StoryStoreMem;
+use crate::persistence::Store;
 use crate::prompt::PromptConfig;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
@@ -73,19 +74,35 @@ fn var<'a>(vars: &'a PromptVars, name: &str) -> &'a str {
     vars.get(name).and_then(Value::as_str).expect("string var")
 }
 
-async fn runtime_context(story_ctx: &StoryContext, processed: &str) -> String {
-    let store = StoryStoreMem::new();
+fn plan_input(processed: &str) -> PlanInput {
+    PlanInput {
+        player_contribution: contribution(processed),
+        directions: Vec::new(),
+        constraints: Vec::new(),
+    }
+}
+
+fn text(value: &str) -> BoundedText {
+    BoundedText::try_new(value, "test", usize::MAX).expect("test text should fit")
+}
+
+async fn render_runtime_context(story_ctx: &StoryContext, input: &PlanInput) -> String {
+    let store = Store::default();
     let trace = test_trace();
-    let rendered = process_plan(&bundled_prompt(), story_ctx, &contribution(processed), &store, trace.root())
+    let rendered = process_plan(&bundled_prompt(), story_ctx, input, &store, trace.root())
         .await
         .expect("render");
     rendered.messages()[1].content.replace("\r\n", "\n")
 }
 
+async fn runtime_context(story_ctx: &StoryContext, processed: &str) -> String {
+    render_runtime_context(story_ctx, &plan_input(processed)).await
+}
+
 #[test]
 fn vars_for_new_story_carry_opening_and_empty_summary_and_recent_story() {
     let story_ctx = StoryContext::new();
-    let vars = plan_vars(&story_ctx, &contribution("I wave."), "Rain falls.".to_owned());
+    let vars = plan_vars(&story_ctx, &plan_input("I wave."), "Rain falls.".to_owned());
 
     assert_eq!(var(&vars, "player_input"), "I wave.");
     assert_eq!(var(&vars, "story_opening"), "Rain falls.");
@@ -99,7 +116,7 @@ fn vars_with_summary_and_recent_story_carry_both() {
     story_ctx.summary = Some(summary("  Earlier events.  "));
     story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
     story_ctx.recent_turns.push_back(accepted_turn(3, "The hall is dark."));
-    let vars = plan_vars(&story_ctx, &contribution("I wave."), String::new());
+    let vars = plan_vars(&story_ctx, &plan_input("I wave."), String::new());
 
     assert_eq!(var(&vars, "story_summary"), "Earlier events.");
     assert_eq!(var(&vars, "story_opening"), "");
@@ -109,8 +126,13 @@ fn vars_with_summary_and_recent_story_carry_both() {
 #[tokio::test]
 async fn new_story_context_has_opening_then_input() {
     let story_ctx = StoryContext::new();
-    let store = StoryStoreMem::new();
-    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").opening;
+    let store = Store::default();
+    let opening = store
+        .pack_store()
+        .get_pack(&story_ctx.pack_ref.pack_id)
+        .await
+        .expect("pack loads")
+        .opening;
 
     let content = runtime_context(&story_ctx, "I wave.").await;
 
@@ -124,8 +146,13 @@ async fn new_story_context_has_opening_then_input() {
 async fn recent_story_without_summary_keeps_opening_before_recent_story() {
     let mut story_ctx = StoryContext::new();
     story_ctx.recent_turns.push_back(accepted_turn(1, "The door creaks."));
-    let store = StoryStoreMem::new();
-    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").opening;
+    let store = Store::default();
+    let opening = store
+        .pack_store()
+        .get_pack(&story_ctx.pack_ref.pack_id)
+        .await
+        .expect("pack loads")
+        .opening;
 
     let content = runtime_context(&story_ctx, "I wave.").await;
 
@@ -161,5 +188,34 @@ async fn summary_without_recent_story_omits_opening() {
     assert_eq!(
         content,
         "## Story Summary\n\nEarlier events.\n\n## Pending Player Input\n\nI wave."
+    );
+}
+
+#[test]
+fn vars_without_narrative_carry_empty_direction_and_constraints() {
+    let vars = plan_vars(&StoryContext::new(), &plan_input("I wave."), String::new());
+
+    assert_eq!(var(&vars, "narrative_directions"), "");
+    assert_eq!(var(&vars, "story_constraints"), "");
+}
+
+#[tokio::test]
+async fn narrative_direction_and_constraints_precede_player_input() {
+    let mut story_ctx = StoryContext::new();
+    story_ctx.summary = Some(summary("Earlier events."));
+    let input = PlanInput {
+        player_contribution: contribution("I wave."),
+        directions: vec![NarrativeDirection {
+            node_id: NarrativeNodeId::try_new("arrival").expect("test node id should be valid"),
+            dramatic_focus: text("The traveler meets the forest keeper."),
+        }],
+        constraints: vec![text("The ritual truth is revealed.")],
+    };
+
+    let content = render_runtime_context(&story_ctx, &input).await;
+
+    assert_eq!(
+        content,
+        "## Story Summary\n\nEarlier events.\n\n## Narrative Direction\n\n- The traveler meets the forest keeper.\n\n## Story Constraints\n\n- The ritual truth is revealed.\n\n## Pending Player Input\n\nI wave."
     );
 }

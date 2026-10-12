@@ -17,7 +17,7 @@ pub struct NarrativeTransition {
     pub to: NodeStatus,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NarrativeState {
     #[serde(default)]

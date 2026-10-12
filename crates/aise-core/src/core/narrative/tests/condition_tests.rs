@@ -25,7 +25,7 @@ fn evaluate_with_state(
             )
         })
         .collect();
-    let input = NarrativeInput {
+    let input = NarrativeEvidence {
         turn: TurnNumber::new(turn),
         semantic_results: &semantic_results,
     };

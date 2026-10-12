@@ -1,4 +1,4 @@
-use crate::core::{PlayerContribution, StoryContext, TurnControl, TurnEventSink};
+use crate::core::{BoundedText, PlayerContribution, StoryContext, TurnControl, TurnEventSink};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::pipeline::validate::ValidateScoreResult;
 use crate::trace::Observation;
@@ -10,6 +10,7 @@ pub struct RepairInput {
     pub current_proposal: String,
     pub scores: Vec<ValidateScoreResult>,
     pub proposal_version: u32,
+    pub constraints: Vec<BoundedText>,
     pub player_contribution: PlayerContribution,
 }
 

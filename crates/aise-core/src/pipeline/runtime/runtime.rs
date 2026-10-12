@@ -2,7 +2,7 @@ use crate::core::{
     StoryCommit, StoryContext, TurnControl, TurnEvaluation, TurnEventSink, TurnRequest, TurnSegment, WorldChange,
 };
 use crate::llm::LlmGateway;
-use crate::persistence::StoryStore;
+use crate::persistence::Store;
 use crate::pipeline::PipelineConfig;
 use crate::pipeline::baseline::{BaselineInput, BaselinePipeline};
 use crate::pipeline::commit::{CommitInput, CommitPipeline};
@@ -36,28 +36,28 @@ impl Runtime {
     pub fn new(
         gateway: Arc<LlmGateway>,
         prompt: Arc<Prompt>,
-        story_store: Arc<dyn StoryStore>,
+        store: Arc<Store>,
         pipeline_config: PipelineConfig,
     ) -> Self {
         Self {
-            baseline: BaselinePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&story_store)),
-            plan: PlanPipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&story_store)),
+            baseline: BaselinePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&store)),
+            plan: PlanPipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&store)),
             retrieval: RetrievalPipeline,
             think: ThinkPipeline,
-            generate: GeneratePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&story_store)),
+            generate: GeneratePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&store)),
             validate: ValidatePipeline {
                 score_configs: vec![],
                 validation_budget: 10,
             },
             repair: RepairPipeline,
-            extract: ExtractPipeline,
+            extract: ExtractPipeline::new(Arc::clone(&store)),
             summary: SummaryPipeline::new(
                 Arc::clone(&gateway),
                 Arc::clone(&prompt),
-                Arc::clone(&story_store),
+                Arc::clone(&store),
                 pipeline_config.summary,
             ),
-            commit: CommitPipeline::new(Arc::clone(&story_store)),
+            commit: CommitPipeline::new(Arc::clone(&store)),
         }
     }
 
@@ -80,15 +80,19 @@ impl Runtime {
         };
 
         let baseline_output = pipeline_runner.run(&self.baseline, baseline_input, story_ctx).await?;
+        let narrative_output = baseline_output.narrative;
 
         let plan_input = PlanInput {
-            player_contribution: baseline_output.player_contribution.clone(),
+            player_contribution: baseline_output.player_contribution,
+            directions: narrative_output.directions.clone(),
+            constraints: narrative_output.constraints.clone(),
         };
 
         let plan_output = pipeline_runner.run(&self.plan, plan_input, story_ctx).await?;
         let mut generate_input = GenerateInput {
             story_goal: plan_output.plan.clone(),
             player_contribution: plan_output.player_contribution.clone(),
+            constraints: narrative_output.constraints.clone(),
         };
 
         if plan_output.requires_retrieval() {
@@ -113,6 +117,7 @@ impl Runtime {
             original_proposal: generate_output.result.clone(),
             current_proposal: generate_output.result,
             proposal_version: 1,
+            constraints: narrative_output.constraints.clone(),
             player_contribution: generate_output.player_contribution,
         };
 
@@ -125,6 +130,7 @@ impl Runtime {
                 current_proposal: validate_output.current_proposal,
                 scores: validate_output.scores,
                 proposal_version: validate_output.proposal_version,
+                constraints: narrative_output.constraints.clone(),
                 player_contribution: validate_output.player_contribution,
             };
 
@@ -134,6 +140,7 @@ impl Runtime {
                 original_proposal: repair_output.original_proposal,
                 current_proposal: repair_output.current_proposal,
                 proposal_version: repair_output.proposal_version,
+                constraints: narrative_output.constraints.clone(),
                 player_contribution: repair_output.player_contribution,
             };
 
@@ -157,6 +164,7 @@ impl Runtime {
         let extract_input = ExtractInput {
             query: validate_output.current_proposal,
             player_contribution: validate_output.player_contribution,
+            queries: narrative_output.queries,
         };
 
         let extract_output = pipeline_runner.run(&self.extract, extract_input, story_ctx).await?;
@@ -174,6 +182,8 @@ impl Runtime {
             world_change: WorldChange {},
             turn_evaluation: TurnEvaluation {},
             summary: summary_output.summary,
+            narrative: extract_output.narrative,
+            life_cycle: extract_output.life_cycle,
         };
 
         pipeline_runner.run(&self.commit, commit_input, story_ctx).await

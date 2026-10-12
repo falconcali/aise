@@ -1,8 +1,8 @@
 use crate::core::{
-    Change, IdempotencyKey, PlayerContribution, StoryCommit, StoryContext, StorySummary, Turn, TurnControl,
-    TurnEvaluation, TurnEventSink, TurnNumber, TurnSegment, TurnStatus, WorldChange,
+    Change, IdempotencyKey, NarrativeState, PlayerContribution, StoryCommit, StoryContext, StoryLifeCycle,
+    StorySummary, Turn, TurnControl, TurnEvaluation, TurnEventSink, TurnNumber, TurnSegment, TurnStatus, WorldChange,
 };
-use crate::persistence::StoryStore;
+use crate::persistence::Store;
 use crate::pipeline::commit::commit_trace;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
@@ -17,15 +17,17 @@ pub struct CommitInput {
     pub world_change: WorldChange,
     pub turn_evaluation: TurnEvaluation,
     pub summary: Change<StorySummary>,
+    pub narrative: Change<NarrativeState>,
+    pub life_cycle: Change<StoryLifeCycle>,
 }
 
 pub struct CommitPipeline {
-    story_store: Arc<dyn StoryStore>,
+    store: Arc<Store>,
 }
 
 impl CommitPipeline {
-    pub fn new(story_store: Arc<dyn StoryStore>) -> Self {
-        Self { story_store }
+    pub fn new(store: Arc<Store>) -> Self {
+        Self { store }
     }
 }
 
@@ -57,11 +59,14 @@ impl Pipeline for CommitPipeline {
                 turn_status: TurnStatus::Accepted,
             },
             summary: input.summary,
+            narrative: input.narrative,
+            life_cycle: input.life_cycle,
         };
 
         let commit_observation = commit_trace::begin_commit(observation, &story_commit);
         let result = self
-            .story_store
+            .store
+            .story_store()
             .commit(story_commit)
             .await
             .map_err(|error| PipelineError::new(PipelineStage::Commit, error.to_string()));

@@ -158,3 +158,61 @@ fn character_card_name_longer_than_limit_is_rejected() {
         Err(AssetError::TextTooLong { field: "name", .. })
     ));
 }
+
+#[test]
+fn pack_with_valid_narrative_passes_validation() {
+    let mut value = pack_json();
+    value["narrative"] = json!({ "nodes": {
+        "arrival": {
+            "title": "Arrival",
+            "activate_when": { "type": "story_started" },
+            "complete_when": { "type": "turn_reaches", "turn": 3 },
+            "constraints": [{ "forbid": "The ritual truth is revealed.", "window": "while_active" }],
+            "terminal": true
+        }
+    }});
+
+    assert!(pack(value).validate(&AssetConfig::default()).is_ok());
+}
+
+#[test]
+fn pack_with_invalid_narrative_is_rejected() {
+    let mut value = pack_json();
+    value["narrative"] = json!({ "nodes": {
+        "arrival": {
+            "title": "Arrival",
+            "activate_when": { "type": "node_is", "node_id": "ghost", "status": "active" },
+            "complete_when": { "type": "story_started" }
+        }
+    }});
+
+    assert!(matches!(
+        pack(value).validate(&AssetConfig::default()),
+        Err(AssetError::Narrative(crate::core::NarrativeError::UnknownNode { .. }))
+    ));
+}
+
+#[test]
+fn narrative_constraint_longer_than_text_limit_is_rejected() {
+    let mut value = pack_json();
+    value["narrative"] = json!({ "nodes": {
+        "arrival": {
+            "title": "Arrival",
+            "activate_when": { "type": "story_started" },
+            "complete_when": { "type": "story_started" },
+            "constraints": [{ "forbid": "x".repeat(16), "window": "while_active" }]
+        }
+    }});
+    let config = AssetConfig {
+        max_text_bytes: 15,
+        ..AssetConfig::default()
+    };
+
+    assert!(matches!(
+        pack(value).validate(&config),
+        Err(AssetError::InvalidEntry {
+            section: "narrative.nodes",
+            ..
+        })
+    ));
+}

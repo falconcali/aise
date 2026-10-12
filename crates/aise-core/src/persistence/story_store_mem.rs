@@ -2,22 +2,14 @@ use super::config::StoryStoreConfig;
 use super::error::PersistenceError;
 use super::story_store::StoryStore;
 use crate::core::{
-    BoundedText, CharacterProfile, IdempotencyKey, PackId, PlayDefinition, RetrievalHint, RoleBody, RoleId,
-    SemanticVersion, StoryCommit, StoryContext, StoryId, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle,
-    StoryPack, StoryPackMeta, StoryPackProfile, StoryPackSpec, TurnNumber, WorldState,
+    Change, IdempotencyKey, StoryCommit, StoryContext, StoryId, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle,
+    TurnNumber, WorldState,
 };
 use async_trait::async_trait;
 use chrono::Utc;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-const DEFAULT_PACK_TEXT_LIMIT: usize = 8192;
-const DEFAULT_PLAYER_ROLE: &str = "protagonist";
-const DEFAULT_PLAYER_ROLE_NAME: &str = "许仙";
-const DEFAULT_PLAYER_ROLE_BACKSTORY: &str = "杭州药铺的年轻伙计，为人老实厚道，在西湖断桥边的雨中遇见白素贞。";
-const DEFAULT_PLAYER_ROLE_RETRIEVAL: &str = "许仙 药铺伙计 断桥借伞";
-const DEFAULT_PACK_OPENING: &str = "许仙在西湖游船靠岸时，天色忽然阴沉下来。细密的雨丝打湿了青石桥面，行人纷纷避入檐下。一个白衣女子站在断桥边，没有带伞，正望着湖面出神。她回头看向许仙，礼貌地问能否借伞同行。许仙把雨伞递过去时，远处传来一声闷雷，湖心荡开一圈不合时宜的涟漪。女子自称白素贞，并说日后一定归还这把伞。";
 
 #[derive(Debug)]
 pub struct StoryStoreMem {
@@ -62,63 +54,7 @@ impl StoryStoreMem {
             context.recent_turns.pop_front();
         }
     }
-
-    fn bounded(value: &str, field: &'static str) -> Result<BoundedText, PersistenceError> {
-        Ok(BoundedText::try_new(value, field, DEFAULT_PACK_TEXT_LIMIT)?)
-    }
-
-    fn build_default_pack(&self) -> Result<StoryPack, PersistenceError> {
-        let player_role = RoleId::try_new(DEFAULT_PLAYER_ROLE)?;
-        let story_pack = StoryPack {
-            spec: StoryPackSpec::V1,
-            meta: StoryPackMeta {
-                creator: Self::bounded("aise", "creator")?,
-                version: SemanticVersion::try_new("1.0.0")?,
-                tags: Vec::new(),
-            },
-            profile: StoryPackProfile {
-                title: Self::bounded("白蛇传", "title")?,
-                description: None,
-                genres: Vec::new(),
-                themes: Vec::new(),
-                tones: Vec::new(),
-                point_of_view: Self::bounded("第三人称", "point_of_view")?,
-                tense: Self::bounded("过去时", "tense")?,
-            },
-            roles: BTreeMap::from([(player_role.clone(), Self::build_default_player_role()?)]),
-            play: PlayDefinition {
-                playable_roles: BTreeSet::from([player_role]),
-            },
-            opening: Self::bounded(DEFAULT_PACK_OPENING, "opening")?,
-            seed_facts: BTreeMap::new(),
-            seed_rumors: BTreeMap::new(),
-            constraints: Vec::new(),
-        };
-        story_pack.validate(&self.config.asset)?;
-        Ok(story_pack)
-    }
-
-    fn build_default_player_role() -> Result<RoleBody, PersistenceError> {
-        Ok(RoleBody {
-            name: Self::bounded(DEFAULT_PLAYER_ROLE_NAME, "name")?,
-            alias: Vec::new(),
-            backstory: Self::bounded(DEFAULT_PLAYER_ROLE_BACKSTORY, "backstory")?,
-            activation: Default::default(),
-            retrieval: RetrievalHint::try_new(DEFAULT_PLAYER_ROLE_RETRIEVAL)?,
-            default_profile: CharacterProfile {
-                appearance: None,
-                personality: None,
-                speaking_style: None,
-                dialogue_examples: Vec::new(),
-            },
-            seed_memories: BTreeMap::new(),
-        })
-    }
 }
-
-#[cfg(test)]
-#[path = "test/story_store_mem_tests.rs"]
-mod tests;
 
 impl Default for StoryStoreMem {
     fn default() -> Self {
@@ -140,6 +76,7 @@ impl StoryStore for StoryStoreMem {
             recent_turns: std::collections::VecDeque::new(),
             life_cycle: StoryLifeCycle::Active,
             world_state: WorldState {},
+            narrative: spec.narrative,
         };
         let info = StoryInstanceInfo {
             story_id: context.story_id.clone(),
@@ -202,6 +139,11 @@ impl StoryStore for StoryStoreMem {
         if let Some(existing) = story.committed.get(&idempotency_key) {
             return Ok(existing.clone());
         }
+        if story.context.life_cycle != StoryLifeCycle::Active {
+            return Err(PersistenceError::ConstraintViolation {
+                constraint: "story is not active".to_owned(),
+            });
+        }
         let expected_turn_number = story.context.turn_number.increment();
         if commit.turn.turn_number.value() != expected_turn_number.value() {
             return Err(PersistenceError::ConstraintViolation {
@@ -211,7 +153,7 @@ impl StoryStore for StoryStoreMem {
         let mut next_context = story.context.clone();
         next_context.turn_number = commit.turn.turn_number.clone();
         next_context.recent_turns.push_back(commit.turn.clone());
-        if let crate::core::Change::Replaced(summary) = &commit.summary {
+        if let Change::Replaced(summary) = &commit.summary {
             if summary.covered_through.value() > commit.turn.turn_number.value() {
                 return Err(PersistenceError::ConstraintViolation {
                     constraint: "summary covers a future turn".to_owned(),
@@ -229,14 +171,21 @@ impl StoryStore for StoryStoreMem {
             }
             next_context.summary = Some(summary.clone());
         }
+        if let Change::Replaced(narrative) = &commit.narrative {
+            next_context.narrative = narrative.clone();
+        }
+        if let Change::Replaced(life_cycle) = commit.life_cycle {
+            next_context.life_cycle = life_cycle;
+            story.info.life_cycle = life_cycle;
+        }
         Self::adjust_rencent_turns(&mut next_context, self.config.max_recent_turns);
         story.context = next_context;
         story.info.updated_at = Utc::now();
         story.committed.insert(idempotency_key, commit.clone());
         Ok(commit)
     }
-
-    async fn get_pack(&self, _pack_id: &PackId) -> Result<StoryPack, PersistenceError> {
-        self.build_default_pack()
-    }
 }
+
+#[cfg(test)]
+#[path = "tests/story_store_mem_tests.rs"]
+mod tests;

@@ -1,5 +1,5 @@
 use crate::core::narrative::{
-    NarrativeCondition, NarrativeConfig, NarrativeConstraint, NarrativeError, NarrativeInput, NarrativeState,
+    NarrativeCondition, NarrativeConfig, NarrativeConstraint, NarrativeError, NarrativeEvidence, NarrativeState,
     NodeStatus,
 };
 use crate::core::{BoundedText, NarrativeNodeId};
@@ -86,7 +86,7 @@ impl NarrativeNode {
         &self,
         current: NodeStatus,
         state: &NarrativeState,
-        input: &NarrativeInput<'_>,
+        input: &NarrativeEvidence<'_>,
     ) -> Option<NodeStatus> {
         match current {
             NodeStatus::Inactive => self.activate_when.holds(state, input).then_some(NodeStatus::Active),

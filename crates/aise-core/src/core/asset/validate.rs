@@ -3,7 +3,7 @@ use crate::core::asset::{
 };
 use crate::core::knowledge::Recallable;
 use crate::core::role::{CharacterProfile, RoleBody};
-use crate::core::{BoundedText, RoleId};
+use crate::core::{BoundedText, NarrativeGraph, NarrativeNode, RoleId};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
@@ -19,7 +19,8 @@ impl StoryPack {
         validate_entries("seed_facts", &self.seed_facts, |fact| validate_recallable(fact, config))?;
         check_count("seed_rumors", self.seed_rumors.len(), config.max_seed_entries)?;
         validate_entries("seed_rumors", &self.seed_rumors, |rumor| validate_recallable(rumor, config))?;
-        check_list("constraints", &self.constraints, config.max_list_items, config.max_text_bytes)
+        check_list("constraints", &self.constraints, config.max_list_items, config.max_text_bytes)?;
+        validate_narrative(self.narrative.as_ref(), config)
     }
 }
 
@@ -88,6 +89,22 @@ fn validate_profile(profile: &CharacterProfile, config: &AssetConfig) -> Result<
         check_text("profile.dialogue_examples.situation", &example.situation, config.max_text_bytes)?;
         check_text("profile.dialogue_examples.response", &example.response, config.max_text_bytes)
     })
+}
+
+fn validate_narrative(graph: Option<&NarrativeGraph>, config: &AssetConfig) -> Result<(), AssetError> {
+    let Some(graph) = graph else {
+        return Ok(());
+    };
+    graph.validate(&config.narrative)?;
+    validate_entries("narrative.nodes", &graph.nodes, |node| validate_narrative_node(node, config))
+}
+
+fn validate_narrative_node(node: &NarrativeNode, config: &AssetConfig) -> Result<(), AssetError> {
+    check_text("title", &node.title, config.max_label_bytes)?;
+    check_optional_text("dramatic_focus", node.dramatic_focus.as_ref(), config.max_text_bytes)?;
+    node.constraints
+        .iter()
+        .try_for_each(|constraint| check_text("constraints.forbid", &constraint.forbid, config.max_text_bytes))
 }
 
 fn validate_recallable(item: &impl Recallable, config: &AssetConfig) -> Result<(), AssetError> {

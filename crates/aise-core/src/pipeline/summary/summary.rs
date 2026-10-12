@@ -1,6 +1,6 @@
 use crate::core::{Change, StoryContext, StorySummary, TurnControl, TurnEventSink, TurnNumber};
 use crate::llm::LlmGateway;
-use crate::persistence::StoryStore;
+use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::pipeline::summary::{SummaryConfig, summary_llm, summary_prompt, summary_trace};
 use crate::prompt::Prompt;
@@ -21,21 +21,16 @@ pub struct SummaryOutput {
 pub struct SummaryPipeline {
     gateway: Arc<LlmGateway>,
     prompt: Arc<Prompt>,
-    story_store: Arc<dyn StoryStore>,
+    store: Arc<Store>,
     config: SummaryConfig,
 }
 
 impl SummaryPipeline {
-    pub fn new(
-        gateway: Arc<LlmGateway>,
-        prompt: Arc<Prompt>,
-        story_store: Arc<dyn StoryStore>,
-        config: SummaryConfig,
-    ) -> Self {
+    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, store: Arc<Store>, config: SummaryConfig) -> Self {
         Self {
             gateway,
             prompt,
-            story_store,
+            store,
             config,
         }
     }
@@ -51,7 +46,7 @@ impl SummaryPipeline {
             self.prompt.as_ref(),
             story_ctx,
             covered_turns,
-            self.story_store.as_ref(),
+            self.store.as_ref(),
             observation,
         )
         .await?;

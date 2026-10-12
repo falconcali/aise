@@ -7,7 +7,7 @@ mod plan;
 mod resolver;
 mod state;
 
-pub use condition::{NarrativeCondition, NarrativeInput, Truth};
+pub use condition::{NarrativeCondition, NarrativeEvidence, Truth};
 pub use config::NarrativeConfig;
 pub use constraint::{ConstraintWindow, NarrativeConstraint};
 pub use error::NarrativeError;

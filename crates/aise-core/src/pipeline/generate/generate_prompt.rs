@@ -1,5 +1,5 @@
 use crate::core::StoryContext;
-use crate::persistence::StoryStore;
+use crate::persistence::Store;
 use crate::pipeline::common::{PipelineError, PipelineStage, pipeline_prompt};
 use crate::pipeline::generate::GenerateInput;
 use crate::prompt::{Prompt, PromptSpec, PromptVars, RenderedPrompt};
@@ -10,6 +10,7 @@ const GENERATE_STORY_PROMPT_ID: &str = "generate.generate_story";
 const STORY_SUMMARY_VAR: &str = "story_summary";
 const STORY_OPENING_VAR: &str = "story_opening";
 const RECENT_STORY_VAR: &str = "recent_story";
+const STORY_CONSTRAINTS_VAR: &str = "story_constraints";
 const STORY_GOAL_VAR: &str = "story_goal";
 const PLAYER_CONTRIBUTION_VAR: &str = "player_contribution";
 
@@ -17,10 +18,10 @@ pub async fn generate_story(
     prompt: &Prompt,
     story_ctx: &StoryContext,
     input: &GenerateInput,
-    story_store: &dyn StoryStore,
+    store: &Store,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
-    let story_opening = pipeline_prompt::load_story_opening(PipelineStage::Generate, story_ctx, story_store).await?;
+    let story_opening = pipeline_prompt::load_story_opening(PipelineStage::Generate, story_ctx, store).await?;
     let vars = generate_vars(story_ctx, input, story_opening);
     prompt
         .render(PromptSpec::new(GENERATE_STORY_PROMPT_ID, vars), observation)
@@ -37,6 +38,10 @@ fn generate_vars(story_ctx: &StoryContext, input: &GenerateInput, story_opening:
         (
             RECENT_STORY_VAR.to_owned(),
             Value::String(pipeline_prompt::recent_story(story_ctx)),
+        ),
+        (
+            STORY_CONSTRAINTS_VAR.to_owned(),
+            Value::String(pipeline_prompt::story_constraints(&input.constraints)),
         ),
         (STORY_GOAL_VAR.to_owned(), Value::String(input.story_goal.clone())),
         (

@@ -1,9 +1,9 @@
 use super::*;
 use crate::core::{
-    IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus,
-    WorldChange,
+    BoundedText, IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment,
+    TurnStatus, WorldChange,
 };
-use crate::persistence::StoryStoreMem;
+use crate::persistence::Store;
 use crate::prompt::PromptConfig;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
@@ -51,6 +51,7 @@ fn generate_input(goal: &str, processed: &str) -> GenerateInput {
             raw: "raw".to_owned(),
             processed: processed.to_owned(),
         },
+        constraints: Vec::new(),
     }
 }
 
@@ -81,7 +82,7 @@ fn var<'a>(vars: &'a PromptVars, name: &str) -> &'a str {
 }
 
 async fn runtime_context(story_ctx: &StoryContext, input: &GenerateInput) -> String {
-    let store = StoryStoreMem::new();
+    let store = Store::default();
     let trace = test_trace();
     let rendered = generate_story(&bundled_prompt(), story_ctx, input, &store, trace.root())
         .await
@@ -117,8 +118,13 @@ fn vars_with_summary_and_recent_story_carry_both() {
 #[tokio::test]
 async fn new_story_context_has_opening_then_goal_and_contribution() {
     let story_ctx = StoryContext::new();
-    let store = StoryStoreMem::new();
-    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").opening;
+    let store = Store::default();
+    let opening = store
+        .pack_store()
+        .get_pack(&story_ctx.pack_ref.pack_id)
+        .await
+        .expect("pack loads")
+        .opening;
 
     let content = runtime_context(&story_ctx, &generate_input("Goal.", "I wave.")).await;
 
@@ -134,8 +140,13 @@ async fn new_story_context_has_opening_then_goal_and_contribution() {
 async fn recent_story_without_summary_keeps_opening_before_recent_story() {
     let mut story_ctx = StoryContext::new();
     story_ctx.recent_turns.push_back(accepted_turn(1, "The door creaks."));
-    let store = StoryStoreMem::new();
-    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").opening;
+    let store = Store::default();
+    let opening = store
+        .pack_store()
+        .get_pack(&story_ctx.pack_ref.pack_id)
+        .await
+        .expect("pack loads")
+        .opening;
 
     let content = runtime_context(&story_ctx, &generate_input("Goal.", "I wave.")).await;
 
@@ -171,5 +182,21 @@ async fn summary_without_recent_story_omits_opening() {
     assert_eq!(
         content,
         "# Story Summary\n\nEarlier events.\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave."
+    );
+}
+
+#[tokio::test]
+async fn story_constraints_precede_goal_and_contribution() {
+    let mut story_ctx = StoryContext::new();
+    story_ctx.summary = Some(summary("Earlier events."));
+    let mut input = generate_input("Goal.", "I wave.");
+    input.constraints =
+        vec![BoundedText::try_new("The ritual truth is revealed.", "test", usize::MAX).expect("test text should fit")];
+
+    let content = runtime_context(&story_ctx, &input).await;
+
+    assert_eq!(
+        content,
+        "# Story Summary\n\nEarlier events.\n\n# Story Constraints\n\n- The ritual truth is revealed.\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave."
     );
 }

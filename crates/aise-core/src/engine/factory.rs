@@ -1,7 +1,9 @@
-use crate::core::{PackRef, PlayerId, RoleActor, RoleId, StoryId, StoryInstanceInfo, StoryInstanceSpec};
+use crate::core::{
+    NarrativeGraph, PackRef, PlayerId, RoleActor, RoleId, StoryId, StoryInstanceInfo, StoryInstanceSpec,
+};
 use crate::engine::EngineError;
 use crate::llm::{LlmConfig, LlmGateway, LlmProviderType, OpenAiCompatProvider};
-use crate::persistence::{PersistanceConfig, StoryStore, StoryStoreMem, StoryStoreSqlite, StoryStoreType};
+use crate::persistence::{PersistanceConfig, Store};
 use crate::prompt::{Prompt, PromptConfig, PromptError};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -19,24 +21,30 @@ pub struct AiseFactory;
 impl AiseFactory {
     pub async fn create_story(
         &self,
-        story_store: Arc<dyn StoryStore>,
+        store: Arc<Store>,
         spec: StoryCreationSpec,
     ) -> Result<StoryInstanceInfo, EngineError> {
-        let story_pack = story_store.get_pack(&spec.pack_ref.pack_id).await?;
+        let story_pack = store.pack_store().get_pack(&spec.pack_ref.pack_id).await?;
         let cast = story_pack.resolve_cast(&spec.player_role, spec.cast)?;
+        let narrative = story_pack
+            .narrative
+            .as_ref()
+            .map(NarrativeGraph::initial_state)
+            .unwrap_or_default();
         let story_instance_spec = StoryInstanceSpec {
             story_id: self.generate_story_id(),
             pack_ref: spec.pack_ref,
             cast,
             player_id: spec.player_id,
             player_role: spec.player_role,
+            narrative,
         };
 
-        story_store.create(story_instance_spec).await.map_err(EngineError::from)
+        store.story_store().create(story_instance_spec).await.map_err(EngineError::from)
     }
 
-    pub async fn remove_story(&self, story_store: Arc<dyn StoryStore>, story_id: &StoryId) -> Result<(), EngineError> {
-        story_store.remove(story_id).await.map_err(EngineError::from)
+    pub async fn remove_story(&self, store: Arc<Store>, story_id: &StoryId) -> Result<(), EngineError> {
+        store.story_store().remove(story_id).await.map_err(EngineError::from)
     }
 
     pub fn create_llm_gateway(&self, llm_config: LlmConfig) -> Arc<LlmGateway> {
@@ -52,11 +60,8 @@ impl AiseFactory {
         Prompt::new(prompt_config)
     }
 
-    pub fn create_story_store(&self, persistence_config: PersistanceConfig) -> Arc<dyn StoryStore> {
-        match persistence_config.story_store.store_type {
-            StoryStoreType::Memory => Arc::new(StoryStoreMem::with_config(persistence_config.story_store)),
-            StoryStoreType::Sqlite => Arc::new(StoryStoreSqlite::new(persistence_config.story_store)),
-        }
+    pub fn create_store(&self, persistence_config: PersistanceConfig) -> Arc<Store> {
+        Arc::new(Store::new(persistence_config))
     }
 
     fn generate_story_id(&self) -> StoryId {

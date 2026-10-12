@@ -1,3 +1,4 @@
+use crate::core::NarrativeConfig;
 use serde::Deserialize;
 
 const DEFAULT_MAX_LABEL_BYTES: usize = 256;
@@ -18,6 +19,8 @@ pub struct AssetConfig {
     pub max_roles: usize,
     pub max_seed_entries: usize,
     pub max_seed_memories_per_role: usize,
+    #[serde(default)]
+    pub narrative: NarrativeConfig,
 }
 
 impl Default for AssetConfig {
@@ -30,6 +33,7 @@ impl Default for AssetConfig {
             max_roles: DEFAULT_MAX_ROLES,
             max_seed_entries: DEFAULT_MAX_SEED_ENTRIES,
             max_seed_memories_per_role: DEFAULT_MAX_SEED_MEMORIES_PER_ROLE,
+            narrative: NarrativeConfig::default(),
         }
     }
 }

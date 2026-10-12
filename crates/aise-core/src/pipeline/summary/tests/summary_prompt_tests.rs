@@ -3,7 +3,7 @@ use crate::core::{
     IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus,
     WorldChange,
 };
-use crate::persistence::StoryStoreMem;
+use crate::persistence::Store;
 use crate::prompt::PromptConfig;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
@@ -71,7 +71,7 @@ fn var<'a>(vars: &'a PromptVars, name: &str) -> &'a str {
 }
 
 async fn runtime_context(story_ctx: &StoryContext, covered_turns: usize) -> String {
-    let store = StoryStoreMem::new();
+    let store = Store::default();
     let trace = test_trace();
     let rendered = summarize_story(&bundled_prompt(), story_ctx, covered_turns, &store, trace.root())
         .await
@@ -98,8 +98,13 @@ fn vars_carry_only_the_covered_leading_turns() {
 async fn first_summary_context_has_opening_then_story_to_summarize() {
     let mut story_ctx = StoryContext::new();
     story_ctx.recent_turns.push_back(accepted_turn(1, "The door creaks."));
-    let store = StoryStoreMem::new();
-    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").opening;
+    let store = Store::default();
+    let opening = store
+        .pack_store()
+        .get_pack(&story_ctx.pack_ref.pack_id)
+        .await
+        .expect("pack loads")
+        .opening;
 
     let content = runtime_context(&story_ctx, 1).await;
 

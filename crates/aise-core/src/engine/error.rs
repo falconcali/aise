@@ -1,4 +1,4 @@
-use crate::core::AssetError;
+use crate::core::{AssetError, StoryLifeCycle};
 use crate::llm::LlmError;
 use crate::persistence::PersistenceError;
 use crate::prompt::PromptError;
@@ -8,6 +8,8 @@ use thiserror::Error;
 pub enum EngineError {
     #[error("turn execution failed: {message}")]
     Turn { message: String },
+    #[error("story is not active: {life_cycle:?}")]
+    StoryNotActive { life_cycle: StoryLifeCycle },
     #[error("engine dependency failed: {message}")]
     Dependency { message: String },
     #[error("persistence error: {message}")]

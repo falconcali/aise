@@ -1,6 +1,6 @@
 use crate::core::asset::AssetError;
 use crate::core::role::{RoleActor, RoleBody};
-use crate::core::{BoundedText, FactBody, FactId, RoleId, RumorBody, RumorId, SemanticVersion};
+use crate::core::{BoundedText, FactBody, FactId, NarrativeGraph, RoleId, RumorBody, RumorId, SemanticVersion};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,6 +19,8 @@ pub struct StoryPack {
     pub seed_rumors: BTreeMap<RumorId, RumorBody>,
     #[serde(default)]
     pub constraints: Vec<BoundedText>,
+    #[serde(default)]
+    pub narrative: Option<NarrativeGraph>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

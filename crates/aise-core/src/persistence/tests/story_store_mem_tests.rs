@@ -1,9 +1,10 @@
 use super::*;
 use crate::core::{
-    Change, IdempotencyKey, PackId, PackRef, PlayerId, RoleId, SemanticVersion, Sha256Digest, StoryCommit, StoryId,
-    StoryInstanceSpec, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus, WorldChange,
+    Change, IdempotencyKey, NarrativeNodeId, NarrativeState, NodeStatus, PackId, PackRef, PlayerId, RoleId,
+    SemanticVersion, Sha256Digest, StoryCommit, StoryId, StoryInstanceSpec, StorySummary, Turn, TurnEvaluation,
+    TurnNumber, TurnSegment, TurnStatus, WorldChange,
 };
-use crate::persistence::StoryStoreType;
+use crate::persistence::StoreType;
 
 fn story_id(value: &str) -> StoryId {
     StoryId::try_new(value).expect("test story id should be valid")
@@ -24,6 +25,7 @@ fn story_spec(value: &str) -> StoryInstanceSpec {
         cast: std::collections::BTreeMap::new(),
         player_id: PlayerId::try_new("player").expect("test player id should be valid"),
         player_role: RoleId::try_new("protagonist").expect("test role id should be valid"),
+        narrative: NarrativeState::default(),
     }
 }
 
@@ -43,6 +45,8 @@ fn commit(story_id: &StoryId, turn_number: u64, key: &str, summary: Change<Story
             turn_status: TurnStatus::Accepted,
         },
         summary,
+        narrative: Change::Unchanged,
+        life_cycle: Change::Unchanged,
     }
 }
 
@@ -108,9 +112,8 @@ async fn commits_turn_and_returns_idempotent_result() {
 #[tokio::test]
 async fn removes_turns_covered_by_summary_before_window_trim() {
     let store = StoryStoreMem::with_config(StoryStoreConfig {
-        store_type: StoryStoreType::Memory,
+        store_type: StoreType::Memory,
         max_recent_turns: 8,
-        ..StoryStoreConfig::default()
     });
     let spec = story_spec("story-1");
     store.create(spec.clone()).await.expect("story creation should succeed");
@@ -162,5 +165,66 @@ async fn rejects_invalid_turn_number_and_future_summary() {
         }),
     );
     let error = store.commit(future_summary).await.expect_err("future summary should fail");
+    assert!(matches!(error, PersistenceError::ConstraintViolation { .. }));
+}
+
+#[tokio::test]
+async fn creation_keeps_initial_narrative_state() {
+    let store = StoryStoreMem::new();
+    let mut spec = story_spec("story-1");
+    spec.narrative.node_status.insert(
+        NarrativeNodeId::try_new("arrival").expect("test node id should be valid"),
+        NodeStatus::Active,
+    );
+    store.create(spec.clone()).await.expect("story creation should succeed");
+
+    let loaded = store.load(&spec.story_id).await.expect("story should load");
+    assert_eq!(loaded.narrative, spec.narrative);
+}
+
+#[tokio::test]
+async fn commit_replaces_narrative_state() {
+    let store = StoryStoreMem::new();
+    let spec = story_spec("story-1");
+    store.create(spec.clone()).await.expect("story creation should succeed");
+    let mut narrative = NarrativeState::default();
+    narrative.node_status.insert(
+        NarrativeNodeId::try_new("arrival").expect("test node id should be valid"),
+        NodeStatus::Completed,
+    );
+    let mut turn = commit(&spec.story_id, 1, "key-1", Change::Unchanged);
+    turn.narrative = Change::Replaced(narrative.clone());
+
+    store.commit(turn).await.expect("commit should succeed");
+
+    let loaded = store.load(&spec.story_id).await.expect("story should load");
+    assert_eq!(loaded.narrative, narrative);
+}
+
+#[tokio::test]
+async fn completing_story_updates_life_cycle_and_rejects_further_turns() {
+    let store = StoryStoreMem::new();
+    let spec = story_spec("story-1");
+    store.create(spec.clone()).await.expect("story creation should succeed");
+    let mut final_turn = commit(&spec.story_id, 1, "key-1", Change::Unchanged);
+    final_turn.life_cycle = Change::Replaced(crate::core::StoryLifeCycle::Completed);
+    store.commit(final_turn.clone()).await.expect("final commit should succeed");
+
+    let loaded = store.load(&spec.story_id).await.expect("story should load");
+    assert_eq!(loaded.life_cycle, crate::core::StoryLifeCycle::Completed);
+    let info = store.get_info(&spec.story_id).await.expect("story info should load");
+    assert_eq!(info.life_cycle, crate::core::StoryLifeCycle::Completed);
+
+    let replayed = store
+        .commit(final_turn)
+        .await
+        .expect("replaying the final commit stays idempotent");
+    assert_eq!(replayed.turn.turn_number.value(), 1);
+
+    let next_turn = commit(&spec.story_id, 2, "key-2", Change::Unchanged);
+    let error = store
+        .commit(next_turn)
+        .await
+        .expect_err("completed story should reject new turns");
     assert!(matches!(error, PersistenceError::ConstraintViolation { .. }));
 }

@@ -1,5 +1,5 @@
 use crate::core::StoryContext;
-use crate::persistence::StoryStore;
+use crate::persistence::Store;
 use crate::pipeline::common::{PipelineError, PipelineStage, pipeline_prompt};
 use crate::prompt::{Prompt, PromptSpec, PromptVars, RenderedPrompt};
 use crate::trace::Observation;
@@ -14,10 +14,10 @@ pub async fn summarize_story(
     prompt: &Prompt,
     story_ctx: &StoryContext,
     covered_turns: usize,
-    story_store: &dyn StoryStore,
+    store: &Store,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
-    let story_opening = pipeline_prompt::load_story_opening(PipelineStage::Summary, story_ctx, story_store).await?;
+    let story_opening = pipeline_prompt::load_story_opening(PipelineStage::Summary, story_ctx, store).await?;
     let vars = summary_vars(story_ctx, covered_turns, story_opening);
     prompt
         .render(PromptSpec::new(SUMMARIZE_STORY_PROMPT_ID, vars), observation)

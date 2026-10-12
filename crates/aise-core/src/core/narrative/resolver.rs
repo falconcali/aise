@@ -1,5 +1,7 @@
-use crate::core::narrative::{NarrativeGraph, NarrativeInput, NarrativeState, NarrativeTransition, NodeStatus};
+use crate::core::TurnNumber;
+use crate::core::narrative::{NarrativeEvidence, NarrativeGraph, NarrativeState, NarrativeTransition, NodeStatus};
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct NarrativeResolution {
@@ -8,12 +10,23 @@ pub struct NarrativeResolution {
 }
 
 impl NarrativeGraph {
-    pub fn resolve(&self, state: &NarrativeState, input: &NarrativeInput<'_>) -> NarrativeResolution {
+    pub fn initial_state(&self) -> NarrativeState {
+        let mut state = NarrativeState::default();
+        let semantic_results = BTreeMap::new();
+        let evidence = NarrativeEvidence {
+            turn: TurnNumber::new(0),
+            semantic_results: &semantic_results,
+        };
+        state.apply(&self.resolve(&state, &evidence).transitions);
+        state
+    }
+
+    pub fn resolve(&self, state: &NarrativeState, evidence: &NarrativeEvidence<'_>) -> NarrativeResolution {
         let transitions: Vec<NarrativeTransition> = self
             .nodes
             .iter()
             .filter_map(|(node_id, node)| {
-                node.next_status(state.status(node_id), state, input)
+                node.next_status(state.status(node_id), state, evidence)
                     .map(|to| NarrativeTransition {
                         node_id: node_id.clone(),
                         to,

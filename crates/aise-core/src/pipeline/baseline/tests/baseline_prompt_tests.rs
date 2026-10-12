@@ -3,7 +3,7 @@ use crate::core::{
     IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus,
     WorldChange,
 };
-use crate::persistence::StoryStoreMem;
+use crate::persistence::Store;
 use crate::prompt::PromptConfig;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
@@ -71,7 +71,7 @@ fn var<'a>(vars: &'a PromptVars, name: &str) -> &'a str {
 }
 
 async fn runtime_context(story_ctx: &StoryContext, input: &str) -> String {
-    let store = StoryStoreMem::new();
+    let store = Store::default();
     let trace = test_trace();
     let rendered = process_player_input(&bundled_prompt(), story_ctx, input, &store, trace.root())
         .await
@@ -110,8 +110,13 @@ fn vars_with_summary_carry_trimmed_summary_and_segments_only() {
 #[tokio::test]
 async fn new_story_runtime_context_has_opening_then_input() {
     let story_ctx = StoryContext::new();
-    let store = StoryStoreMem::new();
-    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").opening;
+    let store = Store::default();
+    let opening = store
+        .pack_store()
+        .get_pack(&story_ctx.pack_ref.pack_id)
+        .await
+        .expect("pack loads")
+        .opening;
 
     let content = runtime_context(&story_ctx, "I wave.").await;
 
@@ -123,12 +128,17 @@ async fn new_story_runtime_context_has_opening_then_input() {
 
 #[tokio::test]
 async fn new_story_runtime_context_orders_opening_recent_story_and_input() {
-    let store = StoryStoreMem::new();
+    let store = Store::default();
     let mut story_ctx = StoryContext::new();
     story_ctx
         .recent_turns
         .push_back(turn(1, "The door creaks.", TurnStatus::Accepted));
-    let opening = store.get_pack(&story_ctx.pack_ref.pack_id).await.expect("pack loads").opening;
+    let opening = store
+        .pack_store()
+        .get_pack(&story_ctx.pack_ref.pack_id)
+        .await
+        .expect("pack loads")
+        .opening;
 
     let content = runtime_context(&story_ctx, "I wave.").await;
 

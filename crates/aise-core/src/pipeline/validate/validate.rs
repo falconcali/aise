@@ -1,4 +1,4 @@
-use crate::core::{PlayerContribution, StoryContext, TurnControl, TurnEventSink};
+use crate::core::{BoundedText, PlayerContribution, StoryContext, TurnControl, TurnEventSink};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
 use serde::Serialize;
@@ -15,6 +15,7 @@ pub struct ValidateInput {
     pub original_proposal: String,
     pub current_proposal: String,
     pub proposal_version: u32,
+    pub constraints: Vec<BoundedText>,
 
     pub player_contribution: PlayerContribution,
 }

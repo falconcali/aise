@@ -16,6 +16,18 @@
 {{ recent_story }}
 
 {% endif -%}
+{%- if narrative_directions -%}
+## Narrative Direction
+
+{{ narrative_directions }}
+
+{% endif -%}
+{%- if story_constraints -%}
+## Story Constraints
+
+{{ story_constraints }}
+
+{% endif -%}
 ## Pending Player Input
 
 {{ player_input }}

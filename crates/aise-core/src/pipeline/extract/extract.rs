@@ -1,21 +1,38 @@
-use crate::core::{PlayerContribution, StoryContext, TurnControl, TurnEventSink};
+use crate::core::{
+    Change, NarrativeState, PlayerContribution, SemanticQuery, StoryContext, StoryLifeCycle, TurnControl, TurnEventSink,
+};
+use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
+use crate::pipeline::extract::extract_narrative;
 use crate::trace::Observation;
 use serde::Serialize;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[derive(Serialize)]
 pub struct ExtractInput {
     pub query: String,
     pub player_contribution: PlayerContribution,
+    pub queries: Vec<SemanticQuery>,
 }
 
 #[derive(Serialize)]
 pub struct ExtractOutput {
     pub result: String,
     pub player_contribution: PlayerContribution,
+    pub narrative: Change<NarrativeState>,
+    pub life_cycle: Change<StoryLifeCycle>,
 }
 
-pub struct ExtractPipeline;
+pub struct ExtractPipeline {
+    store: Arc<Store>,
+}
+
+impl ExtractPipeline {
+    pub fn new(store: Arc<Store>) -> Self {
+        Self { store }
+    }
+}
 
 impl Pipeline for ExtractPipeline {
     type Input = ExtractInput;
@@ -29,13 +46,23 @@ impl Pipeline for ExtractPipeline {
         &self,
         input: Self::Input,
         story_ctx: &StoryContext,
-        control: &TurnControl,
-        sink: &dyn TurnEventSink,
-        observation: &Observation,
+        _control: &TurnControl,
+        _sink: &dyn TurnEventSink,
+        _observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
+        let story_pack = self
+            .store
+            .pack_store()
+            .get_pack(&story_ctx.pack_ref.pack_id)
+            .await
+            .map_err(|error| PipelineError::new(PipelineStage::Extract, error.to_string()))?;
+        let semantic_results = BTreeMap::new();
+        let change = extract_narrative::resolve_narrative(&story_pack, story_ctx, &semantic_results);
         Ok(ExtractOutput {
             result: input.query,
             player_contribution: input.player_contribution,
+            narrative: change.narrative,
+            life_cycle: change.life_cycle,
         })
     }
 }

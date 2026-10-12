@@ -6,7 +6,7 @@ use crate::core::{
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
 };
-use crate::persistence::StoryStoreMem;
+use crate::persistence::Store;
 use crate::prompt::PromptConfig;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
@@ -59,7 +59,7 @@ fn pipeline(content: Result<String, &'static str>, summary_turn_count: usize) ->
     SummaryPipeline::new(
         Arc::new(LlmGateway::new(Arc::new(FixedProvider { content }), LlmConfig::default())),
         Arc::new(prompt),
-        Arc::new(StoryStoreMem::new()),
+        Arc::new(Store::default()),
         SummaryConfig { summary_turn_count },
     )
 }

@@ -24,8 +24,8 @@ pub use ids::{
 pub use knowledge::{EntryOrigin, FactBody, FactEntry, Recallable, RetrievalHint, RumorBody, RumorEntry};
 pub use narrative::{
     ActiveConstraint, ConstraintWindow, NarrativeCondition, NarrativeConfig, NarrativeConstraint, NarrativeDirection,
-    NarrativeError, NarrativeGraph, NarrativeInput, NarrativeNode, NarrativePlan, NarrativeResolution, NarrativeState,
-    NarrativeTransition, NodeStatus, SemanticQuery, Truth,
+    NarrativeError, NarrativeEvidence, NarrativeGraph, NarrativeNode, NarrativePlan, NarrativeResolution,
+    NarrativeState, NarrativeTransition, NodeStatus, SemanticQuery, Truth,
 };
 pub use role::{
     CharacterCardRef, CharacterProfile, DialogueExample, MemoryBody, MemoryEntry, RoleActor, RoleBody, RoleEntry,

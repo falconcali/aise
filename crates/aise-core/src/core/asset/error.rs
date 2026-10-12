@@ -1,3 +1,4 @@
+use crate::core::NarrativeError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -24,6 +25,9 @@ pub enum AssetError {
 
     #[error("role is not playable: {role_id}")]
     RoleNotPlayable { role_id: String },
+
+    #[error("narrative graph is invalid: {0}")]
+    Narrative(#[from] NarrativeError),
 
     #[error("{section} entry {id} is invalid: {source}")]
     InvalidEntry {

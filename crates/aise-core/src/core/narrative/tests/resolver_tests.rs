@@ -41,7 +41,7 @@ fn resolution(state: &NarrativeState, results: &[(&str, Truth)]) -> NarrativeRes
             )
         })
         .collect();
-    let input = NarrativeInput {
+    let input = NarrativeEvidence {
         turn: TurnNumber::new(1),
         semantic_results: &semantic_results,
     };
@@ -142,7 +142,7 @@ fn applying_resolution_advances_the_graph_one_step_per_turn() {
     let mut narrative_state = NarrativeState::default();
     let graph = graph();
     let semantic_results = BTreeMap::new();
-    let input = NarrativeInput {
+    let input = NarrativeEvidence {
         turn: TurnNumber::new(1),
         semantic_results: &semantic_results,
     };
@@ -153,4 +153,18 @@ fn applying_resolution_advances_the_graph_one_step_per_turn() {
         NodeStatus::Active
     );
     assert!(graph.resolve(&narrative_state, &input).transitions.is_empty());
+}
+
+#[test]
+fn initial_state_activates_nodes_that_start_with_the_story() {
+    let initial = graph().initial_state();
+
+    assert_eq!(
+        initial.status(&NarrativeNodeId::try_new("arrival").expect("test node id should be valid")),
+        NodeStatus::Active
+    );
+    assert_eq!(
+        initial.status(&NarrativeNodeId::try_new("reveal").expect("test node id should be valid")),
+        NodeStatus::Inactive
+    );
 }

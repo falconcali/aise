@@ -1,5 +1,5 @@
 use crate::core::StoryContext;
-use crate::persistence::StoryStore;
+use crate::persistence::Store;
 use crate::pipeline::common::{PipelineError, PipelineStage, pipeline_prompt};
 use crate::prompt::{Prompt, PromptSpec, PromptVars, RenderedPrompt};
 use crate::trace::Observation;
@@ -15,10 +15,10 @@ pub async fn process_player_input(
     prompt: &Prompt,
     story_ctx: &StoryContext,
     input: &str,
-    story_store: &dyn StoryStore,
+    store: &Store,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
-    let story_opening = pipeline_prompt::load_story_opening(PipelineStage::Baseline, story_ctx, story_store).await?;
+    let story_opening = pipeline_prompt::load_story_opening(PipelineStage::Baseline, story_ctx, store).await?;
     let vars = player_input_vars(story_ctx, input, story_opening);
     prompt
         .render(PromptSpec::new(PROCESS_PLAYER_INPUT_PROMPT_ID, vars), observation)

@@ -1,5 +1,6 @@
 use super::{
-    Change, PackId, PlayerId, RoleActor, RoleId, SemanticVersion, Sha256Digest, StoryId, Turn, TurnNumber, WorldState,
+    Change, NarrativeState, PackId, PlayerId, RoleActor, RoleId, SemanticVersion, Sha256Digest, StoryId, Turn,
+    TurnNumber, WorldState,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,7 @@ pub struct StoryInstanceSpec {
     pub cast: BTreeMap<RoleId, RoleActor>,
     pub player_id: PlayerId,
     pub player_role: RoleId,
+    pub narrative: NarrativeState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,7 +39,7 @@ pub struct StorySummary {
     pub covered_through: TurnNumber,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StoryLifeCycle {
     Active,
     Cancelled,
@@ -49,6 +51,8 @@ pub struct StoryCommit {
     pub story_id: StoryId,
     pub turn: Turn,
     pub summary: Change<StorySummary>,
+    pub narrative: Change<NarrativeState>,
+    pub life_cycle: Change<StoryLifeCycle>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +66,7 @@ pub struct StoryContext {
     pub recent_turns: VecDeque<Turn>,
     pub life_cycle: StoryLifeCycle,
     pub world_state: WorldState,
+    pub narrative: NarrativeState,
 }
 
 impl StoryContext {
@@ -80,6 +85,7 @@ impl StoryContext {
             recent_turns: VecDeque::new(),
             life_cycle: StoryLifeCycle::Active,
             world_state: WorldState {},
+            narrative: NarrativeState::default(),
         }
     }
 }

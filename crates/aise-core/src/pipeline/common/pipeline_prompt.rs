@@ -1,5 +1,5 @@
-use crate::core::{StoryContext, Turn, TurnStatus};
-use crate::persistence::StoryStore;
+use crate::core::{BoundedText, NarrativeDirection, StoryContext, Turn, TurnStatus};
+use crate::persistence::Store;
 use crate::pipeline::common::{PipelineError, PipelineStage};
 
 pub(in crate::pipeline) fn story_summary(story_ctx: &StoryContext) -> Option<&str> {
@@ -23,15 +23,33 @@ pub(in crate::pipeline) fn turns_story<'a>(turns: impl Iterator<Item = &'a Turn>
         .join("\n\n")
 }
 
+pub(in crate::pipeline) fn narrative_directions(directions: &[NarrativeDirection]) -> String {
+    bullet_list(directions.iter().map(|direction| direction.dramatic_focus.as_str()))
+}
+
+pub(in crate::pipeline) fn story_constraints(constraints: &[BoundedText]) -> String {
+    bullet_list(constraints.iter().map(BoundedText::as_str))
+}
+
+fn bullet_list<'a>(items: impl Iterator<Item = &'a str>) -> String {
+    items
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(|item| format!("- {item}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub(in crate::pipeline) async fn load_story_opening(
     stage: PipelineStage,
     story_ctx: &StoryContext,
-    story_store: &dyn StoryStore,
+    store: &Store,
 ) -> Result<String, PipelineError> {
     if story_summary(story_ctx).is_some() {
         return Ok(String::new());
     }
-    let story_pack = story_store
+    let story_pack = store
+        .pack_store()
         .get_pack(&story_ctx.pack_ref.pack_id)
         .await
         .map_err(|error| PipelineError::new(stage, error.to_string()))?;

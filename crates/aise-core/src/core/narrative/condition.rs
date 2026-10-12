@@ -75,13 +75,13 @@ pub enum NarrativeCondition {
     },
 }
 
-pub struct NarrativeInput<'a> {
+pub struct NarrativeEvidence<'a> {
     pub turn: TurnNumber,
     pub semantic_results: &'a BTreeMap<NarrativeConditionId, Truth>,
 }
 
 impl NarrativeCondition {
-    pub fn evaluate(&self, state: &NarrativeState, input: &NarrativeInput<'_>) -> Truth {
+    pub fn evaluate(&self, state: &NarrativeState, input: &NarrativeEvidence<'_>) -> Truth {
         match self {
             Self::All { conditions } => Truth::all(conditions.iter().map(|c| c.evaluate(state, input))),
             Self::Any { conditions } => Truth::any(conditions.iter().map(|c| c.evaluate(state, input))),
@@ -95,7 +95,7 @@ impl NarrativeCondition {
         }
     }
 
-    pub(super) fn holds(&self, state: &NarrativeState, input: &NarrativeInput<'_>) -> bool {
+    pub(super) fn holds(&self, state: &NarrativeState, input: &NarrativeEvidence<'_>) -> bool {
         self.evaluate(state, input) == Truth::Satisfied
     }
 
