@@ -7,6 +7,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum PipelineError {
+    #[error("activation knowledge error.")]
+    ActivaionKnowledge,
+
     #[error("pipeline stage {stage} llm call failed: {source}")]
     Llm {
         stage: PipelineStage,

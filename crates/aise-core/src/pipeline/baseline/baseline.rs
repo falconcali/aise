@@ -1,6 +1,7 @@
 use crate::core::{PlayerContribution, StoryContext, TurnControl};
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
+use crate::pipeline::baseline::baseline_knowledge::{self, ActivatedKnowledge};
 use crate::pipeline::baseline::baseline_narrative::{self, NarrativeProjection};
 use crate::pipeline::baseline::{baseline_llm, baseline_prompt, baseline_trace};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
@@ -18,6 +19,7 @@ pub struct BaselineInput {
 pub struct BaselineOutput {
     pub player_contribution: PlayerContribution,
     pub narrative: NarrativeProjection,
+    pub knowledge: ActivatedKnowledge,
 }
 
 pub struct BaselinePipeline {
@@ -31,15 +33,35 @@ impl BaselinePipeline {
         Self { gateway, prompt, store }
     }
 
-    async fn project_narrative(&self, story_ctx: &StoryContext) -> Result<NarrativeProjection, PipelineError> {
+    async fn project_narrative(
+        &self,
+        story_ctx: &StoryContext,
+        observation: &Observation,
+    ) -> Result<NarrativeProjection, PipelineError> {
         let story_pack = self
             .store
             .pack_store()
             .get_pack(&story_ctx.pack_ref)
             .await
             .map_err(PipelineError::persistence(PipelineStage::Baseline))?;
-        baseline_narrative::project_narrative(&story_pack, story_ctx)
+        baseline_narrative::project_narrative(&story_pack, story_ctx, observation)
             .map_err(PipelineError::narrative(PipelineStage::Baseline))
+    }
+
+    async fn activate_knowledge(
+        &self,
+        story_ctx: &StoryContext,
+        player_contribution: &PlayerContribution,
+        observation: &Observation,
+    ) -> Result<ActivatedKnowledge, PipelineError> {
+        let story_pack = self
+            .store
+            .pack_store()
+            .get_pack(&story_ctx.pack_ref)
+            .await
+            .map_err(PipelineError::persistence(PipelineStage::Baseline))?;
+
+        baseline_knowledge::activate_knowledge(&story_pack, story_ctx, player_contribution, observation)
     }
 
     async fn process_player_input(
@@ -87,16 +109,21 @@ impl Pipeline for BaselinePipeline {
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
-        let narrative = self.project_narrative(story_ctx).await?;
+        let narrative = self.project_narrative(story_ctx, observation).await?;
 
-        let baseline_observation = baseline_trace::begin_player_contribution(observation, &input.player_input);
-        let result = self
-            .process_player_input(&input, story_ctx, control, &baseline_observation)
-            .await;
-        baseline_trace::finish_player_contribution(baseline_observation, &result);
-        result.map(|player_contribution: PlayerContribution| BaselineOutput {
+        let input_observation = baseline_trace::begin_player_contribution(observation, &input.player_input);
+        let result = self.process_player_input(&input, story_ctx, control, &input_observation).await;
+        baseline_trace::finish_player_contribution(input_observation, &result);
+
+        let player_contribution = result?;
+        let knowledge = self.activate_knowledge(story_ctx, &player_contribution, observation).await?;
+
+        // role memory
+
+        Ok(BaselineOutput {
             player_contribution,
             narrative,
+            knowledge,
         })
     }
 }

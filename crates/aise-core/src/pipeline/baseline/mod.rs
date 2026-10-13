@@ -1,4 +1,5 @@
 mod baseline;
+mod baseline_knowledge;
 mod baseline_llm;
 mod baseline_narrative;
 mod baseline_prompt;
