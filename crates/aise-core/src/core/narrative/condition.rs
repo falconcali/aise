@@ -99,12 +99,16 @@ impl NarrativeCondition {
         self.evaluate(state, input) == Truth::Satisfied
     }
 
-    pub(super) fn validate(
-        &self,
-        nodes: &BTreeMap<NarrativeNodeId, NarrativeNode>,
-        max_depth: usize,
-    ) -> Result<(), NarrativeError> {
-        self.validate_at(nodes, 1, max_depth)
+    pub(super) fn validate(&self, nodes: &BTreeMap<NarrativeNodeId, NarrativeNode>) -> Result<(), NarrativeError> {
+        match self {
+            Self::All { conditions } => validate_children("all", conditions, nodes),
+            Self::Any { conditions } => validate_children("any", conditions, nodes),
+            Self::Not { condition } => condition.validate(nodes),
+            Self::NodeIs { node_id, .. } if !nodes.contains_key(node_id) => Err(NarrativeError::UnknownNode {
+                node_id: node_id.to_string(),
+            }),
+            Self::NodeIs { .. } | Self::StoryStarted | Self::TurnReaches { .. } | Self::Semantic { .. } => Ok(()),
+        }
     }
 
     pub(super) fn collect_semantic(
@@ -132,41 +136,17 @@ impl NarrativeCondition {
             Self::StoryStarted | Self::TurnReaches { .. } | Self::NodeIs { .. } => Ok(()),
         }
     }
-
-    fn validate_at(
-        &self,
-        nodes: &BTreeMap<NarrativeNodeId, NarrativeNode>,
-        depth: usize,
-        max_depth: usize,
-    ) -> Result<(), NarrativeError> {
-        if depth > max_depth {
-            return Err(NarrativeError::ConditionTooDeep { maximum: max_depth });
-        }
-        match self {
-            Self::All { conditions } => validate_children("all", conditions, nodes, depth, max_depth),
-            Self::Any { conditions } => validate_children("any", conditions, nodes, depth, max_depth),
-            Self::Not { condition } => condition.validate_at(nodes, depth + 1, max_depth),
-            Self::NodeIs { node_id, .. } if !nodes.contains_key(node_id) => Err(NarrativeError::UnknownNode {
-                node_id: node_id.to_string(),
-            }),
-            Self::NodeIs { .. } | Self::StoryStarted | Self::TurnReaches { .. } | Self::Semantic { .. } => Ok(()),
-        }
-    }
 }
 
 fn validate_children(
     operator: &'static str,
     conditions: &[NarrativeCondition],
     nodes: &BTreeMap<NarrativeNodeId, NarrativeNode>,
-    depth: usize,
-    max_depth: usize,
 ) -> Result<(), NarrativeError> {
     if conditions.is_empty() {
         return Err(NarrativeError::EmptyCondition { operator });
     }
-    conditions
-        .iter()
-        .try_for_each(|condition| condition.validate_at(nodes, depth + 1, max_depth))
+    conditions.iter().try_for_each(|condition| condition.validate(nodes))
 }
 
 #[cfg(test)]

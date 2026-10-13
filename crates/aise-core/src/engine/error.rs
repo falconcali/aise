@@ -1,4 +1,4 @@
-use crate::core::{AssetError, StoryLifeCycle};
+use crate::core::{CoreError, StoryError, StoryLifeCycle};
 use crate::llm::LlmError;
 use crate::persistence::PersistenceError;
 use crate::prompt::PromptError;
@@ -14,8 +14,10 @@ pub enum EngineError {
     Dependency { message: String },
     #[error("persistence error: {message}")]
     Persistence { message: String },
-    #[error("asset error: {message}")]
-    Asset { message: String },
+    #[error("story error: {0}")]
+    Story(#[from] StoryError),
+    #[error("core error: {0}")]
+    Core(#[from] CoreError),
     #[error("prompt error: {message}")]
     Prompt { message: String },
     #[error("llm error: {message}")]
@@ -27,14 +29,6 @@ pub enum EngineError {
 impl From<PersistenceError> for EngineError {
     fn from(error: PersistenceError) -> Self {
         EngineError::Persistence {
-            message: error.to_string(),
-        }
-    }
-}
-
-impl From<AssetError> for EngineError {
-    fn from(error: AssetError) -> Self {
-        EngineError::Asset {
             message: error.to_string(),
         }
     }

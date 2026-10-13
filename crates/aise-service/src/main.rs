@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use aise_core::core::{
-    AssetConfig, Change, CharacterCard, IdempotencyKey, PlayerId, RoleId, StoryCommit, StoryId, StoryInstanceInfo,
-    StoryPack, TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError, TurnEventSink, TurnRequest,
+    Change, CharacterCard, IdempotencyKey, PlayerId, RoleId, StoryCommit, StoryId, StoryInstanceInfo, StoryPack,
+    TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError, TurnEventSink, TurnRequest,
 };
 use aise_core::engine::{AiseEngine, Engine, EngineConfig, EngineError, RoleActorSpec, StoryCreationSpec};
 use aise_core::llm::{LlmConfig, LlmProviderType};
@@ -208,10 +208,9 @@ fn print_turn(turn_index: usize, story_commit: &StoryCommit) {
 }
 
 async fn create_demo_story(engine: &AiseEngine) -> anyhow::Result<StoryInstanceInfo> {
-    let asset_config = AssetConfig::default();
-    let story_pack = StoryPack::from_json(&read_demo_asset(DEMO_STORY_PACK_PATH).await?, &asset_config)
-        .context("demo story pack parse failed")?;
-    let card = CharacterCard::from_json(&read_demo_asset(DEMO_CHARACTER_CARD_PATH).await?, &asset_config)
+    let story_pack: StoryPack =
+        serde_json::from_str(&read_demo_asset(DEMO_STORY_PACK_PATH).await?).context("demo story pack parse failed")?;
+    let card: CharacterCard = serde_json::from_str(&read_demo_asset(DEMO_CHARACTER_CARD_PATH).await?)
         .context("demo character card parse failed")?;
     engine
         .create_story(demo_story_creation_spec(story_pack, card)?)
@@ -241,7 +240,6 @@ fn build_engine_config(pipeline_config: PipelineConfig) -> anyhow::Result<Engine
         prompt_config: load_prompt_config()?,
         persistence_config: Default::default(),
         pipeline_config,
-        asset_config: AssetConfig::default(),
     })
 }
 

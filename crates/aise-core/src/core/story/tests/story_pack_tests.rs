@@ -1,6 +1,9 @@
 use super::*;
-use crate::core::{CharacterCardId, CharacterCardRef, Sha256Digest};
+use crate::core::CharacterCardId;
+use crate::core::tests::{SNAKE_PACK_JSON, demo_pack, snake_pack};
 use serde_json::json;
+
+const LEGACY_V5_PACK_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/snake_pack.json"));
 
 fn role(name: &str) -> serde_json::Value {
     json!({
@@ -50,6 +53,48 @@ fn card_ref() -> CharacterCardRef {
 }
 
 #[test]
+fn example_story_packs_import() {
+    let snake = snake_pack();
+    let demo = demo_pack();
+
+    assert!(snake.play.playable_roles.contains(&role_id("xu_xian")));
+    assert_eq!(snake.narrative.as_ref().map(|graph| graph.nodes.len()), Some(14));
+    assert!(demo.play.playable_roles.contains(&role_id("protagonist")));
+}
+
+#[test]
+fn legacy_v5_pack_is_rejected_as_malformed() {
+    assert!(serde_json::from_str::<StoryPack>(LEGACY_V5_PACK_JSON).is_err());
+}
+
+#[test]
+fn digest_is_stable_hex_and_content_sensitive() {
+    let digest = snake_pack().pack_ref().expect("pack ref should compute").digest;
+    let reparsed = serde_json::from_str::<StoryPack>(SNAKE_PACK_JSON)
+        .expect("snake pack should import")
+        .pack_ref()
+        .expect("pack ref should compute")
+        .digest;
+    let other = demo_pack().pack_ref().expect("pack ref should compute").digest;
+
+    assert_eq!(digest, reparsed);
+    assert_ne!(digest, other);
+    assert_eq!(digest.as_str().len(), 64);
+    assert!(digest.as_str().chars().all(|ch| ch.is_ascii_hexdigit()));
+}
+
+#[test]
+fn pack_ref_pins_pack_id_version_and_digest() {
+    let pack = snake_pack();
+
+    let pack_ref = pack.pack_ref().expect("pack ref should compute");
+
+    assert_eq!(pack_ref.pack_id, pack.pack_id);
+    assert_eq!(pack_ref.version, pack.meta.version);
+    assert_eq!(pack_ref.digest, pack.pack_ref().expect("pack ref should compute").digest);
+}
+
+#[test]
 fn deserializes_pack_with_keyed_seeds_and_optional_activation() {
     let pack = pack(pack_json());
 
@@ -93,6 +138,63 @@ fn rejects_character_name_inside_role_profile() {
 }
 
 #[test]
+fn valid_pack_passes_validation() {
+    assert!(pack(pack_json()).validate().is_ok());
+}
+
+#[test]
+fn empty_playable_roles_are_rejected() {
+    let mut value = pack_json();
+    value["play"]["playable_roles"] = json!([]);
+
+    assert!(matches!(pack(value).validate(), Err(StoryError::NoPlayableRole)));
+}
+
+#[test]
+fn playable_role_must_be_defined() {
+    let mut value = pack_json();
+    value["play"]["playable_roles"] = json!(["ghost"]);
+
+    assert!(matches!(
+        pack(value).validate(),
+        Err(StoryError::UnknownRole { field: "play.playable_roles", role_id }) if role_id == "ghost"
+    ));
+}
+
+#[test]
+fn pack_with_valid_narrative_passes_validation() {
+    let mut value = pack_json();
+    value["narrative"] = json!({ "nodes": {
+        "arrival": {
+            "title": "Arrival",
+            "activate_when": { "type": "story_started" },
+            "complete_when": { "type": "turn_reaches", "turn": 3 },
+            "constraints": [{ "forbid": "The ritual truth is revealed.", "window": "while_active" }],
+            "terminal": true
+        }
+    }});
+
+    assert!(pack(value).validate().is_ok());
+}
+
+#[test]
+fn pack_with_invalid_narrative_is_rejected() {
+    let mut value = pack_json();
+    value["narrative"] = json!({ "nodes": {
+        "arrival": {
+            "title": "Arrival",
+            "activate_when": { "type": "node_is", "node_id": "ghost", "status": "active" },
+            "complete_when": { "type": "story_started" }
+        }
+    }});
+
+    assert!(matches!(
+        pack(value).validate(),
+        Err(StoryError::Narrative(crate::core::NarrativeError::UnknownNode { .. }))
+    ));
+}
+
+#[test]
 fn resolve_cast_fills_unbound_roles_with_default_actor() {
     let pack = pack(pack_json());
     let cast = BTreeMap::from([(role_id("xu_xian"), RoleActor::Card(card_ref()))]);
@@ -109,7 +211,7 @@ fn resolve_cast_rejects_non_playable_player_role() {
 
     assert!(matches!(
         pack.resolve_cast(&role_id("bai_suzhen"), BTreeMap::new()),
-        Err(AssetError::RoleNotPlayable { role_id }) if role_id == "bai_suzhen"
+        Err(StoryError::RoleNotPlayable { role_id }) if role_id == "bai_suzhen"
     ));
 }
 
@@ -120,6 +222,6 @@ fn resolve_cast_rejects_unknown_cast_role() {
 
     assert!(matches!(
         pack.resolve_cast(&role_id("xu_xian"), cast),
-        Err(AssetError::UnknownRole { field: "cast", role_id }) if role_id == "ghost"
+        Err(StoryError::UnknownRole { field: "cast", role_id }) if role_id == "ghost"
     ));
 }

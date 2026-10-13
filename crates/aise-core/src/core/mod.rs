@@ -1,7 +1,7 @@
 mod activation;
-mod asset;
 mod bounded_text;
 mod change;
+mod digest;
 pub mod error;
 mod ids;
 mod knowledge;
@@ -16,26 +16,23 @@ mod world;
 pub(crate) mod tests;
 
 pub use activation::ActivationRule;
-pub use asset::{
-    AssetConfig, AssetError, CharacterCard, CharacterCardSpec, CharacterMeta, PlayDefinition, StoryPack, StoryPackMeta,
-    StoryPackProfile, StoryPackSpec,
-};
 pub use ids::{
     CharacterCardId, CharacterId, FactId, IdempotencyKey, MemoryId, NarrativeConditionId, NarrativeNodeId, PackId,
     PlayerId, RoleId, RumorId, SemanticVersion, Sha256Digest, StoryId,
 };
 pub use knowledge::{EntryOrigin, FactBody, FactEntry, Recallable, RetrievalHint, RumorBody, RumorEntry};
 pub use narrative::{
-    ActiveConstraint, ConstraintWindow, NarrativeCondition, NarrativeConfig, NarrativeConstraint, NarrativeDirection,
-    NarrativeError, NarrativeEvidence, NarrativeGraph, NarrativeNode, NarrativePlan, NarrativeResolution,
-    NarrativeState, NarrativeTransition, NodeStatus, SemanticQuery, Truth,
+    ActiveConstraint, ConstraintWindow, NarrativeCondition, NarrativeConstraint, NarrativeDirection, NarrativeError,
+    NarrativeEvidence, NarrativeGraph, NarrativeNode, NarrativePlan, NarrativeResolution, NarrativeState,
+    NarrativeTransition, NodeStatus, SemanticQuery, Truth,
 };
 pub use role::{
-    CharacterCardRef, CharacterProfile, DialogueExample, MemoryBody, MemoryEntry, RoleActor, RoleBody, RoleEntry,
+    CharacterCard, CharacterCardRef, CharacterCardSpec, CharacterMeta, CharacterProfile, DialogueExample, MemoryBody,
+    MemoryEntry, RoleActor, RoleBody, RoleEntry,
 };
 pub use story::{
-    PackRef, StoryAssetSpec, StoryCommit, StoryContext, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle,
-    StorySummary,
+    PackRef, PlayDefinition, StoryAssetSpec, StoryCommit, StoryContext, StoryError, StoryInstanceInfo,
+    StoryInstanceSpec, StoryLifeCycle, StoryPack, StoryPackMeta, StoryPackProfile, StoryPackSpec, StorySummary,
 };
 pub use turn::{
     PlayerContribution, Turn, TurnCancellation, TurnControl, TurnEvaluation, TurnEvent, TurnEventDeliveryError,

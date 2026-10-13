@@ -1,6 +1,5 @@
 use crate::core::narrative::{
-    NarrativeCondition, NarrativeConfig, NarrativeConstraint, NarrativeError, NarrativeEvidence, NarrativeState,
-    NodeStatus,
+    NarrativeCondition, NarrativeConstraint, NarrativeError, NarrativeEvidence, NarrativeState, NodeStatus,
 };
 use crate::core::{BoundedText, NarrativeNodeId};
 use serde::{Deserialize, Serialize};
@@ -29,35 +28,11 @@ pub struct NarrativeNode {
 }
 
 impl NarrativeGraph {
-    pub fn validate(&self, config: &NarrativeConfig) -> Result<(), NarrativeError> {
-        if self.nodes.len() > config.max_nodes {
-            return Err(NarrativeError::TooManyNodes {
-                actual: self.nodes.len(),
-                maximum: config.max_nodes,
-            });
-        }
-
-        for (node_id, node) in &self.nodes {
-            if node.constraints.len() > config.max_constraints_per_node {
-                return Err(NarrativeError::TooManyConstraints {
-                    node_id: node_id.to_string(),
-                    actual: node.constraints.len(),
-                    maximum: config.max_constraints_per_node,
-                });
-            }
-        }
-
+    pub fn validate(&self) -> Result<(), NarrativeError> {
         let mut semantic = BTreeMap::new();
         for condition in self.nodes.values().flat_map(NarrativeNode::conditions) {
-            condition.validate(&self.nodes, config.max_condition_depth)?;
+            condition.validate(&self.nodes)?;
             condition.collect_semantic(&mut semantic)?;
-        }
-
-        if semantic.len() > config.max_semantic_conditions {
-            return Err(NarrativeError::TooManySemanticConditions {
-                actual: semantic.len(),
-                maximum: config.max_semantic_conditions,
-            });
         }
         Ok(())
     }

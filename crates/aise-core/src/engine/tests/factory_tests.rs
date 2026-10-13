@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::tests::{snake_pack, xu_xian_card};
-use crate::core::{BoundedText, PackRef};
+use crate::core::{PackRef, StoryError};
 use crate::persistence::PersistenceError;
 
 fn role_id(value: &str) -> RoleId {
@@ -20,19 +20,15 @@ fn creation_spec(cast: BTreeMap<RoleId, RoleActorSpec>, player_role: &str) -> St
     }
 }
 
-async fn create_story(
-    store: &Arc<Store>,
-    asset_config: &AssetConfig,
-    spec: StoryCreationSpec,
-) -> Result<StoryInstanceInfo, EngineError> {
-    AiseFactory.create_story(Arc::clone(store), asset_config, spec).await
+async fn create_story(store: &Arc<Store>, spec: StoryCreationSpec) -> Result<StoryInstanceInfo, EngineError> {
+    AiseFactory.create_story(Arc::clone(store), spec).await
 }
 
 #[tokio::test]
 async fn created_story_pins_a_frozen_pack_snapshot() {
     let store = AiseFactory.create_store(PersistanceConfig::default());
 
-    let info = create_story(&store, &AssetConfig::default(), creation_spec(BTreeMap::new(), "xu_xian"))
+    let info = create_story(&store, creation_spec(BTreeMap::new(), "xu_xian"))
         .await
         .expect("story should be created");
 
@@ -53,7 +49,7 @@ async fn story_can_cast_a_character_card() {
     let store = AiseFactory.create_store(PersistanceConfig::default());
     let cast = BTreeMap::from([(role_id("xu_xian"), RoleActorSpec::Card(Box::new(xu_xian_card())))]);
 
-    let info = create_story(&store, &AssetConfig::default(), creation_spec(cast, "xu_xian"))
+    let info = create_story(&store, creation_spec(cast, "xu_xian"))
         .await
         .expect("story should be created");
 
@@ -71,51 +67,17 @@ async fn story_can_cast_a_character_card() {
 }
 
 #[tokio::test]
-async fn story_pack_violating_asset_limits_is_rejected() {
-    let store = AiseFactory.create_store(PersistanceConfig::default());
-    let asset_config = AssetConfig {
-        max_label_bytes: 4,
-        ..AssetConfig::default()
-    };
-
-    let error = create_story(&store, &asset_config, creation_spec(BTreeMap::new(), "xu_xian"))
-        .await
-        .expect_err("oversized pack should fail");
-
-    assert!(matches!(error, EngineError::Asset { .. }));
-    assert!(matches!(
-        store.pack_store().get_pack(&snake_pack_ref()).await,
-        Err(PersistenceError::NotFound)
-    ));
-}
-
-#[tokio::test]
-async fn character_card_violating_asset_limits_is_rejected() {
-    let store = AiseFactory.create_store(PersistanceConfig::default());
-    let mut card = xu_xian_card();
-    card.name = BoundedText::try_new("x".repeat(512), "name", 1024).expect("test name should fit");
-    let cast = BTreeMap::from([(role_id("xu_xian"), RoleActorSpec::Card(Box::new(card)))]);
-
-    let error = create_story(&store, &AssetConfig::default(), creation_spec(cast, "xu_xian"))
-        .await
-        .expect_err("oversized card should fail");
-
-    assert!(matches!(error, EngineError::Asset { .. }));
-    assert!(matches!(
-        store.pack_store().get_pack(&snake_pack_ref()).await,
-        Err(PersistenceError::NotFound)
-    ));
-}
-
-#[tokio::test]
 async fn non_playable_player_role_is_rejected_without_retaining_assets() {
     let store = AiseFactory.create_store(PersistanceConfig::default());
 
-    let error = create_story(&store, &AssetConfig::default(), creation_spec(BTreeMap::new(), "bai_suzhen"))
+    let error = create_story(&store, creation_spec(BTreeMap::new(), "bai_suzhen"))
         .await
         .expect_err("non playable role should fail");
 
-    assert!(matches!(error, EngineError::Asset { .. }));
+    assert!(matches!(
+        error,
+        EngineError::Story(StoryError::RoleNotPlayable { role_id }) if role_id == "bai_suzhen"
+    ));
     assert!(matches!(
         store.pack_store().get_pack(&snake_pack_ref()).await,
         Err(PersistenceError::NotFound)
@@ -125,7 +87,7 @@ async fn non_playable_player_role_is_rejected_without_retaining_assets() {
 #[tokio::test]
 async fn removing_story_releases_its_asset_snapshots() {
     let store = AiseFactory.create_store(PersistanceConfig::default());
-    let info = create_story(&store, &AssetConfig::default(), creation_spec(BTreeMap::new(), "xu_xian"))
+    let info = create_story(&store, creation_spec(BTreeMap::new(), "xu_xian"))
         .await
         .expect("story should be created");
 

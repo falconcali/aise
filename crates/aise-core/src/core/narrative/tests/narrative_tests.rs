@@ -24,7 +24,7 @@ fn valid_graph_passes_validation() {
         "b": node(json!({ "type": "node_is", "node_id": "a", "status": "completed" }), started()),
     }}));
 
-    assert!(graph.validate(&NarrativeConfig::default()).is_ok());
+    assert!(graph.validate().is_ok());
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn node_reference_to_missing_node_is_rejected() {
     }}));
 
     assert!(matches!(
-        graph.validate(&NarrativeConfig::default()),
+        graph.validate(),
         Err(NarrativeError::UnknownNode { node_id }) if node_id == "ghost"
     ));
 }
@@ -46,23 +46,8 @@ fn empty_all_is_rejected() {
     }}));
 
     assert!(matches!(
-        graph.validate(&NarrativeConfig::default()),
+        graph.validate(),
         Err(NarrativeError::EmptyCondition { operator: "all" })
-    ));
-}
-
-#[test]
-fn condition_deeper_than_limit_is_rejected() {
-    let nested = json!({ "type": "not", "condition": { "type": "not", "condition": started() } });
-    let graph = graph(json!({ "nodes": { "a": node(nested, started()) } }));
-    let config = NarrativeConfig {
-        max_condition_depth: 2,
-        ..NarrativeConfig::default()
-    };
-
-    assert!(matches!(
-        graph.validate(&config),
-        Err(NarrativeError::ConditionTooDeep { maximum: 2 })
     ));
 }
 
@@ -74,7 +59,7 @@ fn same_semantic_id_with_different_criteria_is_rejected() {
     }}));
 
     assert!(matches!(
-        graph.validate(&NarrativeConfig::default()),
+        graph.validate(),
         Err(NarrativeError::SemanticCriterionConflict { condition_id }) if condition_id == "done"
     ));
 }
@@ -86,63 +71,5 @@ fn same_semantic_id_with_same_criterion_is_accepted() {
         "b": node(started(), semantic("done", "same")),
     }}));
 
-    assert!(graph.validate(&NarrativeConfig::default()).is_ok());
-}
-
-#[test]
-fn too_many_nodes_are_rejected() {
-    let graph = graph(json!({ "nodes": {
-        "a": node(started(), started()),
-        "b": node(started(), started()),
-    }}));
-    let config = NarrativeConfig {
-        max_nodes: 1,
-        ..NarrativeConfig::default()
-    };
-
-    assert!(matches!(
-        graph.validate(&config),
-        Err(NarrativeError::TooManyNodes { actual: 2, maximum: 1 })
-    ));
-}
-
-#[test]
-fn too_many_semantic_conditions_are_rejected() {
-    let graph = graph(json!({ "nodes": {
-        "a": node(started(), semantic("one", "one")),
-        "b": node(started(), semantic("two", "two")),
-    }}));
-    let config = NarrativeConfig {
-        max_semantic_conditions: 1,
-        ..NarrativeConfig::default()
-    };
-
-    assert!(matches!(
-        graph.validate(&config),
-        Err(NarrativeError::TooManySemanticConditions { actual: 2, maximum: 1 })
-    ));
-}
-
-#[test]
-fn too_many_constraints_on_a_node_are_rejected() {
-    let graph = graph(json!({ "nodes": {
-        "a": {
-            "title": "node",
-            "activate_when": started(),
-            "complete_when": started(),
-            "constraints": [
-                { "forbid": "one", "window": "before_active" },
-                { "forbid": "two", "window": "while_active" }
-            ]
-        }
-    }}));
-    let config = NarrativeConfig {
-        max_constraints_per_node: 1,
-        ..NarrativeConfig::default()
-    };
-
-    assert!(matches!(
-        graph.validate(&config),
-        Err(NarrativeError::TooManyConstraints { node_id, actual: 2, maximum: 1 }) if node_id == "a"
-    ));
+    assert!(graph.validate().is_ok());
 }

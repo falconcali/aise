@@ -17,4 +17,7 @@ pub enum CoreError {
 
     #[error("retrieval hint is empty.")]
     RetrievalHintEmpty,
+
+    #[error("{subject} digest failed: {message}")]
+    DigestFailed { subject: &'static str, message: String },
 }

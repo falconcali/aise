@@ -1,7 +1,6 @@
 use super::{AiseFactory, EngineConfig, EngineError, StoryCreationSpec};
 use crate::core::{
-    AssetConfig, StoryCommit, StoryId, StoryInstanceInfo, StoryLifeCycle, TurnControl, TurnEvent, TurnEventSink,
-    TurnRequest,
+    StoryCommit, StoryId, StoryInstanceInfo, StoryLifeCycle, TurnControl, TurnEvent, TurnEventSink, TurnRequest,
 };
 use crate::persistence::Store;
 use crate::pipeline::Runtime;
@@ -27,7 +26,6 @@ pub trait Engine: Send + Sync {
 pub struct AiseEngine {
     runtime: Runtime,
     store: Arc<Store>,
-    asset_config: AssetConfig,
 }
 
 impl AiseEngine {
@@ -38,7 +36,6 @@ impl AiseEngine {
         Ok(Self {
             runtime: Runtime::new(gateway, Arc::new(prompt), Arc::clone(&store), engine_config.pipeline_config),
             store,
-            asset_config: engine_config.asset_config,
         })
     }
 }
@@ -46,9 +43,7 @@ impl AiseEngine {
 #[async_trait]
 impl Engine for AiseEngine {
     async fn create_story(&self, spec: StoryCreationSpec) -> Result<StoryInstanceInfo, EngineError> {
-        AiseFactory
-            .create_story(Arc::clone(&self.store), &self.asset_config, spec)
-            .await
+        AiseFactory.create_story(Arc::clone(&self.store), spec).await
     }
 
     async fn remove_story(&self, story_id: &StoryId) -> Result<(), EngineError> {

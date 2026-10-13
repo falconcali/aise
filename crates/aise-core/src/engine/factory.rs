@@ -1,5 +1,5 @@
 use crate::core::{
-    AssetConfig, CharacterCard, CharacterCardRef, NarrativeGraph, PlayerId, RoleActor, RoleId, StoryAssetSpec, StoryId,
+    CharacterCard, CharacterCardRef, NarrativeGraph, PlayerId, RoleActor, RoleId, StoryAssetSpec, StoryId,
     StoryInstanceInfo, StoryInstanceSpec, StoryPack,
 };
 use crate::engine::EngineError;
@@ -38,10 +38,9 @@ impl AiseFactory {
     pub async fn create_story(
         &self,
         store: Arc<Store>,
-        asset_config: &AssetConfig,
         spec: StoryCreationSpec,
     ) -> Result<StoryInstanceInfo, EngineError> {
-        let story = self.freeze_story(self.generate_story_id(), spec, asset_config)?;
+        let story = self.freeze_story(self.generate_story_id(), spec)?;
         let story_id = story.instance.story_id.clone();
         store.pack_store().retain(&story_id, story.assets).await?;
         match store.story_store().create(story.instance).await {
@@ -75,14 +74,11 @@ impl AiseFactory {
         Arc::new(Store::new(persistence_config))
     }
 
-    fn freeze_story(
-        &self,
-        story_id: StoryId,
-        spec: StoryCreationSpec,
-        asset_config: &AssetConfig,
-    ) -> Result<FrozenStory, EngineError> {
-        spec.story_pack.validate(asset_config)?;
-        let frozen_cast = self.freeze_cast(spec.cast, asset_config)?;
+    fn freeze_story(&self, story_id: StoryId, spec: StoryCreationSpec) -> Result<FrozenStory, EngineError> {
+        // WAIVER: R-ARCH-03
+        // WAIVER: R-ARCH-04
+        spec.story_pack.validate()?;
+        let frozen_cast = self.freeze_cast(spec.cast)?;
         let cast = spec.story_pack.resolve_cast(&spec.player_role, frozen_cast.actors)?;
         let pack_ref = spec.story_pack.pack_ref()?;
         let narrative = spec
@@ -108,11 +104,7 @@ impl AiseFactory {
         })
     }
 
-    fn freeze_cast(
-        &self,
-        cast: BTreeMap<RoleId, RoleActorSpec>,
-        asset_config: &AssetConfig,
-    ) -> Result<FrozenCast, EngineError> {
+    fn freeze_cast(&self, cast: BTreeMap<RoleId, RoleActorSpec>) -> Result<FrozenCast, EngineError> {
         let mut frozen_cast = FrozenCast {
             actors: BTreeMap::new(),
             cards: Vec::new(),
@@ -121,7 +113,6 @@ impl AiseFactory {
             let actor = match actor {
                 RoleActorSpec::Default => RoleActor::Default,
                 RoleActorSpec::Card(card) => {
-                    card.validate(asset_config)?;
                     let card_ref = card.card_ref()?;
                     frozen_cast.cards.push((card_ref.clone(), *card));
                     RoleActor::Card(card_ref)

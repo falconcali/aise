@@ -1,65 +1,15 @@
-use super::{
-    Change, CharacterCard, CharacterCardRef, NarrativeState, PackId, PlayerId, RoleActor, RoleId, SemanticVersion,
-    Sha256Digest, StoryId, StoryPack, Turn, TurnNumber, WorldState,
+use crate::core::{
+    NarrativeState, PackId, PackRef, RoleActor, RoleId, SemanticVersion, Sha256Digest, StoryId, StoryLifeCycle, Turn,
+    TurnNumber, WorldState,
 };
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PackRef {
-    pub pack_id: PackId,
-    pub version: SemanticVersion,
-    pub digest: Sha256Digest,
-}
-
-#[derive(Debug, Clone)]
-pub struct StoryAssetSpec {
-    pub pack_ref: PackRef,
-    pub pack: StoryPack,
-    pub cards: Vec<(CharacterCardRef, CharacterCard)>,
-}
-
-#[derive(Debug, Clone)]
-pub struct StoryInstanceSpec {
-    pub story_id: StoryId,
-    pub pack_ref: PackRef,
-    pub cast: BTreeMap<RoleId, RoleActor>,
-    pub player_id: PlayerId,
-    pub player_role: RoleId,
-    pub narrative: NarrativeState,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoryInstanceInfo {
-    pub story_id: StoryId,
-    pub description: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub life_cycle: StoryLifeCycle,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorySummary {
     pub text: String,
     pub covered_through: TurnNumber,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum StoryLifeCycle {
-    Active,
-    Cancelled,
-    Completed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoryCommit {
-    pub story_id: StoryId,
-    pub turn: Turn,
-    pub summary: Change<StorySummary>,
-    pub narrative: Change<NarrativeState>,
-    pub life_cycle: Change<StoryLifeCycle>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
