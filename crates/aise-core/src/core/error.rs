@@ -18,6 +18,18 @@ pub enum CoreError {
     #[error("retrieval hint is empty.")]
     RetrievalHintEmpty,
 
+    #[error("activation key is empty.")]
+    ActivationKeyEmpty,
+
+    #[error("activation key too long: {actual} (maximum: {maximum})")]
+    ActivationKeyTooLong { actual: u64, maximum: u64 },
+
+    #[error("activation group key is invalid: {value}")]
+    ActivationGroupKeyInvalid { value: String },
+
+    #[error("activation probability is outside 0..=100: {value}")]
+    ActivationProbabilityInvalid { value: u8 },
+
     #[error("{subject} digest failed: {message}")]
     DigestFailed { subject: &'static str, message: String },
 }

@@ -1,7 +1,8 @@
 use super::*;
 use crate::core::tests::store_with_default_pack;
 use crate::core::{
-    IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, WorldChange,
+    ActivationRule, EntryOrigin, FactBody, FactId, IdempotencyKey, PlayerContribution, RetrievalHint, RumorBody,
+    RumorId, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, WorldChange,
 };
 
 fn summary(text: &str, covered_through: u64) -> StorySummary {
@@ -129,8 +130,55 @@ fn narrative_directions_render_dramatic_focus_as_bullets() {
     assert_eq!(narrative_directions(&directions), "- The traveler reaches the grey forest.");
 }
 
+fn fact(id: &str, content: &str) -> FactEntry {
+    FactEntry {
+        id: FactId::try_new(id).expect("test fact id should be valid"),
+        origin: EntryOrigin::Seed,
+        body: FactBody {
+            content: text(content),
+            activation: ActivationRule::default(),
+            retrieval: RetrievalHint::try_new("hint").expect("test hint should be valid"),
+        },
+    }
+}
+
+fn rumor(id: &str, content: &str) -> RumorEntry {
+    RumorEntry {
+        id: RumorId::try_new(id).expect("test rumor id should be valid"),
+        origin: EntryOrigin::Seed,
+        body: RumorBody {
+            content: text(content),
+            activation: ActivationRule::default(),
+            retrieval: RetrievalHint::try_new("hint").expect("test hint should be valid"),
+        },
+    }
+}
+
+#[test]
+fn known_facts_render_only_content_as_bullets() {
+    let facts = [
+        fact("keeper_name", "  The forest keeper is named Ash. "),
+        fact("blank", "  "),
+        fact("river", "The river runs north."),
+    ];
+
+    assert_eq!(
+        known_facts(&facts),
+        "- The forest keeper is named Ash.\n- The river runs north."
+    );
+}
+
+#[test]
+fn rumors_render_only_content_as_bullets() {
+    let rumors_list = [rumor("ghost", "A ghost haunts the mill.")];
+
+    assert_eq!(rumors(&rumors_list), "- A ghost haunts the mill.");
+}
+
 #[test]
 fn empty_lists_render_as_empty_text() {
     assert_eq!(story_constraints(&[]), "");
     assert_eq!(narrative_directions(&[]), "");
+    assert_eq!(known_facts(&[]), "");
+    assert_eq!(rumors(&[]), "");
 }

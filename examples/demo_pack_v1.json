@@ -33,29 +33,92 @@
   "seed_facts": {
     "lodge_is_remote": {
       "content": "木屋位于人迹罕至的密林深处，最近的村落要走上大半天。",
-      "retrieval": "木屋所处的地理环境与孤立程度"
+      "retrieval": "木屋所处的地理环境与孤立程度",
+      "activation": {
+        "mode": {
+          "constant": true
+        },
+        "recursion": {
+          "prevent_recursion": true
+        },
+        "selection": {
+          "order": 50
+        }
+      }
     },
     "brass_key_opens_cellar": {
       "content": "外套口袋里的黄铜钥匙配的是壁炉旁那扇地窖门，钥匙柄上刻着一个模糊的编号。",
-      "retrieval": "黄铜钥匙的用途：打开壁炉旁的地窖门"
+      "retrieval": "黄铜钥匙的用途：打开壁炉旁的地窖门",
+      "activation": {
+        "match": {
+          "keys": ["黄铜钥匙", "铜钥匙", "钥匙"]
+        },
+        "selection": {
+          "order": 30
+        }
+      }
     },
     "cellar_holds_the_guest_log": {
       "content": "地窖里堆着旧柴火和一本住客登记簿，最后一页的名字被人用刀刮去了。",
-      "retrieval": "地窖中的住客登记簿与被刮去的名字"
+      "retrieval": "地窖中的住客登记簿与被刮去的名字",
+      "activation": {
+        "match": {
+          "keys": ["地窖", "登记簿", "暗门"]
+        },
+        "recursion": {
+          "delay_until_recursion": 1
+        },
+        "selection": {
+          "order": 25
+        }
+      }
     },
     "footsteps_are_the_forest_warden": {
       "content": "夜里逼近木门的脚步属于巡林人，他每隔几日会来查看木屋，随身带着猎枪和灯笼。",
-      "retrieval": "屋外脚步声的来源：定期巡查的巡林人"
+      "retrieval": "屋外脚步声的来源：定期巡查的巡林人",
+      "activation": {
+        "match": {
+          "keys": ["脚步声", "脚步", "门闩", "敲门"],
+          "secondary_keys": ["屋外", "木门", "林"],
+          "scan_depth": 2
+        },
+        "selection": {
+          "order": 20
+        }
+      }
     },
     "lodge_was_a_ranger_station": {
       "content": "木屋原本是护林站，二十年前因为一次山火被废弃，之后只作临时落脚处使用。",
-      "retrieval": "木屋的来历：废弃的护林站"
+      "retrieval": "木屋的来历：废弃的护林站",
+      "activation": {
+        "match": {
+          "keys": ["护林站", "来历", "山火", "这间木屋"]
+        },
+        "selection": {
+          "order": 10,
+          "groups": ["lodge.origin"],
+          "use_group_scoring": true
+        }
+      }
     }
   },
   "seed_rumors": {
     "rumor_lodge_is_cursed": {
       "content": "附近猎户说这间木屋受了诅咒，在里面过夜的人会忘掉前一天发生的事。",
-      "retrieval": "关于木屋受诅咒、令人失忆的猎户传闻"
+      "retrieval": "关于木屋受诅咒、令人失忆的猎户传闻",
+      "activation": {
+        "match": {
+          "keys": ["诅咒", "凶宅", "怪事", "这间木屋"]
+        },
+        "recursion": {
+          "exclude_recursion": true
+        },
+        "selection": {
+          "probability": 60,
+          "groups": ["lodge.origin"],
+          "use_group_scoring": true
+        }
+      }
     }
   },
   "narrative": {

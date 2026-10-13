@@ -10,6 +10,8 @@ const PROCESS_STORY_PLAN_PROMPT_ID: &str = "plan.process_story_plan";
 const STORY_SUMMARY_VAR: &str = "story_summary";
 const STORY_OPENING_VAR: &str = "story_opening";
 const RECENT_STORY_VAR: &str = "recent_story";
+const KNOWN_FACTS_VAR: &str = "known_facts";
+const RUMORS_VAR: &str = "rumors";
 const NARRATIVE_DIRECTIONS_VAR: &str = "narrative_directions";
 const STORY_CONSTRAINTS_VAR: &str = "story_constraints";
 const PLAYER_INPUT_VAR: &str = "player_input";
@@ -38,6 +40,14 @@ fn plan_vars(story_ctx: &StoryContext, input: &PlanInput, story_opening: String)
         (
             RECENT_STORY_VAR.to_owned(),
             Value::String(pipeline_prompt::recent_story(story_ctx)),
+        ),
+        (
+            KNOWN_FACTS_VAR.to_owned(),
+            Value::String(pipeline_prompt::known_facts(&input.knowledge.facts)),
+        ),
+        (
+            RUMORS_VAR.to_owned(),
+            Value::String(pipeline_prompt::rumors(&input.knowledge.rumors)),
         ),
         (
             NARRATIVE_DIRECTIONS_VAR.to_owned(),

@@ -1,4 +1,4 @@
-use crate::core::{BoundedText, NarrativeDirection, PlayerContribution, StoryContext, TurnControl};
+use crate::core::{ActivatedKnowledge, BoundedText, NarrativeDirection, PlayerContribution, StoryContext, TurnControl};
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
@@ -13,6 +13,7 @@ pub struct PlanInput {
     pub player_contribution: PlayerContribution,
     pub directions: Vec<NarrativeDirection>,
     pub constraints: Vec<BoundedText>,
+    pub knowledge: ActivatedKnowledge,
 }
 
 #[derive(Serialize)]

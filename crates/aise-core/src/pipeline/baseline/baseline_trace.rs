@@ -1,5 +1,5 @@
-use crate::core::{NarrativeError, PlayerContribution, StoryContext};
-use crate::pipeline::baseline::baseline_knowledge::ActivatedKnowledge;
+use crate::core::{ActivationOutcome, NarrativeError, PlayerContribution, StoryContext};
+use crate::pipeline::baseline::baseline_knowledge::KnowledgeKey;
 use crate::pipeline::baseline::baseline_narrative::NarrativeProjection;
 use crate::pipeline::common::PipelineError;
 use crate::trace::{
@@ -46,23 +46,11 @@ pub fn begin_knowledge_activation(observation: &Observation, player_contribution
     })
 }
 
-pub fn finish_knowledge_activation(observation: Observation, result: &Result<ActivatedKnowledge, PipelineError>) {
-    let outcome = match result {
-        Ok(knowledge) => ObservationOutcome {
-            status: ObservationStatus::Ok,
-            output: observation.capture_content(knowledge),
-            ..ObservationOutcome::default()
-        },
-        Err(error) => ObservationOutcome {
-            status: ObservationStatus::Error,
-            error: Some(ObservationError {
-                code: "knowledge_activation_failed".into(),
-                failure_kind: "pipeline".into(),
-                stage: Some("baseline".into()),
-                message: error.to_string(),
-            }),
-            ..ObservationOutcome::default()
-        },
+pub fn finish_knowledge_activation(observation: Observation, activation: &ActivationOutcome<KnowledgeKey>) {
+    let outcome = ObservationOutcome {
+        status: ObservationStatus::Ok,
+        output: observation.capture_content(activation),
+        ..ObservationOutcome::default()
     };
 
     observation.finish(outcome);

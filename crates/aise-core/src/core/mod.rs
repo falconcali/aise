@@ -15,12 +15,19 @@ mod world;
 #[cfg(test)]
 pub(crate) mod tests;
 
-pub use activation::ActivationRule;
+pub use activation::{
+    ActivatedEntry, ActivationCandidate, ActivationClass, ActivationConfig, ActivationEvidence, ActivationGroupKey,
+    ActivationKey, ActivationMatchRule, ActivationMode, ActivationOutcome, ActivationPatternKind,
+    ActivationProbability, ActivationRecursionRule, ActivationRejection, ActivationRule, ActivationSelectionRule,
+    ActivationStopReason, ActivationTurn, ScanBuffer, ScanFragment, ScanFragmentKind, SecondaryLogic, activate,
+};
 pub use ids::{
     CharacterCardId, CharacterId, FactId, IdempotencyKey, MemoryId, NarrativeConditionId, NarrativeNodeId, PackId,
     PlayerId, RoleId, RumorId, SemanticVersion, Sha256Digest, StoryId,
 };
-pub use knowledge::{EntryOrigin, FactBody, FactEntry, Recallable, RetrievalHint, RumorBody, RumorEntry};
+pub use knowledge::{
+    ActivatedKnowledge, EntryOrigin, FactBody, FactEntry, Recallable, RetrievalHint, RumorBody, RumorEntry,
+};
 pub use narrative::{
     ActiveConstraint, ConstraintWindow, NarrativeCondition, NarrativeConstraint, NarrativeDirection, NarrativeError,
     NarrativeEvidence, NarrativeGraph, NarrativeNode, NarrativePlan, NarrativeResolution, NarrativeState,

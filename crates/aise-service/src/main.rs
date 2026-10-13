@@ -110,6 +110,7 @@ impl DemoPlan {
                 summary: SummaryConfig {
                     summary_turn_count: MULTI_TURN_SUMMARY_TURN_COUNT,
                 },
+                ..PipelineConfig::default()
             },
         }
     }

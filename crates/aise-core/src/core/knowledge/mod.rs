@@ -1,9 +1,11 @@
+mod activated;
 mod fact;
 mod hint;
 mod origin;
 mod recall;
 mod rumor;
 
+pub use activated::ActivatedKnowledge;
 pub use fact::{FactBody, FactEntry};
 pub use hint::RetrievalHint;
 pub use origin::EntryOrigin;

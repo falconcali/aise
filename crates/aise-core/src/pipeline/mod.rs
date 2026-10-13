@@ -11,6 +11,7 @@ mod think;
 mod validate;
 
 pub(crate) mod runtime;
+pub use baseline::BaselineConfig;
 pub use common::{PipelineConfig, PipelineError, PipelineStage};
 pub(crate) use runtime::Runtime;
 pub use summary::SummaryConfig;

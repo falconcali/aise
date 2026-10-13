@@ -1,8 +1,9 @@
 use super::*;
 use crate::core::tests::store_with_default_pack;
 use crate::core::{
-    BoundedText, IdempotencyKey, NarrativeDirection, NarrativeNodeId, PlayerContribution, StorySummary, Turn,
-    TurnEvaluation, TurnNumber, TurnSegment, TurnStatus, WorldChange,
+    ActivatedKnowledge, ActivationRule, BoundedText, EntryOrigin, FactBody, FactEntry, FactId, IdempotencyKey,
+    NarrativeDirection, NarrativeNodeId, PlayerContribution, RetrievalHint, RumorBody, RumorEntry, RumorId,
+    StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus, WorldChange,
 };
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -79,6 +80,7 @@ fn plan_input(processed: &str) -> PlanInput {
         player_contribution: contribution(processed),
         directions: Vec::new(),
         constraints: Vec::new(),
+        knowledge: ActivatedKnowledge::default(),
     }
 }
 
@@ -212,6 +214,7 @@ async fn narrative_direction_and_constraints_precede_player_input() {
             dramatic_focus: text("The traveler meets the forest keeper."),
         }],
         constraints: vec![text("The ritual truth is revealed.")],
+        knowledge: ActivatedKnowledge::default(),
     };
 
     let content = render_runtime_context(&story_ctx, &input).await;
@@ -219,5 +222,62 @@ async fn narrative_direction_and_constraints_precede_player_input() {
     assert_eq!(
         content,
         "## Story Summary\n\nEarlier events.\n\n## Narrative Direction\n\n- The traveler meets the forest keeper.\n\n## Story Constraints\n\n- The ritual truth is revealed.\n\n## Pending Player Input\n\nI wave."
+    );
+}
+
+fn knowledge() -> ActivatedKnowledge {
+    ActivatedKnowledge {
+        facts: vec![FactEntry {
+            id: FactId::try_new("keeper_name").expect("test fact id should be valid"),
+            origin: EntryOrigin::Seed,
+            body: FactBody {
+                content: text("The forest keeper is named Ash."),
+                activation: ActivationRule::default(),
+                retrieval: RetrievalHint::try_new("keeper").expect("test hint should be valid"),
+            },
+        }],
+        rumors: vec![RumorEntry {
+            id: RumorId::try_new("mill_ghost").expect("test rumor id should be valid"),
+            origin: EntryOrigin::Seed,
+            body: RumorBody {
+                content: text("A ghost haunts the old mill."),
+                activation: ActivationRule::default(),
+                retrieval: RetrievalHint::try_new("mill").expect("test hint should be valid"),
+            },
+        }],
+    }
+}
+
+#[test]
+fn vars_carry_knowledge_content_only() {
+    let input = PlanInput {
+        knowledge: knowledge(),
+        ..plan_input("I wave.")
+    };
+    let vars = plan_vars(&StoryContext::new(), &input, String::new());
+
+    assert_eq!(var(&vars, "known_facts"), "- The forest keeper is named Ash.");
+    assert_eq!(var(&vars, "rumors"), "- A ghost haunts the old mill.");
+}
+
+#[tokio::test]
+async fn knowledge_follows_story_and_precedes_narrative_direction() {
+    let mut story_ctx = StoryContext::new();
+    story_ctx.summary = Some(summary("Earlier events."));
+    let input = PlanInput {
+        player_contribution: contribution("I wave."),
+        directions: vec![NarrativeDirection {
+            node_id: NarrativeNodeId::try_new("arrival").expect("test node id should be valid"),
+            dramatic_focus: text("The traveler meets the forest keeper."),
+        }],
+        constraints: Vec::new(),
+        knowledge: knowledge(),
+    };
+
+    let content = render_runtime_context(&story_ctx, &input).await;
+
+    assert_eq!(
+        content,
+        "## Story Summary\n\nEarlier events.\n\n## Known Facts\n\n- The forest keeper is named Ash.\n\n## Rumors\n\n- A ghost haunts the old mill.\n\n## Narrative Direction\n\n- The traveler meets the forest keeper.\n\n## Pending Player Input\n\nI wave."
     );
 }

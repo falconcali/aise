@@ -40,7 +40,12 @@ impl Runtime {
         pipeline_config: PipelineConfig,
     ) -> Self {
         Self {
-            baseline: BaselinePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&store)),
+            baseline: BaselinePipeline::new(
+                Arc::clone(&gateway),
+                Arc::clone(&prompt),
+                Arc::clone(&store),
+                pipeline_config.baseline,
+            ),
             plan: PlanPipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&store)),
             retrieval: RetrievalPipeline,
             think: ThinkPipeline,
@@ -86,6 +91,7 @@ impl Runtime {
             player_contribution: baseline_output.player_contribution,
             directions: narrative_output.directions.clone(),
             constraints: narrative_output.constraints.clone(),
+            knowledge: baseline_output.knowledge,
         };
 
         let plan_output = pipeline_runner.run(&self.plan, plan_input, story_ctx).await?;

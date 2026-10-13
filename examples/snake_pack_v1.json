@@ -188,81 +188,277 @@
   "seed_facts": {
     "bai_is_thousand_year_snake": {
       "content": "白素贞是修行千年的白蛇，能够化作人形并施展法术。",
-      "retrieval": "白素贞的真实身份：修行千年的白蛇"
+      "retrieval": "白素贞的真实身份：修行千年的白蛇",
+      "activation": {
+        "match": {
+          "keys": ["白蛇", "蛇妖", "妖身", "真身", "原形"],
+          "secondary_keys": ["白素贞", "白娘子"]
+        },
+        "selection": {
+          "order": 100,
+          "groups": ["bai.identity"],
+          "group_override": true
+        }
+      }
     },
     "qing_is_green_snake": {
       "content": "小青是陪伴白素贞修行的青蛇精，视白素贞为姐姐。",
-      "retrieval": "小青的身份：与白素贞情同姐妹的青蛇精"
+      "retrieval": "小青的身份：与白素贞情同姐妹的青蛇精",
+      "activation": {
+        "match": {
+          "keys": ["小青", "青蛇"]
+        },
+        "selection": {
+          "order": 40
+        }
+      }
     },
     "bai_saved_by_xu_ancestor": {
       "content": "许仙的前世曾在雨夜为受伤的白蛇撑伞，白素贞因此对许家怀有报恩之心。",
-      "retrieval": "许仙前世为白蛇撑伞，白素贞因此前来报恩"
+      "retrieval": "许仙前世为白蛇撑伞，白素贞因此前来报恩",
+      "activation": {
+        "match": {
+          "keys": ["前世", "报恩", "撑伞", "借伞", "旧恩"],
+          "secondary_keys": ["白素贞", "白娘子", "许仙"]
+        },
+        "selection": {
+          "order": 30
+        }
+      }
     },
     "bai_has_healing_skill": {
       "content": "白素贞精通药理，能够用凡间药材救治许多疑难病症。",
-      "retrieval": "白素贞精通药理，可用凡间药材救治疑难病症"
+      "retrieval": "白素贞精通药理，可用凡间药材救治疑难病症",
+      "activation": {
+        "match": {
+          "keys": ["医术", "药方", "看病", "抓药"],
+          "secondary_keys": ["白素贞", "白娘子"]
+        },
+        "selection": {
+          "order": 20
+        }
+      }
     },
     "fahai_knows_identity": {
       "content": "法海已经察觉白素贞的妖身，并认为她与许仙的婚姻会带来灾祸。",
-      "retrieval": "法海已察觉白素贞的妖身，视这段姻缘为灾祸"
+      "retrieval": "法海已察觉白素贞的妖身，视这段姻缘为灾祸",
+      "activation": {
+        "match": {
+          "keys": ["法海"],
+          "secondary_keys": ["身份", "妖", "白蛇", "白素贞", "白娘子"]
+        },
+        "selection": {
+          "order": 60
+        }
+      }
     },
     "fahai_fears_calamity": {
       "content": "法海年轻时曾见过妖物斗法造成百姓受难，因此把除妖视为守护钱塘的职责。",
-      "retrieval": "法海除妖的动机：旧日妖物斗法令百姓受难"
+      "retrieval": "法海除妖的动机：旧日妖物斗法令百姓受难",
+      "activation": {
+        "match": {
+          "keys": ["灾祸", "斗法", "除妖", "旧日"]
+        },
+        "recursion": {
+          "delay_until_recursion": 1
+        },
+        "selection": {
+          "order": 50,
+          "groups": ["fahai.motive"],
+          "group_override": true
+        }
+      }
     },
     "bai_wants_peace": {
       "content": "白素贞的首要愿望是与许仙平静生活，并不想伤害钱塘百姓。",
-      "retrieval": "白素贞的心愿：与许仙平静相守，不愿伤害百姓"
+      "retrieval": "白素贞的心愿：与许仙平静相守，不愿伤害百姓",
+      "activation": {
+        "match": {
+          "keys": ["心愿", "相守", "安稳", "过日子", "夫妻"],
+          "secondary_keys": ["白素贞", "白娘子"]
+        },
+        "selection": {
+          "order": 15
+        }
+      }
     },
     "jinshan_temple_has_authority": {
       "content": "金山寺在钱塘百姓中拥有很高的声望，法海的话会影响官府和民众对妖异传闻的判断。",
-      "retrieval": "金山寺在钱塘的声望，法海的话足以左右官府与民意"
+      "retrieval": "金山寺在钱塘的声望，法海的话足以左右官府与民意",
+      "activation": {
+        "match": {
+          "keys": ["金山寺", "住持", "香火", "官府"]
+        },
+        "selection": {
+          "order": 10
+        }
+      }
     },
     "west_lake_has_broken_bridge": {
       "content": "西湖断桥是许仙与白素贞初遇和后来重逢的地方，雨水常使桥面湿滑难行。",
-      "retrieval": "西湖断桥：初遇与重逢之地，雨天桥面湿滑"
+      "retrieval": "西湖断桥：初遇与重逢之地，雨天桥面湿滑",
+      "activation": {
+        "match": {
+          "keys": ["断桥", "西湖", "湖面"],
+          "scan_depth": 2
+        },
+        "recursion": {
+          "prevent_recursion": true
+        },
+        "selection": {
+          "order": 5
+        }
+      }
     },
     "water_can_be_commanded": {
       "content": "白素贞与小青能够借助法术引动江河湖水，但大规模施法会伤及凡人并损耗自身修为。",
-      "retrieval": "白素贞与小青可引动江湖之水，大规模施法会伤及凡人"
+      "retrieval": "白素贞与小青可引动江湖之水，大规模施法会伤及凡人",
+      "activation": {
+        "match": {
+          "keys": ["法术", "水漫", "江水", "湖水", "涨水", "施法"]
+        },
+        "selection": {
+          "order": 70
+        }
+      }
     },
     "leifeng_tower_can_seal": {
       "content": "雷峰塔被民间视为镇压妖异的地方，法海相信它可以隔绝白素贞与人间。",
-      "retrieval": "雷峰塔被视为镇压妖异之地，法海相信它能隔绝白素贞"
+      "retrieval": "雷峰塔被视为镇压妖异之地，法海相信它能隔绝白素贞",
+      "activation": {
+        "match": {
+          "keys": ["雷峰塔", "镇压", "封印"]
+        },
+        "selection": {
+          "order": 45,
+          "groups": ["ending.tower"],
+          "group_override": true
+        }
+      }
     },
     "bao_he_tang_needs_reputation": {
       "content": "保和堂依靠百姓信任维持生意，任何妖异传闻都可能让药铺遭到查封。",
-      "retrieval": "保和堂依赖百姓信任，妖异传闻可能导致查封"
+      "retrieval": "保和堂依赖百姓信任，妖异传闻可能导致查封",
+      "activation": {
+        "match": {
+          "keys": ["保和堂", "药铺", "生意", "查封"]
+        },
+        "selection": {
+          "order": 5,
+          "probability": 80
+        }
+      }
     },
     "qian_tang_people_fear_omens": {
       "content": "钱塘百姓相信蛇、暴雨和药铺异象之间存在联系，容易被未经证实的传闻煽动。",
-      "retrieval": "钱塘百姓易被妖异传闻煽动，把蛇与暴雨、药铺异象相联系"
+      "retrieval": "钱塘百姓易被妖异传闻煽动，把蛇与暴雨、药铺异象相联系",
+      "activation": {
+        "match": {
+          "keys": ["百姓", "街坊", "谣言", "妖异", "人心"]
+        },
+        "selection": {
+          "order": 10
+        }
+      }
     }
   },
   "seed_rumors": {
     "rumor_white_dress_woman": {
       "content": "有人说清明时在西湖遇见白衣女子的人，回家后会大病一场。",
-      "retrieval": "传闻：清明在西湖遇白衣女子的人回家会大病一场"
+      "retrieval": "传闻：清明在西湖遇白衣女子的人回家会大病一场",
+      "activation": {
+        "match": {
+          "keys": ["白衣女子", "白衣", "大病"]
+        },
+        "recursion": {
+          "exclude_recursion": true
+        },
+        "selection": {
+          "probability": 70,
+          "groups": ["bai.identity"]
+        }
+      }
     },
     "rumor_bai_poisoned_medicine": {
       "content": "街坊传言保和堂的新药虽能治病，却是用蛇蜕和妖血炼成的。",
-      "retrieval": "传闻：保和堂的新药以蛇蜕和妖血炼成"
+      "retrieval": "传闻：保和堂的新药以蛇蜕和妖血炼成",
+      "activation": {
+        "match": {
+          "keys": ["蛇蜕", "妖血", "下毒", "药里"],
+          "secondary_keys": ["保和堂", "药铺", "药"]
+        },
+        "recursion": {
+          "exclude_recursion": true
+        },
+        "selection": {
+          "probability": 70
+        }
+      }
     },
     "rumor_fahai_never_misses": {
       "content": "百姓相信法海从未错判过一个妖物，只要被他盯上就绝无生还可能。",
-      "retrieval": "传闻：法海除妖从不误判，被他盯上绝无生还"
+      "retrieval": "传闻：法海除妖从不误判，被他盯上绝无生还",
+      "activation": {
+        "match": {
+          "keys": ["从不误判", "误判", "除妖"],
+          "secondary_keys": ["法海"]
+        },
+        "recursion": {
+          "exclude_recursion": true
+        },
+        "selection": {
+          "probability": 60,
+          "groups": ["fahai.motive"]
+        }
+      }
     },
     "rumor_bai_marriage_is_omen": {
       "content": "有人说许仙娶了白素贞以后，钱塘就会连年涨水，婚事本身就是灾兆。",
-      "retrieval": "传闻：许仙娶白素贞后钱塘连年涨水，婚事即是灾兆"
+      "retrieval": "传闻：许仙娶白素贞后钱塘连年涨水，婚事即是灾兆",
+      "activation": {
+        "match": {
+          "keys": ["灾兆", "不祥", "婚事", "成亲"],
+          "secondary_keys": ["许仙", "白素贞", "白娘子"]
+        },
+        "recursion": {
+          "exclude_recursion": true
+        },
+        "selection": {
+          "probability": 80
+        }
+      }
     },
     "rumor_qing_is_violent": {
       "content": "有人见过小青在夜里拔剑，便传言她要杀尽钱塘所有反对白素贞的人。",
-      "retrieval": "传闻：小青夜里拔剑，要杀尽反对白素贞的人"
+      "retrieval": "传闻：小青夜里拔剑，要杀尽反对白素贞的人",
+      "activation": {
+        "match": {
+          "keys": ["拔剑", "杀人", "凶悍"],
+          "secondary_keys": ["小青", "青蛇"]
+        },
+        "recursion": {
+          "exclude_recursion": true
+        },
+        "selection": {
+          "probability": 60
+        }
+      }
     },
     "rumor_leifeng_tower_fate": {
       "content": "民间传说只要白蛇被镇入雷峰塔，钱塘便会恢复太平。",
-      "retrieval": "传说：白蛇被镇入雷峰塔后，钱塘便会恢复太平"
+      "retrieval": "传说：白蛇被镇入雷峰塔后，钱塘便会恢复太平",
+      "activation": {
+        "match": {
+          "keys": ["雷峰塔", "太平", "镇住"]
+        },
+        "recursion": {
+          "exclude_recursion": true
+        },
+        "selection": {
+          "probability": 70,
+          "groups": ["ending.tower"]
+        }
+      }
     }
   },
   "constraints": [

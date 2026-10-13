@@ -1,4 +1,4 @@
-use crate::core::{BoundedText, NarrativeDirection, StoryContext, Turn, TurnStatus};
+use crate::core::{BoundedText, FactEntry, NarrativeDirection, RumorEntry, StoryContext, Turn, TurnStatus};
 use crate::persistence::Store;
 use crate::pipeline::common::{PipelineError, PipelineStage};
 
@@ -29,6 +29,14 @@ pub(in crate::pipeline) fn narrative_directions(directions: &[NarrativeDirection
 
 pub(in crate::pipeline) fn story_constraints(constraints: &[BoundedText]) -> String {
     bullet_list(constraints.iter().map(BoundedText::as_str))
+}
+
+pub(in crate::pipeline) fn known_facts(facts: &[FactEntry]) -> String {
+    bullet_list(facts.iter().map(|fact| fact.body.content.as_str()))
+}
+
+pub(in crate::pipeline) fn rumors(rumors: &[RumorEntry]) -> String {
+    bullet_list(rumors.iter().map(|rumor| rumor.body.content.as_str()))
 }
 
 fn bullet_list<'a>(items: impl Iterator<Item = &'a str>) -> String {
