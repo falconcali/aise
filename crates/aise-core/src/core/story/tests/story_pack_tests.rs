@@ -139,7 +139,8 @@ fn rejects_character_name_inside_role_profile() {
 
 #[test]
 fn valid_pack_passes_validation() {
-    assert!(pack(pack_json()).validate().is_ok());
+    assert!(pack(pack_json()).validate_play().is_ok());
+    assert!(pack(pack_json()).validate_narrative().is_ok());
 }
 
 #[test]
@@ -147,7 +148,7 @@ fn empty_playable_roles_are_rejected() {
     let mut value = pack_json();
     value["play"]["playable_roles"] = json!([]);
 
-    assert!(matches!(pack(value).validate(), Err(StoryError::NoPlayableRole)));
+    assert!(matches!(pack(value).validate_play(), Err(StoryError::NoPlayableRole)));
 }
 
 #[test]
@@ -156,7 +157,7 @@ fn playable_role_must_be_defined() {
     value["play"]["playable_roles"] = json!(["ghost"]);
 
     assert!(matches!(
-        pack(value).validate(),
+        pack(value).validate_play(),
         Err(StoryError::UnknownRole { field: "play.playable_roles", role_id }) if role_id == "ghost"
     ));
 }
@@ -174,7 +175,8 @@ fn pack_with_valid_narrative_passes_validation() {
         }
     }});
 
-    assert!(pack(value).validate().is_ok());
+    assert!(pack(value.clone()).validate_play().is_ok());
+    assert!(pack(value).validate_narrative().is_ok());
 }
 
 #[test]
@@ -189,8 +191,8 @@ fn pack_with_invalid_narrative_is_rejected() {
     }});
 
     assert!(matches!(
-        pack(value).validate(),
-        Err(StoryError::Narrative(crate::core::NarrativeError::UnknownNode { .. }))
+        pack(value).validate_narrative(),
+        Err(crate::core::NarrativeError::UnknownNode { .. })
     ));
 }
 

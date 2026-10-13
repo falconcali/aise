@@ -61,21 +61,9 @@ impl Engine for AiseEngine {
         sink: &dyn TurnEventSink,
         trace: &Trace,
     ) -> Result<StoryCommit, EngineError> {
-        sink.emit(TurnEvent::StageStarted {
-            stage: "initialization".to_string(),
-        })
-        .map_err(|error| EngineError::Turn {
-            message: error.to_string(),
-        })?;
+        sink.emit(TurnEvent::TurnStarted);
 
-        let story_ctx =
-            self.store
-                .story_store()
-                .load(&turn_request.story_id)
-                .await
-                .map_err(|error| EngineError::Turn {
-                    message: error.to_string(),
-                })?;
+        let story_ctx = self.store.story_store().load(&turn_request.story_id).await?;
         if story_ctx.life_cycle != StoryLifeCycle::Active {
             return Err(EngineError::StoryNotActive {
                 life_cycle: story_ctx.life_cycle,
@@ -85,15 +73,9 @@ impl Engine for AiseEngine {
         let story_commit = self
             .runtime
             .run_turn(&story_ctx, turn_request, turn_control, sink, trace)
-            .await
-            .map_err(|error| EngineError::Turn {
-                message: error.to_string(),
-            })?;
+            .await?;
 
-        sink.emit(TurnEvent::Committed).map_err(|error| EngineError::Turn {
-            message: error.to_string(),
-        })?;
-
+        sink.emit(TurnEvent::TurnCommitted);
         Ok(story_commit)
     }
 }

@@ -1,4 +1,4 @@
-use crate::core::{PlayerContribution, StoryContext, TurnControl, TurnEventSink};
+use crate::core::{PlayerContribution, StoryContext, TurnControl};
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
 use crate::pipeline::baseline::baseline_narrative::{self, NarrativeProjection};
@@ -37,9 +37,9 @@ impl BaselinePipeline {
             .pack_store()
             .get_pack(&story_ctx.pack_ref)
             .await
-            .map_err(|error| PipelineError::new(PipelineStage::Baseline, error.to_string()))?;
+            .map_err(PipelineError::persistence(PipelineStage::Baseline))?;
         baseline_narrative::project_narrative(&story_pack, story_ctx)
-            .map_err(|error| PipelineError::new(PipelineStage::Baseline, error.to_string()))
+            .map_err(PipelineError::narrative(PipelineStage::Baseline))
     }
 
     async fn process_player_input(
@@ -65,7 +65,8 @@ impl BaselinePipeline {
             control,
             observation,
         )
-        .await?;
+        .await
+        .map_err(PipelineError::llm(PipelineStage::Baseline))?;
 
         Ok(player_contribution)
     }
@@ -84,7 +85,6 @@ impl Pipeline for BaselinePipeline {
         input: Self::Input,
         story_ctx: &StoryContext,
         control: &TurnControl,
-        sink: &dyn TurnEventSink,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         let narrative = self.project_narrative(story_ctx).await?;

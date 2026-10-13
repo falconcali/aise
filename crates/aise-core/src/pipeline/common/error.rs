@@ -1,37 +1,54 @@
+use crate::core::NarrativeError;
 use crate::llm::LlmError;
+use crate::persistence::PersistenceError;
 use crate::pipeline::common::PipelineStage;
 use crate::prompt::PromptError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum PipelineError {
-    #[error("pipeline stage {stage} failed: {message}")]
-    StageFailed { stage: PipelineStage, message: String },
+    #[error("pipeline stage {stage} llm call failed: {source}")]
+    Llm {
+        stage: PipelineStage,
+        #[source]
+        source: LlmError,
+    },
+    #[error("pipeline stage {stage} prompt failed: {source}")]
+    Prompt {
+        stage: PipelineStage,
+        #[source]
+        source: PromptError,
+    },
+    #[error("pipeline stage {stage} persistence failed: {source}")]
+    Persistence {
+        stage: PipelineStage,
+        #[source]
+        source: PersistenceError,
+    },
+    #[error("pipeline stage {stage} narrative failed: {source}")]
+    Narrative {
+        stage: PipelineStage,
+        #[source]
+        source: NarrativeError,
+    },
+    #[error("pipeline stage {stage} produced empty output")]
+    EmptyOutput { stage: PipelineStage },
 }
 
 impl PipelineError {
-    pub fn new(stage: PipelineStage, message: impl Into<String>) -> Self {
-        Self::StageFailed {
-            stage,
-            message: message.into(),
-        }
+    pub fn llm(stage: PipelineStage) -> impl FnOnce(LlmError) -> Self {
+        move |source| Self::Llm { stage, source }
     }
-}
 
-impl From<LlmError> for PipelineError {
-    fn from(error: LlmError) -> Self {
-        Self::StageFailed {
-            stage: PipelineStage::Baseline,
-            message: error.to_string(),
-        }
+    pub fn prompt(stage: PipelineStage) -> impl FnOnce(PromptError) -> Self {
+        move |source| Self::Prompt { stage, source }
     }
-}
 
-impl From<PromptError> for PipelineError {
-    fn from(error: PromptError) -> Self {
-        Self::StageFailed {
-            stage: PipelineStage::Baseline,
-            message: error.to_string(),
-        }
+    pub fn persistence(stage: PipelineStage) -> impl FnOnce(PersistenceError) -> Self {
+        move |source| Self::Persistence { stage, source }
+    }
+
+    pub fn narrative(stage: PipelineStage) -> impl FnOnce(NarrativeError) -> Self {
+        move |source| Self::Narrative { stage, source }
     }
 }

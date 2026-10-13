@@ -1,4 +1,4 @@
-use crate::core::{BoundedText, NarrativeDirection, PlayerContribution, StoryContext, TurnControl, TurnEventSink};
+use crate::core::{BoundedText, NarrativeDirection, PlayerContribution, StoryContext, TurnControl};
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
@@ -54,7 +54,8 @@ impl PlanPipeline {
 
         let story_plan =
             plan_llm::process_plan(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
-                .await?;
+                .await
+                .map_err(PipelineError::llm(PipelineStage::Plan))?;
 
         Ok(story_plan)
     }
@@ -73,7 +74,6 @@ impl Pipeline for PlanPipeline {
         input: Self::Input,
         story_ctx: &StoryContext,
         control: &TurnControl,
-        sink: &dyn TurnEventSink,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         let plan_observation = plan_trace::begin_plan(observation, &input.player_contribution.processed);

@@ -1,4 +1,4 @@
-use crate::core::{StoryContext, TurnControl, TurnEventSink};
+use crate::core::{StoryContext, TurnControl};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
 use serde::Serialize;
@@ -28,7 +28,6 @@ impl Pipeline for ThinkPipeline {
         input: Self::Input,
         story_ctx: &StoryContext,
         control: &TurnControl,
-        sink: &dyn TurnEventSink,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         Ok(ThinkOutput { result: input.query })

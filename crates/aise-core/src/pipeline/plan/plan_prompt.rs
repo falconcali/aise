@@ -25,7 +25,7 @@ pub async fn process_plan(
     let vars = plan_vars(story_ctx, input, story_opening);
     prompt
         .render(PromptSpec::new(PROCESS_STORY_PLAN_PROMPT_ID, vars), observation)
-        .map_err(|error| PipelineError::new(PipelineStage::Plan, error.to_string()))
+        .map_err(PipelineError::prompt(PipelineStage::Plan))
 }
 
 fn plan_vars(story_ctx: &StoryContext, input: &PlanInput, story_opening: String) -> PromptVars {

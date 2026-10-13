@@ -25,7 +25,7 @@ pub async fn generate_story(
     let vars = generate_vars(story_ctx, input, story_opening);
     prompt
         .render(PromptSpec::new(GENERATE_STORY_PROMPT_ID, vars), observation)
-        .map_err(|error| PipelineError::new(PipelineStage::Generate, error.to_string()))
+        .map_err(PipelineError::prompt(PipelineStage::Generate))
 }
 
 fn generate_vars(story_ctx: &StoryContext, input: &GenerateInput, story_opening: String) -> PromptVars {

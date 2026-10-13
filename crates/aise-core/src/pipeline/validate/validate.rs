@@ -1,4 +1,4 @@
-use crate::core::{BoundedText, PlayerContribution, StoryContext, TurnControl, TurnEventSink};
+use crate::core::{BoundedText, PlayerContribution, StoryContext, TurnControl};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::trace::Observation;
 use serde::Serialize;
@@ -66,7 +66,6 @@ impl Pipeline for ValidatePipeline {
         input: Self::Input,
         story_ctx: &StoryContext,
         control: &TurnControl,
-        sink: &dyn TurnEventSink,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         Ok(ValidateOutput {

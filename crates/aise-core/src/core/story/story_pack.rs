@@ -1,6 +1,6 @@
 use crate::core::{
-    BoundedText, CharacterCard, CharacterCardRef, CoreError, FactBody, FactId, NarrativeGraph, PackId, RoleActor,
-    RoleBody, RoleId, RumorBody, RumorId, SemanticVersion, Sha256Digest, StoryError,
+    BoundedText, CharacterCard, CharacterCardRef, CoreError, FactBody, FactId, NarrativeError, NarrativeGraph, PackId,
+    RoleActor, RoleBody, RoleId, RumorBody, RumorId, SemanticVersion, Sha256Digest, StoryError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -78,10 +78,13 @@ pub struct StoryAssetSpec {
 }
 
 impl StoryPack {
-    pub fn validate(&self) -> Result<(), StoryError> {
-        validate_play(&self.play, &self.roles)?;
+    pub fn validate_play(&self) -> Result<(), StoryError> {
+        validate_play(&self.play, &self.roles)
+    }
+
+    pub fn validate_narrative(&self) -> Result<(), NarrativeError> {
         match &self.narrative {
-            Some(graph) => graph.validate().map_err(StoryError::Narrative),
+            Some(graph) => graph.validate(),
             None => Ok(()),
         }
     }

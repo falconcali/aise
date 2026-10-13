@@ -1,8 +1,7 @@
 use super::*;
 use crate::core::tests::store_with_default_pack;
 use crate::core::{
-    IdempotencyKey, PlayerContribution, Turn, TurnCancellation, TurnEvaluation, TurnEvent, TurnEventDeliveryError,
-    TurnSegment, TurnStatus, WorldChange,
+    IdempotencyKey, PlayerContribution, Turn, TurnCancellation, TurnEvaluation, TurnSegment, TurnStatus, WorldChange,
 };
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
@@ -34,17 +33,9 @@ impl LlmProvider for FixedProvider {
                 finish_reason: LlmCompletionFinishReason::Stop,
             }),
             Err(message) => Err(LlmError::Transport {
-                message: (*message).to_owned(),
+                source: (*message).into(),
             }),
         }
-    }
-}
-
-struct NullSink;
-
-impl TurnEventSink for NullSink {
-    fn emit(&self, _event: TurnEvent) -> Result<(), TurnEventDeliveryError> {
-        Ok(())
     }
 }
 
@@ -116,7 +107,7 @@ async fn run(pipeline: &SummaryPipeline, story_ctx: &StoryContext) -> Result<Sum
     let input = SummaryInput {
         pending_turn_number: story_ctx.turn_number.increment(),
     };
-    pipeline.execute(input, story_ctx, &control, &NullSink, trace.root()).await
+    pipeline.execute(input, story_ctx, &control, trace.root()).await
 }
 
 #[tokio::test]
@@ -180,7 +171,13 @@ async fn llm_failure_fails_the_stage() {
 
     let error = run(&pipeline, &story_context(6)).await.err().expect("stage fails");
 
-    assert!(error.to_string().contains("summary"));
+    assert!(matches!(
+        error,
+        PipelineError::Llm {
+            stage: PipelineStage::Summary,
+            source: LlmError::Transport { .. }
+        }
+    ));
     assert!(error.to_string().contains("boom"));
 }
 
@@ -190,5 +187,10 @@ async fn blank_summary_fails_the_stage() {
 
     let error = run(&pipeline, &story_context(6)).await.err().expect("stage fails");
 
-    assert!(error.to_string().contains("empty"));
+    assert!(matches!(
+        error,
+        PipelineError::EmptyOutput {
+            stage: PipelineStage::Summary
+        }
+    ));
 }

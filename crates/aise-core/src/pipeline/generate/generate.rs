@@ -1,4 +1,4 @@
-use crate::core::{BoundedText, PlayerContribution, StoryContext, TurnControl, TurnEventSink};
+use crate::core::{BoundedText, PlayerContribution, StoryContext, TurnControl};
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
@@ -45,7 +45,7 @@ impl GeneratePipeline {
 
         generate_llm::generate_story(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
             .await
-            .map_err(|error| PipelineError::new(PipelineStage::Generate, error.to_string()))
+            .map_err(PipelineError::llm(PipelineStage::Generate))
     }
 }
 
@@ -62,7 +62,6 @@ impl Pipeline for GeneratePipeline {
         input: Self::Input,
         story_ctx: &StoryContext,
         control: &TurnControl,
-        _sink: &dyn TurnEventSink,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         let generate_observation = generate_trace::begin_story_generation(

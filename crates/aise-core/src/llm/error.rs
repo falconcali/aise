@@ -1,3 +1,4 @@
+use std::error::Error;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -6,8 +7,11 @@ pub enum LlmError {
     Cancelled,
     #[error("llm call timed out")]
     Timeout,
-    #[error("llm transport failed: {message}")]
-    Transport { message: String },
+    #[error("llm transport failed: {source}")]
+    Transport {
+        #[source]
+        source: Box<dyn Error + Send + Sync>,
+    },
     #[error("provider rejected request with status {status}: {message:?}")]
     Rejected { status: u16, message: Option<String> },
     #[error("invalid provider response: {reason}")]

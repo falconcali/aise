@@ -2,7 +2,6 @@ use super::{IdempotencyKey, StoryId, WorldChange};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::time::Instant;
-use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,34 +66,13 @@ impl Default for TurnCancellation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TurnEvent {
-    StageStarted { stage: String },
-    Committed,
-    Failed { code: String },
-    Cancelled { code: String },
-    Conflict { code: String },
-}
-
-impl TurnEvent {
-    pub fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            Self::Committed { .. } | Self::Failed { .. } | Self::Cancelled { .. } | Self::Conflict { .. }
-        )
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum TurnEventDeliveryError {
-    #[error("terminal event already sent")]
-    TerminalAlreadySent,
-    #[error("event delivery backpressure")]
-    Backpressure,
-    #[error("event receiver disconnected")]
-    Disconnected,
+    TurnStarted,
+    TurnPipeline { stage: String },
+    TurnCommitted,
 }
 
 pub trait TurnEventSink: Send + Sync {
-    fn emit(&self, event: TurnEvent) -> Result<(), TurnEventDeliveryError>;
+    fn emit(&self, event: TurnEvent);
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

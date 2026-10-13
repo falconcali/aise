@@ -1,4 +1,4 @@
-use crate::core::{StoryContext, TurnControl, TurnEventSink};
+use crate::core::{StoryContext, TurnControl, TurnEvent, TurnEventSink};
 use crate::pipeline::common::PipelineError;
 use crate::pipeline::common::pipeline_trace;
 use crate::trace::{Observation, Trace};
@@ -55,8 +55,12 @@ impl PipelineRunner<'_> {
         input: P::Input,
         story_ctx: &StoryContext,
     ) -> Result<P::Output, PipelineError> {
+        self.sink.emit(TurnEvent::TurnPipeline {
+            stage: pipeline.stage().as_str().into(),
+        });
+
         let observation = pipeline_trace::begin_observation(self.trace, pipeline, &input);
-        let result = pipeline.execute(input, story_ctx, self.control, self.sink, &observation).await;
+        let result = pipeline.execute(input, story_ctx, self.control, &observation).await;
         pipeline_trace::finish_observation(observation, pipeline, &result);
         result
     }
@@ -73,7 +77,6 @@ pub trait Pipeline: Send + Sync {
         input: Self::Input,
         story_ctx: &StoryContext,
         control: &TurnControl,
-        sink: &dyn TurnEventSink,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError>;
 }

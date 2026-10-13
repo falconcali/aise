@@ -35,8 +35,8 @@ pub use story::{
     StoryInstanceSpec, StoryLifeCycle, StoryPack, StoryPackMeta, StoryPackProfile, StoryPackSpec, StorySummary,
 };
 pub use turn::{
-    PlayerContribution, Turn, TurnCancellation, TurnControl, TurnEvaluation, TurnEvent, TurnEventDeliveryError,
-    TurnEventSink, TurnNumber, TurnRequest, TurnSegment, TurnStatus,
+    PlayerContribution, Turn, TurnCancellation, TurnControl, TurnEvaluation, TurnEvent, TurnEventSink, TurnNumber,
+    TurnRequest, TurnSegment, TurnStatus,
 };
 
 pub use bounded_text::BoundedText;

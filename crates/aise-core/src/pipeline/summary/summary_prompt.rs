@@ -21,7 +21,7 @@ pub async fn summarize_story(
     let vars = summary_vars(story_ctx, covered_turns, story_opening);
     prompt
         .render(PromptSpec::new(SUMMARIZE_STORY_PROMPT_ID, vars), observation)
-        .map_err(|error| PipelineError::new(PipelineStage::Summary, error.to_string()))
+        .map_err(PipelineError::prompt(PipelineStage::Summary))
 }
 
 fn summary_vars(story_ctx: &StoryContext, covered_turns: usize, story_opening: String) -> PromptVars {

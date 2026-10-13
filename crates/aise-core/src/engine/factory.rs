@@ -77,7 +77,8 @@ impl AiseFactory {
     fn freeze_story(&self, story_id: StoryId, spec: StoryCreationSpec) -> Result<FrozenStory, EngineError> {
         // WAIVER: R-ARCH-03
         // WAIVER: R-ARCH-04
-        spec.story_pack.validate()?;
+        spec.story_pack.validate_play()?;
+        spec.story_pack.validate_narrative()?;
         let frozen_cast = self.freeze_cast(spec.cast)?;
         let cast = spec.story_pack.resolve_cast(&spec.player_role, frozen_cast.actors)?;
         let pack_ref = spec.story_pack.pack_ref()?;

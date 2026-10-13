@@ -137,7 +137,7 @@ fn map_transport_error(error: reqwest::Error) -> LlmError {
         LlmError::Timeout
     } else {
         LlmError::Transport {
-            message: error.to_string(),
+            source: Box::new(error),
         }
     }
 }

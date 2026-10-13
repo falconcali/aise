@@ -5,5 +5,6 @@ pub(super) mod pipeline_prompt;
 mod pipeline_trace;
 
 pub use config::PipelineConfig;
-pub(super) use error::PipelineError;
-pub(super) use pipeline::{Pipeline, PipelineRunner, PipelineStage};
+pub use error::PipelineError;
+pub use pipeline::PipelineStage;
+pub(super) use pipeline::{Pipeline, PipelineRunner};

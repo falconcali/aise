@@ -1,5 +1,5 @@
 use crate::core::{
-    Change, NarrativeState, PlayerContribution, SemanticQuery, StoryContext, StoryLifeCycle, TurnControl, TurnEventSink,
+    Change, NarrativeState, PlayerContribution, SemanticQuery, StoryContext, StoryLifeCycle, TurnControl,
 };
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
@@ -47,7 +47,6 @@ impl Pipeline for ExtractPipeline {
         input: Self::Input,
         story_ctx: &StoryContext,
         _control: &TurnControl,
-        _sink: &dyn TurnEventSink,
         _observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         let story_pack = self
@@ -55,7 +54,7 @@ impl Pipeline for ExtractPipeline {
             .pack_store()
             .get_pack(&story_ctx.pack_ref)
             .await
-            .map_err(|error| PipelineError::new(PipelineStage::Extract, error.to_string()))?;
+            .map_err(PipelineError::persistence(PipelineStage::Extract))?;
         let semantic_results = BTreeMap::new();
         let change = extract_narrative::resolve_narrative(&story_pack, story_ctx, &semantic_results);
         Ok(ExtractOutput {

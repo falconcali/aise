@@ -1,4 +1,4 @@
-use crate::core::{BoundedText, PlayerContribution, StoryContext, TurnControl, TurnEventSink};
+use crate::core::{BoundedText, PlayerContribution, StoryContext, TurnControl};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::pipeline::validate::ValidateScoreResult;
 use crate::trace::Observation;
@@ -37,7 +37,6 @@ impl Pipeline for RepairPipeline {
         input: Self::Input,
         story_ctx: &StoryContext,
         control: &TurnControl,
-        sink: &dyn TurnEventSink,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         Ok(RepairOutput {

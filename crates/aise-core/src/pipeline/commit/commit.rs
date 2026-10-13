@@ -1,6 +1,6 @@
 use crate::core::{
     Change, IdempotencyKey, NarrativeState, PlayerContribution, StoryCommit, StoryContext, StoryLifeCycle,
-    StorySummary, Turn, TurnControl, TurnEvaluation, TurnEventSink, TurnNumber, TurnSegment, TurnStatus, WorldChange,
+    StorySummary, Turn, TurnControl, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus, WorldChange,
 };
 use crate::persistence::Store;
 use crate::pipeline::commit::commit_trace;
@@ -44,7 +44,6 @@ impl Pipeline for CommitPipeline {
         input: Self::Input,
         story_ctx: &StoryContext,
         control: &TurnControl,
-        sink: &dyn TurnEventSink,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         let story_commit = StoryCommit {
@@ -69,7 +68,7 @@ impl Pipeline for CommitPipeline {
             .story_store()
             .commit(story_commit)
             .await
-            .map_err(|error| PipelineError::new(PipelineStage::Commit, error.to_string()));
+            .map_err(PipelineError::persistence(PipelineStage::Commit));
         commit_trace::finish_commit(commit_observation, &result);
         result
     }

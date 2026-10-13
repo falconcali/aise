@@ -22,7 +22,7 @@ pub async fn process_player_input(
     let vars = player_input_vars(story_ctx, input, story_opening);
     prompt
         .render(PromptSpec::new(PROCESS_PLAYER_INPUT_PROMPT_ID, vars), observation)
-        .map_err(PipelineError::from)
+        .map_err(PipelineError::prompt(PipelineStage::Baseline))
 }
 
 fn player_input_vars(story_ctx: &StoryContext, input: &str, story_opening: String) -> PromptVars {

@@ -2,7 +2,7 @@
 
 use aise_core::core::{
     Change, CharacterCard, IdempotencyKey, PlayerId, RoleId, StoryCommit, StoryId, StoryInstanceInfo, StoryPack,
-    TurnCancellation, TurnControl, TurnEvent, TurnEventDeliveryError, TurnEventSink, TurnRequest,
+    TurnCancellation, TurnControl, TurnEvent, TurnEventSink, TurnRequest,
 };
 use aise_core::engine::{AiseEngine, Engine, EngineConfig, EngineError, RoleActorSpec, StoryCreationSpec};
 use aise_core::llm::{LlmConfig, LlmProviderType};
@@ -65,9 +65,8 @@ const DEMO_PLAYER_ROLE: &str = "xu_xian";
 struct ConsoleTurnEventSink;
 
 impl TurnEventSink for ConsoleTurnEventSink {
-    fn emit(&self, event: TurnEvent) -> Result<(), TurnEventDeliveryError> {
+    fn emit(&self, event: TurnEvent) {
         println!("{event:?}");
-        Ok(())
     }
 }
 

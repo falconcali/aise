@@ -1,4 +1,4 @@
-use crate::core::{Change, StoryContext, StorySummary, TurnControl, TurnEventSink, TurnNumber};
+use crate::core::{Change, StoryContext, StorySummary, TurnControl, TurnNumber};
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
@@ -54,11 +54,13 @@ impl SummaryPipeline {
         let summary_text =
             summary_llm::summarize_story(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
                 .await
-                .map_err(|error| PipelineError::new(PipelineStage::Summary, error.to_string()))?;
+                .map_err(PipelineError::llm(PipelineStage::Summary))?;
 
         let summary_text = summary_text.trim();
         if summary_text.is_empty() {
-            return Err(PipelineError::new(PipelineStage::Summary, "summary model returned empty text"));
+            return Err(PipelineError::EmptyOutput {
+                stage: PipelineStage::Summary,
+            });
         }
         Ok(summary_text.to_owned())
     }
@@ -84,7 +86,6 @@ impl Pipeline for SummaryPipeline {
         input: Self::Input,
         story_ctx: &StoryContext,
         control: &TurnControl,
-        _sink: &dyn TurnEventSink,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         let covered_turns = self.covered_turn_count(story_ctx);
