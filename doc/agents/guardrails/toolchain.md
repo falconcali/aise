@@ -9,6 +9,14 @@
   warnings as errors (`-D warnings`).
 - NEVER add `#[allow(...)]` except via the waiver process; inline justification
   comments are not permitted (`R-CODE-05`).
+- Verification targets the maintained crates only (frozen crates are out of
+  scope, see `AGENTS.md` Scope):
+
+```powershell
+cargo fmt -p aise-core -p aise-service -- --check
+cargo clippy -p aise-core -p aise-service --all-targets -- -D warnings
+cargo test -p aise-core -p aise-service
+```
 
 ---
 

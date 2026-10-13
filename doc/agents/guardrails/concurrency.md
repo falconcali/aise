@@ -11,20 +11,18 @@
 
 ```rust
 // BAD
-let mut w = state.write().await;
-let pipeline = w.pipelines.get(&id).unwrap().clone();
-pipeline.execute(&mut ctx).await; // lock held across .await
-w.turn_counter += 1;
+let mut stories = self.stories.write().await;
+let entry = stories.get_mut(&story_id).ok_or(PersistenceError::NotFound)?;
+self.persist(entry).await?;
 
 // GOOD
-{
-    let mut w = state.write().await;
-    w.turn_counter += 1;
-}
-let pipeline = { state.read().await.pipelines.get(&id).cloned() };
-if let Some(pipeline) = pipeline {
-    pipeline.execute(&mut ctx).await?;
-}
+let snapshot = {
+    let mut stories = self.stories.write().await;
+    let entry = stories.get_mut(&story_id).ok_or(PersistenceError::NotFound)?;
+    entry.apply(commit);
+    entry.clone()
+};
+self.persist(&snapshot).await?;
 ```
 
 ---
@@ -39,12 +37,12 @@ if let Some(pipeline) = pipeline {
 
 ```rust
 // GOOD
-let snapshot = {
-    let s = state.read().await;
-    s.characters.get(&id).cloned()
+let pack = {
+    let packs = self.packs.read().await;
+    packs.get(pack_ref).cloned()
 };
-if let Some(character) = snapshot {
-    character.think(&ctx).await?;
+if let Some(pack) = pack {
+    render(&pack).await?;
 }
 ```
 
@@ -54,32 +52,36 @@ if let Some(character) = snapshot {
 
 **Level: MUST**
 
-- NEVER emit events, send on channels, or perform I/O while holding a write
-  lock.
+- NEVER emit `TurnEvent`s, send on channels, or perform I/O while holding a
+  write lock.
 - MUST apply the state mutation, drop the lock, then perform side effects.
 
 ```rust
 // BAD
-let mut s = state.write().await;
-s.apply_mutation();
-event_tx.send(Event::Updated { .. });
+let mut stories = self.stories.write().await;
+stories.apply(commit);
+sink.emit(TurnEvent::Committed)?;
 
 // GOOD
 {
-    let mut s = state.write().await;
-    s.apply_mutation();
+    let mut stories = self.stories.write().await;
+    stories.apply(commit);
 }
-event_tx.send(Event::Updated { .. });
+sink.emit(TurnEvent::Committed)?;
 ```
 
 ---
 
-## R-CONC-04 - Route LLM calls through a shared limiter
+## R-CONC-04 - Route LLM calls through `LlmGateway` and its limiter
 
 **Level: MUST**
 
-- Every LLM call (completion, streaming, embedding) MUST acquire a shared
-  concurrency limiter (e.g. a `tokio::sync::Semaphore`) before dispatch.
-- NEVER add an LLM call site that bypasses the limiter.
-- The limiter MUST be owned at the application root and injected, so backpressure
-  and provider rate limits stay centrally enforced.
+- Every LLM call (completion, streaming, embedding) MUST go through the
+  injected `llm::LlmGateway`.
+- NEVER call an `LlmProvider` directly outside `LlmGateway`.
+- `LlmGateway` MUST own a shared concurrency limiter (e.g. a
+  `tokio::sync::Semaphore`) and acquire a permit before provider dispatch, so
+  backpressure and provider rate limits stay centrally enforced.
+- `LlmGateway` MUST be created once by the composition root
+  (`engine::AiseFactory`) and shared as `Arc<LlmGateway>`; NEVER create a
+  second gateway per pipeline or per Turn.

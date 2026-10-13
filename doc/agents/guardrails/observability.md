@@ -27,22 +27,33 @@ match analyze_intent(&ctx).await {
 
 ---
 
-## R-OBS-02 - LLM and tool spans
+## R-OBS-02 - Explicit-parent observations
 
 **Level: MUST**
 
-- LLM calls MUST run inside `tracing` spans with structured fields.
-- Tool execution MUST run inside a span.
-- New LLM providers and tools MUST NOT bypass spans.
+- Turn work MUST be observed through `trace::Observation` with an explicitly
+  passed parent; NEVER rely on ambient span context to find the parent.
+- The observation tree is fixed by structure:
+  - `PipelineRunner::run` creates one `Chain` observation per stage and
+    captures the stage `Input` / `Output` (`pipeline_trace.rs`).
+  - Each stage creates its sub-task `Span` observations through the
+    `begin_*` / `finish_*` helpers in its own `{stage}_trace.rs`.
+  - `LlmGateway::complete` creates the LLM generation observation
+    (`llm_trace.rs`); `Prompt::render` creates the prompt-render observation.
+- Every LLM call MUST receive the caller's `&Observation`; new LLM entry points
+  and tools MUST NOT bypass observations.
+- Pipelines MUST NOT create ad-hoc `tracing` spans; `tracing` spans are created
+  only inside `trace::Observation`.
+- Failed observations MUST carry an `ObservationError` with `code`,
+  `failure_kind`, `stage`, and `message`.
+- Observation content MUST go through `Observation::capture_content` so the
+  configured capture policy applies.
 
 ```rust
-// GOOD
-let span = tracing::info_span!(
-    "llm.complete",
-    model = %self.model_name(),
-    turn_id = %ctx.turn_id
-);
-async move { /* ... */ }.instrument(span).await
+// GOOD - stage span via {stage}_trace.rs, LLM call receives the parent
+let plan_observation = plan_trace::begin_plan(observation, &input.player_contribution.processed);
+let result = self.process_story_plan(story_ctx, &input, control, &plan_observation).await;
+plan_trace::finish_plan(plan_observation, &result);
 ```
 
 ---
@@ -56,8 +67,8 @@ async move { /* ... */ }.instrument(span).await
 
 ```rust
 // GOOD
-if let Err(e) = memory_pipeline.spawn_extraction(...).await {
-    tracing::warn!(turn_id = %ctx.turn_id, error = %e, "memory extraction failed");
+if let Err(error) = store.pack_store().release(story_id).await {
+    tracing::warn!(target: "aise::engine", story_id = %story_id, error = %error, "story asset release failed");
 }
 ```
 
@@ -90,17 +101,16 @@ tracing::info!(
 
 - `panic!`, `unwrap`, and `expect` SHOULD be used only for broken invariants.
 - Business errors MUST use `Result`.
-- turn/domain layers SHOULD define typed errors with `thiserror` so callers can
-  discriminate; NEVER leak `anyhow::Error` out of a domain API.
-- Binary/app/composition layers MAY use `anyhow` to aggregate and report errors.
+- Every aise-core module MUST define typed errors with `thiserror`
+  (`CoreError`, `NarrativeError`, `LlmError`, `PromptError`,
+  `PersistenceError`, `PipelineError`, `EngineError`, ...) so callers can
+  discriminate; NEVER leak `anyhow::Error` out of `aise-core`.
+- `aise-service` MAY use `anyhow` to aggregate and report errors.
 
 ```rust
 // BAD
-let character = state.characters.get(&id).unwrap();
+let pack = packs.get(pack_ref).unwrap();
 
 // GOOD
-let character = state
-    .characters
-    .get(&id)
-    .ok_or_else(|| anyhow::anyhow!("character {id} not found"))?;
+let pack = packs.get(pack_ref).cloned().ok_or(PersistenceError::NotFound)?;
 ```

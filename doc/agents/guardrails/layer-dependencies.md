@@ -1,122 +1,118 @@
 # Layer Dependencies
 
-General principle: dependencies flow one way, from outer transport/entry layers
-toward inner domain/turn layers. Inner layers MUST NOT know about outer layers.
+Scope: `crates/aise-core` and `crates/aise-service`. `crates/aise` and
+`crates/aise-server` are frozen reference crates (see `AGENTS.md` Scope).
+
+General principle: dependencies flow one way, from the composition root toward
+the leaf modules. Inner modules MUST NOT know about outer modules.
 
 ```text
-transport / api / adapters
+aise-service (binary)
         |
         v
-application / services
+engine (in-crate composition root: AiseEngine, AiseFactory, EngineConfig)
         |
         v
-  turn contracts
+pipeline::runtime (Runtime, the single Turn orchestrator)
         |
-        +--+--+
-        |     |
-        v     v
-     domain  config (leaf foundation)
+        v
+pipeline stages (baseline, plan, retrieval, think, generate,
+                 validate, repair, extract, summary, commit)
+        |
+        v
+pipeline::common (Pipeline, PipelineRunner, PipelineStage, PipelineError,
+                  PipelineConfig, pipeline_prompt, pipeline_trace)
+        |
+        v
+llm        prompt        persistence
+  |  \       |   \           |
+  |   \      |    \          |
+  v    v     v     v         v
+ core  trace (leaf modules)
 ```
 
-`config` is a leaf foundation layer: it MUST NOT import any internal module,
-and `turn` plus every upper layer MAY depend on it. `domain` is pure and
-self-contained: it MUST NOT depend on `turn`, `config`, or any outer layer.
-Turn data objects (`domain::turn`) live inside `domain`; the `turn` module only
-defines Turn execution contracts.
+`core` is the pure domain model (story, role, narrative, knowledge, turn, IDs,
+errors). `trace` is the cross-cutting observability foundation
+(`Trace`, `Observation`, `ObservationSession`). Both are leaves.
 
-`observability` is a cross-cutting leaf foundation: it MAY depend only on std
-and external telemetry libraries. `turn` and upper execution layers MAY depend
-on it to pass explicit `Observation` parents, but `domain` and `config` MUST
-remain independent of it.
-
-## R-LAYER-01 - turn does not depend on the entry layer
+## R-LAYER-01 - Inner modules do not depend on outer modules
 
 **Level: MUST**
 
-- turn/domain modules MUST NOT import transport, API, or adapter modules.
-- Cross-layer notifications MUST use injected traits, not concrete outer types.
-- NEVER add a backedge from an inner layer to an outer layer.
+- `core` and `trace` MUST NOT import any other internal module.
+- `llm`, `prompt`, and `persistence` MUST NOT import `pipeline` or `engine`.
+- `pipeline` MUST NOT import `engine`.
+- No aise-core module may import `aise-service`, `crates/aise`, or
+  `crates/aise-server`.
+- Notifications toward callers MUST use injected traits defined in the inner
+  module (e.g. `core::TurnEventSink`), not concrete outer types.
 
 ## R-LAYER-02 - Reverse dependencies use traits and injection
 
-**Level: SHOULD**
+**Level: MUST**
 
-- Lower layers SHOULD notify upper layers only through injected trait objects or
-  generic bounds.
-- Lower layers MUST NOT import upper-layer concrete types for callbacks.
-- Wiring of concrete implementations SHOULD happen once, at the composition
-  root.
+- Inner modules MUST notify outer modules only through injected trait objects
+  or generic bounds.
+- Concrete implementations (LLM providers, store backends, event sinks) MUST be
+  wired once, at the composition root (`engine::AiseFactory` / `AiseEngine`,
+  or `aise-service` for sinks and observability exporters).
+- Long-lived services (`LlmGateway`, `Prompt`, `Store`) MUST be created by the
+  composition root and injected as `Arc<_>`; pipelines MUST NOT construct them.
 
-## R-LAYER-03 - config is a leaf foundation layer
+## R-LAYER-03 - Pipeline stages are isolated
 
 **Level: MUST**
 
-- `config` MUST NOT import any internal module (`turn`, `domain`, `runtime`,
-  pipelines, `llm`, `persistence`, `engine`); it MAY depend only on external
-  crates and std.
-- `turn` and every upper layer MAY depend on `config` for typed limits, content
-  policies, and settings.
-- Configuration defaults MUST have one authoritative source in `config`;
-  `turn`/pipelines MUST NOT keep a second copy of the same limits.
+- A pipeline stage module MUST NOT import any other stage module, neither its
+  `Pipeline` type nor its data types.
+- Types shared by more than one stage MUST live in `core` (domain data) or in
+  `pipeline::common` (pipeline mechanics).
+- Only `pipeline::runtime` MAY import stage modules.
+- `pipeline::common` MUST NOT import stage modules, with one exception:
+  `pipeline/common/config.rs` MAY import stage `*Config` types to aggregate
+  them into `PipelineConfig`.
 
-## R-LAYER-04 - domain is pure and self-contained
-
-**Level: MUST**
-
-- `domain` MUST NOT import `turn`, `config`, `observability`, `runtime`, `llm`,
-  `persistence`, `engine`, or any pipeline module; it MAY depend only on its
-  own submodules.
-- `domain` MUST NOT reference Turn-stage concepts (`TurnStage`, `TurnBudget`,
-  `TurnExecutionContext`, `LlmGateway`, `Store`, ...).
-- Cross-submodule reads inside `domain` (e.g. `narrative_graph::director` reading
-  `story_instance::snapshot`) are read-only and MUST NOT carry I/O or write
-  state.
-
-## R-LAYER-05 - turn depends one-way on domain and config
+## R-LAYER-04 - Pipelines use services, not backends
 
 **Level: MUST**
 
-- `turn` MAY depend on `domain` (including `domain::turn` data objects),
-  `config`, top-level `observability`, and turn-internal modules.
-- `turn` MUST NOT depend on `runtime`, any specific pipeline, `llm`,
-  `persistence`, or `engine`.
-- `turn` is the single definition layer for Turn execution contracts; Turn data
-  objects are owned by `domain::turn`.
+- Pipelines MUST call LLMs only through `llm::LlmGateway`; they MUST NOT import
+  `LlmProvider` implementations (e.g. `OpenAiCompatProvider`).
+- Pipelines MUST access storage only through `persistence::Store` and the
+  `PackStore` / `StoryStore` traits; they MUST NOT import store backends
+  (`*_mem`, `*_sqlite`).
+- Pipelines MUST render prompts only through `prompt::Prompt`.
 
-## R-LAYER-06 - pipelines depend only on ports, not adapters
+## R-LAYER-05 - Config follows its owning module
 
 **Level: MUST**
 
-- Pipelines MAY depend on `turn`, `domain`, `config`, top-level
-  `observability`, `llm::gateway`, persistence ports (`store`, `asset_store`,
-  `knowledge_read_port`) including their error types, and `prompt`.
-- Pipelines MUST NOT import persistence adapters (`sqlite_*`) or other pipeline
-  modules.
-- `llm` MAY depend only on the restricted Turn LLM scope (`TurnLlmCallScope`,
-  `turn_contract`, `turn_error`), `config`, top-level `observability`, and
-  `prompt`; it MUST NOT import the full `TurnExecutionContext` or any concrete
-  pipeline.
+- Each module owns its own typed `*Config` in its own `config.rs`
+  (`LlmConfig`, `PromptConfig`, `PersistanceConfig`, `PipelineConfig`, stage
+  configs such as `SummaryConfig`).
+- `EngineConfig` is the single root configuration; every module config MUST be
+  reachable from it.
+- Stage configs MUST be aggregated under `PipelineConfig`.
+- A limit or setting MUST have exactly one authoritative definition; NEVER
+  duplicate the same default in two modules.
 
 ## Dependency matrix
 
+Anything not listed under "may depend on" is forbidden.
+
 | module | may depend on | must not depend on |
 | --- | --- | --- |
-| `domain` | its own submodules (incl. `turn` DTOs) | `turn`, `config`, `observability`, `runtime`, pipelines, `llm`, `persistence`, `engine` |
-| `config` | external crates / std | any internal module |
-| `observability` | external crates / std | every internal business module |
-| `turn` | `domain`, `config`, `observability`, turn-internal | `runtime`, pipelines, `llm`, `persistence`, `engine` |
-| `runtime` | `turn`, `domain`, `config`, `observability`, injected traits | concrete pipeline types, persistence adapters, `llm` providers |
-| `llm` | restricted `turn` contracts, `config`, `observability`, `prompt` | `runtime`, concrete pipelines, full `TurnExecutionContext`, `persistence` |
-| pipelines | `turn`, `domain`, `config`, `observability`, `llm::gateway`, persistence ports, `prompt` | other pipelines, persistence adapters, `runtime`, `engine`, `llm` internals |
-| `prompt` | `turn`, `domain`, `config` | `runtime`, concrete pipelines, `persistence`, `llm` internals |
-| persistence ports | `turn`, `domain`, `config`, persistence-internal | adapters, `runtime`, concrete pipelines |
-| persistence adapters | persistence ports, `domain`, `turn`, `config` | reverse dependency from `turn`/`domain` |
-| `engine` | `config`, `turn`, `runtime`, `observability`, persistence ports | concrete pipelines, persistence adapters |
-| aise-server (composition root) | everything | nothing (wires `TurnPipelineSetBuilder` once) |
+| `core` | its own submodules | every other internal module |
+| `trace` | external crates / std | every internal module |
+| `llm` | `core`, `trace` | `prompt`, `persistence`, `pipeline`, `engine` |
+| `prompt` | `core`, `trace` | `llm`, `persistence`, `pipeline`, `engine` |
+| `persistence` | `core` | `llm`, `prompt`, `trace`, `pipeline`, `engine` |
+| `pipeline::common` | `core`, `llm`, `persistence`, `prompt`, `trace`; stage `*Config` (only in `config.rs`) | other stage items, `runtime`, `engine` |
+| pipeline stages | `core`, `trace`, `llm::LlmGateway` and LLM data types, `persistence::Store` and store traits, `prompt::Prompt` and prompt data types, `pipeline::common` | other stages, `runtime`, `engine`, LLM providers, store backends |
+| `pipeline::runtime` | `core`, `llm`, `persistence`, `prompt`, `trace`, `pipeline::common`, all stages | `engine` |
+| `engine` | every aise-core module | (nothing inside aise-core may import `engine`) |
+| `aise-service` | public API of `aise-core` | `crates/aise`, `crates/aise-server` |
 
-Forbidden reverse dependencies: `turn -> runtime`,
-`turn -> planning/story/validation/character/context`, `llm -> runtime`,
-`pipeline A -> pipeline B`, `domain -> turn/config/observability/runtime/adapter`.
-
-`TurnCommitter` lives in `persistence/` but is a commit coordinator; database
-connections, SQL, and transaction implementations belong to the Store adapter.
+Forbidden reverse dependencies: `core -> *`, `trace -> *`,
+`llm/prompt/persistence -> pipeline/engine`, `stage A -> stage B`,
+`stage -> runtime`, `pipeline -> engine`.

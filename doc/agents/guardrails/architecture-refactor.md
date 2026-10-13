@@ -68,3 +68,6 @@ This is the principle; for concrete error, logging, and tracing rules see
 - MUST remove superseded code, config, docs, tests, and dead flags in the same
   change.
 - NEVER keep temporary parallel paths without a waiver.
+- The frozen reference crates (`crates/aise`, `crates/aise-server`) are not
+  old paths of aise-core; NEVER edit or delete them as part of an aise-core
+  refactor.

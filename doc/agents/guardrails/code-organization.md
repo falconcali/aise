@@ -19,16 +19,16 @@
   in `main.rs`, NEVER in `lib.rs`.
 
 ```rust
-// GOOD - lib.rs
-#![forbid(unsafe_code)]
+// GOOD - engine/mod.rs
+mod config;
+mod engine;
+mod error;
+mod factory;
 
-pub mod app;
-pub mod config;
-pub mod error;
-
-pub use app::GatewayApp;
-pub use config::GatewayConfig;
-pub use error::GatewayError;
+pub use config::EngineConfig;
+pub use engine::{AiseEngine, Engine};
+pub use error::EngineError;
+pub use factory::{AiseFactory, RoleActorSpec, StoryCreationSpec};
 ```
 
 ---
@@ -44,17 +44,16 @@ pub use error::GatewayError;
 
 ```rust
 #[cfg(test)]
-#[path = "tests/dialogue_tests.rs"]
+#[path = "tests/plan_prompt_tests.rs"]
 mod tests;
 ```
 
 ```text
-src/character/
-  character_think.rs
-  memory.rs
+src/pipeline/plan/
+  plan.rs
+  plan_prompt.rs
   tests/
-    character_think_tests.rs
-    memory_tests.rs
+    plan_prompt_tests.rs
 ```
 
 - Test files MUST start with `use super::*;`.
@@ -77,22 +76,29 @@ src/character/
 - Constants and statics SHOULD use `SCREAMING_SNAKE_CASE`.
 - Lifetimes SHOULD use single letters such as `'a` and `'b`.
 - API view and snapshot structs SHOULD use an `XxxInfo` suffix (e.g.
-  `CharacterInfo`, `TurnInfo`).
+  `StoryInstanceInfo`).
 - Configuration structs SHOULD use an `XxxConfig` suffix.
-- Write/command argument bundles SHOULD use an `XxxSpec` suffix.
+- Write/command argument bundles SHOULD use an `XxxSpec` suffix (e.g.
+  `StoryInstanceSpec`, `LlmCompletionSpec`).
+- Pipeline stage types SHOULD be named `{Stage}Pipeline`, `{Stage}Input`, and
+  `{Stage}Output` (e.g. `PlanPipeline`, `PlanInput`, `PlanOutput`).
 
 ---
 
-## R-CODE-04 - ID types use newtypes
+## R-CODE-04 - ID types use `define_id!` newtypes
 
-**Level: SHOULD**
+**Level: MUST**
 
-- IDs SHOULD use newtypes over `Arc<str>` rather than bare `String`.
+- Every ID type MUST be declared with the `define_id!` macro in
+  `crates/aise-core/src/core/ids.rs`; NEVER use a bare `String` for an ID.
+- `define_id!` produces a `String` newtype whose `try_new` rejects empty or
+  whitespace-only values and returns `CoreError::InvalidId`.
 - Different ID domains MUST NOT share the same type.
+- NEVER hand-write a separate ID struct outside `define_id!`.
 
 ```rust
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct CharacterId(Arc<str>);
+define_id!(StoryId, "story_id");
+define_id!(RoleId, "role_id");
 ```
 
 ---
@@ -113,8 +119,11 @@ pub struct CharacterId(Arc<str>);
 
 **Level: MUST for placement; SHOULD for naming**
 
-- Configuration MUST NOT hang off runtime state containers directly; it MUST
-  roll up into a typed root config (e.g. `AppConfig`).
+- Each module owns its typed `*Config` in its own `config.rs`; all module
+  configs MUST roll up into `EngineConfig`, the single root config (see
+  `R-LAYER-05`).
+- Configuration MUST NOT hang off runtime state containers directly; runtime
+  objects receive the config they need at construction time.
 - Mutable runtime state MUST live in dedicated state containers, never mixed
   into config types.
 - Configuration structs SHOULD use the `XxxConfig` suffix.
@@ -135,20 +144,20 @@ pub struct CharacterId(Arc<str>);
 
 ```rust
 // GOOD - one contiguous import block
-use crate::domain::ids::CharacterId;
-use serde::{Deserialize, Serialize};
+use crate::core::{BoundedText, PlayerContribution};
+use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CharacterThought {
+#[derive(Serialize)]
+pub struct PlanInput {
     // ...
 }
 ```
 
 ```rust
 // BAD - blank line inside the import block
-use crate::domain::ids::CharacterId;
+use crate::core::{BoundedText, PlayerContribution};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 ```
 
 ---
@@ -165,27 +174,22 @@ use serde::{Deserialize, Serialize};
 
 ```rust
 // BAD - observation mechanics obscure the business operation
-let observation =
-    ObservationSpan::begin(ObservationStep::LoadStorySnapshot, ObservationFields::default());
-let outcome = observation
-    .in_scope(self.store.load_story_snapshot(&story_id, limits))
-    .await;
-observation.finish(match &outcome {
-    Ok(snapshot) => ObservationFinish {
-        status: ObservationStatus::Ok,
-        metadata: snapshot_metadata(&story_id, snapshot),
-        ..ObservationFinish::default()
-    },
-    Err(error) => snapshot_error(error),
+let plan_observation = observation.begin(ObservationSpec {
+    name: "plan",
+    kind: ObservationKind::Span,
+    input: observation.capture_content(&input.player_contribution.processed),
+    metadata: Vec::new(),
+});
+let result = self.process_story_plan(story_ctx, &input, control, &plan_observation).await;
+plan_observation.finish(match &result {
+    Ok(plan) => ObservationOutcome { status: ObservationStatus::Ok, /* ... */ },
+    Err(error) => ObservationOutcome { status: ObservationStatus::Error, /* ... */ },
 });
 ```
 
 ```rust
-// GOOD - lifecycle stays visible; mechanics belong to BaselineObservation
-let observation =
-    BaselineObservation::begin(ObservationStep::LoadStorySnapshot, Some(story_id.clone()));
-let outcome = observation
-    .in_scope(self.store.load_story_snapshot(&story_id, limits))
-    .await;
-observation.finish(&outcome);
+// GOOD - lifecycle stays visible; mechanics live in plan_trace.rs
+let plan_observation = plan_trace::begin_plan(observation, &input.player_contribution.processed);
+let result = self.process_story_plan(story_ctx, &input, control, &plan_observation).await;
+plan_trace::finish_plan(plan_observation, &result);
 ```

@@ -133,7 +133,7 @@ Every rule must be testable.
 
 ### 4.3 Observability
 
-- Emit `tracing::info_span!("tool.invoke", tool = %name, call_id)`. (R-OBS-02)
+- Create a `Span` observation under the caller's `&Observation` via `{stage}_trace::begin_*` / `finish_*`. (R-OBS-02)
 - Counter `aise_tool_invocations_total{tool, status}` incremented per call.
 
 ---
