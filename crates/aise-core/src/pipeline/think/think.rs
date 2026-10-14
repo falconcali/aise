@@ -10,7 +10,7 @@ pub struct ThinkInput<'a> {
 
 #[derive(Serialize)]
 pub struct ThinkOutput {
-    pub result: String, // 不仅输出决策，也可以按planner的要求输出记忆，用于更好的续写故事。
+    pub result: String,
 }
 
 pub struct ThinkPipeline;
@@ -25,12 +25,12 @@ impl<'a> Pipeline<ThinkInput<'a>> for ThinkPipeline {
     async fn execute(
         &self,
         input: ThinkInput<'a>,
-        story_ctx: &StoryContext,
-        control: &TurnControl,
-        observation: &Observation,
+        _story_ctx: &StoryContext,
+        _control: &TurnControl,
+        _observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         Ok(ThinkOutput {
-            result: input.query.to_owned(),
+            result: input.query.into(),
         })
     }
 }

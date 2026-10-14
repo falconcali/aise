@@ -56,10 +56,7 @@ impl Runtime {
             retrieval: RetrievalPipeline::new(Arc::clone(&store)),
             think: ThinkPipeline,
             generate: GeneratePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&store)),
-            validate: ValidatePipeline {
-                score_configs: vec![],
-                validation_budget: 10,
-            },
+            validate: ValidatePipeline { score_configs: vec![] },
             repair: RepairPipeline,
             extract: ExtractPipeline::new(Arc::clone(&store)),
             summary: SummaryPipeline::new(
@@ -101,9 +98,14 @@ impl Runtime {
 
         let plan_output: PlanOutput = pipeline_runner.run(&self.plan, plan_input, story_ctx).await?;
 
-        let retrieval_output = match retrieval_input(&plan_output) {
-            Some(input) => pipeline_runner.run(&self.retrieval, input, story_ctx).await?,
-            None => RetrievalOutput::default(),
+        let retrieval_output = if plan_output.requires_retrieval() {
+            let retrieval_input = RetrievalInput {
+                fact_ids: &plan_output.facts_to_retrieve,
+                rumor_ids: &plan_output.rumors_to_retrieve,
+            };
+            pipeline_runner.run(&self.retrieval, retrieval_input, story_ctx).await?
+        } else {
+            RetrievalOutput::default()
         };
 
         if plan_output.requires_character_thinking() {
@@ -209,13 +211,6 @@ impl Runtime {
         let final_index = select_final_index(&validations);
         Ok(proposals.swap_remove(final_index))
     }
-}
-
-fn retrieval_input(plan_output: &PlanOutput) -> Option<RetrievalInput<'_>> {
-    plan_output.requires_retrieval().then_some(RetrievalInput {
-        fact_ids: &plan_output.facts_to_retrieve,
-        rumor_ids: &plan_output.rumors_to_retrieve,
-    })
 }
 
 fn proposal_version(proposals: &[String]) -> u32 {

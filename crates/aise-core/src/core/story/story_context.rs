@@ -46,3 +46,9 @@ impl StoryContext {
         }
     }
 }
+
+impl Default for StoryContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}

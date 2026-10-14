@@ -58,20 +58,26 @@ fn all_entries_are_candidates_without_activation() {
 }
 
 #[test]
-fn activated_fact_is_excluded_only_from_fact_candidates() {
-    let pack = pack_with_ids(&["shared", "visible"], &["shared"]);
+fn candidates_exclude_activated_facts_and_rumors() {
+    let pack = pack_with_ids(&["shared", "visible"], &["shared", "visible"]);
     let fact_id = FactId::try_new("shared").expect("valid fact id");
+    let rumor_id = RumorId::try_new("shared").expect("valid rumor id");
     let activated = ActivatedKnowledge {
         facts: vec![activated_fact(
             &fact_id,
             pack.seed_facts.get(&fact_id).expect("fixture fact"),
         )],
-        rumors: Vec::new(),
+        rumors: vec![activated_rumor(
+            &rumor_id,
+            pack.seed_rumors.get(&rumor_id).expect("fixture rumor"),
+        )],
     };
     let candidates = collect_candidates(&pack, &activated, usize::MAX);
 
     assert!(!candidates.contains_fact(&fact_id));
-    assert!(candidates.contains_rumor(&RumorId::try_new("shared").expect("valid rumor id")));
+    assert!(!candidates.contains_rumor(&rumor_id));
+    assert!(candidates.contains_fact(&FactId::try_new("visible").expect("valid fact id")));
+    assert!(candidates.contains_rumor(&RumorId::try_new("visible").expect("valid rumor id")));
 }
 
 #[test]
@@ -103,7 +109,7 @@ fn empty_pack_produces_empty_candidates() {
 }
 
 #[test]
-fn candidates_preserve_btree_id_order() {
+fn candidates_preserve_stable_id_order() {
     let pack = pack_with_ids(&["z", "a", "m"], &["y", "b", "n"]);
     let candidates = collect_candidates(&pack, &ActivatedKnowledge::default(), usize::MAX);
 
@@ -126,7 +132,7 @@ fn candidates_preserve_btree_id_order() {
 }
 
 #[test]
-fn each_candidate_kind_is_truncated_independently() {
+fn candidates_truncate_each_kind_independently() {
     let pack = pack_with_ids(&["a", "b", "c"], &["a", "b"]);
     let candidates = collect_candidates(&pack, &ActivatedKnowledge::default(), 2);
 
@@ -139,7 +145,7 @@ fn each_candidate_kind_is_truncated_independently() {
 }
 
 #[test]
-fn zero_limit_offers_nothing_and_records_truncation() {
+fn zero_limit_truncates_all_eligible_candidates() {
     let pack = pack_with_ids(&["fact"], &["rumor"]);
     let candidates = collect_candidates(&pack, &ActivatedKnowledge::default(), 0);
 

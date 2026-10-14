@@ -75,7 +75,7 @@ pub trait TurnEventSink: Send + Sync {
     fn emit(&self, event: TurnEvent);
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TurnNumber(u64);
 
 impl TurnNumber {
@@ -89,12 +89,6 @@ impl TurnNumber {
 
     pub fn value(&self) -> u64 {
         self.0
-    }
-}
-
-impl Default for TurnNumber {
-    fn default() -> Self {
-        Self(0)
     }
 }
 

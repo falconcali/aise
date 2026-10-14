@@ -1,5 +1,3 @@
 mod validate;
 
-pub(super) use validate::{
-    ValidateInput, ValidateOutput, ValidatePipeline, ValidateScoreConfig, ValidateScoreResult, ValidationDecision,
-};
+pub(super) use validate::{ValidateInput, ValidateOutput, ValidatePipeline, ValidateScoreResult, ValidationDecision};

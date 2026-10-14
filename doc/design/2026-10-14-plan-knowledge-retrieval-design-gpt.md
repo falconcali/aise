@@ -2,7 +2,7 @@
 
 > **Date**: 2026-10-14
 > **Author**: GPT-5.6 Sol
-> **Status**: Draft
+> **Status**: Accepted
 > **Prior docs**: [Pipeline 框架与编排](./2026-10-13-pipeline-framework-design-opus.md)、[Context Preparation and Retrieval](./2026-08-08-context-preparation-retrieval-design-gpt.md)
 
 ---

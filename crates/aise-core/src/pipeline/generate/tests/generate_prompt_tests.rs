@@ -308,7 +308,7 @@ fn vars_carry_knowledge_content_only() {
 }
 
 #[test]
-fn vars_render_activated_knowledge_before_retrieved_knowledge() {
+fn retrieved_knowledge_follows_activated_knowledge() {
     let fixture = GenerateFixture {
         knowledge: knowledge(),
         retrieved_facts: vec![retrieved_fact()],

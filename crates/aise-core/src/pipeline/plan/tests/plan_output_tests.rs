@@ -56,7 +56,19 @@ fn valid_json_produces_typed_plan_output() {
 }
 
 #[test]
-fn prose_outside_json_is_rejected() {
+fn output_rejects_plain_text_story_goal() {
+    let pack = candidate_pack();
+    let raw = "Continue the encounter.";
+
+    let error = parse_plan_output(raw, &candidates(&pack), &config(512))
+        .err()
+        .expect("invalid output");
+
+    assert_eq!(error_code(error), "plan_output_invalid_json");
+}
+
+#[test]
+fn output_rejects_json_with_surrounding_prose() {
     let pack = candidate_pack();
     let raw = r#"Here is the plan: {"story_goal":"Continue.","facts_to_retrieve":[],"rumors_to_retrieve":[]}"#;
 
@@ -80,7 +92,7 @@ fn missing_field_is_rejected() {
 }
 
 #[test]
-fn unknown_field_is_rejected() {
+fn output_rejects_unknown_fields() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":[],"rumors_to_retrieve":[],"reason":"because"}"#;
 
@@ -92,7 +104,7 @@ fn unknown_field_is_rejected() {
 }
 
 #[test]
-fn empty_story_goal_is_rejected() {
+fn output_rejects_empty_story_goal() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":" \n ","facts_to_retrieve":[],"rumors_to_retrieve":[]}"#;
 
@@ -104,7 +116,7 @@ fn empty_story_goal_is_rejected() {
 }
 
 #[test]
-fn oversized_story_goal_uses_original_utf8_byte_length() {
+fn output_rejects_oversized_story_goal() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"界界","facts_to_retrieve":[],"rumors_to_retrieve":[]}"#;
 
@@ -128,7 +140,7 @@ fn invalid_id_is_rejected_as_invalid_json() {
 }
 
 #[test]
-fn unknown_fact_id_is_rejected() {
+fn output_rejects_unknown_fact_id() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":["fact-x"],"rumors_to_retrieve":[]}"#;
 
@@ -140,7 +152,7 @@ fn unknown_fact_id_is_rejected() {
 }
 
 #[test]
-fn unknown_rumor_id_is_rejected() {
+fn output_rejects_unknown_rumor_id() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":[],"rumors_to_retrieve":["rumor-x"]}"#;
 
@@ -164,7 +176,7 @@ fn cross_kind_id_is_rejected() {
 }
 
 #[test]
-fn duplicate_fact_id_is_rejected() {
+fn output_rejects_duplicate_fact_id() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":["fact-a","fact-a"],"rumors_to_retrieve":[]}"#;
 
@@ -176,7 +188,7 @@ fn duplicate_fact_id_is_rejected() {
 }
 
 #[test]
-fn duplicate_rumor_id_is_rejected() {
+fn output_rejects_duplicate_rumor_id() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":[],"rumors_to_retrieve":["rumor-a","rumor-a"]}"#;
 
@@ -199,7 +211,7 @@ fn empty_selections_are_valid() {
 }
 
 #[test]
-fn selection_order_is_preserved() {
+fn valid_output_preserves_selected_id_order() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":["fact-b","fact-a"],"rumors_to_retrieve":["rumor-b","rumor-a"]}"#;
 

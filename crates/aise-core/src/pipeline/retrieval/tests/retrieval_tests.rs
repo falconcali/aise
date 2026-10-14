@@ -81,7 +81,7 @@ fn empty_input_resolves_empty_output() {
 }
 
 #[test]
-fn fact_and_rumor_request_order_is_preserved_independently() {
+fn retrieval_resolves_selected_entries_in_request_order() {
     let story_pack = snake_pack();
     let fact_ids = [
         fact_id("west_lake_has_broken_bridge"),
@@ -109,7 +109,7 @@ fn fact_and_rumor_request_order_is_preserved_independently() {
 }
 
 #[test]
-fn missing_fact_returns_exact_consistency_error_code() {
+fn retrieval_rejects_missing_fact_id() {
     let story_pack = snake_pack();
     let fact_ids = [fact_id("missing_fact")];
     let input = RetrievalInput {
@@ -130,7 +130,7 @@ fn missing_fact_returns_exact_consistency_error_code() {
 }
 
 #[test]
-fn missing_rumor_returns_exact_consistency_error_code() {
+fn retrieval_rejects_missing_rumor_id() {
     let story_pack = snake_pack();
     let rumor_ids = [rumor_id("missing_rumor")];
     let input = RetrievalInput {

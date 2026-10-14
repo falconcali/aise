@@ -31,9 +31,9 @@ impl<'a> Pipeline<RepairInput<'a>> for RepairPipeline {
     async fn execute(
         &self,
         input: RepairInput<'a>,
-        story_ctx: &StoryContext,
-        control: &TurnControl,
-        observation: &Observation,
+        _story_ctx: &StoryContext,
+        _control: &TurnControl,
+        _observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         Ok(RepairOutput {
             current_proposal: input.current_proposal.to_owned(),

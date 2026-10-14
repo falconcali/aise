@@ -52,7 +52,6 @@ impl ValidateOutput {
 
 pub struct ValidatePipeline {
     pub score_configs: Vec<ValidateScoreConfig>,
-    pub validation_budget: u32,
 }
 
 impl<'a> Pipeline<ValidateInput<'a>> for ValidatePipeline {
@@ -64,10 +63,10 @@ impl<'a> Pipeline<ValidateInput<'a>> for ValidatePipeline {
 
     async fn execute(
         &self,
-        input: ValidateInput<'a>,
-        story_ctx: &StoryContext,
-        control: &TurnControl,
-        observation: &Observation,
+        _input: ValidateInput<'a>,
+        _story_ctx: &StoryContext,
+        _control: &TurnControl,
+        _observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         Ok(ValidateOutput {
             decision: ValidationDecision::Accept,

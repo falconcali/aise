@@ -12,8 +12,8 @@ pub async fn process_player_input(
     let llm_result = gateway
         .complete(LlmCompletionSpec { messages }, turn_control, observation)
         .await?;
-    return Ok(PlayerContribution {
+    Ok(PlayerContribution {
         raw: input.to_owned(),
         processed: llm_result.content,
-    });
+    })
 }

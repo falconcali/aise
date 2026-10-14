@@ -42,7 +42,7 @@ impl Pipeline<CommitInput> for CommitPipeline {
         &self,
         input: CommitInput,
         story_ctx: &StoryContext,
-        control: &TurnControl,
+        _control: &TurnControl,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         let story_commit = StoryCommit {

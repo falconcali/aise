@@ -60,13 +60,13 @@ pub fn finish_plan(observation: Observation, result: &Result<PlanOutput, Pipelin
     let outcome = match result {
         Ok(output) => ObservationOutcome {
             status: ObservationStatus::Ok,
-            metadata: retrieval_metadata(metrics),
+            metadata: candidate_trace_metadata(metrics),
             output: observation.capture_content(output),
             ..ObservationOutcome::default()
         },
         Err(error) => ObservationOutcome {
             status: ObservationStatus::Error,
-            metadata: retrieval_metadata(metrics),
+            metadata: candidate_trace_metadata(metrics),
             error: Some(observation_error(error)),
             ..ObservationOutcome::default()
         },
@@ -74,7 +74,7 @@ pub fn finish_plan(observation: Observation, result: &Result<PlanOutput, Pipelin
     observation.finish(outcome);
 }
 
-fn retrieval_metadata(metrics: &PlanTraceMetrics) -> Vec<Attribute> {
+fn candidate_trace_metadata(metrics: &PlanTraceMetrics) -> Vec<Attribute> {
     let fact_candidates_dropped = metrics.fact_candidates_total.saturating_sub(metrics.fact_candidates_offered);
     let rumor_candidates_dropped = metrics.rumor_candidates_total.saturating_sub(metrics.rumor_candidates_offered);
     vec![

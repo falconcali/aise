@@ -1,4 +1,4 @@
 mod extract;
 mod extract_narrative;
 
-pub(super) use extract::{ExtractInput, ExtractOutput, ExtractPipeline};
+pub(super) use extract::{ExtractInput, ExtractPipeline};
