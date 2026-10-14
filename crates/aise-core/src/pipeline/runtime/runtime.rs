@@ -95,7 +95,7 @@ impl Runtime {
         };
 
         let plan_output = pipeline_runner.run(&self.plan, plan_input, story_ctx).await?;
-        let mut generate_input = GenerateInput {
+        let generate_input = GenerateInput {
             story_goal: plan_output.plan.clone(),
             player_contribution: plan_output.player_contribution.clone(),
             constraints: narrative_output.constraints.clone(),

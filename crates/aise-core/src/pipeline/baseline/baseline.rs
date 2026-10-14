@@ -142,8 +142,6 @@ impl Pipeline for BaselinePipeline {
             .await?;
         let knowledge = self.activate_knowledge(&story_pack, story_ctx, &player_contribution, &narrative, observation);
 
-        // role memory
-
         Ok(BaselineOutput {
             player_contribution,
             narrative,

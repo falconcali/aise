@@ -26,6 +26,7 @@ use uuid::Uuid;
 pub mod observability;
 
 const MULTI_TURN_ENV: &str = "AISE_DEMO_MULTI_TURN";
+const TURN_TIMEOUT_ENV: &str = "AISE_TURN_TIMEOUT_MS";
 const DEFAULT_PLAYER_INPUT: &str = concat!(
     "我接过白素贞递来的伞，先向她点头致谢，并问：“白姑娘，你也是要过桥吗？”\n\n",
     "（我想：她看起来不像普通的避雨行人，但我不能仅凭直觉下定论。）\n\n",
@@ -50,7 +51,7 @@ const MULTI_TURN_PLAYER_INPUTS: [&str; 10] = [
     "我把伞还给白素贞，并邀请她们到我所在的药铺做客。",
     "我带她们回到药铺，向掌柜介绍两位客人，并留意小青对药材的反应。",
 ];
-const DEFAULT_TURN_TIMEOUT: Duration = Duration::from_secs(60);
+const DEFAULT_TURN_TIMEOUT: Duration = Duration::from_secs(120);
 const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
 const DEFAULT_LLM_TIMEOUT_MS: u64 = 60_000;
 const DEFAULT_PROMPT_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../aise-core/assets/prompts");
@@ -88,10 +89,13 @@ struct DemoPlan {
 
 impl DemoPlan {
     fn load() -> anyhow::Result<Self> {
-        if parsed_env(MULTI_TURN_ENV, false)? {
-            return Ok(Self::multi_turn());
-        }
-        Ok(Self::single_turn())
+        let mut plan = if parsed_env(MULTI_TURN_ENV, false)? {
+            Self::multi_turn()
+        } else {
+            Self::single_turn()
+        };
+        plan.turn_timeout = duration_env_ms(TURN_TIMEOUT_ENV, plan.turn_timeout)?;
+        Ok(plan)
     }
 
     fn single_turn() -> Self {
@@ -265,6 +269,11 @@ fn load_prompt_config() -> anyhow::Result<PromptConfig> {
 
 fn required_env(name: &str) -> anyhow::Result<String> {
     std::env::var(name).with_context(|| format!("missing required environment variable {name}"))
+}
+
+fn duration_env_ms(name: &str, default: Duration) -> anyhow::Result<Duration> {
+    let default_ms = u64::try_from(default.as_millis()).context("default timeout does not fit in u64 milliseconds")?;
+    Ok(Duration::from_millis(parsed_env(name, default_ms)?))
 }
 
 fn parsed_env<T>(name: &str, default: T) -> anyhow::Result<T>
