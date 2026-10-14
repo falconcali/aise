@@ -89,13 +89,21 @@ fn build_scan_buffer(scope: &KnowledgeScope<'_>) -> ScanBuffer {
             turn.turn_segment.text(),
         )
     });
-    let summary = story_ctx.summary.as_ref().map(|summary| {
-        ScanFragment::new(
-            ScanFragmentKind::StorySummary,
-            depth(story_ctx.recent_turns.len().saturating_add(1)),
-            &summary.text,
-        )
-    });
+    let prior_story_depth = depth(story_ctx.recent_turns.len().saturating_add(1));
+    let prior_story = story_ctx
+        .summary
+        .as_ref()
+        .filter(|summary| !summary.text.trim().is_empty())
+        .map_or_else(
+            || {
+                ScanFragment::new(
+                    ScanFragmentKind::StoryOpening,
+                    prior_story_depth,
+                    scope.story_pack.opening.as_str(),
+                )
+            },
+            |summary| ScanFragment::new(ScanFragmentKind::StorySummary, prior_story_depth, &summary.text),
+        );
     ScanBuffer::new(
         std::iter::once(ScanFragment::new(
             ScanFragmentKind::PlayerContribution,
@@ -105,7 +113,7 @@ fn build_scan_buffer(scope: &KnowledgeScope<'_>) -> ScanBuffer {
         .chain(player_role_name)
         .chain(directions)
         .chain(recent_story)
-        .chain(summary),
+        .chain(std::iter::once(prior_story)),
     )
 }
 

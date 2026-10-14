@@ -32,6 +32,7 @@ fn chinese_text_matches_without_word_boundaries() {
 fn buffer_orders_by_source_priority_and_drops_empty_fragments() {
     let buffer = ScanBuffer::new([
         ScanFragment::new(ScanFragmentKind::StorySummary, 3, "summary"),
+        ScanFragment::new(ScanFragmentKind::StoryOpening, 3, "opening"),
         ScanFragment::new(ScanFragmentKind::RecentStory, 2, "older"),
         ScanFragment::new(ScanFragmentKind::RecentStory, 1, "newer"),
         ScanFragment::new(ScanFragmentKind::PlayerContribution, 0, "   "),
@@ -50,6 +51,7 @@ fn buffer_orders_by_source_priority_and_drops_empty_fragments() {
             (ScanFragmentKind::PlayerRoleName, 0),
             (ScanFragmentKind::RecentStory, 1),
             (ScanFragmentKind::RecentStory, 2),
+            (ScanFragmentKind::StoryOpening, 3),
             (ScanFragmentKind::StorySummary, 3),
         ]
     );

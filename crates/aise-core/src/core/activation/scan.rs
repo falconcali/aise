@@ -7,6 +7,7 @@ pub enum ScanFragmentKind {
     PlayerRoleName,
     NarrativeDirection,
     RecentStory,
+    StoryOpening,
     StorySummary,
     RecursionContent,
 }

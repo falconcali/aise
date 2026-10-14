@@ -143,12 +143,39 @@ fn example_pack_rules_activate_and_recurse() {
 fn example_constant_entry_is_always_active() {
     let knowledge = activate_with(&demo_pack(), &StoryContext::new(), "我坐在火炉边", &empty_narrative());
 
-    assert_eq!(fact_ids(&knowledge), ["lodge_is_remote"]);
+    assert!(fact_ids(&knowledge).contains(&"lodge_is_remote"));
 }
 
 #[test]
 fn unmatched_story_activates_nothing() {
     let knowledge = activate_with(&pack_with_rules(), &StoryContext::new(), "今天天气不错", &empty_narrative());
+
+    assert!(knowledge.facts.is_empty());
+    assert!(knowledge.rumors.is_empty());
+}
+
+#[test]
+fn opening_is_scanned_when_summary_is_absent() {
+    let mut pack = pack_with_rules();
+    pack.opening = BoundedText::try_new("法海在山门前等候。", "test", usize::MAX).expect("test opening should fit");
+
+    let knowledge = activate_with(&pack, &StoryContext::new(), "继续", &empty_narrative());
+
+    assert_eq!(fact_ids(&knowledge), ["fahai_knows_identity"]);
+    assert_eq!(knowledge.rumors.len(), 1);
+}
+
+#[test]
+fn summary_replaces_opening_in_scan_buffer() {
+    let mut pack = pack_with_rules();
+    pack.opening = BoundedText::try_new("法海在山门前等候。", "test", usize::MAX).expect("test opening should fit");
+    let mut story_ctx = StoryContext::new();
+    story_ctx.summary = Some(StorySummary {
+        text: "雨后的西湖十分平静。".to_owned(),
+        covered_through: TurnNumber::new(1),
+    });
+
+    let knowledge = activate_with(&pack, &story_ctx, "继续", &empty_narrative());
 
     assert!(knowledge.facts.is_empty());
     assert!(knowledge.rumors.is_empty());
