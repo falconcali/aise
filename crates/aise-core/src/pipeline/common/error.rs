@@ -33,6 +33,18 @@ pub enum PipelineError {
     },
     #[error("pipeline stage {stage} produced empty output")]
     EmptyOutput { stage: PipelineStage },
+    #[error("pipeline stage {stage} produced invalid output ({code}): {message}")]
+    InvalidOutput {
+        stage: PipelineStage,
+        code: &'static str,
+        message: String,
+    },
+    #[error("pipeline stage {stage} observed inconsistent data ({code}): {message}")]
+    InconsistentData {
+        stage: PipelineStage,
+        code: &'static str,
+        message: String,
+    },
 }
 
 impl PipelineError {
@@ -50,5 +62,21 @@ impl PipelineError {
 
     pub fn narrative(stage: PipelineStage) -> impl FnOnce(NarrativeError) -> Self {
         move |source| Self::Narrative { stage, source }
+    }
+
+    pub fn invalid_output(stage: PipelineStage, code: &'static str, message: impl Into<String>) -> Self {
+        Self::InvalidOutput {
+            stage,
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn inconsistent_data(stage: PipelineStage, code: &'static str, message: impl Into<String>) -> Self {
+        Self::InconsistentData {
+            stage,
+            code,
+            message: message.into(),
+        }
     }
 }

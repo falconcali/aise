@@ -10,9 +10,9 @@ use crate::pipeline::commit::{CommitInput, CommitPipeline};
 use crate::pipeline::common::{PipelineError, PipelineRunner};
 use crate::pipeline::extract::{ExtractInput, ExtractPipeline};
 use crate::pipeline::generate::{GenerateInput, GeneratePipeline};
-use crate::pipeline::plan::{PlanInput, PlanPipeline};
+use crate::pipeline::plan::{PlanInput, PlanOutput, PlanPipeline};
 use crate::pipeline::repair::{RepairInput, RepairPipeline};
-use crate::pipeline::retrieval::{RetrievalInput, RetrievalPipeline};
+use crate::pipeline::retrieval::{RetrievalInput, RetrievalOutput, RetrievalPipeline};
 use crate::pipeline::summary::{SummaryInput, SummaryPipeline};
 use crate::pipeline::think::{ThinkInput, ThinkPipeline};
 use crate::pipeline::validate::{ValidateInput, ValidateOutput, ValidatePipeline, ValidationDecision};
@@ -47,7 +47,12 @@ impl Runtime {
                 Arc::clone(&store),
                 pipeline_config.baseline,
             ),
-            plan: PlanPipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&store)),
+            plan: PlanPipeline::new(
+                Arc::clone(&gateway),
+                Arc::clone(&prompt),
+                Arc::clone(&store),
+                pipeline_config.plan,
+            ),
             retrieval: RetrievalPipeline,
             think: ThinkPipeline,
             generate: GeneratePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&store)),
@@ -94,30 +99,33 @@ impl Runtime {
             knowledge: &baseline_output.knowledge,
         };
 
-        let plan_output = pipeline_runner.run(&self.plan, plan_input, story_ctx).await?;
+        let plan_output: PlanOutput = pipeline_runner.run(&self.plan, plan_input, story_ctx).await?;
+
+        if plan_output.requires_retrieval() {
+            let retrieval_input = RetrievalInput {
+                fact_ids: &plan_output.facts_to_retrieve,
+                rumor_ids: &plan_output.rumors_to_retrieve,
+            };
+
+            let _retrieval_output: RetrievalOutput =
+                pipeline_runner.run(&self.retrieval, retrieval_input, story_ctx).await?;
+        }
+
+        if plan_output.requires_character_thinking() {
+            let think_input = ThinkInput {
+                query: &plan_output.story_goal,
+            };
+
+            let _think_output = pipeline_runner.run(&self.think, think_input, story_ctx).await?;
+        }
+
         let generate_input = GenerateInput {
-            story_goal: &plan_output.plan,
+            story_goal: &plan_output.story_goal,
             player_contribution: &baseline_output.player_contribution,
             directions: &baseline_output.narrative.directions,
             constraints: &baseline_output.narrative.constraints,
             knowledge: &baseline_output.knowledge,
         };
-
-        if plan_output.requires_retrieval() {
-            let retrieval_input = RetrievalInput {
-                query: &plan_output.plan,
-            };
-
-            let retrieval_output = pipeline_runner.run(&self.retrieval, retrieval_input, story_ctx).await?;
-        }
-
-        if plan_output.requires_character_thinking() {
-            let think_input = ThinkInput {
-                query: &plan_output.plan,
-            };
-
-            let think_output = pipeline_runner.run(&self.think, think_input, story_ctx).await?;
-        }
 
         let generate_output = pipeline_runner.run(&self.generate, generate_input, story_ctx).await?;
 
