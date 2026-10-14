@@ -176,6 +176,32 @@ fn rumors_render_only_content_as_bullets() {
 }
 
 #[test]
+fn retrieved_knowledge_is_rendered_after_activated_knowledge() {
+    let activated_facts = [fact("keeper", "The keeper is named Ash.")];
+    let retrieved_facts = [fact("river", "The river runs north.")];
+    let activated_rumors = [rumor("ghost", "A ghost haunts the mill.")];
+    let retrieved_rumors = [rumor("bell", "The chapel bell rings by itself.")];
+
+    assert_eq!(
+        known_facts_with_retrieved(&activated_facts, &retrieved_facts),
+        "- The keeper is named Ash.\n- The river runs north."
+    );
+    assert_eq!(
+        rumors_with_retrieved(&activated_rumors, &retrieved_rumors),
+        "- A ghost haunts the mill.\n- The chapel bell rings by itself."
+    );
+}
+
+#[test]
+fn empty_retrieved_knowledge_preserves_activated_only_rendering() {
+    let facts = [fact("keeper", "The keeper is named Ash.")];
+    let rumors_list = [rumor("ghost", "A ghost haunts the mill.")];
+
+    assert_eq!(known_facts_with_retrieved(&facts, &[]), known_facts(&facts));
+    assert_eq!(rumors_with_retrieved(&rumors_list, &[]), rumors(&rumors_list));
+}
+
+#[test]
 fn empty_lists_render_as_empty_text() {
     assert_eq!(story_constraints(&[]), "");
     assert_eq!(narrative_directions(&[]), "");

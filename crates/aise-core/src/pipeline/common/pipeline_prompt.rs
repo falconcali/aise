@@ -32,11 +32,19 @@ pub(in crate::pipeline) fn story_constraints(constraints: &[BoundedText]) -> Str
 }
 
 pub(in crate::pipeline) fn known_facts(facts: &[FactEntry]) -> String {
-    bullet_list(facts.iter().map(|fact| fact.body.content.as_str()))
+    known_facts_with_retrieved(facts, &[])
+}
+
+pub(in crate::pipeline) fn known_facts_with_retrieved(activated: &[FactEntry], retrieved: &[FactEntry]) -> String {
+    bullet_list(activated.iter().chain(retrieved).map(|fact| fact.body.content.as_str()))
 }
 
 pub(in crate::pipeline) fn rumors(rumors: &[RumorEntry]) -> String {
-    bullet_list(rumors.iter().map(|rumor| rumor.body.content.as_str()))
+    rumors_with_retrieved(rumors, &[])
+}
+
+pub(in crate::pipeline) fn rumors_with_retrieved(activated: &[RumorEntry], retrieved: &[RumorEntry]) -> String {
+    bullet_list(activated.iter().chain(retrieved).map(|rumor| rumor.body.content.as_str()))
 }
 
 fn bullet_list<'a>(items: impl Iterator<Item = &'a str>) -> String {

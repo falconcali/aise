@@ -51,6 +51,8 @@ struct GenerateFixture {
     directions: Vec<NarrativeDirection>,
     constraints: Vec<BoundedText>,
     knowledge: ActivatedKnowledge,
+    retrieved_facts: Vec<FactEntry>,
+    retrieved_rumors: Vec<RumorEntry>,
 }
 
 impl GenerateFixture {
@@ -61,6 +63,8 @@ impl GenerateFixture {
             directions: &self.directions,
             constraints: &self.constraints,
             knowledge: &self.knowledge,
+            retrieved_facts: &self.retrieved_facts,
+            retrieved_rumors: &self.retrieved_rumors,
         }
     }
 }
@@ -75,6 +79,8 @@ fn generate_fixture(goal: &str, processed: &str) -> GenerateFixture {
         directions: Vec::new(),
         constraints: Vec::new(),
         knowledge: ActivatedKnowledge::default(),
+        retrieved_facts: Vec::new(),
+        retrieved_rumors: Vec::new(),
     }
 }
 
@@ -102,6 +108,30 @@ fn knowledge() -> ActivatedKnowledge {
                 retrieval: RetrievalHint::try_new("mill").expect("test hint should be valid"),
             },
         }],
+    }
+}
+
+fn retrieved_fact() -> FactEntry {
+    FactEntry {
+        id: FactId::try_new("river_direction").expect("test fact id should be valid"),
+        origin: EntryOrigin::Seed,
+        body: FactBody {
+            content: text("The river runs north."),
+            activation: ActivationRule::default(),
+            retrieval: RetrievalHint::try_new("river").expect("test hint should be valid"),
+        },
+    }
+}
+
+fn retrieved_rumor() -> RumorEntry {
+    RumorEntry {
+        id: RumorId::try_new("bell_rumor").expect("test rumor id should be valid"),
+        origin: EntryOrigin::Seed,
+        body: RumorBody {
+            content: text("The chapel bell rings by itself."),
+            activation: ActivationRule::default(),
+            retrieval: RetrievalHint::try_new("bell").expect("test hint should be valid"),
+        },
     }
 }
 
@@ -275,6 +305,41 @@ fn vars_carry_knowledge_content_only() {
 
     assert_eq!(var(&vars, "known_facts"), "- The forest keeper is named Ash.");
     assert_eq!(var(&vars, "rumors"), "- A ghost haunts the old mill.");
+}
+
+#[test]
+fn vars_render_activated_knowledge_before_retrieved_knowledge() {
+    let fixture = GenerateFixture {
+        knowledge: knowledge(),
+        retrieved_facts: vec![retrieved_fact()],
+        retrieved_rumors: vec![retrieved_rumor()],
+        ..generate_fixture("Goal.", "I wave.")
+    };
+    let vars = generate_vars(&StoryContext::new(), &fixture.input(), String::new());
+
+    assert_eq!(
+        var(&vars, "known_facts"),
+        "- The forest keeper is named Ash.\n- The river runs north."
+    );
+    assert_eq!(
+        var(&vars, "rumors"),
+        "- A ghost haunts the old mill.\n- The chapel bell rings by itself."
+    );
+}
+
+#[test]
+fn retrieved_content_remains_in_its_knowledge_section() {
+    let fixture = GenerateFixture {
+        retrieved_facts: vec![retrieved_fact()],
+        retrieved_rumors: vec![retrieved_rumor()],
+        ..generate_fixture("Goal.", "I wave.")
+    };
+    let vars = generate_vars(&StoryContext::new(), &fixture.input(), String::new());
+
+    assert!(var(&vars, "known_facts").contains("The river runs north."));
+    assert!(!var(&vars, "known_facts").contains("chapel bell"));
+    assert!(var(&vars, "rumors").contains("The chapel bell rings by itself."));
+    assert!(!var(&vars, "rumors").contains("river runs north"));
 }
 
 #[tokio::test]

@@ -44,11 +44,17 @@ fn generate_vars(story_ctx: &StoryContext, input: &GenerateInput<'_>, story_open
         ),
         (
             KNOWN_FACTS_VAR.to_owned(),
-            Value::String(pipeline_prompt::known_facts(&input.knowledge.facts)),
+            Value::String(pipeline_prompt::known_facts_with_retrieved(
+                &input.knowledge.facts,
+                input.retrieved_facts,
+            )),
         ),
         (
             RUMORS_VAR.to_owned(),
-            Value::String(pipeline_prompt::rumors(&input.knowledge.rumors)),
+            Value::String(pipeline_prompt::rumors_with_retrieved(
+                &input.knowledge.rumors,
+                input.retrieved_rumors,
+            )),
         ),
         (
             NARRATIVE_DIRECTIONS_VAR.to_owned(),

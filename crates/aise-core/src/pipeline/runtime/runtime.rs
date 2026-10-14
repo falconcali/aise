@@ -53,7 +53,7 @@ impl Runtime {
                 Arc::clone(&store),
                 pipeline_config.plan,
             ),
-            retrieval: RetrievalPipeline,
+            retrieval: RetrievalPipeline::new(Arc::clone(&store)),
             think: ThinkPipeline,
             generate: GeneratePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&store)),
             validate: ValidatePipeline {
@@ -101,15 +101,10 @@ impl Runtime {
 
         let plan_output: PlanOutput = pipeline_runner.run(&self.plan, plan_input, story_ctx).await?;
 
-        if plan_output.requires_retrieval() {
-            let retrieval_input = RetrievalInput {
-                fact_ids: &plan_output.facts_to_retrieve,
-                rumor_ids: &plan_output.rumors_to_retrieve,
-            };
-
-            let _retrieval_output: RetrievalOutput =
-                pipeline_runner.run(&self.retrieval, retrieval_input, story_ctx).await?;
-        }
+        let retrieval_output = match retrieval_input(&plan_output) {
+            Some(input) => pipeline_runner.run(&self.retrieval, input, story_ctx).await?,
+            None => RetrievalOutput::default(),
+        };
 
         if plan_output.requires_character_thinking() {
             let think_input = ThinkInput {
@@ -125,6 +120,8 @@ impl Runtime {
             directions: &baseline_output.narrative.directions,
             constraints: &baseline_output.narrative.constraints,
             knowledge: &baseline_output.knowledge,
+            retrieved_facts: &retrieval_output.facts,
+            retrieved_rumors: &retrieval_output.rumors,
         };
 
         let generate_output = pipeline_runner.run(&self.generate, generate_input, story_ctx).await?;
@@ -212,6 +209,13 @@ impl Runtime {
         let final_index = select_final_index(&validations);
         Ok(proposals.swap_remove(final_index))
     }
+}
+
+fn retrieval_input(plan_output: &PlanOutput) -> Option<RetrievalInput<'_>> {
+    plan_output.requires_retrieval().then_some(RetrievalInput {
+        fact_ids: &plan_output.facts_to_retrieve,
+        rumor_ids: &plan_output.rumors_to_retrieve,
+    })
 }
 
 fn proposal_version(proposals: &[String]) -> u32 {

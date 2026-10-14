@@ -1,4 +1,7 @@
-use crate::core::{ActivatedKnowledge, BoundedText, NarrativeDirection, PlayerContribution, StoryContext, TurnControl};
+use crate::core::{
+    ActivatedKnowledge, BoundedText, FactEntry, NarrativeDirection, PlayerContribution, RumorEntry, StoryContext,
+    TurnControl,
+};
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
@@ -15,6 +18,8 @@ pub struct GenerateInput<'a> {
     pub directions: &'a [NarrativeDirection],
     pub constraints: &'a [BoundedText],
     pub knowledge: &'a ActivatedKnowledge,
+    pub retrieved_facts: &'a [FactEntry],
+    pub retrieved_rumors: &'a [RumorEntry],
 }
 
 #[derive(Serialize)]
