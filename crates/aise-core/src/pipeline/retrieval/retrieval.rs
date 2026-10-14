@@ -1,7 +1,7 @@
 use crate::core::{EntryOrigin, FactEntry, FactId, RumorEntry, RumorId, StoryContext, StoryPack, TurnControl};
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
-use crate::pipeline::retrieval::retrieval_trace::{self, RetrievalTraceMetrics};
+use crate::pipeline::retrieval::retrieval_trace;
 use crate::trace::Observation;
 use serde::Serialize;
 use std::sync::Arc;
@@ -108,17 +108,8 @@ impl<'a> Pipeline<RetrievalInput<'a>> for RetrievalPipeline {
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         let retrieval_observation = retrieval_trace::begin_retrieval(observation, &input);
-        let mut metrics = RetrievalTraceMetrics {
-            facts_requested: input.fact_ids.len(),
-            rumors_requested: input.rumor_ids.len(),
-            ..RetrievalTraceMetrics::default()
-        };
         let result = self.retrieve(&input, story_ctx).await;
-        if let Ok(output) = &result {
-            metrics.facts_resolved = output.facts.len();
-            metrics.rumors_resolved = output.rumors.len();
-        }
-        retrieval_trace::finish_retrieval(retrieval_observation, &result, &metrics);
+        retrieval_trace::finish_retrieval(retrieval_observation, &input, &result);
         result
     }
 }

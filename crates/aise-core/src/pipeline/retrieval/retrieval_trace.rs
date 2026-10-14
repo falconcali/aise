@@ -28,19 +28,25 @@ pub fn begin_retrieval(observation: &Observation, input: &RetrievalInput<'_>) ->
 
 pub fn finish_retrieval(
     observation: Observation,
+    input: &RetrievalInput<'_>,
     result: &Result<RetrievalOutput, PipelineError>,
-    metrics: &RetrievalTraceMetrics,
 ) {
+    let metrics = RetrievalTraceMetrics {
+        facts_requested: input.fact_ids.len(),
+        facts_resolved: result.as_ref().map_or(0, |output| output.facts.len()),
+        rumors_requested: input.rumor_ids.len(),
+        rumors_resolved: result.as_ref().map_or(0, |output| output.rumors.len()),
+    };
     let outcome = match result {
         Ok(output) => ObservationOutcome {
             status: ObservationStatus::Ok,
-            metadata: retrieval_metadata(metrics),
+            metadata: retrieval_metadata(&metrics),
             output: observation.capture_content(output),
             ..ObservationOutcome::default()
         },
         Err(error) => ObservationOutcome {
             status: ObservationStatus::Error,
-            metadata: retrieval_metadata(metrics),
+            metadata: retrieval_metadata(&metrics),
             error: Some(observation_error(error)),
             ..ObservationOutcome::default()
         },
