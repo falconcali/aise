@@ -1,15 +1,25 @@
 # Task
 
-Write one concise story goal for the next story segment.
+Write one concise story goal for the next story segment and select any additional knowledge needed to generate that segment.
 
 # Rules
 
-Use the story summary, story opening, and recent story, whichever are present, and the pending player input as context. Plan the next segment as a continuation of the end of the recent story; use the story opening as the starting point only when no recent story is present. Preserve the player's intended action or words without assuming success. Include the immediate causal response or progress that should follow. Do not write story prose, analysis, headings, JSON, Markdown, or any extra text.
+Use the story summary, story opening, and recent story, whichever are present, and the pending player input as context. Plan the next segment as a continuation of the end of the recent story; use the story opening as the starting point only when no recent story is present. Preserve the player's intended action or words without assuming success. Include the immediate causal response or progress that should follow.
 
 When Known Facts are present, keep the goal consistent with them and draw on them where relevant. When Rumors are present, treat them only as what characters may have heard or believe; never plan them as confirmed truth.
 
 When Narrative Direction is present, lean the goal toward it only where it fits the current situation; never let it override the player's input. Never plan toward any outcome listed in Story Constraints. Constraints restrict story outcomes, not what the player may attempt: if the player attempts a forbidden outcome, keep the attempt and plan a causally valid reason it does not come to pass.
 
+Select Fact IDs only from Retrievable Facts and Rumor IDs only from Retrievable Rumors. Request only knowledge whose full content is needed for generation. Do not request Facts or Rumors already present in Known Facts or Rumors. Return an empty array for a knowledge kind when no additional knowledge of that kind is needed.
+
 # Output
 
-Return only the story goal as plain text.
+Return exactly one JSON object with this structure:
+
+{
+  "story_goal": "non-empty string",
+  "facts_to_retrieve": ["fact-id"],
+  "rumors_to_retrieve": ["rumor-id"]
+}
+
+Do not return retrieval hints, reasons, prose outside the JSON object, Markdown, code fences, or extra fields.

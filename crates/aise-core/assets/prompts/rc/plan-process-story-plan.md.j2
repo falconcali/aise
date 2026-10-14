@@ -28,6 +28,18 @@
 {{ rumors }}
 
 {% endif -%}
+{%- if retrievable_facts -%}
+## Retrievable Facts
+
+{{ retrievable_facts }}
+
+{% endif -%}
+{%- if retrievable_rumors -%}
+## Retrievable Rumors
+
+{{ retrievable_rumors }}
+
+{% endif -%}
 {%- if narrative_directions -%}
 ## Narrative Direction
 

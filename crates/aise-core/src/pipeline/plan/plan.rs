@@ -4,7 +4,10 @@ use crate::core::{
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
-use crate::pipeline::plan::{PlanConfig, plan_llm, plan_prompt, plan_trace};
+use crate::pipeline::plan::{
+    PlanConfig, plan_candidates, plan_llm, plan_output, plan_prompt,
+    plan_trace::{self, PlanTraceMetrics},
+};
 use crate::prompt::Prompt;
 use crate::trace::Observation;
 use serde::Serialize;
@@ -58,16 +61,42 @@ impl PlanPipeline {
         input: &PlanInput<'_>,
         control: &TurnControl,
         observation: &Observation,
-    ) -> Result<String, PipelineError> {
-        let rendered_prompt =
-            plan_prompt::process_plan(self.prompt.as_ref(), story_ctx, input, self.store.as_ref(), observation).await?;
-
-        let story_plan =
+        metrics: &mut PlanTraceMetrics,
+    ) -> Result<PlanOutput, PipelineError> {
+        let story_pack = self
+            .store
+            .pack_store()
+            .get_pack(&story_ctx.pack_ref)
+            .await
+            .map_err(PipelineError::persistence(PipelineStage::Plan))?;
+        let candidates = plan_candidates::collect_candidates(
+            story_pack.as_ref(),
+            input.knowledge,
+            self.config.max_retrieval_candidates_per_kind,
+        );
+        metrics.fact_candidates_total = candidates.fact_stats.total;
+        metrics.fact_candidates_offered = candidates.fact_stats.offered;
+        metrics.rumor_candidates_total = candidates.rumor_stats.total;
+        metrics.rumor_candidates_offered = candidates.rumor_stats.offered;
+        if candidates.fact_stats.truncated() || candidates.rumor_stats.truncated() {
+            plan_trace::warn_if_candidates_truncated(metrics);
+        }
+        let rendered_prompt = plan_prompt::process_plan(
+            self.prompt.as_ref(),
+            story_ctx,
+            input,
+            story_pack.as_ref(),
+            &candidates,
+            observation,
+        )?;
+        let raw_output =
             plan_llm::process_plan(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
                 .await
                 .map_err(PipelineError::llm(PipelineStage::Plan))?;
-
-        Ok(story_plan)
+        let output = plan_output::parse_plan_output(&raw_output, &candidates, &self.config)?;
+        metrics.facts_selected = output.facts_to_retrieve.len();
+        metrics.rumors_selected = output.rumors_to_retrieve.len();
+        Ok(output)
     }
 }
 
@@ -86,19 +115,12 @@ impl<'a> Pipeline<PlanInput<'a>> for PlanPipeline {
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         let plan_observation = plan_trace::begin_plan(observation, &input.player_contribution.processed);
-        let result = self.process_story_plan(story_ctx, &input, control, &plan_observation).await;
-        plan_trace::finish_plan(plan_observation, &result);
-        result.and_then(|plan| {
-            let story_goal =
-                BoundedText::try_new(plan, "story_goal", self.config.max_story_goal_bytes).map_err(|error| {
-                    PipelineError::invalid_output(PipelineStage::Plan, "plan_story_goal_too_long", error.to_string())
-                })?;
-            Ok(PlanOutput {
-                story_goal,
-                facts_to_retrieve: Vec::new(),
-                rumors_to_retrieve: Vec::new(),
-            })
-        })
+        let mut metrics = PlanTraceMetrics::default();
+        let result = self
+            .process_story_plan(story_ctx, &input, control, &plan_observation, &mut metrics)
+            .await;
+        plan_trace::finish_plan(plan_observation, &result, &metrics);
+        result
     }
 }
 
