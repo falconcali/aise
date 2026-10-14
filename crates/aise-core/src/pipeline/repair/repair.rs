@@ -5,27 +5,23 @@ use crate::trace::Observation;
 use serde::Serialize;
 
 #[derive(Serialize)]
-pub struct RepairInput {
-    pub original_proposal: String,
-    pub current_proposal: String,
-    pub scores: Vec<ValidateScoreResult>,
+pub struct RepairInput<'a> {
+    pub original_proposal: &'a str,
+    pub current_proposal: &'a str,
+    pub scores: &'a [ValidateScoreResult],
     pub proposal_version: u32,
-    pub constraints: Vec<BoundedText>,
-    pub player_contribution: PlayerContribution,
+    pub constraints: &'a [BoundedText],
+    pub player_contribution: &'a PlayerContribution,
 }
 
 #[derive(Serialize)]
 pub struct RepairOutput {
-    pub original_proposal: String,
     pub current_proposal: String,
-    pub proposal_version: u32,
-    pub player_contribution: PlayerContribution,
 }
 
 pub struct RepairPipeline;
 
-impl Pipeline for RepairPipeline {
-    type Input = RepairInput;
+impl<'a> Pipeline<RepairInput<'a>> for RepairPipeline {
     type Output = RepairOutput;
 
     fn stage(&self) -> PipelineStage {
@@ -34,16 +30,13 @@ impl Pipeline for RepairPipeline {
 
     async fn execute(
         &self,
-        input: Self::Input,
+        input: RepairInput<'a>,
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         Ok(RepairOutput {
-            original_proposal: input.original_proposal,
-            current_proposal: input.current_proposal,
-            proposal_version: input.proposal_version,
-            player_contribution: input.player_contribution,
+            current_proposal: input.current_proposal.to_owned(),
         })
     }
 }

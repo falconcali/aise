@@ -19,7 +19,7 @@ const PLAYER_INPUT_VAR: &str = "player_input";
 pub async fn process_plan(
     prompt: &Prompt,
     story_ctx: &StoryContext,
-    input: &PlanInput,
+    input: &PlanInput<'_>,
     store: &Store,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
@@ -30,7 +30,7 @@ pub async fn process_plan(
         .map_err(PipelineError::prompt(PipelineStage::Plan))
 }
 
-fn plan_vars(story_ctx: &StoryContext, input: &PlanInput, story_opening: String) -> PromptVars {
+fn plan_vars(story_ctx: &StoryContext, input: &PlanInput<'_>, story_opening: String) -> PromptVars {
     PromptVars::from([
         (
             STORY_SUMMARY_VAR.to_owned(),
@@ -51,11 +51,11 @@ fn plan_vars(story_ctx: &StoryContext, input: &PlanInput, story_opening: String)
         ),
         (
             NARRATIVE_DIRECTIONS_VAR.to_owned(),
-            Value::String(pipeline_prompt::narrative_directions(&input.directions)),
+            Value::String(pipeline_prompt::narrative_directions(input.directions)),
         ),
         (
             STORY_CONSTRAINTS_VAR.to_owned(),
-            Value::String(pipeline_prompt::story_constraints(&input.constraints)),
+            Value::String(pipeline_prompt::story_constraints(input.constraints)),
         ),
         (
             PLAYER_INPUT_VAR.to_owned(),

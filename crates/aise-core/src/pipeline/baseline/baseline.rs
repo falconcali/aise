@@ -11,8 +11,8 @@ use serde::Serialize;
 use std::sync::Arc;
 
 #[derive(Serialize)]
-pub struct BaselineInput {
-    pub player_input: String,
+pub struct BaselineInput<'a> {
+    pub player_input: &'a str,
 }
 
 #[derive(Serialize)]
@@ -59,7 +59,7 @@ impl BaselinePipeline {
 
     async fn process_player_input(
         &self,
-        input: &BaselineInput,
+        input: &BaselineInput<'_>,
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,
@@ -67,7 +67,7 @@ impl BaselinePipeline {
         let rendered_prompt = baseline_prompt::process_player_input(
             self.prompt.as_ref(),
             story_ctx,
-            &input.player_input,
+            input.player_input,
             self.store.as_ref(),
             observation,
         )
@@ -75,7 +75,7 @@ impl BaselinePipeline {
 
         let player_contribution = baseline_llm::process_player_input(
             self.gateway.as_ref(),
-            &input.player_input,
+            input.player_input,
             rendered_prompt.into_messages(),
             control,
             observation,
@@ -88,12 +88,12 @@ impl BaselinePipeline {
 
     async fn generate_player_contribution(
         &self,
-        input: &BaselineInput,
+        input: &BaselineInput<'_>,
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<PlayerContribution, PipelineError> {
-        let input_observation = baseline_trace::begin_player_contribution(observation, &input.player_input);
+        let input_observation = baseline_trace::begin_player_contribution(observation, input.player_input);
         let result = self.process_player_input(input, story_ctx, control, &input_observation).await;
         baseline_trace::finish_player_contribution(input_observation, &result);
         result
@@ -120,8 +120,7 @@ impl BaselinePipeline {
     }
 }
 
-impl Pipeline for BaselinePipeline {
-    type Input = BaselineInput;
+impl<'a> Pipeline<BaselineInput<'a>> for BaselinePipeline {
     type Output = BaselineOutput;
 
     fn stage(&self) -> PipelineStage {
@@ -130,7 +129,7 @@ impl Pipeline for BaselinePipeline {
 
     async fn execute(
         &self,
-        input: Self::Input,
+        input: BaselineInput<'a>,
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,

@@ -1,5 +1,6 @@
 use crate::core::{
-    StoryCommit, StoryContext, TurnControl, TurnEvaluation, TurnEventSink, TurnRequest, TurnSegment, WorldChange,
+    BoundedText, PlayerContribution, StoryCommit, StoryContext, TurnControl, TurnEvaluation, TurnEventSink,
+    TurnRequest, TurnSegment, WorldChange,
 };
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
@@ -14,7 +15,7 @@ use crate::pipeline::repair::{RepairInput, RepairPipeline};
 use crate::pipeline::retrieval::{RetrievalInput, RetrievalPipeline};
 use crate::pipeline::summary::{SummaryInput, SummaryPipeline};
 use crate::pipeline::think::{ThinkInput, ThinkPipeline};
-use crate::pipeline::validate::{ValidateInput, ValidatePipeline, ValidationDecision};
+use crate::pipeline::validate::{ValidateInput, ValidateOutput, ValidatePipeline, ValidationDecision};
 use crate::prompt::Prompt;
 use crate::trace::Trace;
 use std::sync::Arc;
@@ -70,40 +71,41 @@ impl Runtime {
         &self,
         story_ctx: &StoryContext,
         turn_request: TurnRequest,
-        turn_control: TurnControl,
+        turn_control: &TurnControl,
         sink: &dyn TurnEventSink,
         trace: &Trace,
     ) -> Result<StoryCommit, PipelineError> {
         let pipeline_runner = PipelineRunner {
-            control: &turn_control,
+            control: turn_control,
             sink,
             trace,
         };
 
         let baseline_input = BaselineInput {
-            player_input: turn_request.player_input.clone(),
+            player_input: &turn_request.player_input,
         };
 
         let baseline_output = pipeline_runner.run(&self.baseline, baseline_input, story_ctx).await?;
-        let narrative_output = baseline_output.narrative;
 
         let plan_input = PlanInput {
-            player_contribution: baseline_output.player_contribution,
-            directions: narrative_output.directions.clone(),
-            constraints: narrative_output.constraints.clone(),
-            knowledge: baseline_output.knowledge,
+            player_contribution: &baseline_output.player_contribution,
+            directions: &baseline_output.narrative.directions,
+            constraints: &baseline_output.narrative.constraints,
+            knowledge: &baseline_output.knowledge,
         };
 
         let plan_output = pipeline_runner.run(&self.plan, plan_input, story_ctx).await?;
         let generate_input = GenerateInput {
-            story_goal: plan_output.plan.clone(),
-            player_contribution: plan_output.player_contribution.clone(),
-            constraints: narrative_output.constraints.clone(),
+            story_goal: &plan_output.plan,
+            player_contribution: &baseline_output.player_contribution,
+            directions: &baseline_output.narrative.directions,
+            constraints: &baseline_output.narrative.constraints,
+            knowledge: &baseline_output.knowledge,
         };
 
         if plan_output.requires_retrieval() {
             let retrieval_input = RetrievalInput {
-                query: plan_output.plan.clone(),
+                query: &plan_output.plan,
             };
 
             let retrieval_output = pipeline_runner.run(&self.retrieval, retrieval_input, story_ctx).await?;
@@ -111,7 +113,7 @@ impl Runtime {
 
         if plan_output.requires_character_thinking() {
             let think_input = ThinkInput {
-                query: plan_output.plan.clone(),
+                query: &plan_output.plan,
             };
 
             let think_output = pipeline_runner.run(&self.think, think_input, story_ctx).await?;
@@ -119,58 +121,20 @@ impl Runtime {
 
         let generate_output = pipeline_runner.run(&self.generate, generate_input, story_ctx).await?;
 
-        let validate_input = ValidateInput {
-            original_proposal: generate_output.result.clone(),
-            current_proposal: generate_output.result,
-            proposal_version: 1,
-            constraints: narrative_output.constraints.clone(),
-            player_contribution: generate_output.player_contribution,
-        };
-
-        let mut validate_output = pipeline_runner.run(&self.validate, validate_input, story_ctx).await?;
-        let mut validate_history = vec![validate_output.clone()];
-
-        while validate_output.decision == ValidationDecision::Repair {
-            let repair_input = RepairInput {
-                original_proposal: validate_output.original_proposal,
-                current_proposal: validate_output.current_proposal,
-                scores: validate_output.scores,
-                proposal_version: validate_output.proposal_version,
-                constraints: narrative_output.constraints.clone(),
-                player_contribution: validate_output.player_contribution,
-            };
-
-            let repair_output = pipeline_runner.run(&self.repair, repair_input, story_ctx).await?;
-
-            let validate_input = ValidateInput {
-                original_proposal: repair_output.original_proposal,
-                current_proposal: repair_output.current_proposal,
-                proposal_version: repair_output.proposal_version,
-                constraints: narrative_output.constraints.clone(),
-                player_contribution: repair_output.player_contribution,
-            };
-
-            validate_output = pipeline_runner.run(&self.validate, validate_input, story_ctx).await?;
-            validate_history.push(validate_output.clone());
-        }
-
-        if validate_output.decision == ValidationDecision::Reject {
-            validate_output = validate_history
-                .into_iter()
-                .max_by(|left, right| {
-                    let left_score = left.scores.iter().map(|score| score.score).sum::<f32>();
-                    let right_score = right.scores.iter().map(|score| score.score).sum::<f32>();
-                    left_score.total_cmp(&right_score)
-                })
-                .expect("validation history is initialized with the first validation result");
-
-            validate_output.decision = ValidationDecision::Reject;
-        }
+        let final_proposal = self
+            .validate_and_repair(
+                &pipeline_runner,
+                story_ctx,
+                generate_output.result,
+                &baseline_output.narrative.constraints,
+                &baseline_output.player_contribution,
+            )
+            .await?;
 
         let extract_input = ExtractInput {
-            query: validate_output.current_proposal,
-            player_contribution: validate_output.player_contribution,
-            queries: narrative_output.queries,
+            query: &final_proposal,
+            player_contribution: &baseline_output.player_contribution,
+            queries: &baseline_output.narrative.queries,
         };
 
         let extract_output = pipeline_runner.run(&self.extract, extract_input, story_ctx).await?;
@@ -182,9 +146,9 @@ impl Runtime {
         let summary_output = pipeline_runner.run(&self.summary, summary_input, story_ctx).await?;
 
         let commit_input: CommitInput = CommitInput {
-            player_contribution: extract_output.player_contribution,
+            player_contribution: baseline_output.player_contribution,
             idempotency_key: turn_request.idempotency_key,
-            turn_segment: TurnSegment::new(extract_output.result),
+            turn_segment: TurnSegment::new(final_proposal),
             world_change: WorldChange {},
             turn_evaluation: TurnEvaluation {},
             summary: summary_output.summary,
@@ -194,4 +158,71 @@ impl Runtime {
 
         pipeline_runner.run(&self.commit, commit_input, story_ctx).await
     }
+
+    async fn validate_and_repair(
+        &self,
+        pipeline_runner: &PipelineRunner<'_>,
+        story_ctx: &StoryContext,
+        initial_proposal: String,
+        constraints: &[BoundedText],
+        player_contribution: &PlayerContribution,
+    ) -> Result<String, PipelineError> {
+        let mut proposals = vec![initial_proposal];
+        let mut validations: Vec<ValidateOutput> = Vec::new();
+
+        loop {
+            let current = proposals.len() - 1;
+            let validate_input = ValidateInput {
+                original_proposal: &proposals[0],
+                current_proposal: &proposals[current],
+                proposal_version: proposal_version(&proposals),
+                constraints,
+                player_contribution,
+            };
+
+            let validate_output = pipeline_runner.run(&self.validate, validate_input, story_ctx).await?;
+            let decision = validate_output.decision;
+            validations.push(validate_output);
+
+            if decision != ValidationDecision::Repair {
+                break;
+            }
+
+            let repair_input = RepairInput {
+                original_proposal: &proposals[0],
+                current_proposal: &proposals[current],
+                scores: &validations[current].scores,
+                proposal_version: proposal_version(&proposals),
+                constraints,
+                player_contribution,
+            };
+
+            let repair_output = pipeline_runner.run(&self.repair, repair_input, story_ctx).await?;
+            proposals.push(repair_output.current_proposal);
+        }
+
+        let final_index = select_final_index(&validations);
+        Ok(proposals.swap_remove(final_index))
+    }
 }
+
+fn proposal_version(proposals: &[String]) -> u32 {
+    u32::try_from(proposals.len()).unwrap_or(u32::MAX)
+}
+
+fn select_final_index(validations: &[ValidateOutput]) -> usize {
+    let last = validations.len().saturating_sub(1);
+    if validations.get(last).map(|validation| validation.decision) != Some(ValidationDecision::Reject) {
+        return last;
+    }
+
+    validations
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.total_score().total_cmp(&right.total_score()))
+        .map_or(last, |(index, _)| index)
+}
+
+#[cfg(test)]
+#[path = "tests/runtime_tests.rs"]
+mod tests;

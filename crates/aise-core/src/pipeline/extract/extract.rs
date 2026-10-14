@@ -10,16 +10,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[derive(Serialize)]
-pub struct ExtractInput {
-    pub query: String,
-    pub player_contribution: PlayerContribution,
-    pub queries: Vec<SemanticQuery>,
+pub struct ExtractInput<'a> {
+    pub query: &'a str,
+    pub player_contribution: &'a PlayerContribution,
+    pub queries: &'a [SemanticQuery],
 }
 
 #[derive(Serialize)]
 pub struct ExtractOutput {
-    pub result: String,
-    pub player_contribution: PlayerContribution,
     pub narrative: Change<NarrativeState>,
     pub life_cycle: Change<StoryLifeCycle>,
 }
@@ -34,8 +32,7 @@ impl ExtractPipeline {
     }
 }
 
-impl Pipeline for ExtractPipeline {
-    type Input = ExtractInput;
+impl<'a> Pipeline<ExtractInput<'a>> for ExtractPipeline {
     type Output = ExtractOutput;
 
     fn stage(&self) -> PipelineStage {
@@ -44,7 +41,7 @@ impl Pipeline for ExtractPipeline {
 
     async fn execute(
         &self,
-        input: Self::Input,
+        _input: ExtractInput<'a>,
         story_ctx: &StoryContext,
         _control: &TurnControl,
         _observation: &Observation,
@@ -58,8 +55,6 @@ impl Pipeline for ExtractPipeline {
         let semantic_results = BTreeMap::new();
         let change = extract_narrative::resolve_narrative(&story_pack, story_ctx, &semantic_results);
         Ok(ExtractOutput {
-            result: input.query,
-            player_contribution: input.player_contribution,
             narrative: change.narrative,
             life_cycle: change.life_cycle,
         })

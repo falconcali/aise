@@ -31,8 +31,7 @@ impl CommitPipeline {
     }
 }
 
-impl Pipeline for CommitPipeline {
-    type Input = CommitInput;
+impl Pipeline<CommitInput> for CommitPipeline {
     type Output = StoryCommit;
 
     fn stage(&self) -> PipelineStage {
@@ -41,7 +40,7 @@ impl Pipeline for CommitPipeline {
 
     async fn execute(
         &self,
-        input: Self::Input,
+        input: CommitInput,
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,

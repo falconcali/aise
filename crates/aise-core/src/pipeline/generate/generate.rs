@@ -1,4 +1,4 @@
-use crate::core::{BoundedText, PlayerContribution, StoryContext, TurnControl};
+use crate::core::{ActivatedKnowledge, BoundedText, NarrativeDirection, PlayerContribution, StoryContext, TurnControl};
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
@@ -9,16 +9,17 @@ use serde::Serialize;
 use std::sync::Arc;
 
 #[derive(Serialize)]
-pub struct GenerateInput {
-    pub story_goal: String,
-    pub player_contribution: PlayerContribution,
-    pub constraints: Vec<BoundedText>,
+pub struct GenerateInput<'a> {
+    pub story_goal: &'a str,
+    pub player_contribution: &'a PlayerContribution,
+    pub directions: &'a [NarrativeDirection],
+    pub constraints: &'a [BoundedText],
+    pub knowledge: &'a ActivatedKnowledge,
 }
 
 #[derive(Serialize)]
 pub struct GenerateOutput {
     pub result: String,
-    pub player_contribution: PlayerContribution,
 }
 
 pub struct GeneratePipeline {
@@ -34,7 +35,7 @@ impl GeneratePipeline {
 
     async fn generate_story(
         &self,
-        input: &GenerateInput,
+        input: &GenerateInput<'_>,
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,
@@ -49,8 +50,7 @@ impl GeneratePipeline {
     }
 }
 
-impl Pipeline for GeneratePipeline {
-    type Input = GenerateInput;
+impl<'a> Pipeline<GenerateInput<'a>> for GeneratePipeline {
     type Output = GenerateOutput;
 
     fn stage(&self) -> PipelineStage {
@@ -59,21 +59,15 @@ impl Pipeline for GeneratePipeline {
 
     async fn execute(
         &self,
-        input: Self::Input,
+        input: GenerateInput<'a>,
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
-        let generate_observation = generate_trace::begin_story_generation(
-            observation,
-            &input.story_goal,
-            &input.player_contribution.processed,
-        );
+        let generate_observation =
+            generate_trace::begin_story_generation(observation, input.story_goal, &input.player_contribution.processed);
         let result = self.generate_story(&input, story_ctx, control, &generate_observation).await;
         generate_trace::finish_story_generation(generate_observation, &result);
-        result.map(|result| GenerateOutput {
-            result,
-            player_contribution: input.player_contribution,
-        })
+        result.map(|result| GenerateOutput { result })
     }
 }

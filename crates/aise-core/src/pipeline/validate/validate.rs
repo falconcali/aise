@@ -11,13 +11,13 @@ pub enum ValidationDecision {
 }
 
 #[derive(Serialize)]
-pub struct ValidateInput {
-    pub original_proposal: String,
-    pub current_proposal: String,
+pub struct ValidateInput<'a> {
+    pub original_proposal: &'a str,
+    pub current_proposal: &'a str,
     pub proposal_version: u32,
-    pub constraints: Vec<BoundedText>,
+    pub constraints: &'a [BoundedText],
 
-    pub player_contribution: PlayerContribution,
+    pub player_contribution: &'a PlayerContribution,
 }
 
 #[derive(Clone, Serialize)]
@@ -38,14 +38,16 @@ pub struct ValidateScoreResult {
     pub issue: String,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Serialize)]
 pub struct ValidateOutput {
-    pub original_proposal: String,
-    pub current_proposal: String,
     pub scores: Vec<ValidateScoreResult>,
-    pub proposal_version: u32,
     pub decision: ValidationDecision,
-    pub player_contribution: PlayerContribution,
+}
+
+impl ValidateOutput {
+    pub fn total_score(&self) -> f32 {
+        self.scores.iter().map(|score| score.score).sum()
+    }
 }
 
 pub struct ValidatePipeline {
@@ -53,8 +55,7 @@ pub struct ValidatePipeline {
     pub validation_budget: u32,
 }
 
-impl Pipeline for ValidatePipeline {
-    type Input = ValidateInput;
+impl<'a> Pipeline<ValidateInput<'a>> for ValidatePipeline {
     type Output = ValidateOutput;
 
     fn stage(&self) -> PipelineStage {
@@ -63,16 +64,13 @@ impl Pipeline for ValidatePipeline {
 
     async fn execute(
         &self,
-        input: Self::Input,
+        input: ValidateInput<'a>,
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         Ok(ValidateOutput {
             decision: ValidationDecision::Accept,
-            original_proposal: input.original_proposal,
-            current_proposal: input.current_proposal,
-            proposal_version: input.proposal_version,
             scores: self
                 .score_configs
                 .iter()
@@ -84,7 +82,6 @@ impl Pipeline for ValidatePipeline {
                     issue: "Not so good".to_string(),
                 })
                 .collect(),
-            player_contribution: input.player_contribution,
         })
     }
 }

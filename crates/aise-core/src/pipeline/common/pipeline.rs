@@ -49,10 +49,10 @@ pub struct PipelineRunner<'a> {
 }
 
 impl PipelineRunner<'_> {
-    pub async fn run<P: Pipeline>(
+    pub async fn run<I: Send + Serialize, P: Pipeline<I>>(
         &self,
         pipeline: &P,
-        input: P::Input,
+        input: I,
         story_ctx: &StoryContext,
     ) -> Result<P::Output, PipelineError> {
         self.sink.emit(TurnEvent::TurnPipeline {
@@ -66,15 +66,14 @@ impl PipelineRunner<'_> {
     }
 }
 
-pub trait Pipeline: Send + Sync {
-    type Input: Send + Serialize;
+pub trait Pipeline<I: Send + Serialize>: Send + Sync {
     type Output: Send + Serialize;
 
     fn stage(&self) -> PipelineStage;
 
     async fn execute(
         &self,
-        input: Self::Input,
+        input: I,
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,

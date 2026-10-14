@@ -2,8 +2,9 @@ use crate::pipeline::common::{Pipeline, PipelineError};
 use crate::trace::{
     Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus, Trace,
 };
+use serde::Serialize;
 
-pub fn begin_observation<P: Pipeline>(trace: &Trace, pipeline: &P, input: &P::Input) -> Observation {
+pub fn begin_observation<I: Send + Serialize, P: Pipeline<I>>(trace: &Trace, pipeline: &P, input: &I) -> Observation {
     trace.begin_observation(ObservationSpec {
         name: pipeline.stage().as_str(),
         kind: ObservationKind::Chain,
@@ -12,7 +13,7 @@ pub fn begin_observation<P: Pipeline>(trace: &Trace, pipeline: &P, input: &P::In
     })
 }
 
-pub fn finish_observation<P: Pipeline>(
+pub fn finish_observation<I: Send + Serialize, P: Pipeline<I>>(
     observation: Observation,
     pipeline: &P,
     result: &Result<P::Output, PipelineError>,

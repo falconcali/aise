@@ -75,8 +75,26 @@ fn var<'a>(vars: &'a PromptVars, name: &str) -> &'a str {
     vars.get(name).and_then(Value::as_str).expect("string var")
 }
 
-fn plan_input(processed: &str) -> PlanInput {
-    PlanInput {
+struct PlanFixture {
+    player_contribution: PlayerContribution,
+    directions: Vec<NarrativeDirection>,
+    constraints: Vec<BoundedText>,
+    knowledge: ActivatedKnowledge,
+}
+
+impl PlanFixture {
+    fn input(&self) -> PlanInput<'_> {
+        PlanInput {
+            player_contribution: &self.player_contribution,
+            directions: &self.directions,
+            constraints: &self.constraints,
+            knowledge: &self.knowledge,
+        }
+    }
+}
+
+fn plan_fixture(processed: &str) -> PlanFixture {
+    PlanFixture {
         player_contribution: contribution(processed),
         directions: Vec::new(),
         constraints: Vec::new(),
@@ -88,23 +106,24 @@ fn text(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", usize::MAX).expect("test text should fit")
 }
 
-async fn render_runtime_context(story_ctx: &StoryContext, input: &PlanInput) -> String {
+async fn render_runtime_context(story_ctx: &StoryContext, fixture: &PlanFixture) -> String {
     let store = store_with_default_pack().await;
     let trace = test_trace();
-    let rendered = process_plan(&bundled_prompt(), story_ctx, input, &store, trace.root())
+    let rendered = process_plan(&bundled_prompt(), story_ctx, &fixture.input(), &store, trace.root())
         .await
         .expect("render");
     rendered.messages()[1].content.replace("\r\n", "\n")
 }
 
 async fn runtime_context(story_ctx: &StoryContext, processed: &str) -> String {
-    render_runtime_context(story_ctx, &plan_input(processed)).await
+    render_runtime_context(story_ctx, &plan_fixture(processed)).await
 }
 
 #[test]
 fn vars_for_new_story_carry_opening_and_empty_summary_and_recent_story() {
     let story_ctx = StoryContext::new();
-    let vars = plan_vars(&story_ctx, &plan_input("I wave."), "Rain falls.".to_owned());
+    let fixture = plan_fixture("I wave.");
+    let vars = plan_vars(&story_ctx, &fixture.input(), "Rain falls.".to_owned());
 
     assert_eq!(var(&vars, "player_input"), "I wave.");
     assert_eq!(var(&vars, "story_opening"), "Rain falls.");
@@ -118,7 +137,8 @@ fn vars_with_summary_and_recent_story_carry_both() {
     story_ctx.summary = Some(summary("  Earlier events.  "));
     story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
     story_ctx.recent_turns.push_back(accepted_turn(3, "The hall is dark."));
-    let vars = plan_vars(&story_ctx, &plan_input("I wave."), String::new());
+    let fixture = plan_fixture("I wave.");
+    let vars = plan_vars(&story_ctx, &fixture.input(), String::new());
 
     assert_eq!(var(&vars, "story_summary"), "Earlier events.");
     assert_eq!(var(&vars, "story_opening"), "");
@@ -197,7 +217,8 @@ async fn summary_without_recent_story_omits_opening() {
 
 #[test]
 fn vars_without_narrative_carry_empty_direction_and_constraints() {
-    let vars = plan_vars(&StoryContext::new(), &plan_input("I wave."), String::new());
+    let fixture = plan_fixture("I wave.");
+    let vars = plan_vars(&StoryContext::new(), &fixture.input(), String::new());
 
     assert_eq!(var(&vars, "narrative_directions"), "");
     assert_eq!(var(&vars, "story_constraints"), "");
@@ -207,7 +228,7 @@ fn vars_without_narrative_carry_empty_direction_and_constraints() {
 async fn narrative_direction_and_constraints_precede_player_input() {
     let mut story_ctx = StoryContext::new();
     story_ctx.summary = Some(summary("Earlier events."));
-    let input = PlanInput {
+    let fixture = PlanFixture {
         player_contribution: contribution("I wave."),
         directions: vec![NarrativeDirection {
             node_id: NarrativeNodeId::try_new("arrival").expect("test node id should be valid"),
@@ -217,7 +238,7 @@ async fn narrative_direction_and_constraints_precede_player_input() {
         knowledge: ActivatedKnowledge::default(),
     };
 
-    let content = render_runtime_context(&story_ctx, &input).await;
+    let content = render_runtime_context(&story_ctx, &fixture).await;
 
     assert_eq!(
         content,
@@ -250,11 +271,11 @@ fn knowledge() -> ActivatedKnowledge {
 
 #[test]
 fn vars_carry_knowledge_content_only() {
-    let input = PlanInput {
+    let fixture = PlanFixture {
         knowledge: knowledge(),
-        ..plan_input("I wave.")
+        ..plan_fixture("I wave.")
     };
-    let vars = plan_vars(&StoryContext::new(), &input, String::new());
+    let vars = plan_vars(&StoryContext::new(), &fixture.input(), String::new());
 
     assert_eq!(var(&vars, "known_facts"), "- The forest keeper is named Ash.");
     assert_eq!(var(&vars, "rumors"), "- A ghost haunts the old mill.");
@@ -264,7 +285,7 @@ fn vars_carry_knowledge_content_only() {
 async fn knowledge_follows_story_and_precedes_narrative_direction() {
     let mut story_ctx = StoryContext::new();
     story_ctx.summary = Some(summary("Earlier events."));
-    let input = PlanInput {
+    let fixture = PlanFixture {
         player_contribution: contribution("I wave."),
         directions: vec![NarrativeDirection {
             node_id: NarrativeNodeId::try_new("arrival").expect("test node id should be valid"),
@@ -274,7 +295,7 @@ async fn knowledge_follows_story_and_precedes_narrative_direction() {
         knowledge: knowledge(),
     };
 
-    let content = render_runtime_context(&story_ctx, &input).await;
+    let content = render_runtime_context(&story_ctx, &fixture).await;
 
     assert_eq!(
         content,

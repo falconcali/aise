@@ -7,7 +7,7 @@ pub fn begin_story_generation(observation: &Observation, story_goal: &str, playe
     observation.begin(ObservationSpec {
         name: "story_generation",
         kind: ObservationKind::Span,
-        input: observation.capture_content(&(story_goal.to_owned(), player_contribution.to_owned())),
+        input: observation.capture_content(&(story_goal, player_contribution)),
         metadata: Vec::new(),
     })
 }

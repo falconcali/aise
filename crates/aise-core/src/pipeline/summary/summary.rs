@@ -73,8 +73,7 @@ impl SummaryPipeline {
     }
 }
 
-impl Pipeline for SummaryPipeline {
-    type Input = SummaryInput;
+impl Pipeline<SummaryInput> for SummaryPipeline {
     type Output = SummaryOutput;
 
     fn stage(&self) -> PipelineStage {
@@ -83,7 +82,7 @@ impl Pipeline for SummaryPipeline {
 
     async fn execute(
         &self,
-        input: Self::Input,
+        input: SummaryInput,
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,

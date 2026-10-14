@@ -10,6 +10,9 @@ const GENERATE_STORY_PROMPT_ID: &str = "generate.generate_story";
 const STORY_SUMMARY_VAR: &str = "story_summary";
 const STORY_OPENING_VAR: &str = "story_opening";
 const RECENT_STORY_VAR: &str = "recent_story";
+const KNOWN_FACTS_VAR: &str = "known_facts";
+const RUMORS_VAR: &str = "rumors";
+const NARRATIVE_DIRECTIONS_VAR: &str = "narrative_directions";
 const STORY_CONSTRAINTS_VAR: &str = "story_constraints";
 const STORY_GOAL_VAR: &str = "story_goal";
 const PLAYER_CONTRIBUTION_VAR: &str = "player_contribution";
@@ -17,7 +20,7 @@ const PLAYER_CONTRIBUTION_VAR: &str = "player_contribution";
 pub async fn generate_story(
     prompt: &Prompt,
     story_ctx: &StoryContext,
-    input: &GenerateInput,
+    input: &GenerateInput<'_>,
     store: &Store,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
@@ -28,7 +31,7 @@ pub async fn generate_story(
         .map_err(PipelineError::prompt(PipelineStage::Generate))
 }
 
-fn generate_vars(story_ctx: &StoryContext, input: &GenerateInput, story_opening: String) -> PromptVars {
+fn generate_vars(story_ctx: &StoryContext, input: &GenerateInput<'_>, story_opening: String) -> PromptVars {
     PromptVars::from([
         (
             STORY_SUMMARY_VAR.to_owned(),
@@ -40,10 +43,22 @@ fn generate_vars(story_ctx: &StoryContext, input: &GenerateInput, story_opening:
             Value::String(pipeline_prompt::recent_story(story_ctx)),
         ),
         (
-            STORY_CONSTRAINTS_VAR.to_owned(),
-            Value::String(pipeline_prompt::story_constraints(&input.constraints)),
+            KNOWN_FACTS_VAR.to_owned(),
+            Value::String(pipeline_prompt::known_facts(&input.knowledge.facts)),
         ),
-        (STORY_GOAL_VAR.to_owned(), Value::String(input.story_goal.clone())),
+        (
+            RUMORS_VAR.to_owned(),
+            Value::String(pipeline_prompt::rumors(&input.knowledge.rumors)),
+        ),
+        (
+            NARRATIVE_DIRECTIONS_VAR.to_owned(),
+            Value::String(pipeline_prompt::narrative_directions(input.directions)),
+        ),
+        (
+            STORY_CONSTRAINTS_VAR.to_owned(),
+            Value::String(pipeline_prompt::story_constraints(input.constraints)),
+        ),
+        (STORY_GOAL_VAR.to_owned(), Value::String(input.story_goal.to_owned())),
         (
             PLAYER_CONTRIBUTION_VAR.to_owned(),
             Value::String(input.player_contribution.processed.clone()),

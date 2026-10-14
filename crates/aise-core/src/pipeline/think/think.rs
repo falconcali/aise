@@ -4,8 +4,8 @@ use crate::trace::Observation;
 use serde::Serialize;
 
 #[derive(Serialize)]
-pub struct ThinkInput {
-    pub query: String,
+pub struct ThinkInput<'a> {
+    pub query: &'a str,
 }
 
 #[derive(Serialize)]
@@ -15,8 +15,7 @@ pub struct ThinkOutput {
 
 pub struct ThinkPipeline;
 
-impl Pipeline for ThinkPipeline {
-    type Input = ThinkInput;
+impl<'a> Pipeline<ThinkInput<'a>> for ThinkPipeline {
     type Output = ThinkOutput;
 
     fn stage(&self) -> PipelineStage {
@@ -25,11 +24,13 @@ impl Pipeline for ThinkPipeline {
 
     async fn execute(
         &self,
-        input: Self::Input,
+        input: ThinkInput<'a>,
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
-        Ok(ThinkOutput { result: input.query })
+        Ok(ThinkOutput {
+            result: input.query.to_owned(),
+        })
     }
 }

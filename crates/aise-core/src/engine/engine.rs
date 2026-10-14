@@ -17,7 +17,7 @@ pub trait Engine: Send + Sync {
     async fn run_turn(
         &self,
         turn_request: TurnRequest,
-        turn_control: TurnControl,
+        turn_control: &TurnControl,
         sink: &dyn TurnEventSink,
         trace: &Trace,
     ) -> Result<StoryCommit, EngineError>;
@@ -57,7 +57,7 @@ impl Engine for AiseEngine {
     async fn run_turn(
         &self,
         turn_request: TurnRequest,
-        turn_control: TurnControl,
+        turn_control: &TurnControl,
         sink: &dyn TurnEventSink,
         trace: &Trace,
     ) -> Result<StoryCommit, EngineError> {

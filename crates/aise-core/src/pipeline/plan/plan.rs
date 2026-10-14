@@ -9,17 +9,16 @@ use serde::Serialize;
 use std::sync::Arc;
 
 #[derive(Serialize)]
-pub struct PlanInput {
-    pub player_contribution: PlayerContribution,
-    pub directions: Vec<NarrativeDirection>,
-    pub constraints: Vec<BoundedText>,
-    pub knowledge: ActivatedKnowledge,
+pub struct PlanInput<'a> {
+    pub player_contribution: &'a PlayerContribution,
+    pub directions: &'a [NarrativeDirection],
+    pub constraints: &'a [BoundedText],
+    pub knowledge: &'a ActivatedKnowledge,
 }
 
 #[derive(Serialize)]
 pub struct PlanOutput {
     pub plan: String,
-    pub player_contribution: PlayerContribution,
 }
 
 impl PlanOutput {
@@ -46,7 +45,7 @@ impl PlanPipeline {
     pub async fn process_story_plan(
         &self,
         story_ctx: &StoryContext,
-        input: &PlanInput,
+        input: &PlanInput<'_>,
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<String, PipelineError> {
@@ -62,8 +61,7 @@ impl PlanPipeline {
     }
 }
 
-impl Pipeline for PlanPipeline {
-    type Input = PlanInput;
+impl<'a> Pipeline<PlanInput<'a>> for PlanPipeline {
     type Output = PlanOutput;
 
     fn stage(&self) -> PipelineStage {
@@ -72,7 +70,7 @@ impl Pipeline for PlanPipeline {
 
     async fn execute(
         &self,
-        input: Self::Input,
+        input: PlanInput<'a>,
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,
@@ -80,9 +78,6 @@ impl Pipeline for PlanPipeline {
         let plan_observation = plan_trace::begin_plan(observation, &input.player_contribution.processed);
         let result = self.process_story_plan(story_ctx, &input, control, &plan_observation).await;
         plan_trace::finish_plan(plan_observation, &result);
-        result.map(|plan| PlanOutput {
-            plan,
-            player_contribution: input.player_contribution,
-        })
+        result.map(|plan| PlanOutput { plan })
     }
 }

@@ -4,7 +4,7 @@ use crate::trace::Observation;
 
 pub async fn process_player_input(
     gateway: &LlmGateway,
-    input: &String,
+    input: &str,
     messages: Vec<ChatMessage>,
     turn_control: &TurnControl,
     observation: &Observation,
@@ -13,7 +13,7 @@ pub async fn process_player_input(
         .complete(LlmCompletionSpec { messages }, turn_control, observation)
         .await?;
     return Ok(PlayerContribution {
-        raw: input.clone(),
+        raw: input.to_owned(),
         processed: llm_result.content,
     });
 }

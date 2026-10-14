@@ -158,7 +158,7 @@ impl DemoRun<'_> {
             turn_index,
             player_input,
         );
-        let result = self.engine.run_turn(request, control, &ConsoleTurnEventSink, &trace).await;
+        let result = self.engine.run_turn(request, &control, &ConsoleTurnEventSink, &trace).await;
         let trace_outcome = trace_outcome(&trace, &result);
         if let Ok(story_commit) = &result {
             trace.bind(vec![Attribute::u64(

@@ -1,8 +1,9 @@
 use super::*;
 use crate::core::tests::store_with_default_pack;
 use crate::core::{
-    BoundedText, IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment,
-    TurnStatus, WorldChange,
+    ActivatedKnowledge, ActivationRule, BoundedText, EntryOrigin, FactBody, FactEntry, FactId, IdempotencyKey,
+    NarrativeDirection, NarrativeNodeId, PlayerContribution, RetrievalHint, RumorBody, RumorEntry, RumorId,
+    StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus, WorldChange,
 };
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -44,14 +45,63 @@ fn test_trace() -> Trace {
     })
 }
 
-fn generate_input(goal: &str, processed: &str) -> GenerateInput {
-    GenerateInput {
+struct GenerateFixture {
+    story_goal: String,
+    player_contribution: PlayerContribution,
+    directions: Vec<NarrativeDirection>,
+    constraints: Vec<BoundedText>,
+    knowledge: ActivatedKnowledge,
+}
+
+impl GenerateFixture {
+    fn input(&self) -> GenerateInput<'_> {
+        GenerateInput {
+            story_goal: &self.story_goal,
+            player_contribution: &self.player_contribution,
+            directions: &self.directions,
+            constraints: &self.constraints,
+            knowledge: &self.knowledge,
+        }
+    }
+}
+
+fn generate_fixture(goal: &str, processed: &str) -> GenerateFixture {
+    GenerateFixture {
         story_goal: goal.to_owned(),
         player_contribution: PlayerContribution {
             raw: "raw".to_owned(),
             processed: processed.to_owned(),
         },
+        directions: Vec::new(),
         constraints: Vec::new(),
+        knowledge: ActivatedKnowledge::default(),
+    }
+}
+
+fn text(value: &str) -> BoundedText {
+    BoundedText::try_new(value, "test", usize::MAX).expect("test text should fit")
+}
+
+fn knowledge() -> ActivatedKnowledge {
+    ActivatedKnowledge {
+        facts: vec![FactEntry {
+            id: FactId::try_new("keeper_name").expect("test fact id should be valid"),
+            origin: EntryOrigin::Seed,
+            body: FactBody {
+                content: text("The forest keeper is named Ash."),
+                activation: ActivationRule::default(),
+                retrieval: RetrievalHint::try_new("keeper").expect("test hint should be valid"),
+            },
+        }],
+        rumors: vec![RumorEntry {
+            id: RumorId::try_new("mill_ghost").expect("test rumor id should be valid"),
+            origin: EntryOrigin::Seed,
+            body: RumorBody {
+                content: text("A ghost haunts the old mill."),
+                activation: ActivationRule::default(),
+                retrieval: RetrievalHint::try_new("mill").expect("test hint should be valid"),
+            },
+        }],
     }
 }
 
@@ -81,10 +131,10 @@ fn var<'a>(vars: &'a PromptVars, name: &str) -> &'a str {
     vars.get(name).and_then(Value::as_str).expect("string var")
 }
 
-async fn runtime_context(story_ctx: &StoryContext, input: &GenerateInput) -> String {
+async fn runtime_context(story_ctx: &StoryContext, fixture: &GenerateFixture) -> String {
     let store = store_with_default_pack().await;
     let trace = test_trace();
-    let rendered = generate_story(&bundled_prompt(), story_ctx, input, &store, trace.root())
+    let rendered = generate_story(&bundled_prompt(), story_ctx, &fixture.input(), &store, trace.root())
         .await
         .expect("render");
     rendered.messages()[1].content.replace("\r\n", "\n")
@@ -93,7 +143,8 @@ async fn runtime_context(story_ctx: &StoryContext, input: &GenerateInput) -> Str
 #[test]
 fn vars_for_new_story_carry_opening_and_empty_summary() {
     let story_ctx = StoryContext::new();
-    let vars = generate_vars(&story_ctx, &generate_input("Goal.", "I wave."), "Rain falls.".to_owned());
+    let fixture = generate_fixture("Goal.", "I wave.");
+    let vars = generate_vars(&story_ctx, &fixture.input(), "Rain falls.".to_owned());
 
     assert_eq!(var(&vars, "story_opening"), "Rain falls.");
     assert_eq!(var(&vars, "story_summary"), "");
@@ -108,7 +159,8 @@ fn vars_with_summary_and_recent_story_carry_both() {
     story_ctx.summary = Some(summary("  Earlier events.  "));
     story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
     story_ctx.recent_turns.push_back(accepted_turn(3, "The hall is dark."));
-    let vars = generate_vars(&story_ctx, &generate_input("Goal.", "I wave."), String::new());
+    let fixture = generate_fixture("Goal.", "I wave.");
+    let vars = generate_vars(&story_ctx, &fixture.input(), String::new());
 
     assert_eq!(var(&vars, "story_summary"), "Earlier events.");
     assert_eq!(var(&vars, "story_opening"), "");
@@ -127,7 +179,7 @@ async fn new_story_context_has_opening_then_goal_and_contribution() {
         .opening
         .clone();
 
-    let content = runtime_context(&story_ctx, &generate_input("Goal.", "I wave.")).await;
+    let content = runtime_context(&story_ctx, &generate_fixture("Goal.", "I wave.")).await;
 
     assert_eq!(
         content,
@@ -150,7 +202,7 @@ async fn recent_story_without_summary_keeps_opening_before_recent_story() {
         .opening
         .clone();
 
-    let content = runtime_context(&story_ctx, &generate_input("Goal.", "I wave.")).await;
+    let content = runtime_context(&story_ctx, &generate_fixture("Goal.", "I wave.")).await;
 
     assert_eq!(
         content,
@@ -166,7 +218,7 @@ async fn summarized_story_context_orders_summary_recent_story_goal_and_contribut
     story_ctx.summary = Some(summary("Earlier events."));
     story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
 
-    let content = runtime_context(&story_ctx, &generate_input("Goal.", "I wave.")).await;
+    let content = runtime_context(&story_ctx, &generate_fixture("Goal.", "I wave.")).await;
 
     assert_eq!(
         content,
@@ -179,7 +231,7 @@ async fn summary_without_recent_story_omits_opening() {
     let mut story_ctx = StoryContext::new();
     story_ctx.summary = Some(summary("Earlier events."));
 
-    let content = runtime_context(&story_ctx, &generate_input("Goal.", "I wave.")).await;
+    let content = runtime_context(&story_ctx, &generate_fixture("Goal.", "I wave.")).await;
 
     assert_eq!(
         content,
@@ -191,14 +243,58 @@ async fn summary_without_recent_story_omits_opening() {
 async fn story_constraints_precede_goal_and_contribution() {
     let mut story_ctx = StoryContext::new();
     story_ctx.summary = Some(summary("Earlier events."));
-    let mut input = generate_input("Goal.", "I wave.");
-    input.constraints =
-        vec![BoundedText::try_new("The ritual truth is revealed.", "test", usize::MAX).expect("test text should fit")];
+    let mut fixture = generate_fixture("Goal.", "I wave.");
+    fixture.constraints = vec![text("The ritual truth is revealed.")];
 
-    let content = runtime_context(&story_ctx, &input).await;
+    let content = runtime_context(&story_ctx, &fixture).await;
 
     assert_eq!(
         content,
         "# Story Summary\n\nEarlier events.\n\n# Story Constraints\n\n- The ritual truth is revealed.\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave."
+    );
+}
+
+#[test]
+fn vars_without_narrative_or_knowledge_carry_empty_values() {
+    let fixture = generate_fixture("Goal.", "I wave.");
+    let vars = generate_vars(&StoryContext::new(), &fixture.input(), String::new());
+
+    assert_eq!(var(&vars, "known_facts"), "");
+    assert_eq!(var(&vars, "rumors"), "");
+    assert_eq!(var(&vars, "narrative_directions"), "");
+    assert_eq!(var(&vars, "story_constraints"), "");
+}
+
+#[test]
+fn vars_carry_knowledge_content_only() {
+    let fixture = GenerateFixture {
+        knowledge: knowledge(),
+        ..generate_fixture("Goal.", "I wave.")
+    };
+    let vars = generate_vars(&StoryContext::new(), &fixture.input(), String::new());
+
+    assert_eq!(var(&vars, "known_facts"), "- The forest keeper is named Ash.");
+    assert_eq!(var(&vars, "rumors"), "- A ghost haunts the old mill.");
+}
+
+#[tokio::test]
+async fn knowledge_and_direction_follow_story_and_precede_constraints_goal_and_contribution() {
+    let mut story_ctx = StoryContext::new();
+    story_ctx.summary = Some(summary("Earlier events."));
+    let fixture = GenerateFixture {
+        directions: vec![NarrativeDirection {
+            node_id: NarrativeNodeId::try_new("arrival").expect("test node id should be valid"),
+            dramatic_focus: text("The traveler meets the forest keeper."),
+        }],
+        constraints: vec![text("The ritual truth is revealed.")],
+        knowledge: knowledge(),
+        ..generate_fixture("Goal.", "I wave.")
+    };
+
+    let content = runtime_context(&story_ctx, &fixture).await;
+
+    assert_eq!(
+        content,
+        "# Story Summary\n\nEarlier events.\n\n# Known Facts\n\n- The forest keeper is named Ash.\n\n# Rumors\n\n- A ghost haunts the old mill.\n\n# Narrative Direction\n\n- The traveler meets the forest keeper.\n\n# Story Constraints\n\n- The ritual truth is revealed.\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave."
     );
 }
