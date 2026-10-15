@@ -11,6 +11,10 @@ fn candidate_trace_metadata_reports_fact_truncation() {
         rumor_candidates_offered: 1,
         facts_selected: 1,
         rumors_selected: 0,
+        role_catalog_entries: 7,
+        role_catalog_bytes: 1024,
+        generation_roles_selected: 2,
+        character_think_requests: 1,
     };
 
     assert_eq!(
@@ -26,6 +30,10 @@ fn candidate_trace_metadata_reports_fact_truncation() {
             Attribute::bool(RUMOR_CANDIDATES_TRUNCATED, false),
             Attribute::u64(FACTS_SELECTED, 1),
             Attribute::u64(RUMORS_SELECTED, 0),
+            Attribute::u64(ROLE_CATALOG_ENTRIES, 7),
+            Attribute::u64(ROLE_CATALOG_BYTES, 1024),
+            Attribute::u64(GENERATION_ROLES_SELECTED, 2),
+            Attribute::u64(CHARACTER_THINK_REQUESTS, 1),
         ]
     );
 }
@@ -39,6 +47,7 @@ fn candidate_trace_metadata_reports_rumor_truncation() {
         rumor_candidates_offered: 2,
         facts_selected: 0,
         rumors_selected: 1,
+        ..PlanTraceMetrics::default()
     };
 
     let metadata = candidate_trace_metadata(&metrics);
@@ -59,6 +68,7 @@ fn candidate_trace_metadata_reports_no_truncation() {
         rumor_candidates_offered: 1,
         facts_selected: 2,
         rumors_selected: 1,
+        ..PlanTraceMetrics::default()
     };
 
     let metadata = candidate_trace_metadata(&metrics);

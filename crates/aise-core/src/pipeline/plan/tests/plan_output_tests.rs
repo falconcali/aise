@@ -1,7 +1,8 @@
 use super::*;
 use crate::core::tests::snake_pack;
-use crate::core::{ActivatedKnowledge, StoryPack};
+use crate::core::{ActivatedKnowledge, RoleId, StoryPack};
 use crate::pipeline::plan::plan_candidates::{PlanCandidates, collect_candidates};
+use crate::pipeline::plan::plan_roles::collect_role_catalog;
 use serde_json::json;
 use std::collections::BTreeMap;
 
@@ -28,7 +29,30 @@ fn config(max_story_goal_bytes: usize) -> PlanConfig {
     PlanConfig {
         max_retrieval_candidates_per_kind: 8,
         max_story_goal_bytes,
+        max_roles_for_generation: 16,
+        max_character_think_requests: 8,
+        max_thinking_focus_bytes: 512,
     }
+}
+
+fn role_id(value: &str) -> RoleId {
+    RoleId::try_new(value).expect("valid role id")
+}
+
+fn parse(raw: &str, pack: &StoryPack, config: &PlanConfig) -> Result<PlanOutput, PipelineError> {
+    let raw = match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(mut value) => {
+            if let Some(object) = value.as_object_mut() {
+                object.entry("roles_for_generation").or_insert_with(|| json!([]));
+                object.entry("character_think_requests").or_insert_with(|| json!([]));
+            }
+            value.to_string()
+        }
+        Err(_) => raw.to_owned(),
+    };
+    let candidates = candidates(pack);
+    let role_catalog = collect_role_catalog(pack);
+    parse_plan_output(&raw, &candidates, &role_catalog, &role_id("xu_xian"), config)
 }
 
 fn error_code(error: PipelineError) -> &'static str {
@@ -48,7 +72,7 @@ fn valid_json_produces_typed_plan_output() {
     })
     .to_string();
 
-    let output = parse_plan_output(&raw, &candidates(&pack), &config(512)).expect("valid output");
+    let output = parse(&raw, &pack, &config(512)).expect("valid output");
 
     assert_eq!(output.story_goal.as_str(), "Continue the encounter.");
     assert_eq!(output.facts_to_retrieve[0].as_str(), "fact-a");
@@ -60,9 +84,7 @@ fn output_rejects_plain_text_story_goal() {
     let pack = candidate_pack();
     let raw = "Continue the encounter.";
 
-    let error = parse_plan_output(raw, &candidates(&pack), &config(512))
-        .err()
-        .expect("invalid output");
+    let error = parse(raw, &pack, &config(512)).expect_err("invalid output");
 
     assert_eq!(error_code(error), "plan_output_invalid_json");
 }
@@ -72,9 +94,7 @@ fn output_rejects_json_with_surrounding_prose() {
     let pack = candidate_pack();
     let raw = r#"Here is the plan: {"story_goal":"Continue.","facts_to_retrieve":[],"rumors_to_retrieve":[]}"#;
 
-    let error = parse_plan_output(raw, &candidates(&pack), &config(512))
-        .err()
-        .expect("invalid output");
+    let error = parse(raw, &pack, &config(512)).expect_err("invalid output");
 
     assert_eq!(error_code(error), "plan_output_invalid_json");
 }
@@ -84,9 +104,7 @@ fn missing_field_is_rejected() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":[]}"#;
 
-    let error = parse_plan_output(raw, &candidates(&pack), &config(512))
-        .err()
-        .expect("invalid output");
+    let error = parse(raw, &pack, &config(512)).expect_err("invalid output");
 
     assert_eq!(error_code(error), "plan_output_invalid_json");
 }
@@ -96,9 +114,7 @@ fn output_rejects_unknown_fields() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":[],"rumors_to_retrieve":[],"reason":"because"}"#;
 
-    let error = parse_plan_output(raw, &candidates(&pack), &config(512))
-        .err()
-        .expect("invalid output");
+    let error = parse(raw, &pack, &config(512)).expect_err("invalid output");
 
     assert_eq!(error_code(error), "plan_output_invalid_json");
 }
@@ -108,9 +124,7 @@ fn output_rejects_empty_story_goal() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":" \n ","facts_to_retrieve":[],"rumors_to_retrieve":[]}"#;
 
-    let error = parse_plan_output(raw, &candidates(&pack), &config(512))
-        .err()
-        .expect("invalid output");
+    let error = parse(raw, &pack, &config(512)).expect_err("invalid output");
 
     assert_eq!(error_code(error), "plan_story_goal_empty");
 }
@@ -120,9 +134,7 @@ fn output_rejects_oversized_story_goal() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"界界","facts_to_retrieve":[],"rumors_to_retrieve":[]}"#;
 
-    let error = parse_plan_output(raw, &candidates(&pack), &config(5))
-        .err()
-        .expect("invalid output");
+    let error = parse(raw, &pack, &config(5)).expect_err("invalid output");
 
     assert_eq!(error_code(error), "plan_story_goal_too_long");
 }
@@ -132,9 +144,7 @@ fn invalid_id_is_rejected_as_invalid_json() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":[""],"rumors_to_retrieve":[]}"#;
 
-    let error = parse_plan_output(raw, &candidates(&pack), &config(512))
-        .err()
-        .expect("invalid output");
+    let error = parse(raw, &pack, &config(512)).expect_err("invalid output");
 
     assert_eq!(error_code(error), "plan_output_invalid_json");
 }
@@ -144,9 +154,7 @@ fn output_rejects_unknown_fact_id() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":["fact-x"],"rumors_to_retrieve":[]}"#;
 
-    let error = parse_plan_output(raw, &candidates(&pack), &config(512))
-        .err()
-        .expect("invalid output");
+    let error = parse(raw, &pack, &config(512)).expect_err("invalid output");
 
     assert_eq!(error_code(error), "plan_unknown_fact_id");
 }
@@ -156,9 +164,7 @@ fn output_rejects_unknown_rumor_id() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":[],"rumors_to_retrieve":["rumor-x"]}"#;
 
-    let error = parse_plan_output(raw, &candidates(&pack), &config(512))
-        .err()
-        .expect("invalid output");
+    let error = parse(raw, &pack, &config(512)).expect_err("invalid output");
 
     assert_eq!(error_code(error), "plan_unknown_rumor_id");
 }
@@ -168,9 +174,7 @@ fn cross_kind_id_is_rejected() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":["rumor-a"],"rumors_to_retrieve":[]}"#;
 
-    let error = parse_plan_output(raw, &candidates(&pack), &config(512))
-        .err()
-        .expect("invalid output");
+    let error = parse(raw, &pack, &config(512)).expect_err("invalid output");
 
     assert_eq!(error_code(error), "plan_unknown_fact_id");
 }
@@ -180,9 +184,7 @@ fn output_rejects_duplicate_fact_id() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":["fact-a","fact-a"],"rumors_to_retrieve":[]}"#;
 
-    let error = parse_plan_output(raw, &candidates(&pack), &config(512))
-        .err()
-        .expect("invalid output");
+    let error = parse(raw, &pack, &config(512)).expect_err("invalid output");
 
     assert_eq!(error_code(error), "plan_duplicate_fact_id");
 }
@@ -192,9 +194,7 @@ fn output_rejects_duplicate_rumor_id() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":[],"rumors_to_retrieve":["rumor-a","rumor-a"]}"#;
 
-    let error = parse_plan_output(raw, &candidates(&pack), &config(512))
-        .err()
-        .expect("invalid output");
+    let error = parse(raw, &pack, &config(512)).expect_err("invalid output");
 
     assert_eq!(error_code(error), "plan_duplicate_rumor_id");
 }
@@ -204,7 +204,7 @@ fn empty_selections_are_valid() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":[],"rumors_to_retrieve":[]}"#;
 
-    let output = parse_plan_output(raw, &candidates(&pack), &config(512)).expect("valid output");
+    let output = parse(raw, &pack, &config(512)).expect("valid output");
 
     assert!(output.facts_to_retrieve.is_empty());
     assert!(output.rumors_to_retrieve.is_empty());
@@ -215,7 +215,7 @@ fn valid_output_preserves_selected_id_order() {
     let pack = candidate_pack();
     let raw = r#"{"story_goal":"Continue.","facts_to_retrieve":["fact-b","fact-a"],"rumors_to_retrieve":["rumor-b","rumor-a"]}"#;
 
-    let output = parse_plan_output(raw, &candidates(&pack), &config(512)).expect("valid output");
+    let output = parse(raw, &pack, &config(512)).expect("valid output");
 
     assert_eq!(
         output.facts_to_retrieve.iter().map(FactId::as_str).collect::<Vec<_>>(),
@@ -225,4 +225,169 @@ fn valid_output_preserves_selected_id_order() {
         output.rumors_to_retrieve.iter().map(RumorId::as_str).collect::<Vec<_>>(),
         ["rumor-b", "rumor-a"]
     );
+}
+
+fn role_selection_output(roles: serde_json::Value, requests: serde_json::Value) -> String {
+    json!({
+        "story_goal": "Continue.",
+        "facts_to_retrieve": [],
+        "rumors_to_retrieve": [],
+        "roles_for_generation": roles,
+        "character_think_requests": requests
+    })
+    .to_string()
+}
+
+#[test]
+fn missing_role_selection_field_is_rejected() {
+    let pack = candidate_pack();
+    let raw = r#"{
+        "story_goal":"Continue.",
+        "facts_to_retrieve":[],
+        "rumors_to_retrieve":[],
+        "roles_for_generation":[]
+    }"#;
+    let candidates = candidates(&pack);
+    let role_catalog = collect_role_catalog(&pack);
+
+    let error = parse_plan_output(raw, &candidates, &role_catalog, &role_id("xu_xian"), &config(512))
+        .expect_err("missing field should fail");
+
+    assert_eq!(error_code(error), "plan_output_invalid_json");
+}
+
+#[test]
+fn output_rejects_too_many_generation_roles() {
+    let pack = candidate_pack();
+    let raw = role_selection_output(json!(["bai_suzhen", "xu_xian"]), json!([]));
+    let mut config = config(512);
+    config.max_roles_for_generation = 1;
+
+    let error = parse(&raw, &pack, &config).expect_err("too many roles should fail");
+
+    assert_eq!(error_code(error), "plan_too_many_generation_roles");
+}
+
+#[test]
+fn output_rejects_duplicate_generation_role_id() {
+    let pack = candidate_pack();
+    let raw = role_selection_output(json!(["bai_suzhen", "bai_suzhen"]), json!([]));
+
+    let error = parse(&raw, &pack, &config(512)).expect_err("duplicate role should fail");
+
+    assert_eq!(error_code(error), "plan_duplicate_generation_role_id");
+}
+
+#[test]
+fn output_rejects_unknown_generation_role_id() {
+    let pack = candidate_pack();
+    let raw = role_selection_output(json!(["ghost"]), json!([]));
+
+    let error = parse(&raw, &pack, &config(512)).expect_err("unknown role should fail");
+
+    assert_eq!(error_code(error), "plan_unknown_generation_role_id");
+}
+
+#[test]
+fn output_rejects_too_many_character_think_requests() {
+    let pack = candidate_pack();
+    let raw = role_selection_output(
+        json!([]),
+        json!([{"role_id":"bai_suzhen","thinking_focus":"Choose a response."}]),
+    );
+    let mut config = config(512);
+    config.max_character_think_requests = 0;
+
+    let error = parse(&raw, &pack, &config).expect_err("too many think requests should fail");
+
+    assert_eq!(error_code(error), "plan_too_many_character_think_requests");
+}
+
+#[test]
+fn output_rejects_duplicate_character_think_role_id() {
+    let pack = candidate_pack();
+    let raw = role_selection_output(
+        json!([]),
+        json!([
+            {"role_id":"bai_suzhen","thinking_focus":"Choose a response."},
+            {"role_id":"bai_suzhen","thinking_focus":"Assess the danger."}
+        ]),
+    );
+
+    let error = parse(&raw, &pack, &config(512)).expect_err("duplicate think role should fail");
+
+    assert_eq!(error_code(error), "plan_duplicate_character_think_role_id");
+}
+
+#[test]
+fn output_rejects_unknown_character_think_role_id() {
+    let pack = candidate_pack();
+    let raw = role_selection_output(json!([]), json!([{"role_id":"ghost","thinking_focus":"Choose a response."}]));
+
+    let error = parse(&raw, &pack, &config(512)).expect_err("unknown think role should fail");
+
+    assert_eq!(error_code(error), "plan_unknown_character_think_role_id");
+}
+
+#[test]
+fn output_rejects_player_character_think_target() {
+    let pack = candidate_pack();
+    let raw = role_selection_output(
+        json!(["xu_xian"]),
+        json!([{"role_id":"xu_xian","thinking_focus":"Choose a response."}]),
+    );
+
+    let error = parse(&raw, &pack, &config(512)).expect_err("player think should fail");
+
+    assert_eq!(error_code(error), "plan_player_character_think_forbidden");
+}
+
+#[test]
+fn output_rejects_empty_thinking_focus() {
+    let pack = candidate_pack();
+    let raw = role_selection_output(json!([]), json!([{"role_id":"bai_suzhen","thinking_focus":" \n "}]));
+
+    let error = parse(&raw, &pack, &config(512)).expect_err("empty focus should fail");
+
+    assert_eq!(error_code(error), "plan_thinking_focus_empty");
+}
+
+#[test]
+fn output_rejects_oversized_thinking_focus() {
+    let pack = candidate_pack();
+    let raw = role_selection_output(json!([]), json!([{"role_id":"bai_suzhen","thinking_focus":"界界"}]));
+    let mut config = config(512);
+    config.max_thinking_focus_bytes = 5;
+
+    let error = parse(&raw, &pack, &config).expect_err("oversized focus should fail");
+
+    assert_eq!(error_code(error), "plan_thinking_focus_too_long");
+}
+
+#[test]
+fn valid_role_selections_preserve_order_and_trim_thinking_focus() {
+    let pack = candidate_pack();
+    let raw = role_selection_output(
+        json!(["xu_xian", "bai_suzhen"]),
+        json!([
+            {"role_id":"bai_suzhen","thinking_focus":"  Choose a response.  "},
+            {"role_id":"fahai","thinking_focus":"Assess the danger."}
+        ]),
+    );
+
+    let output = parse(&raw, &pack, &config(512)).expect("valid role selections");
+
+    assert_eq!(
+        output.roles_for_generation.iter().map(RoleId::as_str).collect::<Vec<_>>(),
+        ["xu_xian", "bai_suzhen"]
+    );
+    assert_eq!(
+        output
+            .character_think_requests
+            .iter()
+            .map(|request| request.role_id.as_str())
+            .collect::<Vec<_>>(),
+        ["bai_suzhen", "fahai"]
+    );
+    assert_eq!(output.character_think_requests[0].thinking_focus.as_str(), "Choose a response.");
 }

@@ -271,7 +271,9 @@ fn plan_response(facts: &[&str], rumors: &[&str]) -> String {
     json!({
         "story_goal": "Continue the encounter.",
         "facts_to_retrieve": facts,
-        "rumors_to_retrieve": rumors
+        "rumors_to_retrieve": rumors,
+        "roles_for_generation": [],
+        "character_think_requests": []
     })
     .to_string()
 }

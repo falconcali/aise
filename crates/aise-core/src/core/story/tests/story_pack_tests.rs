@@ -141,6 +141,7 @@ fn rejects_character_name_inside_role_profile() {
 fn valid_pack_passes_validation() {
     assert!(pack(pack_json()).validate_play().is_ok());
     assert!(pack(pack_json()).validate_narrative().is_ok());
+    assert!(pack(pack_json()).validate_roles().is_ok());
 }
 
 #[test]
@@ -225,5 +226,150 @@ fn resolve_cast_rejects_unknown_cast_role() {
     assert!(matches!(
         pack.resolve_cast(&role_id("xu_xian"), cast),
         Err(StoryError::UnknownRole { field: "cast", role_id }) if role_id == "ghost"
+    ));
+}
+
+fn text(value: impl Into<String>) -> BoundedText {
+    BoundedText::try_new(value, "test", usize::MAX).expect("test text should fit")
+}
+
+fn pack_with_role_count(count: usize) -> StoryPack {
+    let mut pack = pack(pack_json());
+    let role = pack.roles.values().next().expect("fixture role").clone();
+    pack.roles = (0..count)
+        .map(|index| (role_id(&format!("role-{index:03}")), role.clone()))
+        .collect();
+    pack
+}
+
+fn single_role_pack() -> StoryPack {
+    let mut pack = pack(pack_json());
+    let role = pack.roles.values().next().expect("fixture role").clone();
+    pack.roles = BTreeMap::from([(role_id("r"), role)]);
+    pack
+}
+
+fn pack_with_catalog_bytes(size: usize) -> StoryPack {
+    let mut pack = single_role_pack();
+    let role_id = pack.roles.keys().next().expect("fixture role").clone();
+    let role = pack.roles.get_mut(&role_id).expect("fixture role");
+    role.alias.clear();
+    let fixed_bytes = role_id.as_str().len() + role.retrieval.as_str().len();
+    role.name = text("x".repeat(size - fixed_bytes));
+    pack
+}
+
+fn pack_with_seed_memory_count(count: usize) -> StoryPack {
+    let mut pack = single_role_pack();
+    let role = pack.roles.values_mut().next().expect("fixture role");
+    let memory = role.seed_memories.values().next().expect("fixture memory").clone();
+    role.seed_memories = (0..count)
+        .map(|index| {
+            (
+                crate::core::MemoryId::try_new(format!("memory-{index:03}")).expect("valid memory id"),
+                memory.clone(),
+            )
+        })
+        .collect();
+    pack
+}
+
+fn pack_with_role_assets_bytes(size: usize) -> StoryPack {
+    let mut pack = single_role_pack();
+    let role = pack.roles.values_mut().next().expect("fixture role");
+    role.backstory = text("");
+    role.alias.clear();
+    role.seed_memories.clear();
+    let base_size = serde_json::to_vec(&pack.roles).expect("roles serialize").len();
+    pack.roles.values_mut().next().expect("fixture role").backstory = text("x".repeat(size - base_size));
+    assert_eq!(serde_json::to_vec(&pack.roles).expect("roles serialize").len(), size);
+    pack
+}
+
+#[test]
+fn role_count_at_limit_is_accepted() {
+    assert!(pack_with_role_count(MAX_ROLES_PER_PACK).validate_roles().is_ok());
+}
+
+#[test]
+fn role_count_over_limit_is_rejected() {
+    assert!(matches!(
+        pack_with_role_count(MAX_ROLES_PER_PACK + 1).validate_roles(),
+        Err(StoryError::TooManyRoles {
+            actual,
+            maximum: MAX_ROLES_PER_PACK
+        }) if actual == MAX_ROLES_PER_PACK + 1
+    ));
+}
+
+#[test]
+fn alias_count_at_limit_is_accepted() {
+    let mut pack = single_role_pack();
+    pack.roles.values_mut().next().expect("fixture role").alias = vec![text("alias"); MAX_ALIASES_PER_ROLE];
+
+    assert!(pack.validate_roles().is_ok());
+}
+
+#[test]
+fn alias_count_over_limit_is_rejected() {
+    let mut pack = single_role_pack();
+    pack.roles.values_mut().next().expect("fixture role").alias = vec![text("alias"); MAX_ALIASES_PER_ROLE + 1];
+
+    assert!(matches!(
+        pack.validate_roles(),
+        Err(StoryError::TooManyRoleAliases {
+            actual,
+            maximum: MAX_ALIASES_PER_ROLE,
+            ..
+        }) if actual == MAX_ALIASES_PER_ROLE + 1
+    ));
+}
+
+#[test]
+fn role_catalog_bytes_at_limit_are_accepted() {
+    assert!(pack_with_catalog_bytes(MAX_ROLE_CATALOG_BYTES).validate_roles().is_ok());
+}
+
+#[test]
+fn role_catalog_bytes_over_limit_are_rejected() {
+    assert!(matches!(
+        pack_with_catalog_bytes(MAX_ROLE_CATALOG_BYTES + 1).validate_roles(),
+        Err(StoryError::RoleCatalogTooLarge {
+            actual,
+            maximum: MAX_ROLE_CATALOG_BYTES
+        }) if actual == MAX_ROLE_CATALOG_BYTES + 1
+    ));
+}
+
+#[test]
+fn seed_memory_count_at_limit_is_accepted() {
+    assert!(pack_with_seed_memory_count(MAX_SEED_MEMORIES_PER_ROLE).validate_roles().is_ok());
+}
+
+#[test]
+fn seed_memory_count_over_limit_is_rejected() {
+    assert!(matches!(
+        pack_with_seed_memory_count(MAX_SEED_MEMORIES_PER_ROLE + 1).validate_roles(),
+        Err(StoryError::TooManySeedMemories {
+            actual,
+            maximum: MAX_SEED_MEMORIES_PER_ROLE,
+            ..
+        }) if actual == MAX_SEED_MEMORIES_PER_ROLE + 1
+    ));
+}
+
+#[test]
+fn role_assets_bytes_at_limit_are_accepted() {
+    assert!(pack_with_role_assets_bytes(MAX_ROLE_ASSETS_BYTES).validate_roles().is_ok());
+}
+
+#[test]
+fn role_assets_bytes_over_limit_are_rejected() {
+    assert!(matches!(
+        pack_with_role_assets_bytes(MAX_ROLE_ASSETS_BYTES + 1).validate_roles(),
+        Err(StoryError::RoleAssetsTooLarge {
+            actual,
+            maximum: MAX_ROLE_ASSETS_BYTES
+        }) if actual == MAX_ROLE_ASSETS_BYTES + 1
     ));
 }

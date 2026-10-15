@@ -29,8 +29,7 @@ impl LlmProvider for CountingProvider {
     async fn complete(&self, _request: LlmCompletionRequest) -> Result<LlmCompletionResponse, LlmError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(LlmCompletionResponse {
-            content: r#"{"story_goal":"Continue the encounter.","facts_to_retrieve":[],"rumors_to_retrieve":[]}"#
-                .to_owned(),
+            content: r#"{"story_goal":"Continue the encounter.","facts_to_retrieve":[],"rumors_to_retrieve":[],"roles_for_generation":[],"character_think_requests":[]}"#.to_owned(),
             finish_reason: LlmCompletionFinishReason::Stop,
         })
     }
@@ -74,40 +73,78 @@ fn test_trace() -> Trace {
     })
 }
 
-fn plan_output(facts_to_retrieve: Vec<FactId>, rumors_to_retrieve: Vec<RumorId>) -> PlanOutput {
+fn plan_output(
+    facts_to_retrieve: Vec<FactId>,
+    rumors_to_retrieve: Vec<RumorId>,
+    roles_for_generation: Vec<RoleId>,
+    character_think_requests: Vec<CharacterThinkRequest>,
+) -> PlanOutput {
     PlanOutput {
         story_goal: BoundedText::default(),
         facts_to_retrieve,
         rumors_to_retrieve,
+        roles_for_generation,
+        character_think_requests,
     }
 }
 
 #[test]
 fn empty_knowledge_selection_does_not_require_retrieval() {
-    let output = plan_output(Vec::new(), Vec::new());
+    let output = plan_output(Vec::new(), Vec::new(), Vec::new(), Vec::new());
 
     assert!(!output.requires_retrieval());
 }
 
 #[test]
 fn fact_selection_requires_retrieval() {
-    let output = plan_output(vec![FactId::try_new("fact-1").expect("valid fact id")], Vec::new());
+    let output = plan_output(
+        vec![FactId::try_new("fact-1").expect("valid fact id")],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
 
     assert!(output.requires_retrieval());
 }
 
 #[test]
 fn rumor_selection_requires_retrieval() {
-    let output = plan_output(Vec::new(), vec![RumorId::try_new("rumor-1").expect("valid rumor id")]);
+    let output = plan_output(
+        Vec::new(),
+        vec![RumorId::try_new("rumor-1").expect("valid rumor id")],
+        Vec::new(),
+        Vec::new(),
+    );
 
     assert!(output.requires_retrieval());
 }
 
 #[test]
-fn character_thinking_remains_disabled() {
-    let output = plan_output(Vec::new(), Vec::new());
+fn generation_role_selection_requires_retrieval() {
+    let output = plan_output(
+        Vec::new(),
+        Vec::new(),
+        vec![RoleId::try_new("bai_suzhen").expect("valid role id")],
+        Vec::new(),
+    );
 
-    assert!(!output.requires_character_thinking());
+    assert!(output.requires_retrieval());
+}
+
+#[test]
+fn character_think_request_requires_retrieval_and_thinking() {
+    let output = plan_output(
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        vec![CharacterThinkRequest {
+            role_id: RoleId::try_new("bai_suzhen").expect("valid role id"),
+            thinking_focus: BoundedText::try_new("Choose a response.", "test", 64).expect("valid focus"),
+        }],
+    );
+
+    assert!(output.requires_retrieval());
+    assert!(output.requires_character_thinking());
 }
 
 #[tokio::test]
@@ -140,4 +177,6 @@ async fn pipeline_calls_llm_once_and_returns_validated_output() {
     assert_eq!(output.story_goal.as_str(), "Continue the encounter.");
     assert!(output.facts_to_retrieve.is_empty());
     assert!(output.rumors_to_retrieve.is_empty());
+    assert!(output.roles_for_generation.is_empty());
+    assert!(output.character_think_requests.is_empty());
 }

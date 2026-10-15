@@ -1,11 +1,12 @@
 use crate::core::{
-    ActivatedKnowledge, BoundedText, FactId, NarrativeDirection, PlayerContribution, RumorId, StoryContext, TurnControl,
+    ActivatedKnowledge, BoundedText, CharacterThinkRequest, FactId, NarrativeDirection, PlayerContribution, RoleId,
+    RumorId, StoryContext, TurnControl,
 };
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::pipeline::plan::{
-    PlanConfig, plan_candidates, plan_llm, plan_output, plan_prompt,
+    PlanConfig, plan_candidates, plan_llm, plan_output, plan_prompt, plan_roles,
     plan_trace::{self, PlanTraceMetrics},
 };
 use crate::prompt::Prompt;
@@ -21,20 +22,25 @@ pub struct PlanInput<'a> {
     pub knowledge: &'a ActivatedKnowledge,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct PlanOutput {
     pub story_goal: BoundedText,
     pub facts_to_retrieve: Vec<FactId>,
     pub rumors_to_retrieve: Vec<RumorId>,
+    pub roles_for_generation: Vec<RoleId>,
+    pub character_think_requests: Vec<CharacterThinkRequest>,
 }
 
 impl PlanOutput {
     pub fn requires_retrieval(&self) -> bool {
-        !self.facts_to_retrieve.is_empty() || !self.rumors_to_retrieve.is_empty()
+        !self.facts_to_retrieve.is_empty()
+            || !self.rumors_to_retrieve.is_empty()
+            || !self.roles_for_generation.is_empty()
+            || !self.character_think_requests.is_empty()
     }
 
     pub fn requires_character_thinking(&self) -> bool {
-        false
+        !self.character_think_requests.is_empty()
     }
 }
 
@@ -74,10 +80,13 @@ impl PlanPipeline {
             input.knowledge,
             self.config.max_retrieval_candidates_per_kind,
         );
+        let role_catalog = plan_roles::collect_role_catalog(story_pack.as_ref());
         metrics.fact_candidates_total = candidates.fact_stats.total;
         metrics.fact_candidates_offered = candidates.fact_stats.offered;
         metrics.rumor_candidates_total = candidates.rumor_stats.total;
         metrics.rumor_candidates_offered = candidates.rumor_stats.offered;
+        metrics.role_catalog_entries = role_catalog.len();
+        metrics.role_catalog_bytes = plan_roles::catalog_bytes(&role_catalog);
         if candidates.fact_stats.truncated() || candidates.rumor_stats.truncated() {
             plan_trace::warn_if_candidates_truncated(metrics);
         }
@@ -87,15 +96,19 @@ impl PlanPipeline {
             input,
             story_pack.as_ref(),
             &candidates,
+            &role_catalog,
             observation,
         )?;
         let raw_output =
             plan_llm::process_plan(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
                 .await
                 .map_err(PipelineError::llm(PipelineStage::Plan))?;
-        let output = plan_output::parse_plan_output(&raw_output, &candidates, &self.config)?;
+        let output =
+            plan_output::parse_plan_output(&raw_output, &candidates, &role_catalog, &story_ctx.player, &self.config)?;
         metrics.facts_selected = output.facts_to_retrieve.len();
         metrics.rumors_selected = output.rumors_to_retrieve.len();
+        metrics.generation_roles_selected = output.roles_for_generation.len();
+        metrics.character_think_requests = output.character_think_requests.len();
         Ok(output)
     }
 }

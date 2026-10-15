@@ -1,6 +1,6 @@
 # Task
 
-Write one concise story goal for the next story segment and select any additional knowledge needed to generate that segment.
+Write one concise story goal for the next story segment, select any additional knowledge and role data needed to generate that segment, and request independent current-Turn decisions from relevant non-player roles.
 
 # Rules
 
@@ -12,6 +12,8 @@ When Narrative Direction is present, lean the goal toward it only where it fits 
 
 Select Fact IDs only from Retrievable Facts and Rumor IDs only from Retrievable Rumors. Request only knowledge whose full content is needed for generation. Do not request Facts or Rumors already present in Known Facts or Rumors. Return an empty array for a knowledge kind when no additional knowledge of that kind is needed.
 
+Role Catalog contains every selectable role. Infer role relevance and presence from the story text. Use roles_for_generation for roles whose complete data the Generator needs. Use character_think_requests only for non-player roles that need an independent current-Turn decision. Every returned RoleId must come from Role Catalog. A Character Think target does not need to be repeated in roles_for_generation. Empty arrays are valid.
+
 # Output
 
 Return exactly one JSON object with this structure:
@@ -19,7 +21,14 @@ Return exactly one JSON object with this structure:
 {
   "story_goal": "non-empty string",
   "facts_to_retrieve": ["fact-id"],
-  "rumors_to_retrieve": ["rumor-id"]
+  "rumors_to_retrieve": ["rumor-id"],
+  "roles_for_generation": ["role-id"],
+  "character_think_requests": [
+    {
+      "role_id": "role-id",
+      "thinking_focus": "non-empty string"
+    }
+  ]
 }
 
-Do not return retrieval hints, reasons, prose outside the JSON object, Markdown, code fences, or extra fields.
+Do not return role profiles, backstories, memories, decisions, suggested utterances, retrieval hints, reasons, prose outside the JSON object, Markdown, code fences, or extra fields.

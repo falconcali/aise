@@ -14,6 +14,10 @@ const RUMOR_CANDIDATES_DROPPED: &str = "aise.plan.retrieval.rumor_candidates_dro
 const RUMOR_CANDIDATES_TRUNCATED: &str = "aise.plan.retrieval.rumor_candidates_truncated";
 const FACTS_SELECTED: &str = "aise.plan.retrieval.facts_selected";
 const RUMORS_SELECTED: &str = "aise.plan.retrieval.rumors_selected";
+const ROLE_CATALOG_ENTRIES: &str = "aise.plan.roles.catalog_entries";
+const ROLE_CATALOG_BYTES: &str = "aise.plan.roles.catalog_bytes";
+const GENERATION_ROLES_SELECTED: &str = "aise.plan.roles.generation_selected";
+const CHARACTER_THINK_REQUESTS: &str = "aise.plan.roles.think_requests";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PlanTraceMetrics {
@@ -23,6 +27,10 @@ pub struct PlanTraceMetrics {
     pub rumor_candidates_offered: usize,
     pub facts_selected: usize,
     pub rumors_selected: usize,
+    pub role_catalog_entries: usize,
+    pub role_catalog_bytes: usize,
+    pub generation_roles_selected: usize,
+    pub character_think_requests: usize,
 }
 
 pub fn begin_plan(observation: &Observation, player_input: &str) -> Observation {
@@ -88,6 +96,10 @@ fn candidate_trace_metadata(metrics: &PlanTraceMetrics) -> Vec<Attribute> {
         Attribute::bool(RUMOR_CANDIDATES_TRUNCATED, rumor_candidates_dropped > 0),
         Attribute::u64(FACTS_SELECTED, metrics.facts_selected as u64),
         Attribute::u64(RUMORS_SELECTED, metrics.rumors_selected as u64),
+        Attribute::u64(ROLE_CATALOG_ENTRIES, metrics.role_catalog_entries as u64),
+        Attribute::u64(ROLE_CATALOG_BYTES, metrics.role_catalog_bytes as u64),
+        Attribute::u64(GENERATION_ROLES_SELECTED, metrics.generation_roles_selected as u64),
+        Attribute::u64(CHARACTER_THINK_REQUESTS, metrics.character_think_requests as u64),
     ]
 }
 

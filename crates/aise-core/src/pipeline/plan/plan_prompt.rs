@@ -1,6 +1,6 @@
 use crate::core::{StoryContext, StoryPack};
 use crate::pipeline::common::{PipelineError, PipelineStage, pipeline_prompt};
-use crate::pipeline::plan::{PlanInput, plan_candidates::PlanCandidates};
+use crate::pipeline::plan::{PlanInput, plan_candidates::PlanCandidates, plan_roles::RoleCatalogEntry};
 use crate::prompt::{Prompt, PromptSpec, PromptVars, RenderedPrompt};
 use crate::trace::Observation;
 use serde_json::Value;
@@ -13,6 +13,7 @@ const KNOWN_FACTS_VAR: &str = "known_facts";
 const RUMORS_VAR: &str = "rumors";
 const RETRIEVABLE_FACTS_VAR: &str = "retrievable_facts";
 const RETRIEVABLE_RUMORS_VAR: &str = "retrievable_rumors";
+const ROLE_CATALOG_VAR: &str = "role_catalog";
 const NARRATIVE_DIRECTIONS_VAR: &str = "narrative_directions";
 const STORY_CONSTRAINTS_VAR: &str = "story_constraints";
 const PLAYER_INPUT_VAR: &str = "player_input";
@@ -23,13 +24,15 @@ pub fn process_plan(
     input: &PlanInput<'_>,
     story_pack: &StoryPack,
     candidates: &PlanCandidates<'_>,
+    role_catalog: &[RoleCatalogEntry<'_>],
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
     let story_opening = match pipeline_prompt::story_summary(story_ctx) {
         Some(_) => String::new(),
         None => story_pack.opening.as_str().to_owned(),
     };
-    let vars = plan_vars(story_ctx, input, story_opening, candidates);
+    let role_catalog = role_catalog_text(role_catalog)?;
+    let vars = plan_vars(story_ctx, input, story_opening, candidates, role_catalog)?;
     prompt
         .render(PromptSpec::new(PROCESS_STORY_PLAN_PROMPT_ID, vars), observation)
         .map_err(PipelineError::prompt(PipelineStage::Plan))
@@ -40,8 +43,9 @@ fn plan_vars(
     input: &PlanInput<'_>,
     story_opening: String,
     candidates: &PlanCandidates<'_>,
-) -> PromptVars {
-    PromptVars::from([
+    role_catalog: String,
+) -> Result<PromptVars, PipelineError> {
+    Ok(PromptVars::from([
         (
             STORY_SUMMARY_VAR.to_owned(),
             Value::String(pipeline_prompt::story_summary(story_ctx).unwrap_or_default().to_owned()),
@@ -59,8 +63,12 @@ fn plan_vars(
             RUMORS_VAR.to_owned(),
             Value::String(pipeline_prompt::rumors(&input.knowledge.rumors)),
         ),
-        (RETRIEVABLE_FACTS_VAR.to_owned(), Value::String(retrievable_facts(candidates))),
-        (RETRIEVABLE_RUMORS_VAR.to_owned(), Value::String(retrievable_rumors(candidates))),
+        (RETRIEVABLE_FACTS_VAR.to_owned(), Value::String(retrievable_facts(candidates)?)),
+        (
+            RETRIEVABLE_RUMORS_VAR.to_owned(),
+            Value::String(retrievable_rumors(candidates)?),
+        ),
+        (ROLE_CATALOG_VAR.to_owned(), Value::String(role_catalog)),
         (
             NARRATIVE_DIRECTIONS_VAR.to_owned(),
             Value::String(pipeline_prompt::narrative_directions(input.directions)),
@@ -73,31 +81,61 @@ fn plan_vars(
             PLAYER_INPUT_VAR.to_owned(),
             Value::String(input.player_contribution.processed.clone()),
         ),
-    ])
+    ]))
 }
 
-fn retrievable_facts(candidates: &PlanCandidates<'_>) -> String {
+fn retrievable_facts(candidates: &PlanCandidates<'_>) -> Result<String, PipelineError> {
     candidates
         .facts
         .iter()
         .map(|candidate| candidate_line(candidate.id.as_str(), candidate.retrieval_hint.as_str()))
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect::<Result<Vec<_>, _>>()
+        .map(|entries| entries.join("\n"))
 }
 
-fn retrievable_rumors(candidates: &PlanCandidates<'_>) -> String {
+fn retrievable_rumors(candidates: &PlanCandidates<'_>) -> Result<String, PipelineError> {
     candidates
         .rumors
         .iter()
         .map(|candidate| candidate_line(candidate.id.as_str(), candidate.retrieval_hint.as_str()))
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect::<Result<Vec<_>, _>>()
+        .map(|entries| entries.join("\n"))
 }
 
-fn candidate_line(id: &str, retrieval_hint: &str) -> String {
-    let id = serde_json::to_string(id).expect("string JSON serialization must succeed");
-    let retrieval_hint = serde_json::to_string(retrieval_hint).expect("string JSON serialization must succeed");
-    format!("- id: {id}\n  retrieval_hint: {retrieval_hint}")
+fn candidate_line(id: &str, retrieval_hint: &str) -> Result<String, PipelineError> {
+    let id = serialize_prompt_text(id, "plan_candidate_serialization")?;
+    let retrieval_hint = serialize_prompt_text(retrieval_hint, "plan_candidate_serialization")?;
+    Ok(format!("- id: {id}\n  retrieval_hint: {retrieval_hint}"))
+}
+
+fn role_catalog_text(catalog: &[RoleCatalogEntry<'_>]) -> Result<String, PipelineError> {
+    catalog
+        .iter()
+        .map(|entry| {
+            let role_id = serialize_catalog_text(entry.role_id.as_str())?;
+            let name = serialize_catalog_text(entry.name.as_str())?;
+            let aliases = entry
+                .aliases
+                .iter()
+                .map(|alias| serialize_catalog_text(alias.as_str()))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            let retrieval_hint = serialize_catalog_text(entry.retrieval_hint.as_str())?;
+            Ok(format!(
+                "- role_id: {role_id}\n  name: {name}\n  aliases: [{aliases}]\n  retrieval_hint: {retrieval_hint}"
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(|entries| entries.join("\n"))
+}
+
+fn serialize_catalog_text(value: &str) -> Result<String, PipelineError> {
+    serialize_prompt_text(value, "plan_role_catalog_serialization")
+}
+
+fn serialize_prompt_text(value: &str, code: &'static str) -> Result<String, PipelineError> {
+    serde_json::to_string(value)
+        .map_err(|error| PipelineError::inconsistent_data(PipelineStage::Plan, code, error.to_string()))
 }
 
 #[cfg(test)]

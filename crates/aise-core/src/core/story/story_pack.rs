@@ -6,6 +6,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 const STORY_PACK_SUBJECT: &str = "story_pack";
+pub const MAX_ROLES_PER_PACK: usize = 64;
+pub const MAX_ALIASES_PER_ROLE: usize = 8;
+pub const MAX_ROLE_CATALOG_BYTES: usize = 32 * 1024;
+pub const MAX_SEED_MEMORIES_PER_ROLE: usize = 32;
+pub const MAX_ROLE_ASSETS_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -80,6 +85,57 @@ pub struct StoryAssetSpec {
 impl StoryPack {
     pub fn validate_play(&self) -> Result<(), StoryError> {
         validate_play(&self.play, &self.roles)
+    }
+
+    pub fn validate_roles(&self) -> Result<(), StoryError> {
+        if self.roles.len() > MAX_ROLES_PER_PACK {
+            return Err(StoryError::TooManyRoles {
+                actual: self.roles.len(),
+                maximum: MAX_ROLES_PER_PACK,
+            });
+        }
+        let mut catalog_bytes = 0usize;
+        for (role_id, role) in &self.roles {
+            if role.alias.len() > MAX_ALIASES_PER_ROLE {
+                return Err(StoryError::TooManyRoleAliases {
+                    role_id: role_id.clone(),
+                    actual: role.alias.len(),
+                    maximum: MAX_ALIASES_PER_ROLE,
+                });
+            }
+            if role.seed_memories.len() > MAX_SEED_MEMORIES_PER_ROLE {
+                return Err(StoryError::TooManySeedMemories {
+                    role_id: role_id.clone(),
+                    actual: role.seed_memories.len(),
+                    maximum: MAX_SEED_MEMORIES_PER_ROLE,
+                });
+            }
+            catalog_bytes = catalog_bytes
+                .saturating_add(role_id.as_str().len())
+                .saturating_add(role.name.as_str().len())
+                .saturating_add(
+                    role.alias
+                        .iter()
+                        .fold(0usize, |total, alias| total.saturating_add(alias.as_str().len())),
+                )
+                .saturating_add(role.retrieval.as_str().len());
+        }
+        if catalog_bytes > MAX_ROLE_CATALOG_BYTES {
+            return Err(StoryError::RoleCatalogTooLarge {
+                actual: catalog_bytes,
+                maximum: MAX_ROLE_CATALOG_BYTES,
+            });
+        }
+        let role_assets = serde_json::to_vec(&self.roles).map_err(|error| StoryError::RoleAssetsSerialization {
+            message: error.to_string(),
+        })?;
+        if role_assets.len() > MAX_ROLE_ASSETS_BYTES {
+            return Err(StoryError::RoleAssetsTooLarge {
+                actual: role_assets.len(),
+                maximum: MAX_ROLE_ASSETS_BYTES,
+            });
+        }
+        Ok(())
     }
 
     pub fn validate_narrative(&self) -> Result<(), NarrativeError> {

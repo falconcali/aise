@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::tests::{snake_pack, xu_xian_card};
-use crate::core::{PackRef, StoryError};
+use crate::core::{MAX_ROLES_PER_PACK, PackRef, StoryError};
 use crate::persistence::PersistenceError;
 
 fn role_id(value: &str) -> RoleId {
@@ -80,6 +80,28 @@ async fn non_playable_player_role_is_rejected_without_retaining_assets() {
     ));
     assert!(matches!(
         store.pack_store().get_pack(&snake_pack_ref()).await,
+        Err(PersistenceError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn invalid_role_assets_are_rejected_without_retaining_assets() {
+    let store = AiseFactory.create_store(PersistanceConfig::default());
+    let mut spec = creation_spec(BTreeMap::new(), "xu_xian");
+    let role = spec.story_pack.roles.values().next().expect("fixture role").clone();
+    spec.story_pack.roles = (0..MAX_ROLES_PER_PACK)
+        .map(|index| (role_id(&format!("role-{index:03}")), role.clone()))
+        .collect();
+    spec.story_pack.roles.insert(role_id("xu_xian"), role);
+    let pack_ref = spec.story_pack.pack_ref().expect("pack ref should compute");
+
+    let error = create_story(&store, spec)
+        .await
+        .expect_err("oversized role catalog should fail");
+
+    assert!(matches!(error, EngineError::Story(StoryError::TooManyRoles { .. })));
+    assert!(matches!(
+        store.pack_store().get_pack(&pack_ref).await,
         Err(PersistenceError::NotFound)
     ));
 }

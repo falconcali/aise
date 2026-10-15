@@ -34,12 +34,14 @@ pub use narrative::{
     NarrativeTransition, NodeStatus, SemanticQuery, Truth,
 };
 pub use role::{
-    CharacterCard, CharacterCardRef, CharacterCardSpec, CharacterMeta, CharacterProfile, DialogueExample, MemoryBody,
-    MemoryEntry, RoleActor, RoleBody, RoleEntry,
+    CharacterCard, CharacterCardRef, CharacterCardSpec, CharacterDecision, CharacterMeta, CharacterProfile,
+    CharacterThinkRequest, DialogueExample, MemoryBody, MemoryEntry, ResolvedRole, RoleActor, RoleBody, RoleEntry,
 };
 pub use story::{
-    PackRef, PlayDefinition, StoryAssetSpec, StoryCommit, StoryContext, StoryError, StoryInstanceInfo,
-    StoryInstanceSpec, StoryLifeCycle, StoryPack, StoryPackMeta, StoryPackProfile, StoryPackSpec, StorySummary,
+    MAX_ALIASES_PER_ROLE, MAX_ROLE_ASSETS_BYTES, MAX_ROLE_CATALOG_BYTES, MAX_ROLES_PER_PACK,
+    MAX_SEED_MEMORIES_PER_ROLE, PackRef, PlayDefinition, StoryAssetSpec, StoryCommit, StoryContext, StoryError,
+    StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle, StoryPack, StoryPackMeta, StoryPackProfile, StoryPackSpec,
+    StorySummary,
 };
 pub use turn::{
     PlayerContribution, Turn, TurnCancellation, TurnControl, TurnEvaluation, TurnEvent, TurnEventSink, TurnNumber,
