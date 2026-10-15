@@ -14,3 +14,5 @@ pub use error::LlmError;
 pub use gateway::LlmGateway;
 pub use openai_compat::OpenAiCompatProvider;
 pub use provider::LlmProvider;
+#[cfg(test)]
+pub(crate) use provider::LlmProvider as Provider;

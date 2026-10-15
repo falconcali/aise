@@ -257,15 +257,17 @@ fn rejects_total_template_bytes_exceeded() {
 #[test]
 fn loads_bundled_assets() {
     let mut config = config(Path::new(BUNDLED_PROMPT_DIRECTORY));
+    config.max_prompts = 5;
     config.max_template_bytes = 64 * 1024;
     config.max_total_template_bytes = 1024 * 1024;
     let catalog = load_catalog(&config).expect("bundled assets load");
-    assert_eq!(catalog.prompts.len(), 4);
+    assert_eq!(catalog.prompts.len(), 5);
     for prompt in &catalog.prompts {
         assert!(
             [
                 "baseline.process_player_input",
                 "plan.process_story_plan",
+                "think.character_decision",
                 "generate.generate_story",
                 "summary.summarize_story",
             ]

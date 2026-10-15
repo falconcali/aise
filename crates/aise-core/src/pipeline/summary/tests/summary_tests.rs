@@ -4,7 +4,7 @@ use crate::core::{
     IdempotencyKey, PlayerContribution, Turn, TurnCancellation, TurnEvaluation, TurnSegment, TurnStatus, WorldChange,
 };
 use crate::llm::{
-    LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
+    LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
 };
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -21,7 +21,7 @@ struct FixedProvider {
 }
 
 #[async_trait]
-impl LlmProvider for FixedProvider {
+impl Provider for FixedProvider {
     fn name(&self) -> &'static str {
         "fixed"
     }

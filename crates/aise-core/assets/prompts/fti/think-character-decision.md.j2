@@ -1,0 +1,8 @@
+Return exactly one JSON object with no Markdown fence and no prose:
+
+{
+  "decision": "non-empty immediate decision",
+  "suggested_utterance": "optional non-empty utterance or null"
+}
+
+Use exactly these fields. Set `suggested_utterance` to null or omit it when the target role should not speak. Do not include a role ID or any additional field.

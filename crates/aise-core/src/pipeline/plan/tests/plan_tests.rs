@@ -2,7 +2,7 @@ use super::*;
 use crate::core::tests::store_with_default_pack;
 use crate::core::{PlayerContribution, TurnCancellation};
 use crate::llm::{
-    LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
+    LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
 };
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -21,7 +21,7 @@ struct CountingProvider {
 }
 
 #[async_trait]
-impl LlmProvider for CountingProvider {
+impl Provider for CountingProvider {
     fn name(&self) -> &'static str {
         "counting"
     }

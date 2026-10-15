@@ -1,5 +1,5 @@
 use crate::core::{
-    BoundedText, PlayerContribution, StoryCommit, StoryContext, TurnControl, TurnEvaluation, TurnEventSink,
+    BoundedText, PlayerContribution, RoleId, StoryCommit, StoryContext, TurnControl, TurnEvaluation, TurnEventSink,
     TurnRequest, TurnSegment, WorldChange,
 };
 use crate::llm::LlmGateway;
@@ -18,6 +18,7 @@ use crate::pipeline::think::{ThinkInput, ThinkPipeline};
 use crate::pipeline::validate::{ValidateInput, ValidateOutput, ValidatePipeline, ValidationDecision};
 use crate::prompt::Prompt;
 use crate::trace::Trace;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 pub struct Runtime {
@@ -54,7 +55,12 @@ impl Runtime {
                 pipeline_config.plan,
             ),
             retrieval: RetrievalPipeline::new(Arc::clone(&store)),
-            think: ThinkPipeline,
+            think: ThinkPipeline::new(
+                Arc::clone(&gateway),
+                Arc::clone(&prompt),
+                Arc::clone(&store),
+                pipeline_config.think,
+            ),
             generate: GeneratePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&store)),
             validate: ValidatePipeline { score_configs: vec![] },
             repair: RepairPipeline,
@@ -98,10 +104,12 @@ impl Runtime {
 
         let plan_output: PlanOutput = pipeline_runner.run(&self.plan, plan_input, story_ctx).await?;
 
+        let role_ids = effective_role_ids(&plan_output);
         let retrieval_output = if plan_output.requires_retrieval() {
             let retrieval_input = RetrievalInput {
                 fact_ids: &plan_output.facts_to_retrieve,
                 rumor_ids: &plan_output.rumors_to_retrieve,
+                role_ids: &role_ids,
             };
             pipeline_runner.run(&self.retrieval, retrieval_input, story_ctx).await?
         } else {
@@ -110,7 +118,10 @@ impl Runtime {
 
         if plan_output.requires_character_thinking() {
             let think_input = ThinkInput {
-                query: &plan_output.story_goal,
+                requests: &plan_output.character_think_requests,
+                resolved_roles: &retrieval_output.roles,
+                player_contribution: &baseline_output.player_contribution,
+                directions: &baseline_output.narrative.directions,
             };
 
             let _think_output = pipeline_runner.run(&self.think, think_input, story_ctx).await?;
@@ -211,6 +222,22 @@ impl Runtime {
         let final_index = select_final_index(&validations);
         Ok(proposals.swap_remove(final_index))
     }
+}
+
+fn effective_role_ids(plan_output: &PlanOutput) -> Vec<RoleId> {
+    let mut seen =
+        HashSet::with_capacity(plan_output.roles_for_generation.len() + plan_output.character_think_requests.len());
+    let mut role_ids = Vec::with_capacity(seen.capacity());
+    for role_id in plan_output
+        .roles_for_generation
+        .iter()
+        .chain(plan_output.character_think_requests.iter().map(|request| &request.role_id))
+    {
+        if seen.insert(role_id.clone()) {
+            role_ids.push(role_id.clone());
+        }
+    }
+    role_ids
 }
 
 fn proposal_version(proposals: &[String]) -> u32 {

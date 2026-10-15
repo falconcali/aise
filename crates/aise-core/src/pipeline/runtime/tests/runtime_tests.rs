@@ -1,11 +1,12 @@
 use super::*;
 use crate::core::tests::snake_pack;
 use crate::core::{
-    ActivationRule, FactBody, FactId, IdempotencyKey, NarrativeState, PlayerId, RetrievalHint, RumorBody, RumorId,
-    StoryAssetSpec, StoryCommit, StoryInstanceSpec, StoryPack, TurnCancellation, TurnEvent,
+    ActivationRule, CharacterThinkRequest, FactBody, FactId, IdempotencyKey, NarrativeState, PlayerId, RetrievalHint,
+    RoleActor, RumorBody, RumorId, StoryAssetSpec, StoryCommit, StoryInstanceSpec, StoryPack, TurnCancellation,
+    TurnEvent,
 };
 use crate::llm::{
-    LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
+    LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
 };
 use crate::pipeline::common::PipelineStage;
 use crate::pipeline::validate::ValidateScoreResult;
@@ -36,7 +37,7 @@ struct ScriptedProvider {
 }
 
 #[async_trait]
-impl LlmProvider for ScriptedProvider {
+impl Provider for ScriptedProvider {
     fn name(&self) -> &'static str {
         "scripted"
     }
@@ -190,8 +191,9 @@ fn test_trace() -> Trace {
 
 async fn run_runtime(plan_response: String, remove_selected_fact_after_plan: bool) -> RuntimeRun {
     let store = Arc::new(Store::default());
-    let story_ctx = StoryContext::new();
+    let mut story_ctx = StoryContext::new();
     let pack = knowledge_pack();
+    story_ctx.cast = pack.roles.keys().map(|role_id| (role_id.clone(), RoleActor::Default)).collect();
     store
         .pack_store()
         .retain(
@@ -209,7 +211,7 @@ async fn run_runtime(plan_response: String, remove_selected_fact_after_plan: boo
         .create(StoryInstanceSpec {
             story_id: story_ctx.story_id.clone(),
             pack_ref: story_ctx.pack_ref.clone(),
-            cast: BTreeMap::new(),
+            cast: story_ctx.cast.clone(),
             player_id: PlayerId::try_new("player").expect("player id should be valid"),
             player_role: story_ctx.player.clone(),
             narrative: NarrativeState::default(),
@@ -224,13 +226,19 @@ async fn run_runtime(plan_response: String, remove_selected_fact_after_plan: boo
         replacement
     });
     let requests = Arc::new(Mutex::new(Vec::new()));
+    let think_request_count = serde_json::from_str::<serde_json::Value>(&plan_response)
+        .ok()
+        .and_then(|value| value["character_think_requests"].as_array().map(Vec::len))
+        .unwrap_or_default();
+    let mut responses = VecDeque::from(["activation-key".to_owned(), plan_response]);
+    responses.extend(
+        (0..think_request_count)
+            .map(|index| json!({"decision": format!("decision-{index}"), "suggested_utterance": null}).to_string()),
+    );
+    responses.push_back("Generated story.".to_owned());
     let provider = ScriptedProvider {
         calls: AtomicUsize::new(0),
-        responses: Mutex::new(VecDeque::from([
-            "activation-key".to_owned(),
-            plan_response,
-            "Generated story.".to_owned(),
-        ])),
+        responses: Mutex::new(responses),
         requests: Arc::clone(&requests),
         store: Arc::clone(&store),
         replacement_after_plan: Mutex::new(replacement_after_plan),
@@ -268,12 +276,22 @@ async fn run_runtime(plan_response: String, remove_selected_fact_after_plan: boo
 }
 
 fn plan_response(facts: &[&str], rumors: &[&str]) -> String {
+    plan_response_with_roles(facts, rumors, &[], &[])
+}
+
+fn plan_response_with_roles(facts: &[&str], rumors: &[&str], roles: &[&str], think_roles: &[&str]) -> String {
     json!({
         "story_goal": "Continue the encounter.",
         "facts_to_retrieve": facts,
         "rumors_to_retrieve": rumors,
-        "roles_for_generation": [],
-        "character_think_requests": []
+        "roles_for_generation": roles,
+        "character_think_requests": think_roles
+            .iter()
+            .map(|role_id| json!({
+                "role_id": role_id,
+                "thinking_focus": "Choose a response."
+            }))
+            .collect::<Vec<_>>()
     })
     .to_string()
 }
@@ -353,6 +371,36 @@ fn proposal_version_counts_proposals() {
     assert_eq!(proposal_version(&proposals), 2);
 }
 
+#[test]
+fn effective_roles_preserve_generation_order_and_append_unique_think_targets() {
+    let plan_output = PlanOutput {
+        story_goal: text("Continue the encounter."),
+        facts_to_retrieve: Vec::new(),
+        rumors_to_retrieve: Vec::new(),
+        roles_for_generation: vec![
+            RoleId::try_new("bai_suzhen").expect("valid role id"),
+            RoleId::try_new("xiaoqing").expect("valid role id"),
+        ],
+        character_think_requests: vec![
+            CharacterThinkRequest {
+                role_id: RoleId::try_new("bai_suzhen").expect("valid role id"),
+                thinking_focus: text("Choose a response."),
+            },
+            CharacterThinkRequest {
+                role_id: RoleId::try_new("fahai").expect("valid role id"),
+                thinking_focus: text("Choose a response."),
+            },
+        ],
+    };
+
+    let role_ids = effective_role_ids(&plan_output);
+
+    assert_eq!(
+        role_ids.iter().map(RoleId::as_str).collect::<Vec<_>>(),
+        vec!["bai_suzhen", "xiaoqing", "fahai"]
+    );
+}
+
 #[tokio::test]
 async fn runtime_skips_retrieval_for_empty_plan_selection() {
     let run = run_runtime(plan_response(&[], &[]), false).await;
@@ -406,6 +454,44 @@ async fn runtime_delivers_retrieved_knowledge_to_generate() {
     assert!(generate_prompt.contains(
         "# Known Facts\n\n- Activated fact body.\n- Retrieved fact body.\n\n# Rumors\n\n- Activated rumor body.\n- Retrieved rumor body."
     ));
+}
+
+#[tokio::test]
+async fn runtime_runs_one_retrieval_for_generation_roles_only() {
+    let run = run_runtime(plan_response_with_roles(&[], &[], &["bai_suzhen", "xiaoqing"], &[]), false).await;
+
+    assert!(run.result.is_ok());
+    assert_eq!(stage_count(&run.stages, "retrieval"), 1);
+    assert_eq!(run.requests.len(), 3);
+}
+
+#[tokio::test]
+async fn runtime_runs_one_retrieval_for_think_roles_only() {
+    let run = run_runtime(plan_response_with_roles(&[], &[], &[], &["bai_suzhen"]), false).await;
+
+    assert!(run.result.is_ok());
+    assert_eq!(stage_count(&run.stages, "retrieval"), 1);
+    assert_eq!(stage_count(&run.stages, "think"), 1);
+    assert_eq!(run.requests.len(), 4);
+}
+
+#[tokio::test]
+async fn runtime_resolves_cross_list_duplicate_role_once_in_one_retrieval() {
+    let run = run_runtime(
+        plan_response_with_roles(
+            &[RETRIEVED_FACT_ID],
+            &[RETRIEVED_RUMOR_ID],
+            &["bai_suzhen"],
+            &["bai_suzhen", "xiaoqing"],
+        ),
+        false,
+    )
+    .await;
+
+    assert!(run.result.is_ok());
+    assert_eq!(stage_count(&run.stages, "retrieval"), 1);
+    assert_eq!(stage_count(&run.stages, "think"), 1);
+    assert_eq!(run.requests.len(), 5);
 }
 
 #[tokio::test]

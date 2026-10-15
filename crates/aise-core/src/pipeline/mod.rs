@@ -16,3 +16,4 @@ pub use common::{PipelineConfig, PipelineError, PipelineStage};
 pub use plan::PlanConfig;
 pub(crate) use runtime::Runtime;
 pub use summary::SummaryConfig;
+pub use think::ThinkConfig;

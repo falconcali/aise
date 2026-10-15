@@ -15,6 +15,7 @@ use aise_core::trace::{
 };
 use anyhow::Context;
 use observability::{DETECTOR_OVERLAP_BYTES, ObservabilityConfig, ObservabilityRuntime, TelemetryDiagnostics};
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
@@ -54,6 +55,7 @@ const MULTI_TURN_PLAYER_INPUTS: [&str; 10] = [
 const DEFAULT_TURN_TIMEOUT: Duration = Duration::from_secs(120);
 const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
 const DEFAULT_LLM_TIMEOUT_MS: u64 = 60_000;
+const DEFAULT_LLM_MAX_CONCURRENT_CALLS: NonZeroUsize = NonZeroUsize::new(16).unwrap();
 const DEFAULT_PROMPT_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../aise-core/assets/prompts");
 const DEFAULT_PROMPT_MAX_PROMPTS: usize = 16;
 const DEFAULT_PROMPT_MAX_TEMPLATE_BYTES: usize = 64 * 1024;
@@ -255,6 +257,7 @@ fn load_llm_config() -> anyhow::Result<LlmConfig> {
         model: required_env("AISE_LLM_MODEL")?,
         temperature: parsed_env("AISE_LLM_TEMPERATURE", DEFAULT_LLM_TEMPERATURE)?,
         timeout_ms: parsed_env("AISE_LLM_TIMEOUT_MS", DEFAULT_LLM_TIMEOUT_MS)?,
+        max_concurrent_calls: parsed_env("AISE_LLM_MAX_CONCURRENT_CALLS", DEFAULT_LLM_MAX_CONCURRENT_CALLS)?,
     })
 }
 

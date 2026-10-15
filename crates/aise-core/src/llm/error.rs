@@ -7,6 +7,8 @@ pub enum LlmError {
     Cancelled,
     #[error("llm call timed out")]
     Timeout,
+    #[error("llm concurrency limiter is closed")]
+    ConcurrencyLimiterClosed,
     #[error("llm transport failed: {source}")]
     Transport {
         #[source]
@@ -25,6 +27,7 @@ impl LlmError {
         match self {
             LlmError::Cancelled => "cancelled",
             LlmError::Timeout => "timeout",
+            LlmError::ConcurrencyLimiterClosed => "concurrency_limiter_closed",
             LlmError::Transport { .. } => "transport",
             LlmError::Rejected { .. } => "rejected",
             LlmError::InvalidResponse { .. } => "invalid_response",

@@ -1,6 +1,7 @@
 use crate::pipeline::baseline::BaselineConfig;
 use crate::pipeline::plan::PlanConfig;
 use crate::pipeline::summary::SummaryConfig;
+use crate::pipeline::think::ThinkConfig;
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -8,5 +9,6 @@ use serde::Deserialize;
 pub struct PipelineConfig {
     pub baseline: BaselineConfig,
     pub plan: PlanConfig,
+    pub think: ThinkConfig,
     pub summary: SummaryConfig,
 }

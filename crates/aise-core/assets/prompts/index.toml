@@ -11,6 +11,12 @@ rc = "rc/plan-process-story-plan.md.j2"
 fti = "fti/plan-process-story-plan.md.j2"
 
 [[prompts]]
+id = "think.character_decision"
+csi = "csi/think-character-decision.md.j2"
+rc = "rc/think-character-decision.md.j2"
+fti = "fti/think-character-decision.md.j2"
+
+[[prompts]]
 id = "generate.generate_story"
 csi = "csi/generate-generate-story.md.j2"
 rc = "rc/generate-generate-story.md.j2"

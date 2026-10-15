@@ -1,6 +1,6 @@
 use super::*;
-use crate::core::EntryOrigin;
-use crate::core::tests::snake_pack;
+use crate::core::tests::{snake_pack, xu_xian_card};
+use crate::core::{BoundedText, CharacterCard, CharacterCardRef, EntryOrigin, StoryAssetSpec};
 
 fn pipeline() -> RetrievalPipeline {
     RetrievalPipeline::new(Arc::new(Store::default()))
@@ -14,6 +14,35 @@ fn rumor_id(value: &str) -> RumorId {
     RumorId::try_new(value).expect("valid rumor id")
 }
 
+fn role_id(value: &str) -> RoleId {
+    RoleId::try_new(value).expect("valid role id")
+}
+
+fn text(value: &str) -> BoundedText {
+    BoundedText::try_new(value, "test", usize::MAX).expect("valid bounded text")
+}
+
+async fn pipeline_with_assets(
+    story_ctx: &StoryContext,
+    story_pack: StoryPack,
+    cards: Vec<(CharacterCardRef, CharacterCard)>,
+) -> RetrievalPipeline {
+    let store = Arc::new(Store::default());
+    store
+        .pack_store()
+        .retain(
+            &story_ctx.story_id,
+            StoryAssetSpec {
+                pack_ref: story_ctx.pack_ref.clone(),
+                pack: story_pack,
+                cards,
+            },
+        )
+        .await
+        .expect("assets should be retained");
+    RetrievalPipeline::new(store)
+}
+
 #[test]
 fn fact_only_input_resolves_requested_fact() {
     let story_pack = snake_pack();
@@ -21,6 +50,7 @@ fn fact_only_input_resolves_requested_fact() {
     let input = RetrievalInput {
         fact_ids: &fact_ids,
         rumor_ids: &[],
+        role_ids: &[],
     };
 
     let output = pipeline().resolve(&story_pack, &input).expect("fact resolves");
@@ -39,6 +69,7 @@ fn rumor_only_input_resolves_requested_rumor() {
     let input = RetrievalInput {
         fact_ids: &[],
         rumor_ids: &rumor_ids,
+        role_ids: &[],
     };
 
     let output = pipeline().resolve(&story_pack, &input).expect("rumor resolves");
@@ -58,6 +89,7 @@ fn mixed_input_resolves_both_knowledge_kinds() {
     let input = RetrievalInput {
         fact_ids: &fact_ids,
         rumor_ids: &rumor_ids,
+        role_ids: &[],
     };
 
     let output = pipeline().resolve(&story_pack, &input).expect("mixed input resolves");
@@ -72,6 +104,7 @@ fn empty_input_resolves_empty_output() {
     let input = RetrievalInput {
         fact_ids: &[],
         rumor_ids: &[],
+        role_ids: &[],
     };
 
     let output = pipeline().resolve(&story_pack, &input).expect("empty input resolves");
@@ -94,6 +127,7 @@ fn retrieval_resolves_selected_entries_in_request_order() {
     let input = RetrievalInput {
         fact_ids: &fact_ids,
         rumor_ids: &rumor_ids,
+        role_ids: &[],
     };
 
     let output = pipeline().resolve(&story_pack, &input).expect("ordered input resolves");
@@ -115,6 +149,7 @@ fn retrieval_rejects_missing_fact_id() {
     let input = RetrievalInput {
         fact_ids: &fact_ids,
         rumor_ids: &[],
+        role_ids: &[],
     };
 
     let error = pipeline().resolve(&story_pack, &input).err().expect("missing fact fails");
@@ -136,6 +171,7 @@ fn retrieval_rejects_missing_rumor_id() {
     let input = RetrievalInput {
         fact_ids: &[],
         rumor_ids: &rumor_ids,
+        role_ids: &[],
     };
 
     let error = pipeline().resolve(&story_pack, &input).err().expect("missing rumor fails");
@@ -158,9 +194,249 @@ fn mixed_input_with_missing_id_returns_no_partial_output() {
     let input = RetrievalInput {
         fact_ids: &fact_ids,
         rumor_ids: &rumor_ids,
+        role_ids: &[],
     };
 
     let result = pipeline().resolve(&story_pack, &input);
 
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn default_role_uses_role_body_identity_profile_and_memories() {
+    let story_pack = snake_pack();
+    let selected_role_id = role_id("bai_suzhen");
+    let role_body = story_pack.roles[&selected_role_id].clone();
+    let mut story_ctx = StoryContext::new();
+    story_ctx.cast.insert(selected_role_id.clone(), RoleActor::Default);
+    let pipeline = pipeline_with_assets(&story_ctx, story_pack, Vec::new()).await;
+    let role_ids = [selected_role_id.clone()];
+    let input = RetrievalInput {
+        fact_ids: &[],
+        rumor_ids: &[],
+        role_ids: &role_ids,
+    };
+
+    let output = pipeline.retrieve(&input, &story_ctx).await.expect("default role resolves");
+    let role = output.role(&selected_role_id).expect("resolved role should be indexed");
+
+    assert_eq!(role.role_id, selected_role_id);
+    assert_eq!(role.name, role_body.name);
+    assert_eq!(role.aliases, role_body.alias);
+    assert_eq!(role.backstory, role_body.backstory);
+    assert_eq!(role.retrieval_hint.as_str(), role_body.retrieval.as_str());
+    assert_eq!(
+        serde_json::to_value(&role.profile).expect("profile should serialize"),
+        serde_json::to_value(&role_body.default_profile).expect("profile should serialize")
+    );
+    assert_eq!(
+        serde_json::to_value(&role.seed_memories).expect("memories should serialize"),
+        serde_json::to_value(&role_body.seed_memories).expect("memories should serialize")
+    );
+}
+
+#[tokio::test]
+async fn card_role_replaces_only_the_effective_profile() {
+    let story_pack = snake_pack();
+    let selected_role_id = role_id("xu_xian");
+    let role_body = story_pack.roles[&selected_role_id].clone();
+    let mut card = xu_xian_card();
+    card.name = text("Card-only name");
+    let card_name = card.name.clone();
+    let card_profile = card.profile.clone();
+    let card_ref = card.card_ref().expect("card ref should resolve");
+    let mut story_ctx = StoryContext::new();
+    story_ctx
+        .cast
+        .insert(selected_role_id.clone(), RoleActor::Card(card_ref.clone()));
+    let pipeline = pipeline_with_assets(&story_ctx, story_pack, vec![(card_ref, card)]).await;
+    let role_ids = [selected_role_id.clone()];
+    let input = RetrievalInput {
+        fact_ids: &[],
+        rumor_ids: &[],
+        role_ids: &role_ids,
+    };
+
+    let output = pipeline.retrieve(&input, &story_ctx).await.expect("card role resolves");
+    let role = output.role(&selected_role_id).expect("resolved role should be indexed");
+
+    assert_eq!(role.name, role_body.name);
+    assert_ne!(role.name, card_name);
+    assert_eq!(role.aliases, role_body.alias);
+    assert_eq!(role.backstory, role_body.backstory);
+    assert_eq!(role.retrieval_hint.as_str(), role_body.retrieval.as_str());
+    assert_eq!(
+        serde_json::to_value(&role.profile).expect("profile should serialize"),
+        serde_json::to_value(card_profile).expect("profile should serialize")
+    );
+    assert_ne!(
+        serde_json::to_value(&role.profile).expect("profile should serialize"),
+        serde_json::to_value(&role_body.default_profile).expect("profile should serialize")
+    );
+    assert_eq!(
+        serde_json::to_value(&role.seed_memories).expect("memories should serialize"),
+        serde_json::to_value(&role_body.seed_memories).expect("memories should serialize")
+    );
+}
+
+#[tokio::test]
+async fn role_resolution_preserves_request_order() {
+    let story_pack = snake_pack();
+    let role_ids = [role_id("xiaoqing"), role_id("bai_suzhen"), role_id("xu_xian")];
+    let mut story_ctx = StoryContext::new();
+    for role_id in &role_ids {
+        story_ctx.cast.insert(role_id.clone(), RoleActor::Default);
+    }
+    let pipeline = pipeline_with_assets(&story_ctx, story_pack, Vec::new()).await;
+    let input = RetrievalInput {
+        fact_ids: &[],
+        rumor_ids: &[],
+        role_ids: &role_ids,
+    };
+
+    let output = pipeline.retrieve(&input, &story_ctx).await.expect("roles resolve");
+
+    assert_eq!(
+        output.roles.iter().map(|role| &role.role_id).collect::<Vec<_>>(),
+        role_ids.iter().collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn duplicate_role_input_fails_before_card_lookup() {
+    let story_pack = snake_pack();
+    let selected_role_id = role_id("xu_xian");
+    let card_ref = xu_xian_card().card_ref().expect("card ref should resolve");
+    let mut story_ctx = StoryContext::new();
+    story_ctx.cast.insert(selected_role_id.clone(), RoleActor::Card(card_ref));
+    let pipeline = pipeline_with_assets(&story_ctx, story_pack, Vec::new()).await;
+    let role_ids = [selected_role_id.clone(), selected_role_id];
+    let input = RetrievalInput {
+        fact_ids: &[],
+        rumor_ids: &[],
+        role_ids: &role_ids,
+    };
+
+    let error = pipeline
+        .retrieve(&input, &story_ctx)
+        .await
+        .err()
+        .expect("duplicate roles should fail");
+
+    assert!(matches!(
+        error,
+        PipelineError::InconsistentData {
+            stage: PipelineStage::Retrieval,
+            code: "retrieval_duplicate_role_id",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn missing_story_pack_role_fails_the_retrieval() {
+    let story_pack = snake_pack();
+    let missing_role_id = role_id("missing_role");
+    let mut story_ctx = StoryContext::new();
+    story_ctx.cast.insert(missing_role_id.clone(), RoleActor::Default);
+    let pipeline = pipeline_with_assets(&story_ctx, story_pack, Vec::new()).await;
+    let role_ids = [missing_role_id];
+    let input = RetrievalInput {
+        fact_ids: &[],
+        rumor_ids: &[],
+        role_ids: &role_ids,
+    };
+
+    let error = pipeline
+        .retrieve(&input, &story_ctx)
+        .await
+        .err()
+        .expect("missing role should fail");
+
+    assert!(matches!(
+        error,
+        PipelineError::InconsistentData {
+            stage: PipelineStage::Retrieval,
+            code: "retrieval_role_missing",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn missing_cast_binding_fails_the_retrieval() {
+    let story_pack = snake_pack();
+    let selected_role_id = role_id("bai_suzhen");
+    let story_ctx = StoryContext::new();
+    let pipeline = pipeline_with_assets(&story_ctx, story_pack, Vec::new()).await;
+    let role_ids = [selected_role_id];
+    let input = RetrievalInput {
+        fact_ids: &[],
+        rumor_ids: &[],
+        role_ids: &role_ids,
+    };
+
+    let error = pipeline
+        .retrieve(&input, &story_ctx)
+        .await
+        .err()
+        .expect("missing cast should fail");
+
+    assert!(matches!(
+        error,
+        PipelineError::InconsistentData {
+            stage: PipelineStage::Retrieval,
+            code: "retrieval_role_cast_missing",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn missing_character_card_fails_the_retrieval() {
+    let story_pack = snake_pack();
+    let selected_role_id = role_id("xu_xian");
+    let card_ref = xu_xian_card().card_ref().expect("card ref should resolve");
+    let mut story_ctx = StoryContext::new();
+    story_ctx.cast.insert(selected_role_id.clone(), RoleActor::Card(card_ref));
+    let pipeline = pipeline_with_assets(&story_ctx, story_pack, Vec::new()).await;
+    let role_ids = [selected_role_id];
+    let input = RetrievalInput {
+        fact_ids: &[],
+        rumor_ids: &[],
+        role_ids: &role_ids,
+    };
+
+    let error = pipeline
+        .retrieve(&input, &story_ctx)
+        .await
+        .err()
+        .expect("missing card should fail");
+
+    assert!(matches!(
+        error,
+        PipelineError::InconsistentData {
+            stage: PipelineStage::Retrieval,
+            code: "retrieval_role_card_missing",
+            ..
+        }
+    ));
+}
+
+#[test]
+fn non_not_found_card_error_remains_a_retrieval_persistence_error() {
+    let error = map_card_error(
+        &role_id("xu_xian"),
+        PersistenceError::Unavailable {
+            message: "offline".to_owned(),
+        },
+    );
+
+    assert!(matches!(
+        error,
+        PipelineError::Persistence {
+            stage: PipelineStage::Retrieval,
+            source: PersistenceError::Unavailable { .. },
+        }
+    ));
 }
