@@ -2,9 +2,9 @@ use super::*;
 use crate::core::tests::store_with_default_pack;
 use crate::core::{
     ActivatedKnowledge, ActivationRule, BoundedText, CharacterDecision, CharacterProfile, EntryOrigin, FactBody,
-    FactEntry, FactId, IdempotencyKey, NarrativeDirection, NarrativeNodeId, PlayerContribution, ResolvedRole,
-    RetrievalHint, RoleId, RumorBody, RumorEntry, RumorId, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment,
-    TurnStatus, WorldChange,
+    FactEntry, FactId, IdempotencyKey, NarrativeDirection, NarrativeNodeId, PlayerContribution, PlayerRoleContext,
+    ResolvedRole, RetrievalHint, RoleId, RumorBody, RumorEntry, RumorId, StorySummary, Turn, TurnEvaluation,
+    TurnNumber, TurnSegment, TurnStatus, WorldChange,
 };
 use crate::pipeline::GenerateConfig;
 use crate::pipeline::generate::generate_roles::project_role_context;
@@ -57,6 +57,7 @@ struct GenerateFixture {
     knowledge: ActivatedKnowledge,
     retrieved_facts: Vec<FactEntry>,
     retrieved_rumors: Vec<RumorEntry>,
+    player_role: PlayerRoleContext,
     roles: Vec<ResolvedRole>,
     character_decisions: Vec<CharacterDecision>,
 }
@@ -71,6 +72,7 @@ impl GenerateFixture {
             knowledge: &self.knowledge,
             retrieved_facts: &self.retrieved_facts,
             retrieved_rumors: &self.retrieved_rumors,
+            player_role: &self.player_role,
             roles: &self.roles,
             character_decisions: &self.character_decisions,
         }
@@ -89,6 +91,7 @@ fn generate_fixture(goal: &str, processed: &str) -> GenerateFixture {
         knowledge: ActivatedKnowledge::default(),
         retrieved_facts: Vec::new(),
         retrieved_rumors: Vec::new(),
+        player_role: player_role(),
         roles: Vec::new(),
         character_decisions: Vec::new(),
     }
@@ -96,6 +99,21 @@ fn generate_fixture(goal: &str, processed: &str) -> GenerateFixture {
 
 fn text(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", usize::MAX).expect("test text should fit")
+}
+
+fn player_role() -> PlayerRoleContext {
+    PlayerRoleContext {
+        role_id: RoleId::try_new("player").expect("valid role ID"),
+        name: text("Player"),
+        aliases: vec![text("Player Alias")],
+        backstory: text("Player backstory"),
+        profile: CharacterProfile {
+            appearance: Some(text("Player appearance")),
+            personality: Some(text("Player personality")),
+            speaking_style: Some(text("Player style")),
+            dialogue_examples: Vec::new(),
+        },
+    }
 }
 
 fn role(role_id: &str, name: &str) -> ResolvedRole {
@@ -124,8 +142,18 @@ fn decision(role_id: &str, value: &str) -> CharacterDecision {
 }
 
 fn role_context(fixture: &GenerateFixture) -> GenerateRoleContext {
-    project_role_context(&fixture.roles, &fixture.character_decisions, &GenerateConfig::default())
-        .expect("role context projects")
+    project_role_context(
+        &fixture.player_role,
+        &fixture.roles,
+        &fixture.character_decisions,
+        &GenerateConfig::default(),
+    )
+    .expect("role context projects")
+}
+
+fn player_section() -> String {
+    let fixture = generate_fixture("Goal.", "I wave.");
+    format!("# Player Character\n\n{}", role_context(&fixture).player_role)
 }
 
 fn knowledge() -> ActivatedKnowledge {
@@ -282,7 +310,8 @@ async fn new_story_context_has_opening_then_goal_and_contribution() {
     assert_eq!(
         content,
         format!(
-            "# Story Opening\n\n{opening}\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave."
+            "# Story Opening\n\n{opening}\n\n{}\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave.",
+            player_section()
         )
     );
 }
@@ -305,7 +334,8 @@ async fn recent_story_without_summary_keeps_opening_before_recent_story() {
     assert_eq!(
         content,
         format!(
-            "# Story Opening\n\n{opening}\n\n# Recent Story\n\nThe door creaks.\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave."
+            "# Story Opening\n\n{opening}\n\n# Recent Story\n\nThe door creaks.\n\n{}\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave.",
+            player_section()
         )
     );
 }
@@ -320,7 +350,10 @@ async fn summarized_story_context_orders_summary_recent_story_goal_and_contribut
 
     assert_eq!(
         content,
-        "# Story Summary\n\nEarlier events.\n\n# Recent Story\n\nThe door creaks.\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave."
+        format!(
+            "# Story Summary\n\nEarlier events.\n\n# Recent Story\n\nThe door creaks.\n\n{}\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave.",
+            player_section()
+        )
     );
 }
 
@@ -333,7 +366,10 @@ async fn summary_without_recent_story_omits_opening() {
 
     assert_eq!(
         content,
-        "# Story Summary\n\nEarlier events.\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave."
+        format!(
+            "# Story Summary\n\nEarlier events.\n\n{}\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave.",
+            player_section()
+        )
     );
 }
 
@@ -348,7 +384,10 @@ async fn story_constraints_precede_goal_and_contribution() {
 
     assert_eq!(
         content,
-        "# Story Summary\n\nEarlier events.\n\n# Story Constraints\n\n- The ritual truth is revealed.\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave."
+        format!(
+            "# Story Summary\n\nEarlier events.\n\n{}\n\n# Story Constraints\n\n- The ritual truth is revealed.\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave.",
+            player_section()
+        )
     );
 }
 
@@ -428,7 +467,10 @@ async fn knowledge_and_direction_follow_story_and_precede_constraints_goal_and_c
 
     assert_eq!(
         content,
-        "# Story Summary\n\nEarlier events.\n\n# Known Facts\n\n- The forest keeper is named Ash.\n\n# Rumors\n\n- A ghost haunts the old mill.\n\n# Narrative Direction\n\n- The traveler meets the forest keeper.\n\n# Story Constraints\n\n- The ritual truth is revealed.\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave."
+        format!(
+            "# Story Summary\n\nEarlier events.\n\n# Known Facts\n\n- The forest keeper is named Ash.\n\n# Rumors\n\n- A ghost haunts the old mill.\n\n{}\n\n# Narrative Direction\n\n- The traveler meets the forest keeper.\n\n# Story Constraints\n\n- The ritual truth is revealed.\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave.",
+            player_section()
+        )
     );
 }
 
@@ -441,12 +483,14 @@ async fn generate_prompt_contains_roles_and_ordered_decisions() {
     };
 
     let content = runtime_context(&StoryContext::new(), &fixture).await;
-    let roles = content.find("# Relevant Roles").expect("roles section");
+    let player = content.find("# Player Character").expect("player section");
+    let roles = content.find("# Relevant AI Roles").expect("roles section");
     let decisions = content.find("# Character Decisions").expect("decisions section");
     let direction = content.find("# Immediate Story Goal").expect("goal section");
     let second_decision = content.find("decision: \"Observe.\"").expect("second decision");
     let first_decision = content.find("decision: \"Answer.\"").expect("first decision");
 
+    assert!(player < roles);
     assert!(roles < decisions);
     assert!(decisions < direction);
     assert!(second_decision < first_decision);
@@ -469,7 +513,7 @@ async fn generate_prompt_marks_decisions_as_viewpoint_not_fact() {
 
     assert!(instructions.contains("current viewpoint and immediate intent, not a world fact"));
     assert!(instructions.contains("optional guidance, not mandatory verbatim dialogue"));
-    assert!(instructions.contains("private backstory or seed memory is not automatically known by another role"));
+    assert!(instructions.contains("private backstory is not automatically known by another role"));
     assert!(instructions.contains("unless a visible causal event"));
 }
 
@@ -478,7 +522,7 @@ async fn generate_prompt_preserves_player_agency() {
     let messages = runtime_messages(&StoryContext::new(), &generate_fixture("Goal.", "I wave.")).await;
     let instructions = format!("{}\n{}", messages[0], messages[2]);
 
-    assert!(instructions.contains("player role may appear in Relevant Roles but never in Character Decisions"));
+    assert!(instructions.contains("player role never appears in Relevant AI Roles or Character Decisions"));
     assert!(instructions.contains("Do not make an unprovided consequential choice for the player"));
     assert!(
         instructions

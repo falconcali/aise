@@ -63,7 +63,6 @@ use serde::Deserialize;
 
 const DEFAULT_MAX_ROLE_BYTES_PER_ROLE: usize = 16 * 1024;
 const DEFAULT_MAX_ROLE_CONTEXT_BYTES: usize = 384 * 1024;
-const DEFAULT_MAX_SEED_MEMORIES_PER_ROLE: usize = 4;
 const DEFAULT_MAX_DECISION_CONTEXT_BYTES: usize = 16 * 1024;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -71,12 +70,11 @@ const DEFAULT_MAX_DECISION_CONTEXT_BYTES: usize = 16 * 1024;
 pub struct GenerateConfig {
     pub max_role_bytes_per_role: usize,
     pub max_role_context_bytes: usize,
-    pub max_seed_memories_per_role: usize,
     pub max_decision_context_bytes: usize,
 }
 ```
 
-`GenerateConfig::default()` returns `16384`, `393216`, `4`, and `16384`.
+`GenerateConfig::default()` returns `16384`, `393216`, and `16384`.
 
 Extend:
 
@@ -106,6 +104,7 @@ pub struct GenerateInput<'a> {
     pub knowledge: &'a ActivatedKnowledge,
     pub retrieved_facts: &'a [FactEntry],
     pub retrieved_rumors: &'a [RumorEntry],
+    pub player_role: &'a PlayerRoleContext,
     pub roles: &'a [ResolvedRole],
     pub character_decisions: &'a [CharacterDecision],
 }
@@ -137,11 +136,13 @@ Create `pipeline/generate/generate_roles.rs`:
 
 ```rust
 pub(super) struct GenerateRoleContext {
+    pub player_role: String,
     pub roles: String,
     pub decisions: String,
 }
 
 pub(super) fn project_role_context(
+    player_role: &PlayerRoleContext,
     roles: &[ResolvedRole],
     decisions: &[CharacterDecision],
     config: &GenerateConfig,
@@ -159,23 +160,21 @@ profile.personality
 profile.speaking_style
 profile.dialogue_examples
 backstory
-seed_memories
 ```
 
 Rules:
 
-1. roles preserve `RetrievalOutput.roles` order;
-2. every role renders RoleId, name, aliases, and the complete effective profile as compact JSON;
+1. player role renders separately and always; AI roles preserve `RetrievalOutput.roles` order;
+2. every role renders RoleId, name, aliases, the complete effective profile, and backstory as compact JSON;
 3. Card metadata and Card name are never rendered;
 4. backstory is rendered after profile;
-5. seed memories preserve `MemoryId` order and stop after `max_seed_memories_per_role`;
+5. Generate never renders player or AI role memories;
 6. each rendered role is capped at `max_role_bytes_per_role`;
 7. if the full backstory does not fit the remaining per-role budget, render the longest UTF-8-safe prefix followed by the literal marker `[truncated]`;
-8. seed memories are added as complete items only; the first item that does not fit ends memory projection for that role;
-9. aggregate role output is capped at `max_role_context_bytes`;
-10. if mandatory identity and profile fields cannot fit, return `generate_role_projection_too_large`;
-11. if all individually bounded roles exceed the aggregate budget, return `generate_role_context_too_large`;
-12. no role is silently omitted.
+8. player plus aggregate AI role output is capped at `max_role_context_bytes`;
+9. if mandatory identity and profile fields cannot fit, return `generate_role_projection_too_large`;
+10. if all individually bounded roles exceed the aggregate budget, return `generate_role_context_too_large`;
+11. no role is silently omitted.
 
 Character Decisions render in input order:
 
@@ -191,7 +190,8 @@ Before rendering, validate:
 
 - every decision RoleId is unique;
 - every decision RoleId exists in `roles`;
-- no decision targets `StoryContext.player`, enforced by the caller before projection.
+- Player Role Context matches `StoryContext.player`;
+- player RoleId does not occur in AI roles or Character Decisions.
 
 Use:
 
@@ -211,6 +211,7 @@ All map to `PipelineError::InconsistentData` with `stage = PipelineStage::Genera
 Add Prompt variables:
 
 ```text
+player_role
 relevant_roles
 character_decisions
 ```
@@ -222,7 +223,8 @@ Story Summary or Story Opening
 Recent Story
 Known Facts
 Rumors
-Relevant Roles
+Player Character
+Relevant AI Roles
 Character Decisions
 Narrative Direction
 Story Constraints
@@ -232,13 +234,14 @@ Pending Player Contribution
 
 Generate CSI/FTI MUST state:
 
-- Relevant Roles are author-side consistency data.
-- A role's private backstory or seed memory is not automatically known by another role.
+- Player Character is always-present author-side consistency data and cannot authorize an unprovided player choice.
+- Relevant AI Roles are author-side consistency data.
+- A role's private backstory is not automatically known by another role.
 - A Character Decision is the named role's current viewpoint and immediate intent, not a world fact.
 - `suggested_utterance` is optional guidance, not mandatory verbatim dialogue.
 - The segment must preserve a Character Decision unless a visible causal event in the segment changes it.
 - Character Decisions do not override established Facts, player contribution, or Story Constraints.
-- The player role may appear in Relevant Roles but never in Character Decisions.
+- The player role never appears in Relevant AI Roles or Character Decisions.
 - The generator must not make an unprovided consequential choice for the player.
 - The generator returns story prose only.
 
@@ -273,6 +276,7 @@ let generate_input = GenerateInput {
     knowledge: &baseline_output.knowledge,
     retrieved_facts: &retrieval_output.facts,
     retrieved_rumors: &retrieval_output.rumors,
+    player_role: &plan_output.player_role,
     roles: &retrieval_output.roles,
     character_decisions: &think_output.decisions,
 };
@@ -310,8 +314,9 @@ pipeline/runtime/tests/runtime_tests.rs
 pipeline/generate/tests/generate_roles_tests.rs
   role_projection_preserves_effective_role_order
   role_projection_uses_effective_card_profile_and_role_body_identity
-  role_projection_keeps_private_memory_scoped_to_its_role
-  role_projection_bounds_seed_memories
+  player_projection_contains_full_profile_and_backstory
+  player_role_is_rejected_from_ai_roles
+  role_projection_excludes_private_memories
   role_projection_rejects_missing_decision_role
   role_projection_rejects_duplicate_decision_role
   role_projection_rejects_player_decision

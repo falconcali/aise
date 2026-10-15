@@ -261,6 +261,7 @@ EngineConfig
     plan: PlanConfig
       max_retrieval_candidates_per_kind
       max_story_goal_bytes
+      ... role-planning limits owned by the Character Think design
     summary: SummaryConfig
 ```
 

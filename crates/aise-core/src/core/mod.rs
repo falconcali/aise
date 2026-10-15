@@ -35,7 +35,8 @@ pub use narrative::{
 };
 pub use role::{
     CharacterCard, CharacterCardRef, CharacterCardSpec, CharacterDecision, CharacterMeta, CharacterProfile,
-    CharacterThinkRequest, DialogueExample, MemoryBody, MemoryEntry, ResolvedRole, RoleActor, RoleBody, RoleEntry,
+    CharacterThinkRequest, DialogueExample, MemoryBody, MemoryEntry, PlayerRoleContext, ResolvedRole, RoleActor,
+    RoleBody, RoleEntry,
 };
 pub use story::{
     MAX_ALIASES_PER_ROLE, MAX_ROLE_ASSETS_BYTES, MAX_ROLE_CATALOG_BYTES, MAX_ROLES_PER_PACK,

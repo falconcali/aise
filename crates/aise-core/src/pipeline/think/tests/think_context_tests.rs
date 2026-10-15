@@ -34,14 +34,14 @@ fn role(memories: &[(&str, &str, &str)]) -> ResolvedRole {
 }
 
 #[test]
-fn seed_memories_render_in_memory_id_order() {
+fn seed_memories_render_only_content_in_memory_id_order() {
     let role = role(&[("memory-b", "second", "hint-b"), ("memory-a", "first", "hint-a")]);
 
     let rendered = seed_memories(&role, &ThinkConfig::default());
 
-    assert!(rendered.find("memory-a").expect("first memory rendered") < rendered.find("memory-b").expect("second"));
-    assert!(rendered.contains("content: \"first\""));
-    assert!(rendered.contains("retrieval_hint: \"hint-a\""));
+    assert_eq!(rendered, "- \"first\"\n- \"second\"");
+    assert!(!rendered.contains("memory-a"));
+    assert!(!rendered.contains("hint-a"));
 }
 
 #[test]
@@ -54,8 +54,8 @@ fn seed_memories_respect_count_limit() {
 
     let rendered = seed_memories(&role, &config);
 
-    assert!(rendered.contains("memory-a"));
-    assert!(!rendered.contains("memory-b"));
+    assert!(rendered.contains("first"));
+    assert!(!rendered.contains("second"));
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn seed_memories_respect_byte_limit_without_partial_item() {
     let rendered = seed_memories(&role, &config);
 
     assert_eq!(rendered, first);
-    assert!(!rendered.contains("memory-b"));
+    assert!(!rendered.contains("second"));
 }
 
 #[test]

@@ -4,16 +4,11 @@ use serde_json::Value;
 
 pub(super) fn seed_memories(role: &ResolvedRole, config: &ThinkConfig) -> String {
     let mut rendered = String::new();
-    for (index, (memory_id, memory)) in role.seed_memories.iter().enumerate() {
+    for (index, memory) in role.seed_memories.values().enumerate() {
         if index >= config.max_seed_memories {
             break;
         }
-        let item = format!(
-            "- memory_id: {}\n  content: {}\n  retrieval_hint: {}",
-            json_string(memory_id.as_str()),
-            json_string(memory.content.as_str()),
-            json_string(memory.retrieval.as_str())
-        );
+        let item = format!("- {}", json_string(memory.content.as_str()));
         let separator_bytes = usize::from(!rendered.is_empty());
         if rendered.len().saturating_add(separator_bytes).saturating_add(item.len()) > config.max_seed_memory_bytes {
             break;

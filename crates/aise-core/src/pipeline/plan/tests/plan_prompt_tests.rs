@@ -2,8 +2,9 @@ use super::*;
 use crate::core::tests::{snake_pack, store_with_default_pack};
 use crate::core::{
     ActivatedKnowledge, ActivationRule, BoundedText, EntryOrigin, FactBody, FactEntry, FactId, IdempotencyKey,
-    NarrativeDirection, NarrativeNodeId, PlayerContribution, RetrievalHint, RumorBody, RumorEntry, RumorId, StoryPack,
-    StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus, WorldChange,
+    NarrativeDirection, NarrativeNodeId, PlayerContribution, PlayerRoleContext, RetrievalHint, RoleId, RumorBody,
+    RumorEntry, RumorId, StoryPack, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus,
+    WorldChange,
 };
 use crate::pipeline::plan::plan_candidates::collect_candidates;
 use crate::pipeline::plan::plan_roles::collect_role_catalog;
@@ -109,15 +110,32 @@ fn text(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", usize::MAX).expect("test text should fit")
 }
 
+fn player_role(pack: &StoryPack) -> PlayerRoleContext {
+    let role_id = RoleId::try_new("xu_xian").expect("valid role id");
+    let role = &pack.roles[&role_id];
+    PlayerRoleContext {
+        role_id,
+        name: role.name.clone(),
+        aliases: role.alias.clone(),
+        backstory: role.backstory.clone(),
+        profile: role.default_profile.clone(),
+    }
+}
+
 async fn render_runtime_context(story_ctx: &StoryContext, fixture: &PlanFixture) -> String {
     let store = store_with_default_pack().await;
     let story_pack = store.pack_store().get_pack(&story_ctx.pack_ref).await.expect("pack loads");
-    without_role_catalog(render_pack_context(story_ctx, fixture, story_pack.as_ref(), 0))
+    without_role_context(render_pack_context(story_ctx, fixture, story_pack.as_ref(), 0))
 }
 
-fn without_role_catalog(content: String) -> String {
-    let marker = "\n\n## Role Catalog\n\n";
-    let Some(start) = content.find(marker) else {
+fn without_role_context(content: String) -> String {
+    let content = without_section(content, "## Player Character");
+    without_section(content, "## AI Role Catalog")
+}
+
+fn without_section(content: String, heading: &str) -> String {
+    let marker = format!("\n\n{heading}\n\n");
+    let Some(start) = content.find(&marker) else {
         return content;
     };
     let catalog_start = start + marker.len();
@@ -135,14 +153,19 @@ fn render_pack_context(
 ) -> String {
     let trace = test_trace();
     let candidates = collect_candidates(story_pack, &fixture.knowledge, candidate_limit);
-    let role_catalog = collect_role_catalog(story_pack);
+    let player_role = player_role(story_pack);
+    let role_catalog = collect_role_catalog(story_pack, &player_role.role_id);
     let rendered = process_plan(
         &bundled_prompt(),
-        story_ctx,
-        &fixture.input(),
-        story_pack,
-        &candidates,
-        &role_catalog,
+        PlanPromptContext {
+            story_ctx,
+            input: &fixture.input(),
+            story_pack,
+            candidates: &candidates,
+            player_role: &player_role,
+            role_catalog: &role_catalog,
+            config: &PlanConfig::default(),
+        },
         trace.root(),
     )
     .expect("render");
@@ -156,9 +179,19 @@ async fn runtime_context(story_ctx: &StoryContext, processed: &str) -> String {
 fn vars(story_ctx: &StoryContext, fixture: &PlanFixture, story_opening: String) -> PromptVars {
     let pack = snake_pack();
     let candidates = collect_candidates(&pack, &fixture.knowledge, 0);
-    let role_catalog = collect_role_catalog(&pack);
+    let player_role = player_role(&pack);
+    let role_catalog = collect_role_catalog(&pack, &player_role.role_id);
+    let player_role = player_role_text(&player_role, &PlanConfig::default()).expect("player role renders");
     let role_catalog = role_catalog_text(&role_catalog).expect("catalog renders");
-    plan_vars(story_ctx, &fixture.input(), story_opening, &candidates, role_catalog).expect("vars render")
+    plan_vars(
+        story_ctx,
+        &fixture.input(),
+        story_opening,
+        &candidates,
+        player_role,
+        role_catalog,
+    )
+    .expect("vars render")
 }
 
 #[test]
@@ -423,7 +456,7 @@ fn candidate_ids_and_hints_are_json_escaped() {
 }
 
 #[test]
-fn role_catalog_contains_lightweight_fields_without_private_role_data() {
+fn ai_role_catalog_contains_lightweight_fields_without_private_role_data() {
     let story_ctx = StoryContext::new();
     let fixture = plan_fixture("I wave.");
     let mut pack = candidate_pack(&[], &[]);
@@ -437,13 +470,51 @@ fn role_catalog_contains_lightweight_fields_without_private_role_data() {
 
     let content = render_pack_context(&story_ctx, &fixture, &pack, 0);
 
-    assert!(content.contains("## Role Catalog"));
+    assert!(content.contains("## AI Role Catalog"));
     assert!(content.contains("name: \"Catalog Name\""));
     assert!(content.contains("aliases: [\"Alias \\\"One\\\"\", \"Alias Two\"]"));
     assert!(content.contains("retrieval_hint: \"Catalog\\nHint\""));
     assert!(!content.contains("PRIVATE_BACKSTORY"));
     assert!(!content.contains("PRIVATE_PROFILE"));
     assert!(!content.contains("PRIVATE_MEMORY"));
+}
+
+#[test]
+fn player_context_contains_planning_fields_without_voice_memory_or_retrieval_hint() {
+    let story_ctx = StoryContext::new();
+    let fixture = plan_fixture("I wave.");
+    let mut pack = candidate_pack(&[], &[]);
+    let player_id = RoleId::try_new("xu_xian").expect("valid role id");
+    let player = pack.roles.get_mut(&player_id).expect("fixture player role");
+    player.name = text("Player Name");
+    player.alias = vec![text("Player Alias")];
+    player.backstory = text("PLAYER_BACKSTORY");
+    player.default_profile.appearance = Some(text("PLAYER_APPEARANCE"));
+    player.default_profile.personality = Some(text("PLAYER_PERSONALITY"));
+    player.default_profile.speaking_style = Some(text("PLAYER_SPEAKING_STYLE"));
+    player.default_profile.dialogue_examples[0].response = text("PLAYER_DIALOGUE_EXAMPLE");
+    player.retrieval = RetrievalHint::try_new("PLAYER_RETRIEVAL_HINT").expect("valid hint");
+    player.seed_memories.values_mut().next().expect("fixture memory").content = text("PLAYER_MEMORY");
+
+    let content = render_pack_context(&story_ctx, &fixture, &pack, 0);
+    let player_section = content
+        .split("## Player Character")
+        .nth(1)
+        .expect("player section")
+        .split("## AI Role Catalog")
+        .next()
+        .expect("player section body");
+
+    assert!(player_section.contains("role_id: \"xu_xian\""));
+    assert!(player_section.contains("name: \"Player Name\""));
+    assert!(player_section.contains("aliases: [\"Player Alias\"]"));
+    assert!(player_section.contains("appearance: \"PLAYER_APPEARANCE\""));
+    assert!(player_section.contains("personality: \"PLAYER_PERSONALITY\""));
+    assert!(player_section.contains("backstory: \"PLAYER_BACKSTORY\""));
+    assert!(!player_section.contains("PLAYER_SPEAKING_STYLE"));
+    assert!(!player_section.contains("PLAYER_DIALOGUE_EXAMPLE"));
+    assert!(!player_section.contains("PLAYER_RETRIEVAL_HINT"));
+    assert!(!player_section.contains("PLAYER_MEMORY"));
 }
 
 #[test]
@@ -465,11 +536,13 @@ fn candidate_sections_follow_known_knowledge_and_precede_narrative_direction() {
     let known = content.find("## Known Facts").expect("known facts section");
     let retrievable_facts = content.find("## Retrievable Facts").expect("retrievable facts section");
     let retrievable_rumors = content.find("## Retrievable Rumors").expect("retrievable rumors section");
-    let role_catalog = content.find("## Role Catalog").expect("role catalog section");
+    let player_role = content.find("## Player Character").expect("player role section");
+    let role_catalog = content.find("## AI Role Catalog").expect("role catalog section");
     let narrative = content.find("## Narrative Direction").expect("narrative direction section");
 
     assert!(known < retrievable_facts);
     assert!(retrievable_facts < retrievable_rumors);
+    assert!(player_role < known);
     assert!(retrievable_rumors < role_catalog);
     assert!(role_catalog < narrative);
 }
@@ -480,16 +553,21 @@ fn final_instruction_requires_strict_json_protocol() {
     let fixture = plan_fixture("I wave.");
     let pack = candidate_pack(&["fact-a"], &["rumor-a"]);
     let candidates = collect_candidates(&pack, &fixture.knowledge, 8);
-    let role_catalog = collect_role_catalog(&pack);
+    let player_role = player_role(&pack);
+    let role_catalog = collect_role_catalog(&pack, &player_role.role_id);
     let trace = test_trace();
 
     let rendered = process_plan(
         &bundled_prompt(),
-        &story_ctx,
-        &fixture.input(),
-        &pack,
-        &candidates,
-        &role_catalog,
+        PlanPromptContext {
+            story_ctx: &story_ctx,
+            input: &fixture.input(),
+            story_pack: &pack,
+            candidates: &candidates,
+            player_role: &player_role,
+            role_catalog: &role_catalog,
+            config: &PlanConfig::default(),
+        },
         trace.root(),
     )
     .expect("render");
@@ -501,7 +579,8 @@ fn final_instruction_requires_strict_json_protocol() {
     assert!(instruction.contains("\"roles_for_generation\": [\"role-id\"]"));
     assert!(instruction.contains("\"character_think_requests\": ["));
     assert!(instruction.contains("\"thinking_focus\": \"non-empty string\""));
-    assert!(instruction.contains("Every returned RoleId must come from Role Catalog"));
+    assert!(instruction.contains("Every returned RoleId must come from AI Role Catalog"));
+    assert!(instruction.contains("Never return its RoleId in roles_for_generation or character_think_requests"));
     assert!(instruction.contains("A Character Think target does not need to be repeated in roles_for_generation"));
     assert!(
         instruction.contains("Do not return role profiles, backstories, memories, decisions, suggested utterances")

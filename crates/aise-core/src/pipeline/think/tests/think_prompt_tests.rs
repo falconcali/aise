@@ -2,7 +2,7 @@ use super::*;
 use crate::core::tests::store_with_default_pack;
 use crate::core::{
     BoundedText, CharacterProfile, CharacterThinkRequest, MemoryBody, MemoryId, PlayerContribution, ResolvedRole,
-    RetrievalHint, RoleId, StoryContext,
+    RetrievalHint, RoleId, StoryContext, StorySummary, TurnNumber,
 };
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -122,6 +122,8 @@ async fn prompt_contains_only_target_role_private_context() {
     assert!(text.contains("TARGET_PRIVATE backstory"));
     assert!(text.contains("TARGET_PRIVATE personality"));
     assert!(text.contains("TARGET_PRIVATE memory content"));
+    assert!(!text.contains("TARGET_PRIVATE-memory"));
+    assert!(!text.contains("TARGET_PRIVATE memory hint"));
     assert!(!text.contains("OTHER_PRIVATE"));
     assert!(!text.contains("FORBIDDEN_STORY_GOAL"));
 }
@@ -163,7 +165,7 @@ async fn prompt_renders_required_runtime_sections_in_order() {
     .expect("prompt should render");
     let text = rendered_text(&rendered);
     let sections = [
-        "## Story Summary or Story Opening",
+        "## Story Opening",
         "## Recent Story",
         "## Pending Player Contribution",
         "## Narrative Direction",
@@ -180,8 +182,56 @@ async fn prompt_renders_required_runtime_sections_in_order() {
         .collect::<Vec<_>>();
 
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(!text.contains("## Story Summary"));
+    assert!(!text.contains("## Story Summary or Story Opening"));
     assert!(text.contains(r#"Aliases: ["TARGET alias"]"#));
     assert!(text.contains(r#"{"appearance":"TARGET appearance""#));
+}
+
+#[tokio::test]
+async fn prompt_labels_existing_summary_as_story_summary() {
+    let store = store_with_default_pack().await;
+    let mut story_ctx = StoryContext::new();
+    story_ctx.summary = Some(StorySummary {
+        text: "Earlier events.".to_owned(),
+        covered_through: TurnNumber::new(1),
+    });
+    let roles = [role("target", "TARGET")];
+    let requests = [CharacterThinkRequest {
+        role_id: roles[0].role_id.clone(),
+        thinking_focus: text("focus"),
+    }];
+    let player_contribution = PlayerContribution {
+        raw: "raw".to_owned(),
+        processed: "processed".to_owned(),
+    };
+    let input = ThinkInput {
+        requests: &requests,
+        resolved_roles: &roles,
+        player_contribution: &player_contribution,
+        directions: &[],
+    };
+    let trace = trace();
+
+    let rendered = character_decision(
+        &prompt(),
+        &store,
+        CharacterDecisionPrompt {
+            story_ctx: &story_ctx,
+            input: &input,
+            request: &requests[0],
+            role: &roles[0],
+            config: &ThinkConfig::default(),
+        },
+        trace.root(),
+    )
+    .await
+    .expect("prompt should render");
+    let text = rendered_text(&rendered);
+
+    assert!(text.contains("## Story Summary\n\nEarlier events."));
+    assert!(!text.contains("## Story Opening"));
+    assert!(!text.contains("## Story Summary or Story Opening"));
 }
 
 #[tokio::test]

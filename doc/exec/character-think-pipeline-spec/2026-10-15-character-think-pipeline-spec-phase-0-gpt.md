@@ -148,7 +148,7 @@ pub struct CharacterDecision {
 }
 ```
 
-Re-export all three types through `core/role/mod.rs` and `core/mod.rs`.
+Create `core/role/player_context.rs` with `PlayerRoleContext { role_id, name, aliases, backstory, profile }`. It contains no retrieval hint or memory. Re-export all four shared types through `core/role/mod.rs` and `core/mod.rs`.
 
 ### 3.3 Plan configuration
 
@@ -158,19 +158,21 @@ Extend `PlanConfig`:
 const DEFAULT_MAX_ROLES_FOR_GENERATION: usize = 16;
 const DEFAULT_MAX_CHARACTER_THINK_REQUESTS: usize = 8;
 const DEFAULT_MAX_THINKING_FOCUS_BYTES: usize = 512;
+const DEFAULT_MAX_PLAYER_ROLE_CONTEXT_BYTES: usize = 16 * 1024;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanConfig {
     pub max_retrieval_candidates_per_kind: usize,
     pub max_story_goal_bytes: usize,
+    pub max_player_role_context_bytes: usize,
     pub max_roles_for_generation: usize,
     pub max_character_think_requests: usize,
     pub max_thinking_focus_bytes: usize,
 }
 ```
 
-`PlanConfig::default()` MUST preserve the existing `32` and `512` defaults and add `16`, `8`, and `512` respectively.
+`PlanConfig::default()` MUST preserve the existing `32` and `512` defaults and add `16384`, `16`, `8`, and `512` respectively.
 
 ### 3.4 Plan role catalog
 
@@ -188,6 +190,7 @@ pub(super) struct RoleCatalogEntry<'a> {
 
 pub(super) fn collect_role_catalog(
     story_pack: &StoryPack,
+    player_role: &RoleId,
 ) -> Vec<RoleCatalogEntry<'_>>;
 
 pub(super) fn contains_role(
@@ -196,7 +199,7 @@ pub(super) fn contains_role(
 ) -> bool;
 ```
 
-`collect_role_catalog` iterates `StoryPack.roles` directly and therefore preserves `BTreeMap<RoleId, _>` order. It MUST NOT truncate, rank, activate, or omit a validated role.
+`collect_role_catalog` iterates `StoryPack.roles` directly, excludes `player_role`, and preserves `BTreeMap<RoleId, _>` order. It MUST NOT truncate, rank, activate, or omit any other validated role. Plan deterministically resolves the player RoleBody plus effective Cast/Card profile into `PlayerRoleContext`.
 
 ### 3.5 Plan stage output
 
@@ -206,6 +209,7 @@ The final `PlanOutput` shape is:
 #[derive(Serialize)]
 pub struct PlanOutput {
     pub story_goal: BoundedText,
+    pub player_role: PlayerRoleContext,
     pub facts_to_retrieve: Vec<FactId>,
     pub rumors_to_retrieve: Vec<RumorId>,
     pub roles_for_generation: Vec<RoleId>,
@@ -256,7 +260,7 @@ pub(super) fn parse_plan_output(
     raw: &str,
     candidates: &PlanCandidates<'_>,
     role_catalog: &[RoleCatalogEntry<'_>],
-    player_role: &RoleId,
+    player_role: PlayerRoleContext,
     config: &PlanConfig,
 ) -> Result<PlanOutput, PipelineError>;
 ```
@@ -284,6 +288,7 @@ Use these additional stable `PipelineError::InvalidOutput.code` values:
 plan_too_many_generation_roles
 plan_duplicate_generation_role_id
 plan_unknown_generation_role_id
+plan_player_generation_role_forbidden
 plan_too_many_character_think_requests
 plan_duplicate_character_think_role_id
 plan_unknown_character_think_role_id
@@ -294,11 +299,14 @@ plan_thinking_focus_too_long
 
 ### 3.7 Plan prompt projection
 
-Add `role_catalog` to `plan_prompt::process_plan` and add the Prompt variable:
+Add `player_role` and `role_catalog` to `plan_prompt::process_plan` and add the Prompt variables:
 
 ```text
+player_role
 role_catalog
 ```
+
+Player Character renders RoleId, name, aliases, appearance, personality, and backstory. It MUST omit speaking style, dialogue examples, retrieval hint, and memory, and fit `max_player_role_context_bytes`.
 
 Each role renders in stable order as:
 
@@ -314,11 +322,12 @@ The Plan RC order is:
 ```text
 Story Summary or Story Opening
 Recent Story
+Player Character
 Known Facts
 Rumors
 Retrievable Facts
 Retrievable Rumors
-Role Catalog
+AI Role Catalog
 Narrative Direction
 Story Constraints
 Pending Player Input
@@ -326,11 +335,12 @@ Pending Player Input
 
 The Plan CSI/FTI MUST state:
 
-- The catalog contains every selectable role.
+- Player Character is always passed directly to Generate and is never selectable.
+- The AI catalog contains every selectable non-player role.
 - Role relevance and presence are inferred from story text.
 - `roles_for_generation` selects roles whose complete data Generate needs.
 - `character_think_requests` selects only non-player roles needing an independent current-Turn decision.
-- Every returned RoleId must come from Role Catalog.
+- Every returned RoleId must come from AI Role Catalog.
 - A Think target need not be repeated in `roles_for_generation`.
 - Empty arrays are valid.
 - No extra fields or prose are allowed.

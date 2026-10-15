@@ -142,6 +142,7 @@ impl Runtime {
             knowledge: &baseline_output.knowledge,
             retrieved_facts: &retrieval_output.facts,
             retrieved_rumors: &retrieval_output.rumors,
+            player_role: &plan_output.player_role,
             roles: &retrieval_output.roles,
             character_decisions: &think_output.decisions,
         };

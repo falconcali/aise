@@ -13,6 +13,7 @@ const STORY_OPENING_VAR: &str = "story_opening";
 const RECENT_STORY_VAR: &str = "recent_story";
 const KNOWN_FACTS_VAR: &str = "known_facts";
 const RUMORS_VAR: &str = "rumors";
+const PLAYER_ROLE_VAR: &str = "player_role";
 const RELEVANT_ROLES_VAR: &str = "relevant_roles";
 const CHARACTER_DECISIONS_VAR: &str = "character_decisions";
 const NARRATIVE_DIRECTIONS_VAR: &str = "narrative_directions";
@@ -65,6 +66,7 @@ fn generate_vars(
                 input.retrieved_rumors,
             )),
         ),
+        (PLAYER_ROLE_VAR.to_owned(), Value::String(role_context.player_role.clone())),
         (RELEVANT_ROLES_VAR.to_owned(), Value::String(role_context.roles.clone())),
         (
             CHARACTER_DECISIONS_VAR.to_owned(),

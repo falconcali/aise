@@ -16,6 +16,9 @@
 {{ recent_story }}
 
 {% endif -%}
+## Player Character
+
+{{ player_role ~ "\n\n" }}
 {%- if known_facts -%}
 ## Known Facts
 
@@ -41,7 +44,7 @@
 
 {% endif -%}
 {%- if role_catalog -%}
-## Role Catalog
+## AI Role Catalog
 
 {{ role_catalog }}
 

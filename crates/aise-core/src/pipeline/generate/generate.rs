@@ -1,6 +1,6 @@
 use crate::core::{
     ActivatedKnowledge, BoundedText, CharacterDecision, FactEntry, NarrativeDirection, PlayerContribution,
-    ResolvedRole, RumorEntry, StoryContext, TurnControl,
+    PlayerRoleContext, ResolvedRole, RumorEntry, StoryContext, TurnControl,
 };
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
@@ -23,6 +23,7 @@ pub struct GenerateInput<'a> {
     pub knowledge: &'a ActivatedKnowledge,
     pub retrieved_facts: &'a [FactEntry],
     pub retrieved_rumors: &'a [RumorEntry],
+    pub player_role: &'a PlayerRoleContext,
     pub roles: &'a [ResolvedRole],
     pub character_decisions: &'a [CharacterDecision],
 }
@@ -57,9 +58,14 @@ impl GeneratePipeline {
         observation: &Observation,
         metrics: &mut GenerateTraceMetrics,
     ) -> Result<String, PipelineError> {
-        generate_roles::validate_player_decisions(input.character_decisions, &story_ctx.player)?;
-        let role_context = generate_roles::project_role_context(input.roles, input.character_decisions, &self.config)?;
-        metrics.role_context_bytes = role_context.roles.len();
+        generate_roles::validate_player_role(input.player_role, &story_ctx.player)?;
+        let role_context = generate_roles::project_role_context(
+            input.player_role,
+            input.roles,
+            input.character_decisions,
+            &self.config,
+        )?;
+        metrics.role_context_bytes = role_context.player_role.len().saturating_add(role_context.roles.len());
         metrics.decision_context_bytes = role_context.decisions.len();
         let rendered_prompt = generate_prompt::generate_story(
             self.prompt.as_ref(),

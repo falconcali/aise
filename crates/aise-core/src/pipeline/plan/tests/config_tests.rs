@@ -6,6 +6,7 @@ fn default_limits_match_plan_contract() {
 
     assert_eq!(config.max_retrieval_candidates_per_kind, 32);
     assert_eq!(config.max_story_goal_bytes, 512);
+    assert_eq!(config.max_player_role_context_bytes, 16_384);
     assert_eq!(config.max_roles_for_generation, 16);
     assert_eq!(config.max_character_think_requests, 8);
     assert_eq!(config.max_thinking_focus_bytes, 512);
@@ -17,6 +18,7 @@ fn zero_retrieval_candidate_limit_is_valid() {
         r#"{
             "max_retrieval_candidates_per_kind": 0,
             "max_story_goal_bytes": 512,
+            "max_player_role_context_bytes": 16384,
             "max_roles_for_generation": 16,
             "max_character_think_requests": 8,
             "max_thinking_focus_bytes": 512

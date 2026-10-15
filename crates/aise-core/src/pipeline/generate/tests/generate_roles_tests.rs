@@ -1,7 +1,5 @@
 use super::*;
-use crate::core::{
-    ActivationRule, BoundedText, CharacterProfile, DialogueExample, MemoryBody, MemoryId, RetrievalHint,
-};
+use crate::core::{BoundedText, CharacterProfile, DialogueExample, PlayerRoleContext, RetrievalHint};
 use std::collections::BTreeMap;
 
 fn text(value: &str) -> BoundedText {
@@ -28,11 +26,21 @@ fn role(role_id: &str, name: &str, personality: &str) -> ResolvedRole {
     }
 }
 
-fn memory(content: &str) -> MemoryBody {
-    MemoryBody {
-        content: text(content),
-        activation: ActivationRule::default(),
-        retrieval: RetrievalHint::try_new(content).expect("valid retrieval hint"),
+fn player() -> PlayerRoleContext {
+    PlayerRoleContext {
+        role_id: RoleId::try_new("player").expect("valid role ID"),
+        name: text("Player"),
+        aliases: vec![text("Player Alias")],
+        backstory: text("Player backstory"),
+        profile: CharacterProfile {
+            appearance: Some(text("Player appearance")),
+            personality: Some(text("Player personality")),
+            speaking_style: Some(text("Player style")),
+            dialogue_examples: vec![DialogueExample {
+                situation: text("Greeting"),
+                response: text("Hello."),
+            }],
+        },
     }
 }
 
@@ -48,7 +56,8 @@ fn decision(role_id: &str, value: &str) -> CharacterDecision {
 fn role_projection_preserves_effective_role_order() {
     let roles = vec![role("second", "Second", "calm"), role("first", "First", "bold")];
 
-    let context = project_role_context(&roles, &[], &GenerateConfig::default()).expect("projection succeeds");
+    let context =
+        project_role_context(&player(), &roles, &[], &GenerateConfig::default()).expect("projection succeeds");
 
     assert!(context.roles.find("role_id: \"second\"") < context.roles.find("role_id: \"first\""));
 }
@@ -57,7 +66,8 @@ fn role_projection_preserves_effective_role_order() {
 fn role_projection_uses_effective_card_profile_and_role_body_identity() {
     let roles = vec![role("role_body_id", "Role Body Name", "Card personality")];
 
-    let context = project_role_context(&roles, &[], &GenerateConfig::default()).expect("projection succeeds");
+    let context =
+        project_role_context(&player(), &roles, &[], &GenerateConfig::default()).expect("projection succeeds");
 
     assert!(context.roles.contains("role_id: \"role_body_id\""));
     assert!(context.roles.contains("name: \"Role Body Name\""));
@@ -67,46 +77,58 @@ fn role_projection_uses_effective_card_profile_and_role_body_identity() {
 }
 
 #[test]
-fn role_projection_keeps_private_memory_scoped_to_its_role() {
-    let mut first = role("first", "First", "calm");
-    first.seed_memories.insert(
-        MemoryId::try_new("first_memory").expect("valid memory ID"),
-        memory("First secret"),
-    );
-    let mut second = role("second", "Second", "bold");
-    second.seed_memories.insert(
-        MemoryId::try_new("second_memory").expect("valid memory ID"),
-        memory("Second secret"),
-    );
+fn player_projection_contains_full_profile_and_backstory() {
+    let context = project_role_context(&player(), &[], &[], &GenerateConfig::default()).expect("projection succeeds");
 
-    let context = project_role_context(&[first, second], &[], &GenerateConfig::default()).expect("projection succeeds");
-    let projected = context.roles.split("\n\n").collect::<Vec<_>>();
-
-    assert!(projected[0].contains("First secret"));
-    assert!(!projected[0].contains("Second secret"));
-    assert!(projected[1].contains("Second secret"));
-    assert!(!projected[1].contains("First secret"));
+    assert!(context.player_role.contains("role_id: \"player\""));
+    assert!(context.player_role.contains("profile.appearance: \"Player appearance\""));
+    assert!(context.player_role.contains("profile.personality: \"Player personality\""));
+    assert!(context.player_role.contains("profile.speaking_style: \"Player style\""));
+    assert!(context.player_role.contains("\"situation\":\"Greeting\""));
+    assert!(context.player_role.contains("backstory: \"Player backstory\""));
 }
 
 #[test]
-fn role_projection_bounds_seed_memories() {
-    let mut selected = role("selected", "Selected", "calm");
-    for index in 0..3 {
-        selected.seed_memories.insert(
-            MemoryId::try_new(format!("memory_{index}")).expect("valid memory ID"),
-            memory(&format!("memory content {index}")),
-        );
-    }
-    let config = GenerateConfig {
-        max_seed_memories_per_role: 2,
-        ..GenerateConfig::default()
-    };
+fn player_role_is_rejected_from_ai_roles() {
+    let error = project_role_context(&player(), &[role("player", "Player", "calm")], &[], &GenerateConfig::default())
+        .expect_err("projection fails");
 
-    let context = project_role_context(&[selected], &[], &config).expect("projection succeeds");
+    assert!(matches!(
+        error,
+        PipelineError::InconsistentData {
+            stage: PipelineStage::Generate,
+            code: "generate_player_role_in_ai_roles",
+            ..
+        }
+    ));
+}
 
-    assert!(context.roles.contains("memory_0"));
-    assert!(context.roles.contains("memory_1"));
-    assert!(!context.roles.contains("memory_2"));
+#[test]
+fn role_projection_excludes_private_memories() {
+    let mut first = role("first", "First", "calm");
+    first.seed_memories.insert(
+        crate::core::MemoryId::try_new("first_memory").expect("valid memory ID"),
+        crate::core::MemoryBody {
+            content: text("First secret"),
+            activation: crate::core::ActivationRule::default(),
+            retrieval: RetrievalHint::try_new("First secret").expect("valid retrieval hint"),
+        },
+    );
+    let mut second = role("second", "Second", "bold");
+    second.seed_memories.insert(
+        crate::core::MemoryId::try_new("second_memory").expect("valid memory ID"),
+        crate::core::MemoryBody {
+            content: text("Second secret"),
+            activation: crate::core::ActivationRule::default(),
+            retrieval: RetrievalHint::try_new("Second secret").expect("valid retrieval hint"),
+        },
+    );
+
+    let context = project_role_context(&player(), &[first, second], &[], &GenerateConfig::default())
+        .expect("projection succeeds");
+
+    assert!(!context.roles.contains("First secret"));
+    assert!(!context.roles.contains("Second secret"));
 }
 
 #[test]
@@ -114,7 +136,8 @@ fn role_projection_rejects_missing_decision_role() {
     let roles = vec![role("present", "Present", "calm")];
     let decisions = vec![decision("missing", "Wait.")];
 
-    let error = project_role_context(&roles, &decisions, &GenerateConfig::default()).expect_err("projection fails");
+    let error =
+        project_role_context(&player(), &roles, &decisions, &GenerateConfig::default()).expect_err("projection fails");
 
     assert!(matches!(
         error,
@@ -131,7 +154,8 @@ fn role_projection_rejects_duplicate_decision_role() {
     let roles = vec![role("present", "Present", "calm")];
     let decisions = vec![decision("present", "Wait."), decision("present", "Speak.")];
 
-    let error = project_role_context(&roles, &decisions, &GenerateConfig::default()).expect_err("projection fails");
+    let error =
+        project_role_context(&player(), &roles, &decisions, &GenerateConfig::default()).expect_err("projection fails");
 
     assert!(matches!(
         error,
@@ -145,10 +169,10 @@ fn role_projection_rejects_duplicate_decision_role() {
 
 #[test]
 fn role_projection_rejects_player_decision() {
-    let player = RoleId::try_new("player").expect("valid role ID");
     let decisions = vec![decision("player", "Choose.")];
 
-    let error = validate_player_decisions(&decisions, &player).expect_err("validation fails");
+    let error =
+        project_role_context(&player(), &[], &decisions, &GenerateConfig::default()).expect_err("validation fails");
 
     assert!(matches!(
         error,
@@ -167,7 +191,8 @@ fn role_projection_rejects_aggregate_overflow() {
         ..GenerateConfig::default()
     };
 
-    let error = project_role_context(&[role("role", "Role", "calm")], &[], &config).expect_err("projection fails");
+    let error =
+        project_role_context(&player(), &[role("role", "Role", "calm")], &[], &config).expect_err("projection fails");
 
     assert!(matches!(
         error,
@@ -186,7 +211,8 @@ fn role_projection_rejects_mandatory_role_overflow() {
         ..GenerateConfig::default()
     };
 
-    let error = project_role_context(&[role("role", "Role", "calm")], &[], &config).expect_err("projection fails");
+    let error =
+        project_role_context(&player(), &[role("role", "Role", "calm")], &[], &config).expect_err("projection fails");
 
     assert!(matches!(
         error,
@@ -205,8 +231,13 @@ fn role_projection_rejects_decision_overflow() {
         ..GenerateConfig::default()
     };
 
-    let error = project_role_context(&[role("role", "Role", "calm")], &[decision("role", "Wait.")], &config)
-        .expect_err("projection fails");
+    let error = project_role_context(
+        &player(),
+        &[role("role", "Role", "calm")],
+        &[decision("role", "Wait.")],
+        &config,
+    )
+    .expect_err("projection fails");
 
     assert!(matches!(
         error,
@@ -222,14 +253,14 @@ fn role_projection_rejects_decision_overflow() {
 fn role_projection_truncates_backstory_on_utf8_boundary() {
     let mut selected = role("role", "Role", "calm");
     selected.backstory = text("白蛇传中的角色拥有一段很长的往事");
-    let full = project_role_context(std::slice::from_ref(&selected), &[], &GenerateConfig::default())
+    let full = project_role_context(&player(), std::slice::from_ref(&selected), &[], &GenerateConfig::default())
         .expect("full projection succeeds");
     let config = GenerateConfig {
         max_role_bytes_per_role: full.roles.len() - 5,
         ..GenerateConfig::default()
     };
 
-    let context = project_role_context(&[selected], &[], &config).expect("truncated projection succeeds");
+    let context = project_role_context(&player(), &[selected], &[], &config).expect("truncated projection succeeds");
 
     assert!(context.roles.contains("[truncated]"));
     assert!(context.roles.len() <= config.max_role_bytes_per_role);

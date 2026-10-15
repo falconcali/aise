@@ -1,6 +1,6 @@
 use super::*;
-use crate::core::tests::store_with_default_pack;
-use crate::core::{PlayerContribution, TurnCancellation};
+use crate::core::tests::{snake_pack, store_with_default_pack};
+use crate::core::{PlayerContribution, PlayerRoleContext, RoleActor, TurnCancellation};
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
 };
@@ -79,8 +79,18 @@ fn plan_output(
     roles_for_generation: Vec<RoleId>,
     character_think_requests: Vec<CharacterThinkRequest>,
 ) -> PlanOutput {
+    let pack = snake_pack();
+    let role_id = RoleId::try_new("xu_xian").expect("valid role id");
+    let role = &pack.roles[&role_id];
     PlanOutput {
         story_goal: BoundedText::default(),
+        player_role: PlayerRoleContext {
+            role_id,
+            name: role.name.clone(),
+            aliases: role.alias.clone(),
+            backstory: role.backstory.clone(),
+            profile: role.default_profile.clone(),
+        },
         facts_to_retrieve,
         rumors_to_retrieve,
         roles_for_generation,
@@ -151,7 +161,9 @@ fn character_think_request_requires_retrieval_and_thinking() {
 async fn pipeline_calls_llm_once_and_returns_validated_output() {
     let calls = Arc::new(AtomicUsize::new(0));
     let pipeline = pipeline(Arc::clone(&calls)).await;
-    let story_ctx = StoryContext::new();
+    let mut story_ctx = StoryContext::new();
+    story_ctx.player = RoleId::try_new("xu_xian").expect("valid role id");
+    story_ctx.cast.insert(story_ctx.player.clone(), RoleActor::Default);
     let player_contribution = PlayerContribution {
         raw: "I wave.".to_owned(),
         processed: "I wave.".to_owned(),
@@ -175,6 +187,7 @@ async fn pipeline_calls_llm_once_and_returns_validated_output() {
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(output.story_goal.as_str(), "Continue the encounter.");
+    assert_eq!(output.player_role.role_id, story_ctx.player);
     assert!(output.facts_to_retrieve.is_empty());
     assert!(output.rumors_to_retrieve.is_empty());
     assert!(output.roles_for_generation.is_empty());

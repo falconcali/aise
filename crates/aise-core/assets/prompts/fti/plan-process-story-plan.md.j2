@@ -12,7 +12,9 @@ When Narrative Direction is present, lean the goal toward it only where it fits 
 
 Select Fact IDs only from Retrievable Facts and Rumor IDs only from Retrievable Rumors. Request only knowledge whose full content is needed for generation. Do not request Facts or Rumors already present in Known Facts or Rumors. Return an empty array for a knowledge kind when no additional knowledge of that kind is needed.
 
-Role Catalog contains every selectable role. Infer role relevance and presence from the story text. Use roles_for_generation for roles whose complete data the Generator needs. Use character_think_requests only for non-player roles that need an independent current-Turn decision. Every returned RoleId must come from Role Catalog. A Character Think target does not need to be repeated in roles_for_generation. Empty arrays are valid.
+Player Character is always provided directly to the Generator. Never return its RoleId in roles_for_generation or character_think_requests. Its profile and backstory may inform the plan, but the Pending Player Input remains authoritative for the player's current contribution.
+
+AI Role Catalog contains every selectable non-player role. Infer role relevance and presence from the story text. Use roles_for_generation for AI roles whose complete data the Generator needs. Use character_think_requests only for AI roles that need an independent current-Turn decision. Every returned RoleId must come from AI Role Catalog. A Character Think target does not need to be repeated in roles_for_generation. Empty arrays are valid.
 
 # Output
 

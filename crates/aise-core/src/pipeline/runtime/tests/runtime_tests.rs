@@ -1,9 +1,9 @@
 use super::*;
 use crate::core::tests::snake_pack;
 use crate::core::{
-    ActivationRule, CharacterThinkRequest, FactBody, FactId, IdempotencyKey, NarrativeState, PlayerId, RetrievalHint,
-    RoleActor, RumorBody, RumorId, StoryAssetSpec, StoryCommit, StoryInstanceSpec, StoryPack, TurnCancellation,
-    TurnEvent,
+    ActivationRule, CharacterThinkRequest, FactBody, FactId, IdempotencyKey, NarrativeState, PlayerId,
+    PlayerRoleContext, RetrievalHint, RoleActor, RumorBody, RumorId, StoryAssetSpec, StoryCommit, StoryInstanceSpec,
+    StoryPack, TurnCancellation, TurnEvent,
 };
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
@@ -201,6 +201,7 @@ async fn run_runtime_with_think_responses(
     let store = Arc::new(Store::default());
     let mut story_ctx = StoryContext::new();
     let pack = knowledge_pack();
+    story_ctx.player = RoleId::try_new("xu_xian").expect("player role id should be valid");
     story_ctx.cast = pack.roles.keys().map(|role_id| (role_id.clone(), RoleActor::Default)).collect();
     store
         .pack_store()
@@ -334,6 +335,12 @@ fn assert_plan_prompt_contract(requests: &[LlmCompletionRequest]) {
     assert!(prompt.contains(&format!("- id: \"{RETRIEVED_RUMOR_ID}\"")));
     assert!(!prompt.contains(&format!("- id: \"{ACTIVATED_FACT_ID}\"")));
     assert!(!prompt.contains(&format!("- id: \"{ACTIVATED_RUMOR_ID}\"")));
+    assert!(prompt.contains("## Player Character"));
+    assert!(prompt.contains("role_id: \"xu_xian\""));
+    assert!(prompt.contains("appearance: \"清瘦温和的年轻书生"));
+    assert!(!prompt.contains("profile.speaking_style"));
+    let ai_catalog = prompt.split("## AI Role Catalog").nth(1).expect("AI role catalog");
+    assert!(!ai_catalog.contains("role_id: \"xu_xian\""));
 }
 
 fn validation(decision: ValidationDecision, scores: &[f32]) -> ValidateOutput {
@@ -382,8 +389,18 @@ fn proposal_version_counts_proposals() {
 
 #[test]
 fn effective_roles_preserve_generation_order_and_append_unique_think_targets() {
+    let pack = snake_pack();
+    let player_role_id = RoleId::try_new("xu_xian").expect("valid role id");
+    let player_role = &pack.roles[&player_role_id];
     let plan_output = PlanOutput {
         story_goal: text("Continue the encounter."),
+        player_role: PlayerRoleContext {
+            role_id: player_role_id,
+            name: player_role.name.clone(),
+            aliases: player_role.alias.clone(),
+            backstory: player_role.backstory.clone(),
+            profile: player_role.default_profile.clone(),
+        },
         facts_to_retrieve: Vec::new(),
         rumors_to_retrieve: Vec::new(),
         roles_for_generation: vec![
@@ -420,6 +437,11 @@ async fn runtime_skips_role_retrieval_and_think_when_plan_selects_no_roles() {
     assert_eq!(run.requests.len(), 3);
     assert_plan_prompt_contract(&run.requests);
     let generate_prompt = request_text(&run.requests[2]);
+    assert!(generate_prompt.contains("# Player Character"));
+    assert!(generate_prompt.contains("role_id: \"xu_xian\""));
+    assert!(generate_prompt.contains("profile.speaking_style: \"温和克制"));
+    assert!(!generate_prompt.contains("xu_memory_west_lake_meeting"));
+    assert!(!generate_prompt.contains("清明时节西湖骤雨"));
     assert!(generate_prompt.contains("# Known Facts\n\n- Activated fact body."));
     assert!(generate_prompt.contains("# Rumors\n\n- Activated rumor body."));
     assert!(!generate_prompt.contains("Retrieved fact body."));
@@ -475,7 +497,8 @@ async fn runtime_retrieves_generation_only_role_without_think() {
     assert_eq!(stage_count(&run.stages, "think"), 0);
     assert_eq!(run.requests.len(), 3);
     let generate_prompt = request_text(&run.requests[2]);
-    assert!(generate_prompt.contains("# Relevant Roles"));
+    assert!(generate_prompt.contains("# Player Character"));
+    assert!(generate_prompt.contains("# Relevant AI Roles"));
     assert!(generate_prompt.contains("role_id: \"bai_suzhen\""));
     assert!(!generate_prompt.contains("# Character Decisions"));
 }
@@ -489,7 +512,8 @@ async fn runtime_runs_one_character_think_and_delivers_decision_to_generate() {
     assert_eq!(stage_count(&run.stages, "think"), 1);
     assert_eq!(run.requests.len(), 4);
     let generate_prompt = request_text(&run.requests[3]);
-    assert!(generate_prompt.contains("# Relevant Roles"));
+    assert!(generate_prompt.contains("# Player Character"));
+    assert!(generate_prompt.contains("# Relevant AI Roles"));
     assert!(generate_prompt.contains("# Character Decisions"));
     assert!(generate_prompt.contains("role_id: \"bai_suzhen\""));
     assert!(generate_prompt.contains("decision: \"decision-0\""));
@@ -514,7 +538,7 @@ async fn runtime_stable_union_resolves_cross_list_role_once() {
     assert_eq!(run.requests.len(), 5);
     let generate_prompt = request_text(&run.requests[4]);
     let relevant_roles = generate_prompt
-        .split("# Relevant Roles")
+        .split("# Relevant AI Roles")
         .nth(1)
         .expect("roles section")
         .split("# Character Decisions")

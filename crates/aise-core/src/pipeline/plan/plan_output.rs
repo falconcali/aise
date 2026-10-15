@@ -1,4 +1,4 @@
-use crate::core::{BoundedText, CharacterThinkRequest, FactId, RoleId, RumorId};
+use crate::core::{BoundedText, CharacterThinkRequest, FactId, PlayerRoleContext, RoleId, RumorId};
 use crate::pipeline::common::{PipelineError, PipelineStage};
 use crate::pipeline::plan::{
     PlanConfig, PlanOutput,
@@ -29,7 +29,7 @@ pub(super) fn parse_plan_output(
     raw: &str,
     candidates: &PlanCandidates<'_>,
     role_catalog: &[RoleCatalogEntry<'_>],
-    player_role: &RoleId,
+    player_role: PlayerRoleContext,
     config: &PlanConfig,
 ) -> Result<PlanOutput, PipelineError> {
     let output = serde_json::from_str::<PlanLlmOutputDto>(raw).map_err(|error| {
@@ -55,9 +55,9 @@ pub(super) fn parse_plan_output(
     }
     validate_fact_ids(&output.facts_to_retrieve, candidates)?;
     validate_rumor_ids(&output.rumors_to_retrieve, candidates)?;
-    validate_generation_roles(&output.roles_for_generation, role_catalog, config)?;
+    validate_generation_roles(&output.roles_for_generation, role_catalog, &player_role.role_id, config)?;
     let character_think_requests =
-        validate_character_think_requests(output.character_think_requests, role_catalog, player_role, config)?;
+        validate_character_think_requests(output.character_think_requests, role_catalog, &player_role.role_id, config)?;
     let story_goal =
         BoundedText::try_new(output.story_goal, "story_goal", config.max_story_goal_bytes).map_err(|error| {
             PipelineError::invalid_output(PipelineStage::Plan, "plan_story_goal_too_long", error.to_string())
@@ -65,6 +65,7 @@ pub(super) fn parse_plan_output(
 
     Ok(PlanOutput {
         story_goal,
+        player_role,
         facts_to_retrieve: output.facts_to_retrieve,
         rumors_to_retrieve: output.rumors_to_retrieve,
         roles_for_generation: output.roles_for_generation,
@@ -117,6 +118,7 @@ fn validate_rumor_ids(ids: &[RumorId], candidates: &PlanCandidates<'_>) -> Resul
 fn validate_generation_roles(
     role_ids: &[RoleId],
     role_catalog: &[RoleCatalogEntry<'_>],
+    player_role: &RoleId,
     config: &PlanConfig,
 ) -> Result<(), PipelineError> {
     if role_ids.len() > config.max_roles_for_generation {
@@ -133,6 +135,13 @@ fn validate_generation_roles(
                 PipelineStage::Plan,
                 "plan_duplicate_generation_role_id",
                 "duplicate generation role ID selected",
+            ));
+        }
+        if role_id == player_role {
+            return Err(PipelineError::invalid_output(
+                PipelineStage::Plan,
+                "plan_player_generation_role_forbidden",
+                "player role cannot be selected for generation",
             ));
         }
         if !plan_roles::contains_role(role_catalog, role_id) {
@@ -169,18 +178,18 @@ fn validate_character_think_requests(
                 "duplicate character think role ID selected",
             ));
         }
-        if !plan_roles::contains_role(role_catalog, &request.role_id) {
-            return Err(PipelineError::invalid_output(
-                PipelineStage::Plan,
-                "plan_unknown_character_think_role_id",
-                "selected character think role ID was not offered",
-            ));
-        }
         if &request.role_id == player_role {
             return Err(PipelineError::invalid_output(
                 PipelineStage::Plan,
                 "plan_player_character_think_forbidden",
                 "player role cannot be a character think target",
+            ));
+        }
+        if !plan_roles::contains_role(role_catalog, &request.role_id) {
+            return Err(PipelineError::invalid_output(
+                PipelineStage::Plan,
+                "plan_unknown_character_think_role_id",
+                "selected character think role ID was not offered",
             ));
         }
         let thinking_focus = request.thinking_focus.trim();

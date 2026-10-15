@@ -1,6 +1,6 @@
-use crate::core::{StoryContext, StoryPack};
+use crate::core::{BoundedText, PlayerRoleContext, StoryContext, StoryPack};
 use crate::pipeline::common::{PipelineError, PipelineStage, pipeline_prompt};
-use crate::pipeline::plan::{PlanInput, plan_candidates::PlanCandidates, plan_roles::RoleCatalogEntry};
+use crate::pipeline::plan::{PlanConfig, PlanInput, plan_candidates::PlanCandidates, plan_roles::RoleCatalogEntry};
 use crate::prompt::{Prompt, PromptSpec, PromptVars, RenderedPrompt};
 use crate::trace::Observation;
 use serde_json::Value;
@@ -13,26 +13,41 @@ const KNOWN_FACTS_VAR: &str = "known_facts";
 const RUMORS_VAR: &str = "rumors";
 const RETRIEVABLE_FACTS_VAR: &str = "retrievable_facts";
 const RETRIEVABLE_RUMORS_VAR: &str = "retrievable_rumors";
+const PLAYER_ROLE_VAR: &str = "player_role";
 const ROLE_CATALOG_VAR: &str = "role_catalog";
 const NARRATIVE_DIRECTIONS_VAR: &str = "narrative_directions";
 const STORY_CONSTRAINTS_VAR: &str = "story_constraints";
 const PLAYER_INPUT_VAR: &str = "player_input";
 
-pub fn process_plan(
+pub(super) struct PlanPromptContext<'a, 'b, 'c> {
+    pub story_ctx: &'a StoryContext,
+    pub input: &'a PlanInput<'b>,
+    pub story_pack: &'c StoryPack,
+    pub candidates: &'a PlanCandidates<'c>,
+    pub player_role: &'a PlayerRoleContext,
+    pub role_catalog: &'a [RoleCatalogEntry<'c>],
+    pub config: &'a PlanConfig,
+}
+
+pub(super) fn process_plan(
     prompt: &Prompt,
-    story_ctx: &StoryContext,
-    input: &PlanInput<'_>,
-    story_pack: &StoryPack,
-    candidates: &PlanCandidates<'_>,
-    role_catalog: &[RoleCatalogEntry<'_>],
+    context: PlanPromptContext<'_, '_, '_>,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
-    let story_opening = match pipeline_prompt::story_summary(story_ctx) {
+    let story_opening = match pipeline_prompt::story_summary(context.story_ctx) {
         Some(_) => String::new(),
-        None => story_pack.opening.as_str().to_owned(),
+        None => context.story_pack.opening.as_str().to_owned(),
     };
-    let role_catalog = role_catalog_text(role_catalog)?;
-    let vars = plan_vars(story_ctx, input, story_opening, candidates, role_catalog)?;
+    let player_role = player_role_text(context.player_role, context.config)?;
+    let role_catalog = role_catalog_text(context.role_catalog)?;
+    let vars = plan_vars(
+        context.story_ctx,
+        context.input,
+        story_opening,
+        context.candidates,
+        player_role,
+        role_catalog,
+    )?;
     prompt
         .render(PromptSpec::new(PROCESS_STORY_PLAN_PROMPT_ID, vars), observation)
         .map_err(PipelineError::prompt(PipelineStage::Plan))
@@ -43,6 +58,7 @@ fn plan_vars(
     input: &PlanInput<'_>,
     story_opening: String,
     candidates: &PlanCandidates<'_>,
+    player_role: String,
     role_catalog: String,
 ) -> Result<PromptVars, PipelineError> {
     Ok(PromptVars::from([
@@ -55,6 +71,7 @@ fn plan_vars(
             RECENT_STORY_VAR.to_owned(),
             Value::String(pipeline_prompt::recent_story(story_ctx)),
         ),
+        (PLAYER_ROLE_VAR.to_owned(), Value::String(player_role)),
         (
             KNOWN_FACTS_VAR.to_owned(),
             Value::String(pipeline_prompt::known_facts(&input.knowledge.facts)),
@@ -106,6 +123,42 @@ fn candidate_line(id: &str, retrieval_hint: &str) -> Result<String, PipelineErro
     let id = serialize_prompt_text(id, "plan_candidate_serialization")?;
     let retrieval_hint = serialize_prompt_text(retrieval_hint, "plan_candidate_serialization")?;
     Ok(format!("- id: {id}\n  retrieval_hint: {retrieval_hint}"))
+}
+
+fn player_role_text(role: &PlayerRoleContext, config: &PlanConfig) -> Result<String, PipelineError> {
+    let role_id = serialize_prompt_text(role.role_id.as_str(), "plan_player_role_serialization")?;
+    let name = serialize_prompt_text(role.name.as_str(), "plan_player_role_serialization")?;
+    let aliases = role
+        .aliases
+        .iter()
+        .map(|alias| serialize_prompt_text(alias.as_str(), "plan_player_role_serialization"))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(", ");
+    let appearance = optional_text(role.profile.appearance.as_ref())?;
+    let personality = optional_text(role.profile.personality.as_ref())?;
+    let backstory = serialize_prompt_text(role.backstory.as_str(), "plan_player_role_serialization")?;
+    let rendered = format!(
+        "role_id: {role_id}\nname: {name}\naliases: [{aliases}]\nappearance: {appearance}\npersonality: {personality}\nbackstory: {backstory}"
+    );
+    if rendered.len() > config.max_player_role_context_bytes {
+        return Err(PipelineError::inconsistent_data(
+            PipelineStage::Plan,
+            "plan_player_role_context_too_large",
+            format!(
+                "player role context size {} exceeds maximum {}",
+                rendered.len(),
+                config.max_player_role_context_bytes
+            ),
+        ));
+    }
+    Ok(rendered)
+}
+
+fn optional_text(value: Option<&BoundedText>) -> Result<String, PipelineError> {
+    match value {
+        Some(value) => serialize_prompt_text(value.as_str(), "plan_player_role_serialization"),
+        None => Ok(Value::Null.to_string()),
+    }
 }
 
 fn role_catalog_text(catalog: &[RoleCatalogEntry<'_>]) -> Result<String, PipelineError> {

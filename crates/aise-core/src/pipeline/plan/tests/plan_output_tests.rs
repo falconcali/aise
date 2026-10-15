@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::tests::snake_pack;
-use crate::core::{ActivatedKnowledge, RoleId, StoryPack};
+use crate::core::{ActivatedKnowledge, PlayerRoleContext, RoleId, StoryPack};
 use crate::pipeline::plan::plan_candidates::{PlanCandidates, collect_candidates};
 use crate::pipeline::plan::plan_roles::collect_role_catalog;
 use serde_json::json;
@@ -29,6 +29,7 @@ fn config(max_story_goal_bytes: usize) -> PlanConfig {
     PlanConfig {
         max_retrieval_candidates_per_kind: 8,
         max_story_goal_bytes,
+        max_player_role_context_bytes: 16_384,
         max_roles_for_generation: 16,
         max_character_think_requests: 8,
         max_thinking_focus_bytes: 512,
@@ -37,6 +38,18 @@ fn config(max_story_goal_bytes: usize) -> PlanConfig {
 
 fn role_id(value: &str) -> RoleId {
     RoleId::try_new(value).expect("valid role id")
+}
+
+fn player_role(pack: &StoryPack) -> PlayerRoleContext {
+    let role_id = role_id("xu_xian");
+    let role = &pack.roles[&role_id];
+    PlayerRoleContext {
+        role_id,
+        name: role.name.clone(),
+        aliases: role.alias.clone(),
+        backstory: role.backstory.clone(),
+        profile: role.default_profile.clone(),
+    }
 }
 
 fn parse(raw: &str, pack: &StoryPack, config: &PlanConfig) -> Result<PlanOutput, PipelineError> {
@@ -51,8 +64,9 @@ fn parse(raw: &str, pack: &StoryPack, config: &PlanConfig) -> Result<PlanOutput,
         Err(_) => raw.to_owned(),
     };
     let candidates = candidates(pack);
-    let role_catalog = collect_role_catalog(pack);
-    parse_plan_output(&raw, &candidates, &role_catalog, &role_id("xu_xian"), config)
+    let player_role = player_role(pack);
+    let role_catalog = collect_role_catalog(pack, &player_role.role_id);
+    parse_plan_output(&raw, &candidates, &role_catalog, player_role, config)
 }
 
 fn error_code(error: PipelineError) -> &'static str {
@@ -248,9 +262,10 @@ fn missing_role_selection_field_is_rejected() {
         "roles_for_generation":[]
     }"#;
     let candidates = candidates(&pack);
-    let role_catalog = collect_role_catalog(&pack);
+    let player_role = player_role(&pack);
+    let role_catalog = collect_role_catalog(&pack, &player_role.role_id);
 
-    let error = parse_plan_output(raw, &candidates, &role_catalog, &role_id("xu_xian"), &config(512))
+    let error = parse_plan_output(raw, &candidates, &role_catalog, player_role, &config(512))
         .expect_err("missing field should fail");
 
     assert_eq!(error_code(error), "plan_output_invalid_json");
@@ -332,14 +347,21 @@ fn output_rejects_unknown_character_think_role_id() {
 #[test]
 fn output_rejects_player_character_think_target() {
     let pack = candidate_pack();
-    let raw = role_selection_output(
-        json!(["xu_xian"]),
-        json!([{"role_id":"xu_xian","thinking_focus":"Choose a response."}]),
-    );
+    let raw = role_selection_output(json!([]), json!([{"role_id":"xu_xian","thinking_focus":"Choose a response."}]));
 
     let error = parse(&raw, &pack, &config(512)).expect_err("player think should fail");
 
     assert_eq!(error_code(error), "plan_player_character_think_forbidden");
+}
+
+#[test]
+fn output_rejects_player_generation_role() {
+    let pack = candidate_pack();
+    let raw = role_selection_output(json!(["xu_xian"]), json!([]));
+
+    let error = parse(&raw, &pack, &config(512)).expect_err("player generation role should fail");
+
+    assert_eq!(error_code(error), "plan_player_generation_role_forbidden");
 }
 
 #[test]
@@ -368,7 +390,7 @@ fn output_rejects_oversized_thinking_focus() {
 fn valid_role_selections_preserve_order_and_trim_thinking_focus() {
     let pack = candidate_pack();
     let raw = role_selection_output(
-        json!(["xu_xian", "bai_suzhen"]),
+        json!(["xiaoqing", "bai_suzhen"]),
         json!([
             {"role_id":"bai_suzhen","thinking_focus":"  Choose a response.  "},
             {"role_id":"fahai","thinking_focus":"Assess the danger."}
@@ -379,7 +401,7 @@ fn valid_role_selections_preserve_order_and_trim_thinking_focus() {
 
     assert_eq!(
         output.roles_for_generation.iter().map(RoleId::as_str).collect::<Vec<_>>(),
-        ["xu_xian", "bai_suzhen"]
+        ["xiaoqing", "bai_suzhen"]
     );
     assert_eq!(
         output

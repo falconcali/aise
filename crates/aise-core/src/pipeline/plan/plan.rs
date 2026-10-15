@@ -1,6 +1,6 @@
 use crate::core::{
-    ActivatedKnowledge, BoundedText, CharacterThinkRequest, FactId, NarrativeDirection, PlayerContribution, RoleId,
-    RumorId, StoryContext, TurnControl,
+    ActivatedKnowledge, BoundedText, CharacterThinkRequest, FactId, NarrativeDirection, PlayerContribution,
+    PlayerRoleContext, RoleId, RumorId, StoryContext, TurnControl,
 };
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
@@ -25,6 +25,7 @@ pub struct PlanInput<'a> {
 #[derive(Debug, Serialize)]
 pub struct PlanOutput {
     pub story_goal: BoundedText,
+    pub player_role: PlayerRoleContext,
     pub facts_to_retrieve: Vec<FactId>,
     pub rumors_to_retrieve: Vec<RumorId>,
     pub roles_for_generation: Vec<RoleId>,
@@ -80,7 +81,8 @@ impl PlanPipeline {
             input.knowledge,
             self.config.max_retrieval_candidates_per_kind,
         );
-        let role_catalog = plan_roles::collect_role_catalog(story_pack.as_ref());
+        let player_role = plan_roles::resolve_player_role(self.store.as_ref(), story_pack.as_ref(), story_ctx).await?;
+        let role_catalog = plan_roles::collect_role_catalog(story_pack.as_ref(), &story_ctx.player);
         metrics.fact_candidates_total = candidates.fact_stats.total;
         metrics.fact_candidates_offered = candidates.fact_stats.offered;
         metrics.rumor_candidates_total = candidates.rumor_stats.total;
@@ -92,11 +94,15 @@ impl PlanPipeline {
         }
         let rendered_prompt = plan_prompt::process_plan(
             self.prompt.as_ref(),
-            story_ctx,
-            input,
-            story_pack.as_ref(),
-            &candidates,
-            &role_catalog,
+            plan_prompt::PlanPromptContext {
+                story_ctx,
+                input,
+                story_pack: story_pack.as_ref(),
+                candidates: &candidates,
+                player_role: &player_role,
+                role_catalog: &role_catalog,
+                config: &self.config,
+            },
             observation,
         )?;
         let raw_output =
@@ -104,7 +110,7 @@ impl PlanPipeline {
                 .await
                 .map_err(PipelineError::llm(PipelineStage::Plan))?;
         let output =
-            plan_output::parse_plan_output(&raw_output, &candidates, &role_catalog, &story_ctx.player, &self.config)?;
+            plan_output::parse_plan_output(&raw_output, &candidates, &role_catalog, player_role, &self.config)?;
         metrics.facts_selected = output.facts_to_retrieve.len();
         metrics.rumors_selected = output.rumors_to_retrieve.len();
         metrics.generation_roles_selected = output.roles_for_generation.len();
