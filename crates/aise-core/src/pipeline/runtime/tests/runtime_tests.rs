@@ -190,6 +190,14 @@ fn test_trace() -> Trace {
 }
 
 async fn run_runtime(plan_response: String, remove_selected_fact_after_plan: bool) -> RuntimeRun {
+    run_runtime_with_think_responses(plan_response, remove_selected_fact_after_plan, None).await
+}
+
+async fn run_runtime_with_think_responses(
+    plan_response: String,
+    remove_selected_fact_after_plan: bool,
+    think_responses: Option<Vec<String>>,
+) -> RuntimeRun {
     let store = Arc::new(Store::default());
     let mut story_ctx = StoryContext::new();
     let pack = knowledge_pack();
@@ -231,10 +239,11 @@ async fn run_runtime(plan_response: String, remove_selected_fact_after_plan: boo
         .and_then(|value| value["character_think_requests"].as_array().map(Vec::len))
         .unwrap_or_default();
     let mut responses = VecDeque::from(["activation-key".to_owned(), plan_response]);
-    responses.extend(
+    responses.extend(think_responses.unwrap_or_else(|| {
         (0..think_request_count)
-            .map(|index| json!({"decision": format!("decision-{index}"), "suggested_utterance": null}).to_string()),
-    );
+            .map(|index| json!({"decision": format!("decision-{index}"), "suggested_utterance": null}).to_string())
+            .collect()
+    }));
     responses.push_back("Generated story.".to_owned());
     let provider = ScriptedProvider {
         calls: AtomicUsize::new(0),
@@ -402,11 +411,12 @@ fn effective_roles_preserve_generation_order_and_append_unique_think_targets() {
 }
 
 #[tokio::test]
-async fn runtime_skips_retrieval_for_empty_plan_selection() {
+async fn runtime_skips_role_retrieval_and_think_when_plan_selects_no_roles() {
     let run = run_runtime(plan_response(&[], &[]), false).await;
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 0);
+    assert_eq!(stage_count(&run.stages, "think"), 0);
     assert_eq!(run.requests.len(), 3);
     assert_plan_prompt_contract(&run.requests);
     let generate_prompt = request_text(&run.requests[2]);
@@ -457,26 +467,36 @@ async fn runtime_delivers_retrieved_knowledge_to_generate() {
 }
 
 #[tokio::test]
-async fn runtime_runs_one_retrieval_for_generation_roles_only() {
-    let run = run_runtime(plan_response_with_roles(&[], &[], &["bai_suzhen", "xiaoqing"], &[]), false).await;
+async fn runtime_retrieves_generation_only_role_without_think() {
+    let run = run_runtime(plan_response_with_roles(&[], &[], &["bai_suzhen"], &[]), false).await;
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
+    assert_eq!(stage_count(&run.stages, "think"), 0);
     assert_eq!(run.requests.len(), 3);
+    let generate_prompt = request_text(&run.requests[2]);
+    assert!(generate_prompt.contains("# Relevant Roles"));
+    assert!(generate_prompt.contains("role_id: \"bai_suzhen\""));
+    assert!(!generate_prompt.contains("# Character Decisions"));
 }
 
 #[tokio::test]
-async fn runtime_runs_one_retrieval_for_think_roles_only() {
+async fn runtime_runs_one_character_think_and_delivers_decision_to_generate() {
     let run = run_runtime(plan_response_with_roles(&[], &[], &[], &["bai_suzhen"]), false).await;
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
     assert_eq!(stage_count(&run.stages, "think"), 1);
     assert_eq!(run.requests.len(), 4);
+    let generate_prompt = request_text(&run.requests[3]);
+    assert!(generate_prompt.contains("# Relevant Roles"));
+    assert!(generate_prompt.contains("# Character Decisions"));
+    assert!(generate_prompt.contains("role_id: \"bai_suzhen\""));
+    assert!(generate_prompt.contains("decision: \"decision-0\""));
 }
 
 #[tokio::test]
-async fn runtime_resolves_cross_list_duplicate_role_once_in_one_retrieval() {
+async fn runtime_stable_union_resolves_cross_list_role_once() {
     let run = run_runtime(
         plan_response_with_roles(
             &[RETRIEVED_FACT_ID],
@@ -492,6 +512,72 @@ async fn runtime_resolves_cross_list_duplicate_role_once_in_one_retrieval() {
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
     assert_eq!(stage_count(&run.stages, "think"), 1);
     assert_eq!(run.requests.len(), 5);
+    let generate_prompt = request_text(&run.requests[4]);
+    let relevant_roles = generate_prompt
+        .split("# Relevant Roles")
+        .nth(1)
+        .expect("roles section")
+        .split("# Character Decisions")
+        .next()
+        .expect("roles section body");
+    assert_eq!(relevant_roles.matches("role_id: \"bai_suzhen\"").count(), 1);
+    assert_eq!(relevant_roles.matches("role_id: \"xiaoqing\"").count(), 1);
+}
+
+#[tokio::test]
+async fn runtime_preserves_multi_role_think_request_order() {
+    let run = run_runtime(plan_response_with_roles(&[], &[], &[], &["xiaoqing", "bai_suzhen"]), false).await;
+
+    assert!(run.result.is_ok());
+    assert_eq!(stage_count(&run.stages, "think"), 1);
+    assert_eq!(run.requests.len(), 5);
+    let generate_prompt = request_text(&run.requests[4]);
+    let decisions = generate_prompt
+        .split("# Character Decisions")
+        .nth(1)
+        .expect("decisions section");
+    let xiaoqing = decisions.find("role_id: \"xiaoqing\"").expect("xiaoqing decision");
+    let bai_suzhen = decisions.find("role_id: \"bai_suzhen\"").expect("bai suzhen decision");
+    let first_decision = decisions.find("decision: \"decision-0\"").expect("first decision");
+    let second_decision = decisions.find("decision: \"decision-1\"").expect("second decision");
+
+    assert!(xiaoqing < bai_suzhen);
+    assert!(first_decision < second_decision);
+}
+
+#[tokio::test]
+async fn runtime_fails_before_generate_when_one_character_think_fails() {
+    let valid = json!({"decision": "valid", "suggested_utterance": null}).to_string();
+    let run = run_runtime_with_think_responses(
+        plan_response_with_roles(&[], &[], &[], &["bai_suzhen", "xiaoqing"]),
+        false,
+        Some(vec![valid, "not json".to_owned()]),
+    )
+    .await;
+
+    assert!(matches!(
+        run.result,
+        Err(PipelineError::InvalidOutput {
+            stage: PipelineStage::Think,
+            code: "think_output_invalid_json",
+            ..
+        })
+    ));
+    assert_eq!(stage_count(&run.stages, "think"), 1);
+    assert_eq!(stage_count(&run.stages, "generate"), 0);
+    assert_eq!(run.requests.len(), 4);
+}
+
+#[tokio::test]
+async fn runtime_never_places_character_decisions_in_commit() {
+    let run = run_runtime(plan_response_with_roles(&[], &[], &[], &["bai_suzhen"]), false).await;
+
+    let commit = run.result.expect("turn succeeds");
+    let serialized = serde_json::to_string(&commit).expect("commit serializes");
+
+    assert!(!serialized.contains("character_decisions"));
+    assert!(!serialized.contains("decision-0"));
+    assert_eq!(commit.turn.turn_segment.text(), "Generated story.");
 }
 
 #[tokio::test]

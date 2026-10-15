@@ -21,7 +21,7 @@ pub struct ThinkInput<'a> {
     pub directions: &'a [NarrativeDirection],
 }
 
-#[derive(Serialize)]
+#[derive(Default, Serialize)]
 pub struct ThinkOutput {
     pub decisions: Vec<CharacterDecision>,
 }

@@ -2,7 +2,7 @@
 
 > **Date**: 2026-10-14
 > **Author**: GPT-5.6
-> **Status**: Draft
+> **Status**: Accepted
 > **Prior doc**: [Pipeline 框架与编排](./2026-10-13-pipeline-framework-design-opus.md)
 
 ---

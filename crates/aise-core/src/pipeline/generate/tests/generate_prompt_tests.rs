@@ -1,14 +1,18 @@
 use super::*;
 use crate::core::tests::store_with_default_pack;
 use crate::core::{
-    ActivatedKnowledge, ActivationRule, BoundedText, EntryOrigin, FactBody, FactEntry, FactId, IdempotencyKey,
-    NarrativeDirection, NarrativeNodeId, PlayerContribution, RetrievalHint, RumorBody, RumorEntry, RumorId,
-    StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus, WorldChange,
+    ActivatedKnowledge, ActivationRule, BoundedText, CharacterDecision, CharacterProfile, EntryOrigin, FactBody,
+    FactEntry, FactId, IdempotencyKey, NarrativeDirection, NarrativeNodeId, PlayerContribution, ResolvedRole,
+    RetrievalHint, RoleId, RumorBody, RumorEntry, RumorId, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment,
+    TurnStatus, WorldChange,
 };
+use crate::pipeline::GenerateConfig;
+use crate::pipeline::generate::generate_roles::project_role_context;
 use crate::prompt::PromptConfig;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
 };
+use std::collections::BTreeMap;
 use std::path::Path;
 
 const BUNDLED_PROMPT_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/prompts");
@@ -53,6 +57,8 @@ struct GenerateFixture {
     knowledge: ActivatedKnowledge,
     retrieved_facts: Vec<FactEntry>,
     retrieved_rumors: Vec<RumorEntry>,
+    roles: Vec<ResolvedRole>,
+    character_decisions: Vec<CharacterDecision>,
 }
 
 impl GenerateFixture {
@@ -65,6 +71,8 @@ impl GenerateFixture {
             knowledge: &self.knowledge,
             retrieved_facts: &self.retrieved_facts,
             retrieved_rumors: &self.retrieved_rumors,
+            roles: &self.roles,
+            character_decisions: &self.character_decisions,
         }
     }
 }
@@ -81,11 +89,43 @@ fn generate_fixture(goal: &str, processed: &str) -> GenerateFixture {
         knowledge: ActivatedKnowledge::default(),
         retrieved_facts: Vec::new(),
         retrieved_rumors: Vec::new(),
+        roles: Vec::new(),
+        character_decisions: Vec::new(),
     }
 }
 
 fn text(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", usize::MAX).expect("test text should fit")
+}
+
+fn role(role_id: &str, name: &str) -> ResolvedRole {
+    ResolvedRole {
+        role_id: RoleId::try_new(role_id).expect("valid role ID"),
+        name: text(name),
+        aliases: Vec::new(),
+        backstory: text(&format!("{name} private backstory")),
+        retrieval_hint: RetrievalHint::try_new(name).expect("valid retrieval hint"),
+        profile: CharacterProfile {
+            appearance: None,
+            personality: Some(text("measured")),
+            speaking_style: None,
+            dialogue_examples: Vec::new(),
+        },
+        seed_memories: BTreeMap::new(),
+    }
+}
+
+fn decision(role_id: &str, value: &str) -> CharacterDecision {
+    CharacterDecision {
+        role_id: RoleId::try_new(role_id).expect("valid role ID"),
+        decision: text(value),
+        suggested_utterance: Some(text(&format!("Say {value}"))),
+    }
+}
+
+fn role_context(fixture: &GenerateFixture) -> GenerateRoleContext {
+    project_role_context(&fixture.roles, &fixture.character_decisions, &GenerateConfig::default())
+        .expect("role context projects")
 }
 
 fn knowledge() -> ActivatedKnowledge {
@@ -164,17 +204,45 @@ fn var<'a>(vars: &'a PromptVars, name: &str) -> &'a str {
 async fn runtime_context(story_ctx: &StoryContext, fixture: &GenerateFixture) -> String {
     let store = store_with_default_pack().await;
     let trace = test_trace();
-    let rendered = generate_story(&bundled_prompt(), story_ctx, &fixture.input(), &store, trace.root())
-        .await
-        .expect("render");
+    let role_context = role_context(fixture);
+    let rendered = generate_story(
+        &bundled_prompt(),
+        story_ctx,
+        &fixture.input(),
+        &role_context,
+        &store,
+        trace.root(),
+    )
+    .await
+    .expect("render");
     rendered.messages()[1].content.replace("\r\n", "\n")
+}
+
+async fn runtime_messages(story_ctx: &StoryContext, fixture: &GenerateFixture) -> Vec<String> {
+    let store = store_with_default_pack().await;
+    let trace = test_trace();
+    let role_context = role_context(fixture);
+    generate_story(
+        &bundled_prompt(),
+        story_ctx,
+        &fixture.input(),
+        &role_context,
+        &store,
+        trace.root(),
+    )
+    .await
+    .expect("render")
+    .into_messages()
+    .into_iter()
+    .map(|message| message.content.replace("\r\n", "\n"))
+    .collect()
 }
 
 #[test]
 fn vars_for_new_story_carry_opening_and_empty_summary() {
     let story_ctx = StoryContext::new();
     let fixture = generate_fixture("Goal.", "I wave.");
-    let vars = generate_vars(&story_ctx, &fixture.input(), "Rain falls.".to_owned());
+    let vars = generate_vars(&story_ctx, &fixture.input(), &role_context(&fixture), "Rain falls.".to_owned());
 
     assert_eq!(var(&vars, "story_opening"), "Rain falls.");
     assert_eq!(var(&vars, "story_summary"), "");
@@ -190,7 +258,7 @@ fn vars_with_summary_and_recent_story_carry_both() {
     story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
     story_ctx.recent_turns.push_back(accepted_turn(3, "The hall is dark."));
     let fixture = generate_fixture("Goal.", "I wave.");
-    let vars = generate_vars(&story_ctx, &fixture.input(), String::new());
+    let vars = generate_vars(&story_ctx, &fixture.input(), &role_context(&fixture), String::new());
 
     assert_eq!(var(&vars, "story_summary"), "Earlier events.");
     assert_eq!(var(&vars, "story_opening"), "");
@@ -287,7 +355,7 @@ async fn story_constraints_precede_goal_and_contribution() {
 #[test]
 fn vars_without_narrative_or_knowledge_carry_empty_values() {
     let fixture = generate_fixture("Goal.", "I wave.");
-    let vars = generate_vars(&StoryContext::new(), &fixture.input(), String::new());
+    let vars = generate_vars(&StoryContext::new(), &fixture.input(), &role_context(&fixture), String::new());
 
     assert_eq!(var(&vars, "known_facts"), "");
     assert_eq!(var(&vars, "rumors"), "");
@@ -301,7 +369,7 @@ fn vars_carry_knowledge_content_only() {
         knowledge: knowledge(),
         ..generate_fixture("Goal.", "I wave.")
     };
-    let vars = generate_vars(&StoryContext::new(), &fixture.input(), String::new());
+    let vars = generate_vars(&StoryContext::new(), &fixture.input(), &role_context(&fixture), String::new());
 
     assert_eq!(var(&vars, "known_facts"), "- The forest keeper is named Ash.");
     assert_eq!(var(&vars, "rumors"), "- A ghost haunts the old mill.");
@@ -315,7 +383,7 @@ fn retrieved_knowledge_follows_activated_knowledge() {
         retrieved_rumors: vec![retrieved_rumor()],
         ..generate_fixture("Goal.", "I wave.")
     };
-    let vars = generate_vars(&StoryContext::new(), &fixture.input(), String::new());
+    let vars = generate_vars(&StoryContext::new(), &fixture.input(), &role_context(&fixture), String::new());
 
     assert_eq!(
         var(&vars, "known_facts"),
@@ -334,7 +402,7 @@ fn retrieved_content_remains_in_its_knowledge_section() {
         retrieved_rumors: vec![retrieved_rumor()],
         ..generate_fixture("Goal.", "I wave.")
     };
-    let vars = generate_vars(&StoryContext::new(), &fixture.input(), String::new());
+    let vars = generate_vars(&StoryContext::new(), &fixture.input(), &role_context(&fixture), String::new());
 
     assert!(var(&vars, "known_facts").contains("The river runs north."));
     assert!(!var(&vars, "known_facts").contains("chapel bell"));
@@ -361,5 +429,59 @@ async fn knowledge_and_direction_follow_story_and_precede_constraints_goal_and_c
     assert_eq!(
         content,
         "# Story Summary\n\nEarlier events.\n\n# Known Facts\n\n- The forest keeper is named Ash.\n\n# Rumors\n\n- A ghost haunts the old mill.\n\n# Narrative Direction\n\n- The traveler meets the forest keeper.\n\n# Story Constraints\n\n- The ritual truth is revealed.\n\n# Immediate Story Goal\n\nGoal.\n\n# Pending Player Contribution\n\nI wave."
+    );
+}
+
+#[tokio::test]
+async fn generate_prompt_contains_roles_and_ordered_decisions() {
+    let fixture = GenerateFixture {
+        roles: vec![role("first", "First"), role("second", "Second")],
+        character_decisions: vec![decision("second", "Observe."), decision("first", "Answer.")],
+        ..generate_fixture("Goal.", "I wave.")
+    };
+
+    let content = runtime_context(&StoryContext::new(), &fixture).await;
+    let roles = content.find("# Relevant Roles").expect("roles section");
+    let decisions = content.find("# Character Decisions").expect("decisions section");
+    let direction = content.find("# Immediate Story Goal").expect("goal section");
+    let second_decision = content.find("decision: \"Observe.\"").expect("second decision");
+    let first_decision = content.find("decision: \"Answer.\"").expect("first decision");
+
+    assert!(roles < decisions);
+    assert!(decisions < direction);
+    assert!(second_decision < first_decision);
+    assert!(content.contains("role_id: \"first\""));
+    assert!(content.contains("role_id: \"second\""));
+}
+
+#[tokio::test]
+async fn generate_prompt_marks_decisions_as_viewpoint_not_fact() {
+    let messages = runtime_messages(
+        &StoryContext::new(),
+        &GenerateFixture {
+            roles: vec![role("first", "First")],
+            character_decisions: vec![decision("first", "Wait.")],
+            ..generate_fixture("Goal.", "I wave.")
+        },
+    )
+    .await;
+    let instructions = format!("{}\n{}", messages[0], messages[2]);
+
+    assert!(instructions.contains("current viewpoint and immediate intent, not a world fact"));
+    assert!(instructions.contains("optional guidance, not mandatory verbatim dialogue"));
+    assert!(instructions.contains("private backstory or seed memory is not automatically known by another role"));
+    assert!(instructions.contains("unless a visible causal event"));
+}
+
+#[tokio::test]
+async fn generate_prompt_preserves_player_agency() {
+    let messages = runtime_messages(&StoryContext::new(), &generate_fixture("Goal.", "I wave.")).await;
+    let instructions = format!("{}\n{}", messages[0], messages[2]);
+
+    assert!(instructions.contains("player role may appear in Relevant Roles but never in Character Decisions"));
+    assert!(instructions.contains("Do not make an unprovided consequential choice for the player"));
+    assert!(
+        instructions
+            .contains("never override established Known Facts, the Pending Player Contribution, or Story Constraints")
     );
 }

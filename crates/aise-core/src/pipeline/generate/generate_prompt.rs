@@ -2,6 +2,7 @@ use crate::core::StoryContext;
 use crate::persistence::Store;
 use crate::pipeline::common::{PipelineError, PipelineStage, pipeline_prompt};
 use crate::pipeline::generate::GenerateInput;
+use crate::pipeline::generate::generate_roles::GenerateRoleContext;
 use crate::prompt::{Prompt, PromptSpec, PromptVars, RenderedPrompt};
 use crate::trace::Observation;
 use serde_json::Value;
@@ -12,6 +13,8 @@ const STORY_OPENING_VAR: &str = "story_opening";
 const RECENT_STORY_VAR: &str = "recent_story";
 const KNOWN_FACTS_VAR: &str = "known_facts";
 const RUMORS_VAR: &str = "rumors";
+const RELEVANT_ROLES_VAR: &str = "relevant_roles";
+const CHARACTER_DECISIONS_VAR: &str = "character_decisions";
 const NARRATIVE_DIRECTIONS_VAR: &str = "narrative_directions";
 const STORY_CONSTRAINTS_VAR: &str = "story_constraints";
 const STORY_GOAL_VAR: &str = "story_goal";
@@ -21,17 +24,23 @@ pub async fn generate_story(
     prompt: &Prompt,
     story_ctx: &StoryContext,
     input: &GenerateInput<'_>,
+    role_context: &GenerateRoleContext,
     store: &Store,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
     let story_opening = pipeline_prompt::load_story_opening(PipelineStage::Generate, story_ctx, store).await?;
-    let vars = generate_vars(story_ctx, input, story_opening);
+    let vars = generate_vars(story_ctx, input, role_context, story_opening);
     prompt
         .render(PromptSpec::new(GENERATE_STORY_PROMPT_ID, vars), observation)
         .map_err(PipelineError::prompt(PipelineStage::Generate))
 }
 
-fn generate_vars(story_ctx: &StoryContext, input: &GenerateInput<'_>, story_opening: String) -> PromptVars {
+fn generate_vars(
+    story_ctx: &StoryContext,
+    input: &GenerateInput<'_>,
+    role_context: &GenerateRoleContext,
+    story_opening: String,
+) -> PromptVars {
     PromptVars::from([
         (
             STORY_SUMMARY_VAR.to_owned(),
@@ -55,6 +64,11 @@ fn generate_vars(story_ctx: &StoryContext, input: &GenerateInput<'_>, story_open
                 &input.knowledge.rumors,
                 input.retrieved_rumors,
             )),
+        ),
+        (RELEVANT_ROLES_VAR.to_owned(), Value::String(role_context.roles.clone())),
+        (
+            CHARACTER_DECISIONS_VAR.to_owned(),
+            Value::String(role_context.decisions.clone()),
         ),
         (
             NARRATIVE_DIRECTIONS_VAR.to_owned(),

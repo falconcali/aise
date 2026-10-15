@@ -14,7 +14,7 @@ use crate::pipeline::plan::{PlanInput, PlanOutput, PlanPipeline};
 use crate::pipeline::repair::{RepairInput, RepairPipeline};
 use crate::pipeline::retrieval::{RetrievalInput, RetrievalOutput, RetrievalPipeline};
 use crate::pipeline::summary::{SummaryInput, SummaryPipeline};
-use crate::pipeline::think::{ThinkInput, ThinkPipeline};
+use crate::pipeline::think::{ThinkInput, ThinkOutput, ThinkPipeline};
 use crate::pipeline::validate::{ValidateInput, ValidateOutput, ValidatePipeline, ValidationDecision};
 use crate::prompt::Prompt;
 use crate::trace::Trace;
@@ -61,7 +61,12 @@ impl Runtime {
                 Arc::clone(&store),
                 pipeline_config.think,
             ),
-            generate: GeneratePipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), Arc::clone(&store)),
+            generate: GeneratePipeline::new(
+                Arc::clone(&gateway),
+                Arc::clone(&prompt),
+                Arc::clone(&store),
+                pipeline_config.generate,
+            ),
             validate: ValidatePipeline { score_configs: vec![] },
             repair: RepairPipeline,
             extract: ExtractPipeline::new(Arc::clone(&store)),
@@ -116,7 +121,7 @@ impl Runtime {
             RetrievalOutput::default()
         };
 
-        if plan_output.requires_character_thinking() {
+        let think_output = if plan_output.requires_character_thinking() {
             let think_input = ThinkInput {
                 requests: &plan_output.character_think_requests,
                 resolved_roles: &retrieval_output.roles,
@@ -124,8 +129,10 @@ impl Runtime {
                 directions: &baseline_output.narrative.directions,
             };
 
-            let _think_output = pipeline_runner.run(&self.think, think_input, story_ctx).await?;
-        }
+            pipeline_runner.run(&self.think, think_input, story_ctx).await?
+        } else {
+            ThinkOutput::default()
+        };
 
         let generate_input = GenerateInput {
             story_goal: &plan_output.story_goal,
@@ -135,6 +142,8 @@ impl Runtime {
             knowledge: &baseline_output.knowledge,
             retrieved_facts: &retrieval_output.facts,
             retrieved_rumors: &retrieval_output.rumors,
+            roles: &retrieval_output.roles,
+            character_decisions: &think_output.decisions,
         };
 
         let generate_output = pipeline_runner.run(&self.generate, generate_input, story_ctx).await?;

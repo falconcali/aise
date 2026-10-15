@@ -1,11 +1,14 @@
 use crate::core::{
-    ActivatedKnowledge, BoundedText, FactEntry, NarrativeDirection, PlayerContribution, RumorEntry, StoryContext,
-    TurnControl,
+    ActivatedKnowledge, BoundedText, CharacterDecision, FactEntry, NarrativeDirection, PlayerContribution,
+    ResolvedRole, RumorEntry, StoryContext, TurnControl,
 };
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
-use crate::pipeline::generate::{generate_llm, generate_prompt, generate_trace};
+use crate::pipeline::generate::{
+    GenerateConfig, generate_llm, generate_prompt, generate_roles,
+    generate_trace::{self, GenerateTraceMetrics},
+};
 use crate::prompt::Prompt;
 use crate::trace::Observation;
 use serde::Serialize;
@@ -20,6 +23,8 @@ pub struct GenerateInput<'a> {
     pub knowledge: &'a ActivatedKnowledge,
     pub retrieved_facts: &'a [FactEntry],
     pub retrieved_rumors: &'a [RumorEntry],
+    pub roles: &'a [ResolvedRole],
+    pub character_decisions: &'a [CharacterDecision],
 }
 
 #[derive(Serialize)]
@@ -31,11 +36,17 @@ pub struct GeneratePipeline {
     gateway: Arc<LlmGateway>,
     prompt: Arc<Prompt>,
     store: Arc<Store>,
+    config: GenerateConfig,
 }
 
 impl GeneratePipeline {
-    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, store: Arc<Store>) -> Self {
-        Self { gateway, prompt, store }
+    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, store: Arc<Store>, config: GenerateConfig) -> Self {
+        Self {
+            gateway,
+            prompt,
+            store,
+            config,
+        }
     }
 
     async fn generate_story(
@@ -44,10 +55,21 @@ impl GeneratePipeline {
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,
+        metrics: &mut GenerateTraceMetrics,
     ) -> Result<String, PipelineError> {
-        let rendered_prompt =
-            generate_prompt::generate_story(self.prompt.as_ref(), story_ctx, input, self.store.as_ref(), observation)
-                .await?;
+        generate_roles::validate_player_decisions(input.character_decisions, &story_ctx.player)?;
+        let role_context = generate_roles::project_role_context(input.roles, input.character_decisions, &self.config)?;
+        metrics.role_context_bytes = role_context.roles.len();
+        metrics.decision_context_bytes = role_context.decisions.len();
+        let rendered_prompt = generate_prompt::generate_story(
+            self.prompt.as_ref(),
+            story_ctx,
+            input,
+            &role_context,
+            self.store.as_ref(),
+            observation,
+        )
+        .await?;
 
         generate_llm::generate_story(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
             .await
@@ -71,8 +93,15 @@ impl<'a> Pipeline<GenerateInput<'a>> for GeneratePipeline {
     ) -> Result<Self::Output, PipelineError> {
         let generate_observation =
             generate_trace::begin_story_generation(observation, input.story_goal, &input.player_contribution.processed);
-        let result = self.generate_story(&input, story_ctx, control, &generate_observation).await;
-        generate_trace::finish_story_generation(generate_observation, &result);
+        let mut metrics = GenerateTraceMetrics {
+            roles: input.roles.len(),
+            character_decisions: input.character_decisions.len(),
+            ..GenerateTraceMetrics::default()
+        };
+        let result = self
+            .generate_story(&input, story_ctx, control, &generate_observation, &mut metrics)
+            .await;
+        generate_trace::finish_story_generation(generate_observation, &result, &metrics);
         result.map(|result| GenerateOutput { result })
     }
 }
