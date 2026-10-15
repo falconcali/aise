@@ -129,7 +129,7 @@ The exact output protocol is:
 
 ```json
 {
-  "story_goal": "non-empty string",
+  "story_goal": "one concise sentence within max_story_goal_bytes",
   "facts_to_retrieve": ["fact-id"],
   "rumors_to_retrieve": ["rumor-id"]
 }
@@ -205,6 +205,7 @@ Add Prompt variables:
 ```text
 retrievable_facts
 retrievable_rumors
+max_story_goal_bytes
 ```
 
 Render each candidate as:
@@ -234,6 +235,7 @@ An empty candidate kind omits its entire section.
 The FTI prompt MUST require the exact JSON protocol from §3.2 and MUST state:
 
 - Select only IDs present in the corresponding candidate section.
+- Set `story_goal` to one concise sentence containing only the immediate narrative transition, with no explanation, rationale, scene outline, or prose, and keep it within `max_story_goal_bytes` UTF-8 bytes.
 - Return an empty array when no additional knowledge is needed.
 - Do not return retrieval hints, reasons, prose, Markdown, or extra fields.
 - Already known Facts/Rumors must not be requested again.
@@ -345,7 +347,7 @@ crates/aise-core/assets/prompts/
 - Story Pack load failures map to `PipelineError::Persistence { stage: Plan, .. }`.
 - Prompt rendering failures map to `PipelineError::Prompt { stage: Plan, .. }`.
 - Gateway failures map to `PipelineError::Llm { stage: Plan, .. }`.
-- Output violations use exactly one code from §3.2.
+- Output violations use exactly one code from §3.2; `plan_story_goal_too_long` reports the actual and maximum byte counts.
 - `plan_trace::finish_plan` maps output violations to `code = <PipelineError code>`, `failure_kind = "invalid_output"`, and `stage = "plan"`.
 - Error log messages MUST NOT interpolate IDs.
 

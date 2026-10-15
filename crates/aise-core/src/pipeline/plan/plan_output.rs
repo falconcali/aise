@@ -50,7 +50,11 @@ pub(super) fn parse_plan_output(
         return Err(PipelineError::invalid_output(
             PipelineStage::Plan,
             "plan_story_goal_too_long",
-            "story goal exceeds the configured byte limit",
+            format!(
+                "story goal size {} exceeds maximum {}",
+                output.story_goal.len(),
+                config.max_story_goal_bytes
+            ),
         ));
     }
     validate_fact_ids(&output.facts_to_retrieve, candidates)?;

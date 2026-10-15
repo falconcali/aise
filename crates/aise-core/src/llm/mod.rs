@@ -8,6 +8,7 @@ mod provider;
 
 pub use completion::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmCompletionResult, LlmCompletionSpec,
+    LlmReasoningEffort,
 };
 pub use config::{LlmConfig, LlmProviderType};
 pub use error::LlmError;

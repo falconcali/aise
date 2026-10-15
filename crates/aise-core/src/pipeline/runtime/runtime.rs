@@ -126,7 +126,8 @@ impl Runtime {
                 requests: &plan_output.character_think_requests,
                 resolved_roles: &retrieval_output.roles,
                 player_contribution: &baseline_output.player_contribution,
-                directions: &baseline_output.narrative.directions,
+                activated_rumors: &baseline_output.knowledge.rumors,
+                retrieved_rumors: &retrieval_output.rumors,
             };
 
             pipeline_runner.run(&self.think, think_input, story_ctx).await?

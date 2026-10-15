@@ -1,6 +1,7 @@
 use crate::core::{ChatMessage, ChatMessageRole};
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
+    LlmReasoningEffort,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -16,6 +17,8 @@ struct OpenAiChatRequest<'a> {
     model: &'a str,
     messages: Vec<OpenAiChatMessage<'a>>,
     temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<LlmReasoningEffort>,
 }
 
 #[derive(Serialize)]
@@ -91,6 +94,7 @@ fn to_chat_request(request: &LlmCompletionRequest) -> OpenAiChatRequest<'_> {
         model: &request.model,
         messages: request.messages.iter().map(to_chat_message).collect(),
         temperature: request.temperature,
+        reasoning_effort: request.reasoning_effort,
     }
 }
 
@@ -141,3 +145,7 @@ fn map_transport_error(error: reqwest::Error) -> LlmError {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/openai_compat_tests.rs"]
+mod tests;

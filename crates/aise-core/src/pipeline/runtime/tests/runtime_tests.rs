@@ -520,6 +520,25 @@ async fn runtime_runs_one_character_think_and_delivers_decision_to_generate() {
 }
 
 #[tokio::test]
+async fn runtime_delivers_relevant_rumors_but_not_narrative_direction_to_character_think() {
+    let run = run_runtime(
+        plan_response_with_roles(&[], &[RETRIEVED_RUMOR_ID], &[], &["bai_suzhen"]),
+        false,
+    )
+    .await;
+
+    assert!(run.result.is_ok());
+    assert_eq!(run.requests.len(), 4);
+    let think_prompt = request_text(&run.requests[2]);
+    assert!(think_prompt.contains("## Rumors\n\n- \"Activated rumor body.\"\n- \"Retrieved rumor body.\""));
+    assert!(!think_prompt.contains(ACTIVATED_RUMOR_ID));
+    assert!(!think_prompt.contains(RETRIEVED_RUMOR_ID));
+    assert!(!think_prompt.contains("activated rumor hint"));
+    assert!(!think_prompt.contains("retrieved rumor hint"));
+    assert!(!think_prompt.contains("Narrative Direction"));
+}
+
+#[tokio::test]
 async fn runtime_stable_union_resolves_cross_list_role_once() {
     let run = run_runtime(
         plan_response_with_roles(

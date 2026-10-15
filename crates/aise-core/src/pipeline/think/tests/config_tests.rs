@@ -10,6 +10,7 @@ fn defaults_match_character_think_contract() {
     assert_eq!(config.max_backstory_bytes, 4096);
     assert_eq!(config.max_seed_memories, 8);
     assert_eq!(config.max_seed_memory_bytes, 8192);
+    assert_eq!(config.max_rumor_bytes, 8192);
     assert_eq!(config.max_decision_bytes, 512);
     assert_eq!(config.max_suggested_utterance_bytes, 512);
     assert_eq!(config.max_total_output_bytes, 1024);
@@ -23,6 +24,7 @@ fn zero_concurrency_is_rejected_during_deserialization() {
         max_backstory_bytes = 4096
         max_seed_memories = 8
         max_seed_memory_bytes = 8192
+        max_rumor_bytes = 8192
         max_decision_bytes = 512
         max_suggested_utterance_bytes = 512
         max_total_output_bytes = 1024

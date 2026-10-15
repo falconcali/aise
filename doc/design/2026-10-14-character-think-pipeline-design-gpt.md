@@ -105,7 +105,8 @@ flowchart LR
     CTX["Opening/Summary + Recent Story + Player Input + Narrative Direction"] --> P
     P -->|roles for generation + think requests| U["Runtime stable union"]
     U -->|effective RoleIds| R["Retrieval"]
-    R -->|resolved AI roles| T["Think"]
+    B["Baseline activated rumors"] --> T["Think"]
+    R -->|resolved AI roles + retrieved rumors| T
     R -->|resolved AI roles| G["Generate"]
     P -->|player role context| G
     T -->|character decisions| G
@@ -194,7 +195,13 @@ Retrieval 只按 AI RoleId 从当前 Story Pack 和 Cast 解析 `ResolvedRole`�
 - 有效 profile；
 - backstory；
 - 按稳定 MemoryId 顺序取出的有界 seed memory 前缀；
-- Story Continuity、Player Contribution 和 Narrative Direction 中该角色可用的信息。
+- Story Continuity 和 Player Contribution 中该角色可感知的信息；
+- Baseline 激活与 Retrieval 选中的本轮相关 Rumor；
+- 只引导注意问题、不指定期望行动或结论的 Thinking Focus。
+
+Rumor 表示所有角色都知道正在流传的公共说法，但不代表世界事实，也不要求目标角色相信。所有 Think 目标共享同一组本轮相关 Rumor；Prompt 只投影正文，不投影 RumorId、retrieval hint、origin 或 activation，并使用独立字节预算截取稳定完整条目前缀。Fact 不进入角色认知上下文。
+
+全局 Narrative Direction 是作者侧剧情目标，只提供给 Planner 和 Generate，不进入 Character Think。仅靠 Prompt 声明“可以偏离”无法消除模型对剧情目标的锚定，因此 Think 必须在输入契约中完全看不到它。未来若需要导演对单一角色施加内在推动，应增加按 RoleId 定向的 Character Impulse，而不能复用全局 Narrative Direction。
 
 本阶段不设计角色 memory 激活。Think 只使用目标 AI 角色自己的 seed memories，并按条目数和总字节预算截断。
 

@@ -475,6 +475,16 @@ async fn knowledge_and_direction_follow_story_and_precede_constraints_goal_and_c
 }
 
 #[tokio::test]
+async fn instructions_define_rumors_as_public_but_unconfirmed_claims() {
+    let messages = runtime_messages(&StoryContext::new(), &generate_fixture("Goal.", "I wave.")).await;
+
+    assert!(messages[0].contains("public claims every character knows are circulating"));
+    assert!(messages[2].contains("public claims every character knows are circulating"));
+    assert!(!messages[0].contains("characters may have heard"));
+    assert!(!messages[2].contains("characters may have heard"));
+}
+
+#[tokio::test]
 async fn generate_prompt_contains_roles_and_ordered_decisions() {
     let fixture = GenerateFixture {
         roles: vec![role("first", "First"), role("second", "Second")],

@@ -181,7 +181,7 @@ PlanOutput
 
 `max_retrieval_candidates_per_kind` 同时约束 Fact 候选和 Rumor 候选，因此 Plan Prompt 最多包含两倍该值的知识索引项。默认值为 `32`。配置为 `0` 时两个候选列表均为空；若存在合格候选，按正常截断规则记录 warning 与 trace。
 
-`max_story_goal_bytes` 约束结构化 LLM 输出中的 `story_goal`，默认值为 `512`，用于把原始字符串转换为 `BoundedText`；它不影响候选或 Retrieval 预算。
+`max_story_goal_bytes` 约束结构化 LLM 输出中的 `story_goal`，默认值为 `512`，用于把原始字符串转换为 `BoundedText`；同一动态上限必须进入 Plan FTI Prompt，要求模型只返回一句简洁的即时叙事转场，不得把解释、理由、场景提纲或正文塞入 `story_goal`。它不影响候选或 Retrieval 预算。
 
 ### 4. Prompt and LLM output contract
 
@@ -211,7 +211,7 @@ FTI 层把任务从“只返回故事目标文本”改为“返回一个严格 
 
 LLM 规则：
 
-1. `story_goal` 保持现有语义：描述下一段的单一、直接故事目标。
+1. `story_goal` 描述下一段的单一、直接故事目标，只包含一句简洁的即时叙事转场，并明确受 `max_story_goal_bytes` UTF-8 字节上限约束。
 2. 只选择为了规划目标后的生成阶段确实需要读取正文的候选。
 3. 已在 Known Facts/Rumors 中提供的知识不得再次请求。
 4. Fact ID 只能来自 Retrievable Facts，Rumor ID 只能来自 Retrievable Rumors。
@@ -225,7 +225,7 @@ LLM 规则：
 LLM 返回后依次执行：
 
 1. 严格解析唯一 JSON 对象，拒绝对象外文本、缺字段和未知字段。
-2. 按现有故事目标边界把 `story_goal` 转为 `BoundedText`。
+2. 校验 `story_goal` 原始 UTF-8 字节数并转为 `BoundedText`；超限错误同时报告实际字节数与配置上限。
 3. 把字符串 ID 转为 `FactId` / `RumorId`。
 4. 检查每个 ID 属于本次实际发送给 LLM 的同类候选集合。
 5. 检查同一列表中没有重复 ID。

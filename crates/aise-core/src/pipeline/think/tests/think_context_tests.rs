@@ -1,6 +1,8 @@
 use super::*;
 use crate::core::tests::snake_pack;
-use crate::core::{BoundedText, MemoryBody, MemoryId, ResolvedRole, RetrievalHint, RoleId};
+use crate::core::{
+    BoundedText, EntryOrigin, MemoryBody, MemoryId, ResolvedRole, RetrievalHint, RoleId, RumorBody, RumorEntry, RumorId,
+};
 use std::collections::BTreeMap;
 
 fn text(value: &str) -> BoundedText {
@@ -30,6 +32,18 @@ fn role(memories: &[(&str, &str, &str)]) -> ResolvedRole {
             .iter()
             .map(|(id, content, hint)| (MemoryId::try_new(*id).expect("valid memory id"), memory(content, hint)))
             .collect::<BTreeMap<_, _>>(),
+    }
+}
+
+fn rumor(id: &str, content: &str, hint: &str) -> RumorEntry {
+    RumorEntry {
+        id: RumorId::try_new(id).expect("valid rumor id"),
+        origin: EntryOrigin::Seed,
+        body: RumorBody {
+            content: text(content),
+            activation: Default::default(),
+            retrieval: RetrievalHint::try_new(hint).expect("valid retrieval hint"),
+        },
     }
 }
 
@@ -114,4 +128,43 @@ fn zero_memory_limits_render_empty_context() {
         )
         .is_empty()
     );
+}
+
+#[test]
+fn rumors_render_activated_then_retrieved_content_only() {
+    let activated = [rumor("rumor-a", "first", "hint-a")];
+    let retrieved = [rumor("rumor-b", "second", "hint-b")];
+
+    let rendered = rumors(&activated, &retrieved, &ThinkConfig::default());
+
+    assert_eq!(rendered, "- \"first\"\n- \"second\"");
+    assert!(!rendered.contains("rumor-a"));
+    assert!(!rendered.contains("hint-a"));
+}
+
+#[test]
+fn rumors_respect_byte_limit_without_partial_item() {
+    let activated = [rumor("rumor-a", "first", "hint-a")];
+    let retrieved = [rumor("rumor-b", "second", "hint-b")];
+    let first = rumors(&activated, &[], &ThinkConfig::default());
+    let config = ThinkConfig {
+        max_rumor_bytes: first.len(),
+        ..ThinkConfig::default()
+    };
+
+    let rendered = rumors(&activated, &retrieved, &config);
+
+    assert_eq!(rendered, first);
+    assert!(!rendered.contains("second"));
+}
+
+#[test]
+fn zero_rumor_budget_renders_empty_context() {
+    let activated = [rumor("rumor-a", "first", "hint-a")];
+    let config = ThinkConfig {
+        max_rumor_bytes: 0,
+        ..ThinkConfig::default()
+    };
+
+    assert!(rumors(&activated, &[], &config).is_empty());
 }

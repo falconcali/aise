@@ -11,7 +11,7 @@ const STORY_SUMMARY_VAR: &str = "story_summary";
 const STORY_OPENING_VAR: &str = "story_opening";
 const RECENT_STORY_VAR: &str = "recent_story";
 const PLAYER_CONTRIBUTION_VAR: &str = "player_contribution";
-const NARRATIVE_DIRECTIONS_VAR: &str = "narrative_directions";
+const RUMORS_VAR: &str = "rumors";
 const TARGET_ROLE_ID_VAR: &str = "target_role_id";
 const TARGET_NAME_VAR: &str = "target_name";
 const TARGET_ALIASES_VAR: &str = "target_aliases";
@@ -52,8 +52,12 @@ pub async fn character_decision(
             Value::String(spec.input.player_contribution.processed.clone()),
         ),
         (
-            NARRATIVE_DIRECTIONS_VAR.to_owned(),
-            Value::String(pipeline_prompt::narrative_directions(spec.input.directions)),
+            RUMORS_VAR.to_owned(),
+            Value::String(think_context::rumors(
+                spec.input.activated_rumors,
+                spec.input.retrieved_rumors,
+                spec.config,
+            )),
         ),
         (
             TARGET_ROLE_ID_VAR.to_owned(),

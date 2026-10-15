@@ -269,7 +269,7 @@ The exact JSON protocol is:
 
 ```json
 {
-  "story_goal": "non-empty string",
+  "story_goal": "one concise sentence within max_story_goal_bytes",
   "facts_to_retrieve": ["fact-id"],
   "rumors_to_retrieve": ["rumor-id"],
   "roles_for_generation": ["role-id"],
@@ -335,6 +335,7 @@ Pending Player Input
 
 The Plan CSI/FTI MUST state:
 
+- `story_goal` contains only one concise immediate narrative transition and stays within the configured UTF-8 byte limit.
 - Player Character is always passed directly to Generate and is never selectable.
 - The AI catalog contains every selectable non-player role.
 - Role relevance and presence are inferred from story text.

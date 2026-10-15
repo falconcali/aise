@@ -18,6 +18,7 @@ const ROLE_CATALOG_VAR: &str = "role_catalog";
 const NARRATIVE_DIRECTIONS_VAR: &str = "narrative_directions";
 const STORY_CONSTRAINTS_VAR: &str = "story_constraints";
 const PLAYER_INPUT_VAR: &str = "player_input";
+const MAX_STORY_GOAL_BYTES_VAR: &str = "max_story_goal_bytes";
 
 pub(super) struct PlanPromptContext<'a, 'b, 'c> {
     pub story_ctx: &'a StoryContext,
@@ -47,6 +48,7 @@ pub(super) fn process_plan(
         context.candidates,
         player_role,
         role_catalog,
+        context.config.max_story_goal_bytes,
     )?;
     prompt
         .render(PromptSpec::new(PROCESS_STORY_PLAN_PROMPT_ID, vars), observation)
@@ -60,6 +62,7 @@ fn plan_vars(
     candidates: &PlanCandidates<'_>,
     player_role: String,
     role_catalog: String,
+    max_story_goal_bytes: usize,
 ) -> Result<PromptVars, PipelineError> {
     Ok(PromptVars::from([
         (
@@ -97,6 +100,10 @@ fn plan_vars(
         (
             PLAYER_INPUT_VAR.to_owned(),
             Value::String(input.player_contribution.processed.clone()),
+        ),
+        (
+            MAX_STORY_GOAL_BYTES_VAR.to_owned(),
+            Value::String(max_story_goal_bytes.to_string()),
         ),
     ]))
 }

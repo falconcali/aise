@@ -150,7 +150,14 @@ fn output_rejects_oversized_story_goal() {
 
     let error = parse(raw, &pack, &config(5)).expect_err("invalid output");
 
-    assert_eq!(error_code(error), "plan_story_goal_too_long");
+    assert!(matches!(
+        error,
+        PipelineError::InvalidOutput {
+            code: "plan_story_goal_too_long",
+            message,
+            ..
+        } if message == "story goal size 6 exceeds maximum 5"
+    ));
 }
 
 #[test]

@@ -6,6 +6,7 @@ use crate::trace::{
 use async_trait::async_trait;
 use futures::future::join_all;
 use std::num::NonZeroUsize;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Notify;
 
@@ -15,6 +16,7 @@ struct DelayedProvider {
     delay: Duration,
     entered: Notify,
     maximum_active: AtomicUsize,
+    reasoning_efforts: Mutex<Vec<Option<LlmReasoningEffort>>>,
 }
 
 #[async_trait]
@@ -23,8 +25,12 @@ impl LlmProvider for DelayedProvider {
         "delayed"
     }
 
-    async fn complete(&self, _request: LlmCompletionRequest) -> Result<LlmCompletionResponse, LlmError> {
+    async fn complete(&self, request: LlmCompletionRequest) -> Result<LlmCompletionResponse, LlmError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.reasoning_efforts
+            .lock()
+            .expect("reasoning efforts lock")
+            .push(request.reasoning_effort);
         let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.maximum_active.fetch_max(active, Ordering::SeqCst);
         self.entered.notify_one();
@@ -81,6 +87,7 @@ async fn gateway_limits_active_provider_calls() {
         delay: Duration::from_millis(20),
         entered: Notify::new(),
         maximum_active: AtomicUsize::new(0),
+        reasoning_efforts: Mutex::new(Vec::new()),
     });
     let gateway = LlmGateway::new(provider.clone(), config(2));
     let control = TurnControl::new(Instant::now() + Duration::from_secs(5), TurnCancellation::new());
@@ -91,6 +98,14 @@ async fn gateway_limits_active_provider_calls() {
     assert!(results.iter().all(Result::is_ok));
     assert_eq!(provider.calls.load(Ordering::SeqCst), 6);
     assert_eq!(provider.maximum_active.load(Ordering::SeqCst), 2);
+    assert!(
+        provider
+            .reasoning_efforts
+            .lock()
+            .expect("reasoning efforts lock")
+            .iter()
+            .all(|effort| *effort == Some(LlmReasoningEffort::Medium))
+    );
 }
 
 #[tokio::test]
@@ -101,6 +116,7 @@ async fn permit_wait_respects_turn_cancellation() {
         delay: Duration::from_millis(50),
         entered: Notify::new(),
         maximum_active: AtomicUsize::new(0),
+        reasoning_efforts: Mutex::new(Vec::new()),
     });
     let gateway = LlmGateway::new(provider.clone(), config(1));
     let first_control = TurnControl::new(Instant::now() + Duration::from_secs(5), TurnCancellation::new());
@@ -129,6 +145,7 @@ async fn permit_wait_respects_turn_deadline() {
         delay: Duration::from_millis(50),
         entered: Notify::new(),
         maximum_active: AtomicUsize::new(0),
+        reasoning_efforts: Mutex::new(Vec::new()),
     });
     let gateway = LlmGateway::new(provider.clone(), config(1));
     let first_control = TurnControl::new(Instant::now() + Duration::from_secs(5), TurnCancellation::new());

@@ -1,8 +1,8 @@
 use super::*;
 use crate::core::tests::store_with_default_pack;
 use crate::core::{
-    BoundedText, CharacterProfile, CharacterThinkRequest, MemoryBody, MemoryId, PlayerContribution, ResolvedRole,
-    RetrievalHint, RoleId, StoryContext, StorySummary, TurnNumber,
+    BoundedText, CharacterProfile, CharacterThinkRequest, EntryOrigin, MemoryBody, MemoryId, PlayerContribution,
+    ResolvedRole, RetrievalHint, RoleId, RumorBody, RumorEntry, RumorId, StoryContext, StorySummary, TurnNumber,
 };
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -38,6 +38,18 @@ fn role(id: &str, marker: &str) -> ResolvedRole {
                 retrieval: RetrievalHint::try_new(format!("{marker} memory hint")).expect("valid memory hint"),
             },
         )]),
+    }
+}
+
+fn rumor(id: &str, content: &str, hint: &str) -> RumorEntry {
+    RumorEntry {
+        id: RumorId::try_new(id).expect("valid rumor id"),
+        origin: EntryOrigin::Seed,
+        body: RumorBody {
+            content: text(content),
+            activation: Default::default(),
+            retrieval: RetrievalHint::try_new(hint).expect("valid retrieval hint"),
+        },
     }
 }
 
@@ -80,6 +92,7 @@ fn rendered_text(rendered: &RenderedPrompt) -> String {
         .map(|message| message.content.as_str())
         .collect::<Vec<_>>()
         .join("\n")
+        .replace("\r\n", "\n")
 }
 
 #[tokio::test]
@@ -95,11 +108,22 @@ async fn prompt_contains_only_target_role_private_context() {
         raw: "raw player input".to_owned(),
         processed: "processed player input".to_owned(),
     };
+    let activated_rumors = [rumor(
+        "activated-rumor",
+        "Activated rumor content.",
+        "activated rumor hint",
+    )];
+    let retrieved_rumors = [rumor(
+        "retrieved-rumor",
+        "Retrieved rumor content.",
+        "retrieved rumor hint",
+    )];
     let input = ThinkInput {
         requests: &requests,
         resolved_roles: &roles,
         player_contribution: &player_contribution,
-        directions: &[],
+        activated_rumors: &activated_rumors,
+        retrieved_rumors: &retrieved_rumors,
     };
     let trace = trace();
 
@@ -126,6 +150,13 @@ async fn prompt_contains_only_target_role_private_context() {
     assert!(!text.contains("TARGET_PRIVATE memory hint"));
     assert!(!text.contains("OTHER_PRIVATE"));
     assert!(!text.contains("FORBIDDEN_STORY_GOAL"));
+    assert!(text.contains("Activated rumor content."));
+    assert!(text.contains("Retrieved rumor content."));
+    assert!(!text.contains("activated-rumor"));
+    assert!(!text.contains("retrieved-rumor"));
+    assert!(!text.contains("activated rumor hint"));
+    assert!(!text.contains("retrieved rumor hint"));
+    assert!(!text.contains("Narrative Direction"));
 }
 
 #[tokio::test]
@@ -145,7 +176,8 @@ async fn prompt_renders_required_runtime_sections_in_order() {
         requests: &requests,
         resolved_roles: &roles,
         player_contribution: &player_contribution,
-        directions: &[],
+        activated_rumors: &[],
+        retrieved_rumors: &[],
     };
     let trace = trace();
 
@@ -168,7 +200,7 @@ async fn prompt_renders_required_runtime_sections_in_order() {
         "## Story Opening",
         "## Recent Story",
         "## Pending Player Contribution",
-        "## Narrative Direction",
+        "## Rumors",
         "## Target Role ID",
         "## Target Name and Aliases",
         "## Target Profile",
@@ -209,7 +241,8 @@ async fn prompt_labels_existing_summary_as_story_summary() {
         requests: &requests,
         resolved_roles: &roles,
         player_contribution: &player_contribution,
-        directions: &[],
+        activated_rumors: &[],
+        retrieved_rumors: &[],
     };
     let trace = trace();
 
@@ -251,7 +284,8 @@ async fn oversized_profile_is_rejected_before_rendering() {
         requests: std::slice::from_ref(&request),
         resolved_roles: std::slice::from_ref(&role),
         player_contribution: &player_contribution,
-        directions: &[],
+        activated_rumors: &[],
+        retrieved_rumors: &[],
     };
     let trace = trace();
     let config = ThinkConfig {
@@ -300,7 +334,8 @@ async fn oversized_backstory_is_rejected_before_rendering() {
         requests: std::slice::from_ref(&request),
         resolved_roles: std::slice::from_ref(&role),
         player_contribution: &player_contribution,
-        directions: &[],
+        activated_rumors: &[],
+        retrieved_rumors: &[],
     };
     let trace = trace();
     let config = ThinkConfig {

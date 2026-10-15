@@ -1,6 +1,6 @@
 use crate::core::{
-    CharacterDecision, CharacterThinkRequest, NarrativeDirection, PlayerContribution, ResolvedRole, RoleId,
-    StoryContext, TurnControl,
+    CharacterDecision, CharacterThinkRequest, PlayerContribution, ResolvedRole, RoleId, RumorEntry, StoryContext,
+    TurnControl,
 };
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
@@ -18,7 +18,8 @@ pub struct ThinkInput<'a> {
     pub requests: &'a [CharacterThinkRequest],
     pub resolved_roles: &'a [ResolvedRole],
     pub player_contribution: &'a PlayerContribution,
-    pub directions: &'a [NarrativeDirection],
+    pub activated_rumors: &'a [RumorEntry],
+    pub retrieved_rumors: &'a [RumorEntry],
 }
 
 #[derive(Default, Serialize)]

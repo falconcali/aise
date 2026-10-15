@@ -28,11 +28,23 @@ pub enum LlmCompletionFinishReason {
     Other,
 }
 
+#[derive(Clone, Debug, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LlmReasoningEffort {
+    None,
+    #[default]
+    Low,
+    Medium,
+    High,
+    Max,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct LlmCompletionRequest {
     pub model: String,
     pub messages: Vec<ChatMessage>,
     pub temperature: f32,
+    pub reasoning_effort: Option<LlmReasoningEffort>,
 }
 
 #[derive(Clone, Debug, Serialize)]

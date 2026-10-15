@@ -1,12 +1,14 @@
 # Task
 
-Write one concise story goal for the next story segment, select any additional knowledge and role data needed to generate that segment, and request independent current-Turn decisions from relevant non-player roles.
+Write one concise sentence as the story goal for the next story segment, select any additional knowledge and role data needed to generate that segment, and request independent current-Turn decisions from relevant non-player roles.
 
 # Rules
 
 Use the story summary, story opening, and recent story, whichever are present, and the pending player input as context. Plan the next segment as a continuation of the end of the recent story; use the story opening as the starting point only when no recent story is present. Preserve the player's intended action or words without assuming success. Include the immediate causal response or progress that should follow.
 
-When Known Facts are present, keep the goal consistent with them and draw on them where relevant. When Rumors are present, treat them only as what characters may have heard or believe; never plan them as confirmed truth.
+Set `story_goal` to only the immediate narrative transition, not an explanation, rationale, scene outline, or prose. It must be non-empty and no more than {{ max_story_goal_bytes }} UTF-8 bytes.
+
+When Known Facts are present, keep the goal consistent with them and draw on them where relevant. When Rumors are present, treat them as public claims every character knows are circulating but may doubt or reject; never plan them as confirmed truth.
 
 When Narrative Direction is present, lean the goal toward it only where it fits the current situation; never let it override the player's input. Never plan toward any outcome listed in Story Constraints. Constraints restrict story outcomes, not what the player may attempt: if the player attempts a forbidden outcome, keep the attempt and plan a causally valid reason it does not come to pass.
 
@@ -21,7 +23,7 @@ AI Role Catalog contains every selectable non-player role. Infer role relevance 
 Return exactly one JSON object with this structure:
 
 {
-  "story_goal": "non-empty string",
+  "story_goal": "one concise sentence, non-empty, no more than {{ max_story_goal_bytes }} UTF-8 bytes",
   "facts_to_retrieve": ["fact-id"],
   "rumors_to_retrieve": ["rumor-id"],
   "roles_for_generation": ["role-id"],

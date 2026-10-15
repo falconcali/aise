@@ -164,7 +164,8 @@ async fn decisions_preserve_request_order_with_bounded_concurrency() {
         requests: &requests,
         resolved_roles: &roles,
         player_contribution: &player_contribution,
-        directions: &[],
+        activated_rumors: &[],
+        retrieved_rumors: &[],
     };
     let story_ctx = StoryContext::new();
     let control = TurnControl::new(Instant::now() + Duration::from_secs(5), TurnCancellation::new());
@@ -206,7 +207,8 @@ async fn any_invalid_role_output_fails_the_whole_stage() {
         requests: &requests,
         resolved_roles: &roles,
         player_contribution: &player_contribution,
-        directions: &[],
+        activated_rumors: &[],
+        retrieved_rumors: &[],
     };
     let story_ctx = StoryContext::new();
     let control = TurnControl::new(Instant::now() + Duration::from_secs(5), TurnCancellation::new());
@@ -239,7 +241,8 @@ fn duplicate_request_role_is_rejected() {
         requests: &requests,
         resolved_roles: &roles,
         player_contribution: &player_contribution,
-        directions: &[],
+        activated_rumors: &[],
+        retrieved_rumors: &[],
     };
 
     let error = validate_input(&input, &RoleId::try_new("player").expect("valid player")).expect_err("duplicate fails");
@@ -265,7 +268,8 @@ fn player_role_request_is_rejected() {
         requests: &requests,
         resolved_roles: &roles,
         player_contribution: &player_contribution,
-        directions: &[],
+        activated_rumors: &[],
+        retrieved_rumors: &[],
     };
 
     let error = validate_input(&input, &roles[0].role_id).expect_err("player target fails");
@@ -291,14 +295,16 @@ fn missing_or_duplicate_resolved_role_is_rejected() {
         requests: &requests,
         resolved_roles: &[],
         player_contribution: &player_contribution,
-        directions: &[],
+        activated_rumors: &[],
+        retrieved_rumors: &[],
     };
     let duplicate_roles = [roles[0].clone(), roles[0].clone()];
     let duplicate_input = ThinkInput {
         requests: &requests,
         resolved_roles: &duplicate_roles,
         player_contribution: &player_contribution,
-        directions: &[],
+        activated_rumors: &[],
+        retrieved_rumors: &[],
     };
     let player = RoleId::try_new("player").expect("valid player");
 

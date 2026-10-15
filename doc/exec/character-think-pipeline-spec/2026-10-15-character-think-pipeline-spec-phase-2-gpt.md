@@ -32,6 +32,7 @@ Generate one bounded, role-bound Character Decision per validated non-player req
 
 - Does not expose another role's profile, backstory, or memories to a target call.
 - Does not expose Plan `story_goal` to Character Think.
+- Does not expose global Narrative Direction or world Fact entries to Character Think.
 - Does not generate final story prose or committed world changes.
 - Does not persist decisions or add runtime character memory.
 - Does not generate chain-of-thought, long internal monologue, or guaranteed future outcomes.
@@ -66,6 +67,7 @@ const DEFAULT_MAX_PROFILE_BYTES: usize = 4 * 1024;
 const DEFAULT_MAX_BACKSTORY_BYTES: usize = 4 * 1024;
 const DEFAULT_MAX_SEED_MEMORIES: usize = 8;
 const DEFAULT_MAX_SEED_MEMORY_BYTES: usize = 8 * 1024;
+const DEFAULT_MAX_RUMOR_BYTES: usize = 8 * 1024;
 const DEFAULT_MAX_DECISION_BYTES: usize = 512;
 const DEFAULT_MAX_SUGGESTED_UTTERANCE_BYTES: usize = 512;
 const DEFAULT_MAX_TOTAL_OUTPUT_BYTES: usize = 1024;
@@ -78,13 +80,14 @@ pub struct ThinkConfig {
     pub max_backstory_bytes: usize,
     pub max_seed_memories: usize,
     pub max_seed_memory_bytes: usize,
+    pub max_rumor_bytes: usize,
     pub max_decision_bytes: usize,
     pub max_suggested_utterance_bytes: usize,
     pub max_total_output_bytes: usize,
 }
 ```
 
-`ThinkConfig::default()` returns `4`, `4096`, `4096`, `8`, `8192`, `512`, `512`, and `1024` respectively. The implementation may express the nonzero default without a const `unwrap`, but the public values MUST match.
+`ThinkConfig::default()` returns `4`, `4096`, `4096`, `8`, `8192`, `8192`, `512`, `512`, and `1024` respectively. The implementation may express the nonzero default without a const `unwrap`, but the public values MUST match.
 
 Extend:
 
@@ -146,7 +149,8 @@ pub struct ThinkInput<'a> {
     pub requests: &'a [CharacterThinkRequest],
     pub resolved_roles: &'a [ResolvedRole],
     pub player_contribution: &'a PlayerContribution,
-    pub directions: &'a [NarrativeDirection],
+    pub activated_rumors: &'a [RumorEntry],
+    pub retrieved_rumors: &'a [RumorEntry],
 }
 
 #[derive(Serialize)]
@@ -222,14 +226,18 @@ rendered UTF-8 bytes <= max_seed_memory_bytes
 Each item renders:
 
 ```text
-- memory_id: "<JSON-escaped MemoryId>"
-  content: "<JSON-escaped content>"
-  retrieval_hint: "<JSON-escaped retrieval hint>"
+- "<JSON-escaped content>"
 ```
 
 An item that would exceed the remaining byte budget is not added, and iteration stops. No partial item is rendered.
 
-### 3.6 Think prompt protocol
+### 3.6 Rumor projection
+
+`think_context::rumors` receives Baseline activated Rumors followed by Retrieval selected Rumors. It renders only each Rumor body as a JSON-escaped bullet, preserves that stable order, and includes the longest complete-item prefix whose rendered UTF-8 size does not exceed `max_rumor_bytes`. It never renders RumorId, retrieval hint, origin, or activation metadata.
+
+Rumors are public claims known to be circulating by every role, but they are not Facts and the target role may doubt or reject them. Fact entries do not enter Character Think.
+
+### 3.7 Think prompt protocol
 
 Register:
 
@@ -247,7 +255,7 @@ The RC variables and section order are:
 Story Summary or Story Opening
 Recent Story
 Pending Player Contribution
-Narrative Direction
+Rumors
 Target Role ID
 Target Name and Aliases
 Target Profile
@@ -261,15 +269,17 @@ Aliases render as a JSON array. Profile renders as compact JSON. Backstory rende
 The prompt MUST enforce:
 
 - The model acts only as the named target role.
-- Continuity, player contribution, Narrative Direction, and Thinking Focus are context, not automatically character-known facts.
+- Continuity, player contribution, and Thinking Focus are context, not automatically character-known facts.
+- Rumors are public claims known to be circulating, not established Facts; the target may doubt or reject them.
 - The target may use profile, backstory, and seed memories as its own information.
 - Hidden information about other roles is absent.
 - Thinking Focus directs attention but is not an action command or required outcome.
 - Output is an immediate decision and optional utterance, not reasoning or narration.
-- The decision may diverge from the Planner's desired direction.
 - The output contains no RoleId.
 
-### 3.7 LLM output parsing
+Global Narrative Direction MUST NOT be present in `ThinkInput`, prompt variables, or any Character Think prompt. It remains writer-facing context for Plan and Generate.
+
+### 3.8 LLM output parsing
 
 Create `pipeline/think/think_output.rs`:
 
@@ -320,7 +330,7 @@ think_suggested_utterance_too_long
 think_output_too_long
 ```
 
-### 3.8 Input validation errors
+### 3.9 Input validation errors
 
 Use:
 
@@ -334,7 +344,7 @@ think_backstory_too_long
 
 All Think errors map to `PipelineError::InvalidOutput` for malformed LLM data or `PipelineError::InconsistentData` for invalid engine handoff, with `stage = PipelineStage::Think`.
 
-### 3.9 Bounded execution
+### 3.10 Bounded execution
 
 Implement request execution with an ordered bounded stream equivalent to:
 
@@ -348,7 +358,7 @@ stream::iter(work)
 
 The implementation MUST use `buffered`, not `buffer_unordered`, so output order equals request order. On the first observed error, it returns `Err`, drops remaining in-flight futures, and exposes no partial decisions.
 
-### 3.10 Think observations
+### 3.11 Think observations
 
 Create `pipeline/think/think_trace.rs` with stage lifecycle helpers and per-role helpers:
 
@@ -384,7 +394,7 @@ aise.think.role_id
 
 The per-role observation is the explicit parent passed to Prompt rendering and `LlmGateway::complete`.
 
-### 3.11 File layout
+### 3.12 File layout
 
 ```text
 crates/aise-core/src/
@@ -427,10 +437,12 @@ crates/aise-core/src/
 8. **R-CT-P2-8**: Any prompt, LLM, parse, validation, or handoff failure fails the whole Think stage.
 9. **R-CT-P2-9**: RoleId is copied from the validated request and never deserialized from model output.
 10. **R-CT-P2-10**: Character Decisions remain Turn-scoped and are never written by Think.
+11. **R-CT-P2-11**: Every call receives the same bounded stable prefix of Baseline activated and Retrieval selected Rumor bodies.
+12. **R-CT-P2-12**: Global Narrative Direction and Fact entries never enter Character Think.
 
 ### 4.1 Error Handling
 
-- Use the exact stable codes in §§3.7–3.8.
+- Use the exact stable codes in §§3.8–3.9.
 - Do not retry, repair JSON, strip prose, infer missing fields, or accept unknown fields.
 - Permit wait cancellation returns `LlmError::Cancelled`; permit wait deadline exhaustion returns `LlmError::Timeout`.
 - No `unwrap`, `expect`, or panic is allowed on request, role, prompt, LLM, or output data.
@@ -456,7 +468,7 @@ crates/aise-core/src/
 
 ## 5. Acceptance Criteria
 
-- [ ] `ThinkConfig` exists, is aggregated into `PipelineConfig`, and all eight defaults match §3.1.
+- [ ] `ThinkConfig` exists, is aggregated into `PipelineConfig`, and all nine defaults match §3.1.
 - [ ] `LlmConfig.max_concurrent_calls` is nonzero, defaults to `16`, and is loaded by `aise-service`.
 - [ ] A Gateway concurrency test proves active provider calls never exceed the configured permit count.
 - [ ] Gateway permit waiting respects Turn cancellation and deadline.
@@ -464,9 +476,11 @@ crates/aise-core/src/
 - [ ] Prompt tests prove each call contains only the target role's private data.
 - [ ] Prompt tests prove `story_goal` and other roles' backstory/memories are absent.
 - [ ] Seed-memory tests cover stable order, count limit, byte limit, zero limits, and no partial item.
-- [ ] Role-context tests reject oversized profile and backstory with the exact §3.8 codes.
-- [ ] Output tests cover valid null/missing utterance and all six output codes in §3.7.
-- [ ] Input tests cover all three §3.8 handoff codes.
+- [ ] Rumor tests cover activated-before-retrieved order, content-only projection, byte limit, zero limit, and no partial item.
+- [ ] Prompt tests prove relevant Rumors are present while Facts and Narrative Direction are absent.
+- [ ] Role-context tests reject oversized profile and backstory with the exact §3.9 codes.
+- [ ] Output tests cover valid null/missing utterance and all six output codes in §3.8.
+- [ ] Input tests cover all three §3.9 handoff codes.
 - [ ] A controlled provider test proves stable decision order when calls complete out of order.
 - [ ] A failure test proves no partial `ThinkOutput` reaches Runtime.
 - [ ] Trace tests prove explicit stage → role → Prompt/LLM parentage.

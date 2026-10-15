@@ -190,6 +190,7 @@ fn vars(story_ctx: &StoryContext, fixture: &PlanFixture, story_opening: String) 
         &candidates,
         player_role,
         role_catalog,
+        PlanConfig::default().max_story_goal_bytes,
     )
     .expect("vars render")
 }
@@ -204,6 +205,7 @@ fn vars_for_new_story_carry_opening_and_empty_summary_and_recent_story() {
     assert_eq!(var(&vars, "story_opening"), "Rain falls.");
     assert_eq!(var(&vars, "story_summary"), "");
     assert_eq!(var(&vars, "recent_story"), "");
+    assert_eq!(var(&vars, "max_story_goal_bytes"), "512");
 }
 
 #[test]
@@ -548,7 +550,7 @@ fn candidate_sections_follow_known_knowledge_and_precede_narrative_direction() {
 }
 
 #[test]
-fn final_instruction_requires_strict_json_protocol() {
+fn instructions_enforce_goal_budget_rumor_semantics_and_strict_json_protocol() {
     let story_ctx = StoryContext::new();
     let fixture = plan_fixture("I wave.");
     let pack = candidate_pack(&["fact-a"], &["rumor-a"]);
@@ -556,6 +558,10 @@ fn final_instruction_requires_strict_json_protocol() {
     let player_role = player_role(&pack);
     let role_catalog = collect_role_catalog(&pack, &player_role.role_id);
     let trace = test_trace();
+    let config = PlanConfig {
+        max_story_goal_bytes: 321,
+        ..PlanConfig::default()
+    };
 
     let rendered = process_plan(
         &bundled_prompt(),
@@ -566,14 +572,20 @@ fn final_instruction_requires_strict_json_protocol() {
             candidates: &candidates,
             player_role: &player_role,
             role_catalog: &role_catalog,
-            config: &PlanConfig::default(),
+            config: &config,
         },
         trace.root(),
     )
     .expect("render");
+    let context_instruction = rendered.messages()[0].content.replace("\r\n", "\n");
     let instruction = rendered.messages()[2].content.replace("\r\n", "\n");
 
-    assert!(instruction.contains("\"story_goal\": \"non-empty string\""));
+    assert!(context_instruction.contains("public claims every character knows are circulating"));
+    assert!(instruction.contains("public claims every character knows are circulating"));
+    assert!(!context_instruction.contains("characters may have heard"));
+    assert!(!instruction.contains("characters may have heard"));
+    assert!(instruction.contains("no more than 321 UTF-8 bytes"));
+    assert!(instruction.contains("\"story_goal\": \"one concise sentence, non-empty"));
     assert!(instruction.contains("\"facts_to_retrieve\": [\"fact-id\"]"));
     assert!(instruction.contains("\"rumors_to_retrieve\": [\"rumor-id\"]"));
     assert!(instruction.contains("\"roles_for_generation\": [\"role-id\"]"));
