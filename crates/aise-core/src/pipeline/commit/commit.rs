@@ -73,3 +73,7 @@ impl Pipeline<CommitInput> for CommitPipeline {
         result
     }
 }
+
+#[cfg(test)]
+#[path = "tests/commit_tests.rs"]
+mod tests;

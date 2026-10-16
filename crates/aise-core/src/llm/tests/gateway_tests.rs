@@ -105,7 +105,7 @@ async fn gateway_limits_active_provider_calls() {
             .lock()
             .expect("reasoning efforts lock")
             .iter()
-            .all(|effort| *effort == Some(LlmReasoningEffort::Medium))
+            .all(|effort| *effort == Some(LlmReasoningEffort::Low))
     );
 }
 

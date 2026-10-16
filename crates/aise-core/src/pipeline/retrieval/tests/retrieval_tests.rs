@@ -218,7 +218,11 @@ async fn default_role_uses_role_body_identity_profile_and_memories() {
     };
 
     let output = pipeline.retrieve(&input, &story_ctx).await.expect("default role resolves");
-    let role = output.role(&selected_role_id).expect("resolved role should be indexed");
+    let role = output
+        .roles
+        .iter()
+        .find(|role| role.role_id == selected_role_id)
+        .expect("resolved role should be indexed");
 
     assert_eq!(role.role_id, selected_role_id);
     assert_eq!(role.name, role_body.name);
@@ -258,7 +262,11 @@ async fn card_role_replaces_only_the_effective_profile() {
     };
 
     let output = pipeline.retrieve(&input, &story_ctx).await.expect("card role resolves");
-    let role = output.role(&selected_role_id).expect("resolved role should be indexed");
+    let role = output
+        .roles
+        .iter()
+        .find(|role| role.role_id == selected_role_id)
+        .expect("resolved role should be indexed");
 
     assert_eq!(role.name, role_body.name);
     assert_ne!(role.name, card_name);

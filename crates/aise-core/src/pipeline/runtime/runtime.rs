@@ -1,24 +1,23 @@
 use crate::core::{
-    RoleId, StoryCommit, StoryContext, TurnCheckEvaluation, TurnChoiceEvaluation, TurnControl, TurnEvaluation,
-    TurnEventSink, TurnRequest, TurnScoreEvaluation, TurnSegment, TurnStatus, WorldChange,
+    RoleId, StoryCommit, StoryContext, TurnControl, TurnEventSink, TurnRequest, TurnSegment, WorldChange,
 };
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
-use crate::pipeline::baseline::{BaselineInput, BaselineOutput, BaselinePipeline};
+use crate::pipeline::baseline::{BaselineInput, BaselinePipeline};
 use crate::pipeline::commit::{CommitInput, CommitPipeline};
-use crate::pipeline::common::{
-    PipelineError, PipelineRunner, PipelineStage, ValidationContext, ValidationCriterionKind, ValidationIssue,
-    ValidationReport,
-};
+use crate::pipeline::common::{PipelineError, PipelineRunner};
 use crate::pipeline::extract::{ExtractInput, ExtractPipeline};
 use crate::pipeline::generate::{GenerateInput, GeneratePipeline};
 use crate::pipeline::plan::{PlanInput, PlanOutput, PlanPipeline};
-use crate::pipeline::repair::{RepairInput, RepairOutput, RepairPipeline};
+use crate::pipeline::repair::RepairPipeline;
 use crate::pipeline::retrieval::{RetrievalInput, RetrievalOutput, RetrievalPipeline};
-use crate::pipeline::runtime::validation_choice::select_choice;
+use crate::pipeline::runtime::runtime_trace;
+use crate::pipeline::runtime::runtime_validation::{
+    turn_evaluation, validate_generated_proposal, validation_context,
+};
 use crate::pipeline::summary::{SummaryInput, SummaryPipeline};
 use crate::pipeline::think::{ThinkInput, ThinkOutput, ThinkPipeline};
-use crate::pipeline::validate::{ValidateInput, ValidateOutput, ValidatePipeline};
+use crate::pipeline::validate::ValidatePipeline;
 use crate::pipeline::{PipelineConfig, ValidationLoopConfig};
 use crate::prompt::Prompt;
 use crate::trace::Trace;
@@ -31,26 +30,13 @@ pub struct Runtime {
     retrieval: RetrievalPipeline,
     think: ThinkPipeline,
     generate: GeneratePipeline,
-    validate: ValidatePipeline,
-    repair: RepairPipeline,
+    pub(super) validate: ValidatePipeline,
+    pub(super) repair: RepairPipeline,
     extract: ExtractPipeline,
     summary: SummaryPipeline,
     commit: CommitPipeline,
-    validation_loop: ValidationLoopConfig,
+    pub(super) validation_loop: ValidationLoopConfig,
     repair_max_proposal_bytes: usize,
-}
-
-pub(super) struct ValidatedProposal {
-    pub(super) proposal: String,
-    pub(super) report: ValidationReport,
-}
-
-struct ValidationLoopResult {
-    proposal: String,
-    report: ValidationReport,
-    repair_rounds: u32,
-    status: TurnStatus,
-    choice: Option<TurnChoiceEvaluation>,
 }
 
 impl Runtime {
@@ -184,6 +170,7 @@ impl Runtime {
         let generate_output = pipeline_runner.run(&self.generate, generate_input, story_ctx).await?;
 
         let initial_proposal = validate_generated_proposal(generate_output.result, self.repair_max_proposal_bytes)?;
+        let validation_observation = runtime_trace::begin_validation_loop(trace, &initial_proposal);
         let validation_result = self
             .validate_and_repair(
                 &pipeline_runner,
@@ -191,7 +178,9 @@ impl Runtime {
                 validation_context(&plan_output, &baseline_output, &retrieval_output, &think_output),
                 initial_proposal,
             )
-            .await?;
+            .await;
+        runtime_trace::finish_validation_loop(validation_observation, &validation_result);
+        let validation_result = validation_result?;
 
         let extract_input = ExtractInput {
             query: &validation_result.proposal,
@@ -222,89 +211,6 @@ impl Runtime {
 
         pipeline_runner.run(&self.commit, commit_input, story_ctx).await
     }
-
-    async fn validate_and_repair(
-        &self,
-        pipeline_runner: &PipelineRunner<'_>,
-        story_ctx: &StoryContext,
-        context: ValidationContext<'_>,
-        initial_proposal: String,
-    ) -> Result<ValidationLoopResult, PipelineError> {
-        let mut history = Vec::with_capacity(self.validation_loop.max_repair_rounds as usize + 1);
-        let mut current_proposal = initial_proposal;
-        let mut repair_rounds = 0;
-
-        loop {
-            let proposal_version =
-                u32::try_from(history.len() + 1).expect("validated proposal history length must fit u32");
-            let validate_input = ValidateInput {
-                context,
-                proposal: &current_proposal,
-                proposal_version,
-                repair_rounds_used: repair_rounds,
-                repair_rounds_remaining: self.validation_loop.max_repair_rounds - repair_rounds,
-            };
-
-            let validate_output: ValidateOutput =
-                pipeline_runner.run(&self.validate, validate_input, story_ctx).await?;
-            history.push(ValidatedProposal {
-                proposal: current_proposal,
-                report: validate_output.report,
-            });
-            let latest = history.last().expect("validated proposal history must not be empty");
-            if latest.report.all_checks_pass() && latest.report.all_scores_meet_target() {
-                let passed = history.pop().expect("validated proposal history must not be empty");
-                return Ok(ValidationLoopResult {
-                    proposal: passed.proposal,
-                    report: passed.report,
-                    repair_rounds,
-                    status: TurnStatus::Pass,
-                    choice: None,
-                });
-            }
-
-            if repair_rounds >= self.validation_loop.max_repair_rounds {
-                if !latest.report.all_checks_pass() {
-                    let issues = latest.report.failed_issues();
-                    let (failed_checks, unmet_scores) = failed_issue_counts(&issues);
-                    return Err(PipelineError::ValidationFailed {
-                        code: "validation_hard_gate_exhausted",
-                        proposal_version: latest.report.proposal_version,
-                        message: format!(
-                            "repair budget exhausted with {failed_checks} failed checks and {unmet_scores} unmet scores"
-                        ),
-                    });
-                }
-                let selection = select_choice(&history)?;
-                let selected = history.swap_remove(selection.history_index);
-                return Ok(ValidationLoopResult {
-                    proposal: selected.proposal,
-                    choice: Some(TurnChoiceEvaluation {
-                        selected_proposal_version: selection.proposal_version,
-                        target_gap_mse: selection.target_gap_mse,
-                    }),
-                    report: selected.report,
-                    repair_rounds,
-                    status: TurnStatus::Choice,
-                });
-            }
-
-            repair_rounds += 1;
-            let latest = history.last().expect("validated proposal history must not be empty");
-            let issues = latest.report.failed_issues();
-            let repair_input = RepairInput {
-                context,
-                proposal: &latest.proposal,
-                proposal_version: latest.report.proposal_version,
-                issues: &issues,
-                repair_round: repair_rounds,
-                repair_rounds_remaining: self.validation_loop.max_repair_rounds - repair_rounds,
-            };
-
-            let repair_output: RepairOutput = pipeline_runner.run(&self.repair, repair_input, story_ctx).await?;
-            current_proposal = repair_output.proposal;
-        }
-    }
 }
 
 fn effective_role_ids(plan_output: &PlanOutput) -> Vec<RoleId> {
@@ -321,80 +227,6 @@ fn effective_role_ids(plan_output: &PlanOutput) -> Vec<RoleId> {
         }
     }
     role_ids
-}
-
-fn validation_context<'a>(
-    plan_output: &'a PlanOutput,
-    baseline_output: &'a BaselineOutput,
-    retrieval_output: &'a RetrievalOutput,
-    think_output: &'a ThinkOutput,
-) -> ValidationContext<'a> {
-    ValidationContext {
-        story_goal: &plan_output.story_goal,
-        player_contribution: &baseline_output.player_contribution,
-        directions: &baseline_output.narrative.directions,
-        constraints: &baseline_output.narrative.constraints,
-        knowledge: &baseline_output.knowledge,
-        retrieved_facts: &retrieval_output.facts,
-        retrieved_rumors: &retrieval_output.rumors,
-        player_role: &plan_output.player_role,
-        roles: &retrieval_output.roles,
-        character_decisions: &think_output.decisions,
-    }
-}
-
-fn turn_evaluation(result: &ValidationLoopResult) -> TurnEvaluation {
-    TurnEvaluation {
-        proposal_version: result.report.proposal_version,
-        repair_rounds: result.repair_rounds,
-        checks: result
-            .report
-            .checks
-            .iter()
-            .map(|check| TurnCheckEvaluation {
-                name: check.name.clone(),
-                passed: check.passed,
-                issue: check.issue.clone(),
-            })
-            .collect(),
-        scores: result
-            .report
-            .scores
-            .iter()
-            .map(|score| TurnScoreEvaluation {
-                name: score.name.clone(),
-                min_score: score.min_score,
-                max_score: score.max_score,
-                target_score: score.target_score,
-                score: score.score,
-                issue: score.issue.clone(),
-            })
-            .collect(),
-        choice: result.choice.clone(),
-    }
-}
-
-fn validate_generated_proposal(proposal: String, max_proposal_bytes: usize) -> Result<String, PipelineError> {
-    if proposal.trim().is_empty() {
-        return Err(PipelineError::EmptyOutput {
-            stage: PipelineStage::Generate,
-        });
-    }
-    if proposal.len() > max_proposal_bytes {
-        return Err(PipelineError::invalid_output(
-            PipelineStage::Generate,
-            "generate_proposal_too_long",
-            format!("generated proposal exceeds {max_proposal_bytes} bytes"),
-        ));
-    }
-    Ok(proposal)
-}
-
-fn failed_issue_counts(issues: &[ValidationIssue]) -> (usize, usize) {
-    issues.iter().fold((0, 0), |(checks, scores), issue| match issue.kind {
-        ValidationCriterionKind::Check => (checks + 1, scores),
-        ValidationCriterionKind::Score => (checks, scores + 1),
-    })
 }
 
 #[cfg(test)]

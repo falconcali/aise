@@ -334,6 +334,17 @@ fn validation_response() -> String {
 
 fn validation_response_with(checks_pass: bool, score_value: Option<f64>) -> String {
     let config = ValidateConfig::default();
+    let score_values = config
+        .scores
+        .iter()
+        .map(|score| score_value.unwrap_or(score.target_score))
+        .collect::<Vec<_>>();
+    validation_response_with_scores(checks_pass, &score_values)
+}
+
+fn validation_response_with_scores(checks_pass: bool, score_values: &[f64]) -> String {
+    let config = ValidateConfig::default();
+    assert_eq!(score_values.len(), config.scores.len());
     let checks = config
         .checks
         .iter()
@@ -348,12 +359,12 @@ fn validation_response_with(checks_pass: bool, score_value: Option<f64>) -> Stri
     let scores = config
         .scores
         .iter()
-        .map(|score| {
-            let value = score_value.unwrap_or(score.target_score);
+        .zip(score_values)
+        .map(|(score, value)| {
             json!({
                 "name": score.name,
                 "score": value,
-                "issue": (value < score.target_score).then_some("Improve this score.")
+                "issue": (*value < score.target_score).then_some("Improve this score.")
             })
         })
         .collect::<Vec<_>>();
@@ -712,7 +723,32 @@ async fn runtime_passes_initial_proposal_without_repair() {
 }
 
 #[tokio::test]
-async fn runtime_repairs_then_fully_revalidates_new_version() {
+async fn runtime_repairs_then_passes_new_version() {
+    let run = run_runtime_scenario(
+        plan_response(&[], &[]),
+        false,
+        None,
+        "Generated story.".to_owned(),
+        vec![
+            validation_response_with(false, Some(7.0)),
+            "Repaired story.".to_owned(),
+            validation_response(),
+        ],
+        PipelineConfig::default(),
+    )
+    .await;
+    let commit = run.result.expect("turn succeeds");
+
+    assert_eq!(stage_count(&run.stages, "validate"), 2);
+    assert_eq!(stage_count(&run.stages, "repair"), 1);
+    assert_eq!(commit.turn.turn_segment.text(), "Repaired story.");
+    assert_eq!(commit.turn.turn_status, TurnStatus::Pass);
+    assert_eq!(commit.turn.turn_evaluation.proposal_version, 2);
+    assert_eq!(commit.turn.turn_evaluation.repair_rounds, 1);
+}
+
+#[tokio::test]
+async fn runtime_revalidates_all_criteria_after_repair() {
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
         false,
@@ -751,7 +787,7 @@ async fn runtime_repairs_then_fully_revalidates_new_version() {
 }
 
 #[tokio::test]
-async fn runtime_zero_budget_validates_once_and_never_repairs() {
+async fn runtime_zero_budget_chooses_initial_score_only_candidate() {
     let mut config = PipelineConfig::default();
     config.validation_loop.max_repair_rounds = 0;
     let run = run_runtime_scenario(
@@ -769,6 +805,69 @@ async fn runtime_zero_budget_validates_once_and_never_repairs() {
     assert_eq!(stage_count(&run.stages, "repair"), 0);
     assert_eq!(commit.turn.turn_status, TurnStatus::Choice);
     assert_eq!(commit.turn.turn_evaluation.repair_rounds, 0);
+}
+
+#[tokio::test]
+async fn runtime_exhaustion_chooses_best_hard_gate_passing_candidate() {
+    let mut config = PipelineConfig::default();
+    config.validation_loop.max_repair_rounds = 2;
+    let run = run_runtime_scenario(
+        plan_response(&[], &[]),
+        false,
+        None,
+        "Generated story.".to_owned(),
+        vec![
+            validation_response_with_scores(true, &[10.0, 6.0, 8.0, 8.0]),
+            "Repair one.".to_owned(),
+            validation_response_with_scores(false, &[8.0, 8.0, 8.0, 8.0]),
+            "Repair two.".to_owned(),
+            validation_response_with_scores(true, &[7.5, 7.5, 8.0, 8.0]),
+        ],
+        config,
+    )
+    .await;
+    let commit = run.result.expect("turn succeeds");
+
+    assert_eq!(commit.turn.turn_segment.text(), "Repair two.");
+    assert_eq!(commit.turn.turn_status, TurnStatus::Choice);
+    assert_eq!(commit.turn.turn_evaluation.proposal_version, 3);
+    assert_eq!(
+        commit
+            .turn
+            .turn_evaluation
+            .choice
+            .as_ref()
+            .expect("choice evaluation")
+            .selected_proposal_version,
+        3
+    );
+}
+
+#[tokio::test]
+async fn runtime_choice_can_select_older_proposal() {
+    let mut config = PipelineConfig::default();
+    config.validation_loop.max_repair_rounds = 1;
+    let run = run_runtime_scenario(
+        plan_response(&[], &[]),
+        false,
+        None,
+        "Generated story.".to_owned(),
+        vec![
+            validation_response_with_scores(true, &[7.5, 7.5, 8.0, 8.0]),
+            "Repaired story.".to_owned(),
+            validation_response_with_scores(true, &[10.0, 6.0, 8.0, 8.0]),
+        ],
+        config,
+    )
+    .await;
+    let commit = run.result.expect("turn succeeds");
+    let choice = commit.turn.turn_evaluation.choice.as_ref().expect("choice evaluation");
+
+    assert_eq!(commit.turn.turn_segment.text(), "Generated story.");
+    assert_eq!(commit.turn.turn_status, TurnStatus::Choice);
+    assert_eq!(commit.turn.turn_evaluation.proposal_version, 1);
+    assert_eq!(commit.turn.turn_evaluation.repair_rounds, 1);
+    assert_eq!(choice.selected_proposal_version, 1);
 }
 
 #[tokio::test]
@@ -805,7 +904,7 @@ async fn runtime_hard_gate_exhaustion_skips_extract_summary_and_commit() {
 }
 
 #[tokio::test]
-async fn runtime_validate_contract_error_does_not_consume_repair_budget() {
+async fn runtime_validate_contract_error_skips_repair_and_commit() {
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
         false,
@@ -827,6 +926,84 @@ async fn runtime_validate_contract_error_does_not_consume_repair_budget() {
     assert_eq!(stage_count(&run.stages, "validate"), 1);
     assert_eq!(stage_count(&run.stages, "repair"), 0);
     assert_eq!(stage_count(&run.stages, "commit"), 0);
+}
+
+#[tokio::test]
+async fn runtime_repair_error_skips_next_validate_and_commit() {
+    let run = run_runtime_scenario(
+        plan_response(&[], &[]),
+        false,
+        None,
+        "Generated story.".to_owned(),
+        vec![validation_response_with(true, Some(7.0)), " \n\t".to_owned()],
+        PipelineConfig::default(),
+    )
+    .await;
+
+    assert!(matches!(
+        run.result,
+        Err(PipelineError::EmptyOutput {
+            stage: PipelineStage::Repair
+        })
+    ));
+    assert_eq!(stage_count(&run.stages, "validate"), 1);
+    assert_eq!(stage_count(&run.stages, "repair"), 1);
+    assert_eq!(stage_count(&run.stages, "commit"), 0);
+}
+
+#[tokio::test]
+async fn runtime_persists_pass_evaluation() {
+    let run = run_runtime(plan_response(&[], &[]), false).await;
+    let commit = run.result.expect("turn succeeds");
+    let evaluation = &commit.turn.turn_evaluation;
+    let config = ValidateConfig::default();
+
+    assert_eq!(commit.turn.turn_status, TurnStatus::Pass);
+    assert_eq!(evaluation.proposal_version, 1);
+    assert_eq!(evaluation.repair_rounds, 0);
+    assert_eq!(evaluation.checks.len(), config.checks.len());
+    assert!(evaluation.checks.iter().all(|check| check.passed && check.issue.is_none()));
+    assert_eq!(evaluation.scores.len(), config.scores.len());
+    for (persisted, configured) in evaluation.scores.iter().zip(config.scores) {
+        assert_eq!(persisted.name, configured.name);
+        assert_eq!(persisted.min_score, configured.min_score);
+        assert_eq!(persisted.max_score, configured.max_score);
+        assert_eq!(persisted.target_score, configured.target_score);
+        assert_eq!(persisted.score, configured.target_score);
+        assert!(persisted.issue.is_none());
+    }
+    assert!(evaluation.choice.is_none());
+}
+
+#[tokio::test]
+async fn runtime_persists_choice_evaluation() {
+    let mut config = PipelineConfig::default();
+    config.validation_loop.max_repair_rounds = 0;
+    let run = run_runtime_scenario(
+        plan_response(&[], &[]),
+        false,
+        None,
+        "Generated story.".to_owned(),
+        vec![validation_response_with(true, Some(7.0))],
+        config,
+    )
+    .await;
+    let commit = run.result.expect("turn succeeds");
+    let evaluation = &commit.turn.turn_evaluation;
+    let choice = evaluation.choice.as_ref().expect("choice evaluation");
+
+    assert_eq!(commit.turn.turn_status, TurnStatus::Choice);
+    assert_eq!(evaluation.proposal_version, 1);
+    assert_eq!(evaluation.repair_rounds, 0);
+    assert!(evaluation.checks.iter().all(|check| check.passed && check.issue.is_none()));
+    assert!(
+        evaluation
+            .scores
+            .iter()
+            .all(|score| score.score == 7.0 && score.issue.is_some())
+    );
+    assert_eq!(choice.selected_proposal_version, 1);
+    assert!((choice.target_gap_mse - 0.01).abs() < f64::EPSILON);
 }
 
 #[tokio::test]

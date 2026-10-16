@@ -10,13 +10,13 @@ fn request(reasoning_effort: Option<LlmReasoningEffort>) -> LlmCompletionRequest
 }
 
 #[test]
-fn default_reasoning_effort_serializes_as_medium() {
+fn default_reasoning_effort_serializes_as_low() {
     let reasoning_effort = LlmReasoningEffort::default();
     let value =
         serde_json::to_value(to_chat_request(&request(Some(reasoning_effort)))).expect("serialize chat request");
 
-    assert_eq!(reasoning_effort, LlmReasoningEffort::Medium);
-    assert_eq!(value["reasoning_effort"], "medium");
+    assert_eq!(reasoning_effort, LlmReasoningEffort::Low);
+    assert_eq!(value["reasoning_effort"], "low");
 }
 
 #[test]

@@ -3,19 +3,15 @@ use crate::llm::LlmError;
 use crate::pipeline::common::PipelineError;
 use crate::pipeline::think::ThinkOutput;
 use crate::trace::{
-    Attribute, Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus,
+    Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus,
 };
 
-const THINK_REQUESTS: &str = "aise.think.requests";
-const THINK_DECISIONS: &str = "aise.think.decisions";
-const THINK_ROLE_ID: &str = "aise.think.role_id";
-
-pub fn begin_think(parent: &Observation, request_count: usize) -> Observation {
+pub fn begin_think(parent: &Observation) -> Observation {
     parent.begin(ObservationSpec {
         name: "think",
         kind: ObservationKind::Span,
         input: None,
-        metadata: vec![Attribute::u64(THINK_REQUESTS, request_count as u64)],
+        metadata: Vec::new(),
     })
 }
 
@@ -23,14 +19,10 @@ pub fn finish_think(observation: Observation, result: &Result<ThinkOutput, Pipel
     let outcome = match result {
         Ok(output) => ObservationOutcome {
             status: ObservationStatus::Ok,
-            metadata: vec![Attribute::u64(THINK_DECISIONS, output.decisions.len() as u64)],
             output: observation.capture_content(output),
             ..ObservationOutcome::default()
         },
-        Err(error) => ObservationOutcome {
-            metadata: vec![Attribute::u64(THINK_DECISIONS, 0)],
-            ..error_outcome(error)
-        },
+        Err(error) => error_outcome(error),
     };
     observation.finish(outcome);
 }
@@ -39,8 +31,8 @@ pub fn begin_role(parent: &Observation, role_id: &RoleId) -> Observation {
     parent.begin(ObservationSpec {
         name: "think_role",
         kind: ObservationKind::Span,
-        input: None,
-        metadata: vec![Attribute::string(THINK_ROLE_ID, role_id.to_string())],
+        input: parent.capture_content(role_id),
+        metadata: Vec::new(),
     })
 }
 

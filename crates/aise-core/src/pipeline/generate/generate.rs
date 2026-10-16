@@ -5,10 +5,7 @@ use crate::core::{
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
-use crate::pipeline::generate::{
-    GenerateConfig, generate_llm, generate_prompt, generate_roles,
-    generate_trace::{self, GenerateTraceMetrics},
-};
+use crate::pipeline::generate::{GenerateConfig, generate_llm, generate_prompt, generate_roles, generate_trace};
 use crate::prompt::Prompt;
 use crate::trace::Observation;
 use serde::Serialize;
@@ -56,7 +53,6 @@ impl GeneratePipeline {
         story_ctx: &StoryContext,
         control: &TurnControl,
         observation: &Observation,
-        metrics: &mut GenerateTraceMetrics,
     ) -> Result<String, PipelineError> {
         generate_roles::validate_player_role(input.player_role, &story_ctx.player)?;
         let role_context = generate_roles::project_role_context(
@@ -65,8 +61,6 @@ impl GeneratePipeline {
             input.character_decisions,
             &self.config,
         )?;
-        metrics.role_context_bytes = role_context.player_role.len().saturating_add(role_context.roles.len());
-        metrics.decision_context_bytes = role_context.decisions.len();
         let rendered_prompt = generate_prompt::generate_story(
             self.prompt.as_ref(),
             story_ctx,
@@ -99,15 +93,8 @@ impl<'a> Pipeline<GenerateInput<'a>> for GeneratePipeline {
     ) -> Result<Self::Output, PipelineError> {
         let generate_observation =
             generate_trace::begin_story_generation(observation, input.story_goal, &input.player_contribution.processed);
-        let mut metrics = GenerateTraceMetrics {
-            roles: input.roles.len(),
-            character_decisions: input.character_decisions.len(),
-            ..GenerateTraceMetrics::default()
-        };
-        let result = self
-            .generate_story(&input, story_ctx, control, &generate_observation, &mut metrics)
-            .await;
-        generate_trace::finish_story_generation(generate_observation, &result, &metrics);
+        let result = self.generate_story(&input, story_ctx, control, &generate_observation).await;
+        generate_trace::finish_story_generation(generate_observation, &result);
         result.map(|result| GenerateOutput { result })
     }
 }

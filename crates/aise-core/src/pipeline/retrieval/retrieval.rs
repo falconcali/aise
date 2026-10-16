@@ -24,12 +24,6 @@ pub struct RetrievalOutput {
     pub roles: Vec<ResolvedRole>,
 }
 
-impl RetrievalOutput {
-    pub fn role(&self, role_id: &RoleId) -> Option<&ResolvedRole> {
-        self.roles.iter().find(|role| &role.role_id == role_id)
-    }
-}
-
 pub struct RetrievalPipeline {
     store: Arc<Store>,
 }
@@ -223,7 +217,7 @@ impl<'a> Pipeline<RetrievalInput<'a>> for RetrievalPipeline {
     ) -> Result<Self::Output, PipelineError> {
         let retrieval_observation = retrieval_trace::begin_retrieval(observation, &input);
         let result = self.retrieve(&input, story_ctx).await;
-        retrieval_trace::finish_retrieval(retrieval_observation, &input, story_ctx, &result);
+        retrieval_trace::finish_retrieval(retrieval_observation, &result);
         result
     }
 }

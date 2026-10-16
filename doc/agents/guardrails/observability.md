@@ -114,3 +114,23 @@ let pack = packs.get(pack_ref).unwrap();
 // GOOD
 let pack = packs.get(pack_ref).cloned().ok_or(PersistenceError::NotFound)?;
 ```
+
+---
+
+## R-OBS-06 - Minimal and purposeful telemetry
+
+**Level: MUST**
+
+- Start observations with a stable name and type, meaningful bounded
+  input/output, status, and diagnosable error data.
+- Trace metadata, metrics, and logs MUST answer a concrete current diagnostic,
+  operational, filtering, evaluation, or capacity question. NEVER add them for
+  possible future use.
+- Every added telemetry field MUST have a known consumer and a verified
+  end-to-end export and query path. Remove fields that are dropped by exporters
+  or unused by operators, dashboards, alerts, filters, or evaluators.
+- Business and orchestration code MUST NOT assemble observability-only metric
+  structs or calculate values solely for telemetry. Derive and map telemetry
+  from existing inputs and results inside the owning `*_trace.rs` helper.
+- Add richer telemetry only when an observed debugging or operational need
+  justifies it.

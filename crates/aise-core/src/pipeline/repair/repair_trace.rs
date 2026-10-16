@@ -1,15 +1,8 @@
 use crate::pipeline::common::PipelineError;
 use crate::pipeline::repair::RepairInput;
 use crate::trace::{
-    Attribute, Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus,
+    Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus,
 };
-
-const INPUT_PROPOSAL_VERSION: &str = "aise.repair.input_proposal_version";
-const OUTPUT_PROPOSAL_VERSION: &str = "aise.repair.output_proposal_version";
-const ROUND: &str = "aise.repair.round";
-const ROUNDS_REMAINING: &str = "aise.repair.rounds_remaining";
-const ISSUES: &str = "aise.repair.issues";
-const OUTPUT_BYTES: &str = "aise.repair.output_bytes";
 
 pub(super) fn begin_repair(observation: &Observation, input: &RepairInput<'_>) -> Observation {
     observation.begin(ObservationSpec {
@@ -20,11 +13,10 @@ pub(super) fn begin_repair(observation: &Observation, input: &RepairInput<'_>) -
     })
 }
 
-pub(super) fn finish_repair(observation: Observation, input: &RepairInput<'_>, result: &Result<String, PipelineError>) {
+pub(super) fn finish_repair(observation: Observation, result: &Result<String, PipelineError>) {
     let outcome = match result {
         Ok(proposal) => ObservationOutcome {
             status: ObservationStatus::Ok,
-            metadata: repair_metadata(input, proposal.len()),
             output: observation.capture_content(proposal),
             ..ObservationOutcome::default()
         },
@@ -35,17 +27,6 @@ pub(super) fn finish_repair(observation: Observation, input: &RepairInput<'_>, r
         },
     };
     observation.finish(outcome);
-}
-
-fn repair_metadata(input: &RepairInput<'_>, output_bytes: usize) -> Vec<Attribute> {
-    vec![
-        Attribute::u64(INPUT_PROPOSAL_VERSION, u64::from(input.proposal_version)),
-        Attribute::u64(OUTPUT_PROPOSAL_VERSION, u64::from(input.proposal_version) + 1),
-        Attribute::u64(ROUND, u64::from(input.repair_round)),
-        Attribute::u64(ROUNDS_REMAINING, u64::from(input.repair_rounds_remaining)),
-        Attribute::u64(ISSUES, input.issues.len() as u64),
-        Attribute::u64(OUTPUT_BYTES, output_bytes as u64),
-    ]
 }
 
 fn observation_error(error: &PipelineError) -> ObservationError {

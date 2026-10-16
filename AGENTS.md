@@ -96,6 +96,9 @@ Errors and observability:
   NEVER interpolate identifiers into message strings.
 - `R-OBS-05` aise-core MUST use typed (`thiserror`) errors and NEVER leak
   `anyhow::Error`; `aise-service` MAY use `anyhow`.
+- `R-OBS-06` MUST keep telemetry minimal and purposeful; NEVER add speculative
+  trace metadata or metrics without a concrete consumer and a verified export
+  path, and keep observability-only mapping inside owned trace helpers.
 
 ---
 

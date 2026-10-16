@@ -2,7 +2,7 @@
 
 > **Date**: 2026-10-16
 > **Author**: GPT-5.6 Sol
-> **Status**: Draft
+> **Status**: Accepted
 > **Prior doc**: [Pipeline Framework Design](2026-10-13-pipeline-framework-design-opus.md)
 
 ---

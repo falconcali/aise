@@ -79,7 +79,7 @@ impl<'a> Pipeline<ValidateInput<'a>> for ValidatePipeline {
     ) -> Result<Self::Output, PipelineError> {
         let evaluator_observation = validate_trace::begin_evaluator(observation, &input);
         let result = self.evaluate(&input, story_ctx, control, &evaluator_observation).await;
-        validate_trace::finish_evaluator(evaluator_observation, &input, &result);
+        validate_trace::finish_evaluator(evaluator_observation, &result);
         result.map(|report| ValidateOutput { report })
     }
 }

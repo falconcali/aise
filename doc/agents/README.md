@@ -63,8 +63,8 @@ path below is only a planned target. The architecture baseline is
 | `R-LAYER-*` | Layer dependencies | [guardrails/layer-dependencies.md](./guardrails/layer-dependencies.md) | 5 |
 | `R-CONC-*` | Concurrency and locks | [guardrails/concurrency.md](./guardrails/concurrency.md) | 4 |
 | `R-CODE-*` | Code organization | [guardrails/code-organization.md](./guardrails/code-organization.md) | 8 |
-| `R-OBS-*` | Errors and observability | [guardrails/observability.md](./guardrails/observability.md) | 5 |
+| `R-OBS-*` | Errors and observability | [guardrails/observability.md](./guardrails/observability.md) | 6 |
 | `R-LINT-*` | Toolchain and lints | [guardrails/toolchain.md](./guardrails/toolchain.md) | 2 |
 | `R-DEP-*` | Dependencies and MSRV | [guardrails/toolchain.md](./guardrails/toolchain.md) | 1 |
 | `R-AISE-*` | Turn pipeline constraints | [guardrails/pipeline.md](./guardrails/pipeline.md) | 8 |
-| Total | | | 40 |
+| Total | | | 41 |

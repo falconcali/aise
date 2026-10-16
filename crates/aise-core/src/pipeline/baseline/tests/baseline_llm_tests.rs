@@ -53,7 +53,7 @@ fn trace() -> Trace {
 }
 
 #[tokio::test]
-async fn baseline_uses_low_reasoning_effort() {
+async fn baseline_uses_high_reasoning_effort() {
     let provider = Arc::new(CapturingProvider {
         request: Mutex::new(None),
     });
@@ -66,5 +66,5 @@ async fn baseline_uses_low_reasoning_effort() {
         .expect("baseline completion");
 
     let request = provider.request.lock().expect("request lock").take().expect("captured request");
-    assert_eq!(request.reasoning_effort, Some(LlmReasoningEffort::Low));
+    assert_eq!(request.reasoning_effort, Some(LlmReasoningEffort::High));
 }

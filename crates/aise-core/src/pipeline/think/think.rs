@@ -130,7 +130,7 @@ impl<'a> Pipeline<ThinkInput<'a>> for ThinkPipeline {
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
-        let think_observation = think_trace::begin_think(observation, input.requests.len());
+        let think_observation = think_trace::begin_think(observation);
         let result = self.think(&input, story_ctx, control, &think_observation).await;
         think_trace::finish_think(think_observation, &result);
         result

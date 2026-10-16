@@ -80,7 +80,7 @@ impl<'a> Pipeline<RepairInput<'a>> for RepairPipeline {
     ) -> Result<Self::Output, PipelineError> {
         let repair_observation = repair_trace::begin_repair(observation, &input);
         let result = self.repair(&input, story_ctx, control, &repair_observation).await;
-        repair_trace::finish_repair(repair_observation, &input, &result);
+        repair_trace::finish_repair(repair_observation, &result);
         result.map(|proposal| RepairOutput { proposal })
     }
 }

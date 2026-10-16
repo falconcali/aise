@@ -36,7 +36,7 @@ fn root_observation() -> Observation {
 #[test]
 fn stage_and_role_observations_form_explicit_parent_chain() {
     let pipeline = root_observation();
-    let think = begin_think(&pipeline, 1);
+    let think = begin_think(&pipeline);
     let role_id = RoleId::try_new("target").expect("valid role id");
     let role = begin_role(&think, &role_id);
 
