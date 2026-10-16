@@ -1,5 +1,5 @@
 use crate::pipeline::common::{PipelineError, PipelineStage};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 pub const MAX_VALIDATE_CHECKS: usize = 16;
@@ -8,14 +8,14 @@ pub const MAX_CRITERION_NAME_BYTES: usize = 64;
 pub const MAX_CRITERION_DESCRIPTION_BYTES: usize = 2 * 1024;
 pub const MAX_ISSUE_BYTES_LIMIT: usize = 16 * 1024;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ValidateCheckConfig {
     pub name: String,
     pub description: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ValidateScoreConfig {
     pub name: String,

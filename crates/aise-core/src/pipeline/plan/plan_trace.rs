@@ -1,37 +1,8 @@
 use crate::pipeline::common::PipelineError;
 use crate::pipeline::plan::PlanOutput;
 use crate::trace::{
-    Attribute, Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus,
+    Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus,
 };
-
-const FACT_CANDIDATES_TOTAL: &str = "aise.plan.retrieval.fact_candidates_total";
-const FACT_CANDIDATES_OFFERED: &str = "aise.plan.retrieval.fact_candidates_offered";
-const FACT_CANDIDATES_DROPPED: &str = "aise.plan.retrieval.fact_candidates_dropped";
-const FACT_CANDIDATES_TRUNCATED: &str = "aise.plan.retrieval.fact_candidates_truncated";
-const RUMOR_CANDIDATES_TOTAL: &str = "aise.plan.retrieval.rumor_candidates_total";
-const RUMOR_CANDIDATES_OFFERED: &str = "aise.plan.retrieval.rumor_candidates_offered";
-const RUMOR_CANDIDATES_DROPPED: &str = "aise.plan.retrieval.rumor_candidates_dropped";
-const RUMOR_CANDIDATES_TRUNCATED: &str = "aise.plan.retrieval.rumor_candidates_truncated";
-const FACTS_SELECTED: &str = "aise.plan.retrieval.facts_selected";
-const RUMORS_SELECTED: &str = "aise.plan.retrieval.rumors_selected";
-const ROLE_CATALOG_ENTRIES: &str = "aise.plan.roles.catalog_entries";
-const ROLE_CATALOG_BYTES: &str = "aise.plan.roles.catalog_bytes";
-const GENERATION_ROLES_SELECTED: &str = "aise.plan.roles.generation_selected";
-const CHARACTER_THINK_REQUESTS: &str = "aise.plan.roles.think_requests";
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct PlanTraceMetrics {
-    pub fact_candidates_total: usize,
-    pub fact_candidates_offered: usize,
-    pub rumor_candidates_total: usize,
-    pub rumor_candidates_offered: usize,
-    pub facts_selected: usize,
-    pub rumors_selected: usize,
-    pub role_catalog_entries: usize,
-    pub role_catalog_bytes: usize,
-    pub generation_roles_selected: usize,
-    pub character_think_requests: usize,
-}
 
 pub fn begin_plan(observation: &Observation, player_input: &str) -> Observation {
     observation.begin(ObservationSpec {
@@ -42,65 +13,20 @@ pub fn begin_plan(observation: &Observation, player_input: &str) -> Observation 
     })
 }
 
-pub fn warn_if_candidates_truncated(metrics: &PlanTraceMetrics) {
-    let fact_candidates_dropped = metrics.fact_candidates_total.saturating_sub(metrics.fact_candidates_offered);
-    let rumor_candidates_dropped = metrics.rumor_candidates_total.saturating_sub(metrics.rumor_candidates_offered);
-    if candidates_truncated(metrics) {
-        tracing::warn!(
-            target: "aise::pipeline::plan",
-            fact_candidates_total = metrics.fact_candidates_total,
-            fact_candidates_offered = metrics.fact_candidates_offered,
-            fact_candidates_dropped,
-            rumor_candidates_total = metrics.rumor_candidates_total,
-            rumor_candidates_offered = metrics.rumor_candidates_offered,
-            rumor_candidates_dropped,
-            "plan retrieval candidates truncated"
-        );
-    }
-}
-
-fn candidates_truncated(metrics: &PlanTraceMetrics) -> bool {
-    metrics.fact_candidates_total > metrics.fact_candidates_offered
-        || metrics.rumor_candidates_total > metrics.rumor_candidates_offered
-}
-
-pub fn finish_plan(observation: Observation, result: &Result<PlanOutput, PipelineError>, metrics: &PlanTraceMetrics) {
+pub fn finish_plan(observation: Observation, result: &Result<PlanOutput, PipelineError>) {
     let outcome = match result {
         Ok(output) => ObservationOutcome {
             status: ObservationStatus::Ok,
-            metadata: candidate_trace_metadata(metrics),
             output: observation.capture_content(output),
             ..ObservationOutcome::default()
         },
         Err(error) => ObservationOutcome {
             status: ObservationStatus::Error,
-            metadata: candidate_trace_metadata(metrics),
             error: Some(observation_error(error)),
             ..ObservationOutcome::default()
         },
     };
     observation.finish(outcome);
-}
-
-fn candidate_trace_metadata(metrics: &PlanTraceMetrics) -> Vec<Attribute> {
-    let fact_candidates_dropped = metrics.fact_candidates_total.saturating_sub(metrics.fact_candidates_offered);
-    let rumor_candidates_dropped = metrics.rumor_candidates_total.saturating_sub(metrics.rumor_candidates_offered);
-    vec![
-        Attribute::u64(FACT_CANDIDATES_TOTAL, metrics.fact_candidates_total as u64),
-        Attribute::u64(FACT_CANDIDATES_OFFERED, metrics.fact_candidates_offered as u64),
-        Attribute::u64(FACT_CANDIDATES_DROPPED, fact_candidates_dropped as u64),
-        Attribute::bool(FACT_CANDIDATES_TRUNCATED, fact_candidates_dropped > 0),
-        Attribute::u64(RUMOR_CANDIDATES_TOTAL, metrics.rumor_candidates_total as u64),
-        Attribute::u64(RUMOR_CANDIDATES_OFFERED, metrics.rumor_candidates_offered as u64),
-        Attribute::u64(RUMOR_CANDIDATES_DROPPED, rumor_candidates_dropped as u64),
-        Attribute::bool(RUMOR_CANDIDATES_TRUNCATED, rumor_candidates_dropped > 0),
-        Attribute::u64(FACTS_SELECTED, metrics.facts_selected as u64),
-        Attribute::u64(RUMORS_SELECTED, metrics.rumors_selected as u64),
-        Attribute::u64(ROLE_CATALOG_ENTRIES, metrics.role_catalog_entries as u64),
-        Attribute::u64(ROLE_CATALOG_BYTES, metrics.role_catalog_bytes as u64),
-        Attribute::u64(GENERATION_ROLES_SELECTED, metrics.generation_roles_selected as u64),
-        Attribute::u64(CHARACTER_THINK_REQUESTS, metrics.character_think_requests as u64),
-    ]
 }
 
 fn observation_error(error: &PipelineError) -> ObservationError {

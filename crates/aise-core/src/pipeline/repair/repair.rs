@@ -1,8 +1,12 @@
 use crate::core::{StoryContext, TurnControl};
+use crate::llm::LlmGateway;
+use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage, ValidationContext, ValidationIssue};
-use crate::pipeline::repair::RepairConfig;
+use crate::pipeline::repair::{RepairConfig, repair_llm, repair_output, repair_prompt, repair_trace};
+use crate::prompt::Prompt;
 use crate::trace::Observation;
 use serde::Serialize;
+use std::sync::Arc;
 
 #[derive(Serialize)]
 pub struct RepairInput<'a> {
@@ -20,12 +24,43 @@ pub struct RepairOutput {
 }
 
 pub struct RepairPipeline {
+    gateway: Arc<LlmGateway>,
+    prompt: Arc<Prompt>,
+    store: Arc<Store>,
     config: RepairConfig,
 }
 
 impl RepairPipeline {
-    pub fn new(config: RepairConfig) -> Self {
-        Self { config }
+    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, store: Arc<Store>, config: RepairConfig) -> Self {
+        Self {
+            gateway,
+            prompt,
+            store,
+            config,
+        }
+    }
+
+    async fn repair(
+        &self,
+        input: &RepairInput<'_>,
+        story_ctx: &StoryContext,
+        control: &TurnControl,
+        observation: &Observation,
+    ) -> Result<String, PipelineError> {
+        let rendered_prompt = repair_prompt::repair_story(
+            self.prompt.as_ref(),
+            story_ctx,
+            input,
+            &self.config,
+            self.store.as_ref(),
+            observation,
+        )
+        .await?;
+        let raw =
+            repair_llm::repair_story(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
+                .await
+                .map_err(PipelineError::llm(PipelineStage::Repair))?;
+        repair_output::validate_repaired_proposal(raw, &self.config)
     }
 }
 
@@ -39,19 +74,17 @@ impl<'a> Pipeline<RepairInput<'a>> for RepairPipeline {
     async fn execute(
         &self,
         input: RepairInput<'a>,
-        _story_ctx: &StoryContext,
-        _control: &TurnControl,
-        _observation: &Observation,
+        story_ctx: &StoryContext,
+        control: &TurnControl,
+        observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
-        if input.proposal.len() > self.config.max_proposal_bytes {
-            return Err(PipelineError::invalid_output(
-                PipelineStage::Repair,
-                "repair_proposal_too_long",
-                format!("repair proposal exceeds {} bytes", self.config.max_proposal_bytes),
-            ));
-        }
-        Ok(RepairOutput {
-            proposal: input.proposal.to_owned(),
-        })
+        let repair_observation = repair_trace::begin_repair(observation, &input);
+        let result = self.repair(&input, story_ctx, control, &repair_observation).await;
+        repair_trace::finish_repair(repair_observation, &input, &result);
+        result.map(|proposal| RepairOutput { proposal })
     }
 }
+
+#[cfg(test)]
+#[path = "tests/repair_tests.rs"]
+mod tests;

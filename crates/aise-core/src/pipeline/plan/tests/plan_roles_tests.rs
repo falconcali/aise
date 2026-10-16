@@ -39,24 +39,6 @@ fn catalog_projects_all_lightweight_role_fields() {
     assert!(contains_role(&catalog, entry.role_id));
 }
 
-#[test]
-fn catalog_byte_count_includes_each_projected_field_once() {
-    let pack = snake_pack();
-    let player_role = RoleId::try_new("xu_xian").expect("valid role id");
-    let catalog = collect_role_catalog(&pack, &player_role);
-    let expected = catalog
-        .iter()
-        .map(|entry| {
-            entry.role_id.as_str().len()
-                + entry.name.as_str().len()
-                + entry.aliases.iter().map(|alias| alias.as_str().len()).sum::<usize>()
-                + entry.retrieval_hint.as_str().len()
-        })
-        .sum::<usize>();
-
-    assert_eq!(catalog_bytes(&catalog), expected);
-}
-
 #[tokio::test]
 async fn player_role_resolution_uses_effective_card_profile_without_memories() {
     let store = Store::default();

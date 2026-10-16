@@ -7,13 +7,15 @@ use crate::persistence::Store;
 use crate::pipeline::baseline::{BaselineInput, BaselineOutput, BaselinePipeline};
 use crate::pipeline::commit::{CommitInput, CommitPipeline};
 use crate::pipeline::common::{
-    PipelineError, PipelineRunner, ValidationContext, ValidationCriterionKind, ValidationIssue, ValidationReport,
+    PipelineError, PipelineRunner, PipelineStage, ValidationContext, ValidationCriterionKind, ValidationIssue,
+    ValidationReport,
 };
 use crate::pipeline::extract::{ExtractInput, ExtractPipeline};
 use crate::pipeline::generate::{GenerateInput, GeneratePipeline};
 use crate::pipeline::plan::{PlanInput, PlanOutput, PlanPipeline};
 use crate::pipeline::repair::{RepairInput, RepairOutput, RepairPipeline};
 use crate::pipeline::retrieval::{RetrievalInput, RetrievalOutput, RetrievalPipeline};
+use crate::pipeline::runtime::validation_choice::select_choice;
 use crate::pipeline::summary::{SummaryInput, SummaryPipeline};
 use crate::pipeline::think::{ThinkInput, ThinkOutput, ThinkPipeline};
 use crate::pipeline::validate::{ValidateInput, ValidateOutput, ValidatePipeline};
@@ -35,6 +37,12 @@ pub struct Runtime {
     summary: SummaryPipeline,
     commit: CommitPipeline,
     validation_loop: ValidationLoopConfig,
+    repair_max_proposal_bytes: usize,
+}
+
+pub(super) struct ValidatedProposal {
+    pub(super) proposal: String,
+    pub(super) report: ValidationReport,
 }
 
 struct ValidationLoopResult {
@@ -53,6 +61,7 @@ impl Runtime {
         pipeline_config: PipelineConfig,
     ) -> Result<Self, PipelineError> {
         pipeline_config.validate()?;
+        let repair_max_proposal_bytes = pipeline_config.repair.max_proposal_bytes;
         Ok(Self {
             baseline: BaselinePipeline::new(
                 Arc::clone(&gateway),
@@ -79,8 +88,18 @@ impl Runtime {
                 Arc::clone(&store),
                 pipeline_config.generate,
             ),
-            validate: ValidatePipeline::new(pipeline_config.validate),
-            repair: RepairPipeline::new(pipeline_config.repair),
+            validate: ValidatePipeline::new(
+                Arc::clone(&gateway),
+                Arc::clone(&prompt),
+                Arc::clone(&store),
+                pipeline_config.validate,
+            ),
+            repair: RepairPipeline::new(
+                Arc::clone(&gateway),
+                Arc::clone(&prompt),
+                Arc::clone(&store),
+                pipeline_config.repair,
+            ),
             extract: ExtractPipeline::new(Arc::clone(&store)),
             summary: SummaryPipeline::new(
                 Arc::clone(&gateway),
@@ -90,6 +109,7 @@ impl Runtime {
             ),
             commit: CommitPipeline::new(Arc::clone(&store)),
             validation_loop: pipeline_config.validation_loop,
+            repair_max_proposal_bytes,
         })
     }
 
@@ -163,12 +183,13 @@ impl Runtime {
 
         let generate_output = pipeline_runner.run(&self.generate, generate_input, story_ctx).await?;
 
+        let initial_proposal = validate_generated_proposal(generate_output.result, self.repair_max_proposal_bytes)?;
         let validation_result = self
             .validate_and_repair(
                 &pipeline_runner,
                 story_ctx,
                 validation_context(&plan_output, &baseline_output, &retrieval_output, &think_output),
-                generate_output.result,
+                initial_proposal,
             )
             .await?;
 
@@ -209,14 +230,16 @@ impl Runtime {
         context: ValidationContext<'_>,
         initial_proposal: String,
     ) -> Result<ValidationLoopResult, PipelineError> {
-        let mut proposal = initial_proposal;
-        let mut proposal_version = 1;
+        let mut history = Vec::with_capacity(self.validation_loop.max_repair_rounds as usize + 1);
+        let mut current_proposal = initial_proposal;
         let mut repair_rounds = 0;
 
         loop {
+            let proposal_version =
+                u32::try_from(history.len() + 1).expect("validated proposal history length must fit u32");
             let validate_input = ValidateInput {
                 context,
-                proposal: &proposal,
+                proposal: &current_proposal,
                 proposal_version,
                 repair_rounds_used: repair_rounds,
                 repair_rounds_remaining: self.validation_loop.max_repair_rounds - repair_rounds,
@@ -224,54 +247,62 @@ impl Runtime {
 
             let validate_output: ValidateOutput =
                 pipeline_runner.run(&self.validate, validate_input, story_ctx).await?;
-            let report = validate_output.report;
-            if report.all_checks_pass() && report.all_scores_meet_target() {
+            history.push(ValidatedProposal {
+                proposal: current_proposal,
+                report: validate_output.report,
+            });
+            let latest = history.last().expect("validated proposal history must not be empty");
+            if latest.report.all_checks_pass() && latest.report.all_scores_meet_target() {
+                let passed = history.pop().expect("validated proposal history must not be empty");
                 return Ok(ValidationLoopResult {
-                    proposal,
-                    report,
+                    proposal: passed.proposal,
+                    report: passed.report,
                     repair_rounds,
                     status: TurnStatus::Pass,
                     choice: None,
                 });
             }
 
-            let issues = report.failed_issues();
             if repair_rounds >= self.validation_loop.max_repair_rounds {
-                if !report.all_checks_pass() {
+                if !latest.report.all_checks_pass() {
+                    let issues = latest.report.failed_issues();
                     let (failed_checks, unmet_scores) = failed_issue_counts(&issues);
                     return Err(PipelineError::ValidationFailed {
                         code: "validation_hard_gate_exhausted",
-                        proposal_version: report.proposal_version,
+                        proposal_version: latest.report.proposal_version,
                         message: format!(
                             "repair budget exhausted with {failed_checks} failed checks and {unmet_scores} unmet scores"
                         ),
                     });
                 }
+                let selection = select_choice(&history)?;
+                let selected = history.swap_remove(selection.history_index);
                 return Ok(ValidationLoopResult {
-                    proposal,
+                    proposal: selected.proposal,
                     choice: Some(TurnChoiceEvaluation {
-                        selected_proposal_version: report.proposal_version,
-                        target_gap_mse: target_gap_mse(&report),
+                        selected_proposal_version: selection.proposal_version,
+                        target_gap_mse: selection.target_gap_mse,
                     }),
-                    report,
+                    report: selected.report,
                     repair_rounds,
                     status: TurnStatus::Choice,
                 });
             }
 
             repair_rounds += 1;
+            let latest = history.last().expect("validated proposal history must not be empty");
+            let issues = latest.report.failed_issues();
             let repair_input = RepairInput {
                 context,
-                proposal: &proposal,
-                proposal_version,
+                proposal: &latest.proposal,
+                proposal_version: latest.report.proposal_version,
                 issues: &issues,
                 repair_round: repair_rounds,
                 repair_rounds_remaining: self.validation_loop.max_repair_rounds - repair_rounds,
             };
 
             let repair_output: RepairOutput = pipeline_runner.run(&self.repair, repair_input, story_ctx).await?;
-            proposal = repair_output.proposal;
-            proposal_version += 1;
+            current_proposal = repair_output.proposal;
         }
     }
 }
@@ -343,19 +374,20 @@ fn turn_evaluation(result: &ValidationLoopResult) -> TurnEvaluation {
     }
 }
 
-fn target_gap_mse(report: &ValidationReport) -> f64 {
-    if report.scores.is_empty() || report.unmet_score_count() == 0 {
-        return 0.0;
+fn validate_generated_proposal(proposal: String, max_proposal_bytes: usize) -> Result<String, PipelineError> {
+    if proposal.trim().is_empty() {
+        return Err(PipelineError::EmptyOutput {
+            stage: PipelineStage::Generate,
+        });
     }
-    report
-        .scores
-        .iter()
-        .map(|score| {
-            let deficit = ((score.target_score - score.score) / (score.max_score - score.min_score)).max(0.0);
-            deficit * deficit
-        })
-        .sum::<f64>()
-        / report.scores.len() as f64
+    if proposal.len() > max_proposal_bytes {
+        return Err(PipelineError::invalid_output(
+            PipelineStage::Generate,
+            "generate_proposal_too_long",
+            format!("generated proposal exceeds {max_proposal_bytes} bytes"),
+        ));
+    }
+    Ok(proposal)
 }
 
 fn failed_issue_counts(issues: &[ValidationIssue]) -> (usize, usize) {

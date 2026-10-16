@@ -8,6 +8,7 @@ use crate::core::{
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
 };
+use crate::pipeline::ValidateConfig;
 use crate::pipeline::common::PipelineStage;
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -198,6 +199,25 @@ async fn run_runtime_with_think_responses(
     remove_selected_fact_after_plan: bool,
     think_responses: Option<Vec<String>>,
 ) -> RuntimeRun {
+    run_runtime_scenario(
+        plan_response,
+        remove_selected_fact_after_plan,
+        think_responses,
+        "Generated story.".to_owned(),
+        vec![validation_response()],
+        PipelineConfig::default(),
+    )
+    .await
+}
+
+async fn run_runtime_scenario(
+    plan_response: String,
+    remove_selected_fact_after_plan: bool,
+    think_responses: Option<Vec<String>>,
+    generated_proposal: String,
+    validation_responses: Vec<String>,
+    pipeline_config: PipelineConfig,
+) -> RuntimeRun {
     let store = Arc::new(Store::default());
     let mut story_ctx = StoryContext::new();
     let pack = knowledge_pack();
@@ -245,7 +265,8 @@ async fn run_runtime_with_think_responses(
             .map(|index| json!({"decision": format!("decision-{index}"), "suggested_utterance": null}).to_string())
             .collect()
     }));
-    responses.push_back("Generated story.".to_owned());
+    responses.push_back(generated_proposal);
+    responses.extend(validation_responses);
     let provider = ScriptedProvider {
         calls: AtomicUsize::new(0),
         responses: Mutex::new(responses),
@@ -257,7 +278,7 @@ async fn run_runtime_with_think_responses(
         Arc::new(LlmGateway::new(Arc::new(provider), LlmConfig::default())),
         Arc::new(bundled_prompt()),
         Arc::clone(&store),
-        PipelineConfig::default(),
+        pipeline_config,
     )
     .expect("runtime config should be valid");
     let sink = CapturingSink::default();
@@ -305,6 +326,38 @@ fn plan_response_with_roles(facts: &[&str], rumors: &[&str], roles: &[&str], thi
             .collect::<Vec<_>>()
     })
     .to_string()
+}
+
+fn validation_response() -> String {
+    validation_response_with(true, None)
+}
+
+fn validation_response_with(checks_pass: bool, score_value: Option<f64>) -> String {
+    let config = ValidateConfig::default();
+    let checks = config
+        .checks
+        .iter()
+        .map(|check| {
+            json!({
+                "name": check.name,
+                "passed": checks_pass,
+                "issue": (!checks_pass).then_some("Fix the hard-gate conflict.")
+            })
+        })
+        .collect::<Vec<_>>();
+    let scores = config
+        .scores
+        .iter()
+        .map(|score| {
+            let value = score_value.unwrap_or(score.target_score);
+            json!({
+                "name": score.name,
+                "score": value,
+                "issue": (value < score.target_score).then_some("Improve this score.")
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({"checks": checks, "scores": scores}).to_string()
 }
 
 fn request_text(request: &LlmCompletionRequest) -> String {
@@ -422,7 +475,7 @@ async fn runtime_skips_role_retrieval_and_think_when_plan_selects_no_roles() {
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 0);
     assert_eq!(stage_count(&run.stages, "think"), 0);
-    assert_eq!(run.requests.len(), 3);
+    assert_eq!(run.requests.len(), 4);
     assert_plan_prompt_contract(&run.requests);
     let generate_prompt = request_text(&run.requests[2]);
     assert!(generate_prompt.contains("# Player Character"));
@@ -442,7 +495,7 @@ async fn runtime_runs_retrieval_for_fact_selection() {
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
-    assert_eq!(run.requests.len(), 3);
+    assert_eq!(run.requests.len(), 4);
     let generate_prompt = request_text(&run.requests[2]);
     assert!(generate_prompt.contains("# Known Facts\n\n- Activated fact body.\n- Retrieved fact body."));
     assert!(generate_prompt.contains("# Rumors\n\n- Activated rumor body."));
@@ -455,7 +508,7 @@ async fn runtime_runs_retrieval_for_rumor_selection() {
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
-    assert_eq!(run.requests.len(), 3);
+    assert_eq!(run.requests.len(), 4);
     let generate_prompt = request_text(&run.requests[2]);
     assert!(generate_prompt.contains("# Known Facts\n\n- Activated fact body."));
     assert!(generate_prompt.contains("# Rumors\n\n- Activated rumor body.\n- Retrieved rumor body."));
@@ -468,7 +521,7 @@ async fn runtime_delivers_retrieved_knowledge_to_generate() {
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
-    assert_eq!(run.requests.len(), 3);
+    assert_eq!(run.requests.len(), 4);
     assert_plan_prompt_contract(&run.requests);
     let generate_prompt = request_text(&run.requests[2]);
     assert!(generate_prompt.contains(
@@ -483,7 +536,7 @@ async fn runtime_retrieves_generation_only_role_without_think() {
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
     assert_eq!(stage_count(&run.stages, "think"), 0);
-    assert_eq!(run.requests.len(), 3);
+    assert_eq!(run.requests.len(), 4);
     let generate_prompt = request_text(&run.requests[2]);
     assert!(generate_prompt.contains("# Player Character"));
     assert!(generate_prompt.contains("# Relevant AI Roles"));
@@ -498,7 +551,7 @@ async fn runtime_runs_one_character_think_and_delivers_decision_to_generate() {
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
     assert_eq!(stage_count(&run.stages, "think"), 1);
-    assert_eq!(run.requests.len(), 4);
+    assert_eq!(run.requests.len(), 5);
     let generate_prompt = request_text(&run.requests[3]);
     assert!(generate_prompt.contains("# Player Character"));
     assert!(generate_prompt.contains("# Relevant AI Roles"));
@@ -516,7 +569,7 @@ async fn runtime_delivers_relevant_rumors_but_not_narrative_direction_to_charact
     .await;
 
     assert!(run.result.is_ok());
-    assert_eq!(run.requests.len(), 4);
+    assert_eq!(run.requests.len(), 5);
     let think_prompt = request_text(&run.requests[2]);
     assert!(think_prompt.contains("## Rumors\n\n- \"Activated rumor body.\"\n- \"Retrieved rumor body.\""));
     assert!(!think_prompt.contains(ACTIVATED_RUMOR_ID));
@@ -542,7 +595,7 @@ async fn runtime_stable_union_resolves_cross_list_role_once() {
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
     assert_eq!(stage_count(&run.stages, "think"), 1);
-    assert_eq!(run.requests.len(), 5);
+    assert_eq!(run.requests.len(), 6);
     let generate_prompt = request_text(&run.requests[4]);
     let relevant_roles = generate_prompt
         .split("# Relevant AI Roles")
@@ -561,7 +614,7 @@ async fn runtime_preserves_multi_role_think_request_order() {
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "think"), 1);
-    assert_eq!(run.requests.len(), 5);
+    assert_eq!(run.requests.len(), 6);
     let generate_prompt = request_text(&run.requests[4]);
     let decisions = generate_prompt
         .split("# Character Decisions")
@@ -643,4 +696,190 @@ async fn runtime_stops_before_generate_when_selected_fact_disappears() {
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
     assert_eq!(stage_count(&run.stages, "generate"), 0);
     assert_eq!(run.requests.len(), 2);
+}
+
+#[tokio::test]
+async fn runtime_passes_initial_proposal_without_repair() {
+    let run = run_runtime(plan_response(&[], &[]), false).await;
+    let commit = run.result.expect("turn succeeds");
+
+    assert_eq!(stage_count(&run.stages, "validate"), 1);
+    assert_eq!(stage_count(&run.stages, "repair"), 0);
+    assert_eq!(commit.turn.turn_segment.text(), "Generated story.");
+    assert_eq!(commit.turn.turn_status, TurnStatus::Pass);
+    assert_eq!(commit.turn.turn_evaluation.proposal_version, 1);
+    assert_eq!(commit.turn.turn_evaluation.repair_rounds, 0);
+}
+
+#[tokio::test]
+async fn runtime_repairs_then_fully_revalidates_new_version() {
+    let run = run_runtime_scenario(
+        plan_response(&[], &[]),
+        false,
+        None,
+        "Generated story.".to_owned(),
+        vec![
+            validation_response_with(false, Some(7.0)),
+            "Repaired story.".to_owned(),
+            validation_response(),
+        ],
+        PipelineConfig::default(),
+    )
+    .await;
+    let commit = run.result.expect("turn succeeds");
+    let validate_requests = run
+        .requests
+        .iter()
+        .filter(|request| request_text(request).contains("# [UNTRUSTED CONTENT] Check Criteria"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(stage_count(&run.stages, "validate"), 2);
+    assert_eq!(stage_count(&run.stages, "repair"), 1);
+    assert_eq!(validate_requests.len(), 2);
+    for request in validate_requests {
+        let prompt = request_text(request);
+        for check in &ValidateConfig::default().checks {
+            assert!(prompt.contains(&check.name));
+        }
+        for score in &ValidateConfig::default().scores {
+            assert!(prompt.contains(&score.name));
+        }
+    }
+    assert_eq!(commit.turn.turn_segment.text(), "Repaired story.");
+    assert_eq!(commit.turn.turn_evaluation.proposal_version, 2);
+    assert_eq!(commit.turn.turn_evaluation.repair_rounds, 1);
+}
+
+#[tokio::test]
+async fn runtime_zero_budget_validates_once_and_never_repairs() {
+    let mut config = PipelineConfig::default();
+    config.validation_loop.max_repair_rounds = 0;
+    let run = run_runtime_scenario(
+        plan_response(&[], &[]),
+        false,
+        None,
+        "Generated story.".to_owned(),
+        vec![validation_response_with(true, Some(7.0))],
+        config,
+    )
+    .await;
+    let commit = run.result.expect("turn succeeds");
+
+    assert_eq!(stage_count(&run.stages, "validate"), 1);
+    assert_eq!(stage_count(&run.stages, "repair"), 0);
+    assert_eq!(commit.turn.turn_status, TurnStatus::Choice);
+    assert_eq!(commit.turn.turn_evaluation.repair_rounds, 0);
+}
+
+#[tokio::test]
+async fn runtime_hard_gate_exhaustion_skips_extract_summary_and_commit() {
+    let mut config = PipelineConfig::default();
+    config.validation_loop.max_repair_rounds = 1;
+    let run = run_runtime_scenario(
+        plan_response(&[], &[]),
+        false,
+        None,
+        "Generated story.".to_owned(),
+        vec![
+            validation_response_with(false, None),
+            "Still broken.".to_owned(),
+            validation_response_with(false, None),
+        ],
+        config,
+    )
+    .await;
+
+    assert!(matches!(
+        run.result,
+        Err(PipelineError::ValidationFailed {
+            code: "validation_hard_gate_exhausted",
+            proposal_version: 2,
+            ..
+        })
+    ));
+    assert_eq!(stage_count(&run.stages, "validate"), 2);
+    assert_eq!(stage_count(&run.stages, "repair"), 1);
+    assert_eq!(stage_count(&run.stages, "extract"), 0);
+    assert_eq!(stage_count(&run.stages, "summary"), 0);
+    assert_eq!(stage_count(&run.stages, "commit"), 0);
+}
+
+#[tokio::test]
+async fn runtime_validate_contract_error_does_not_consume_repair_budget() {
+    let run = run_runtime_scenario(
+        plan_response(&[], &[]),
+        false,
+        None,
+        "Generated story.".to_owned(),
+        vec!["not json".to_owned()],
+        PipelineConfig::default(),
+    )
+    .await;
+
+    assert!(matches!(
+        run.result,
+        Err(PipelineError::InvalidOutput {
+            stage: PipelineStage::Validate,
+            code: "validate_output_invalid_json",
+            ..
+        })
+    ));
+    assert_eq!(stage_count(&run.stages, "validate"), 1);
+    assert_eq!(stage_count(&run.stages, "repair"), 0);
+    assert_eq!(stage_count(&run.stages, "commit"), 0);
+}
+
+#[tokio::test]
+async fn runtime_history_is_bounded_by_repair_budget_plus_one() {
+    let mut config = PipelineConfig::default();
+    config.validation_loop.max_repair_rounds = 2;
+    let run = run_runtime_scenario(
+        plan_response(&[], &[]),
+        false,
+        None,
+        "Generated story.".to_owned(),
+        vec![
+            validation_response_with(false, None),
+            "Repair one.".to_owned(),
+            validation_response_with(false, None),
+            "Repair two.".to_owned(),
+            validation_response_with(false, None),
+        ],
+        config,
+    )
+    .await;
+
+    assert!(matches!(
+        run.result,
+        Err(PipelineError::ValidationFailed {
+            code: "validation_hard_gate_exhausted",
+            proposal_version: 3,
+            ..
+        })
+    ));
+    assert_eq!(stage_count(&run.stages, "validate"), 3);
+    assert_eq!(stage_count(&run.stages, "repair"), 2);
+}
+
+#[tokio::test]
+async fn runtime_rejects_invalid_generated_proposal_before_validate() {
+    let run = run_runtime_scenario(
+        plan_response(&[], &[]),
+        false,
+        None,
+        " \n\t".to_owned(),
+        Vec::new(),
+        PipelineConfig::default(),
+    )
+    .await;
+
+    assert!(matches!(
+        run.result,
+        Err(PipelineError::EmptyOutput {
+            stage: PipelineStage::Generate
+        })
+    ));
+    assert_eq!(stage_count(&run.stages, "validate"), 0);
+    assert_eq!(stage_count(&run.stages, "repair"), 0);
+    assert_eq!(stage_count(&run.stages, "commit"), 0);
 }

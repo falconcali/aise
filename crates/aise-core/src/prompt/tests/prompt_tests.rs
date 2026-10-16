@@ -102,8 +102,10 @@ fn bundled_catalog_has_expected_prompts() {
             BASELINE_PROMPT_ID,
             "generate.generate_story",
             PLAN_PROMPT_ID,
+            "repair.repair_story",
             "summary.summarize_story",
-            "think.character_decision"
+            "think.character_decision",
+            "validate.evaluate_story"
         ]
     );
 }

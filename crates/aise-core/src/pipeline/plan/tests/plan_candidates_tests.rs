@@ -104,8 +104,6 @@ fn empty_pack_produces_empty_candidates() {
 
     assert!(candidates.facts.is_empty());
     assert!(candidates.rumors.is_empty());
-    assert_eq!(candidates.fact_stats, CandidateStats::default());
-    assert_eq!(candidates.rumor_stats, CandidateStats::default());
 }
 
 #[test]
@@ -138,10 +136,6 @@ fn candidates_truncate_each_kind_independently() {
 
     assert_eq!(candidates.facts.len(), 2);
     assert_eq!(candidates.rumors.len(), 2);
-    assert_eq!(candidates.fact_stats, CandidateStats { total: 3, offered: 2 });
-    assert!(candidates.fact_stats.truncated());
-    assert_eq!(candidates.fact_stats.dropped(), 1);
-    assert!(!candidates.rumor_stats.truncated());
 }
 
 #[test]
@@ -151,8 +145,4 @@ fn zero_limit_truncates_all_eligible_candidates() {
 
     assert!(candidates.facts.is_empty());
     assert!(candidates.rumors.is_empty());
-    assert_eq!(candidates.fact_stats.dropped(), 1);
-    assert_eq!(candidates.rumor_stats.dropped(), 1);
-    assert!(candidates.fact_stats.truncated());
-    assert!(candidates.rumor_stats.truncated());
 }

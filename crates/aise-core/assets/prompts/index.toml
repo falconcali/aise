@@ -23,6 +23,18 @@ rc = "rc/generate-generate-story.md.j2"
 fti = "fti/generate-generate-story.md.j2"
 
 [[prompts]]
+id = "validate.evaluate_story"
+csi = "csi/validate-evaluate-story.md.j2"
+rc = "rc/validate-evaluate-story.md.j2"
+fti = "fti/validate-evaluate-story.md.j2"
+
+[[prompts]]
+id = "repair.repair_story"
+csi = "csi/repair-repair-story.md.j2"
+rc = "rc/repair-repair-story.md.j2"
+fti = "fti/repair-repair-story.md.j2"
+
+[[prompts]]
 id = "summary.summarize_story"
 csi = "csi/summary-summarize-story.md.j2"
 rc = "rc/summary-summarize-story.md.j2"

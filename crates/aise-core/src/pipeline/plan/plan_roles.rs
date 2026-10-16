@@ -65,21 +65,6 @@ pub(super) fn contains_role(catalog: &[RoleCatalogEntry<'_>], role_id: &RoleId) 
     catalog.iter().any(|entry| entry.role_id == role_id)
 }
 
-pub(super) fn catalog_bytes(catalog: &[RoleCatalogEntry<'_>]) -> usize {
-    catalog.iter().fold(0usize, |total, entry| {
-        total
-            .saturating_add(entry.role_id.as_str().len())
-            .saturating_add(entry.name.as_str().len())
-            .saturating_add(
-                entry
-                    .aliases
-                    .iter()
-                    .fold(0usize, |alias_total, alias| alias_total.saturating_add(alias.as_str().len())),
-            )
-            .saturating_add(entry.retrieval_hint.as_str().len())
-    })
-}
-
 fn map_player_card_error(role_id: &RoleId, error: PersistenceError) -> PipelineError {
     match error {
         PersistenceError::NotFound => PipelineError::inconsistent_data(

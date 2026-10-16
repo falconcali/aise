@@ -1,0 +1,28 @@
+Evaluate the Current Proposal now.
+
+Return exactly one JSON object with exactly these two fields and no surrounding prose:
+
+{
+  "checks": [
+    {
+      "name": "configured_check_name",
+      "passed": true,
+      "issue": null
+    }
+  ],
+  "scores": [
+    {
+      "name": "configured_score_name",
+      "score": 8.5,
+      "issue": null
+    }
+  ]
+}
+
+Return exactly one result for every configured check and every configured score. Copy each configured name exactly and case-sensitively. Do not add, omit, rename, or duplicate criteria.
+
+For a check, set issue to null when passed is true. When passed is false, issue must be a non-empty actionable description of the specific conflict, its location in the Current Proposal, and the expected correction.
+
+For a score, return a finite number within that criterion's configured minimum and maximum. Set issue to null when score is at least the configured target. When score is below the target, issue must be a non-empty actionable description of the specific shortfall, its location in the Current Proposal, and the expected correction.
+
+Every issue must fit within the supplied Issue Byte Limit. Do not return descriptions, ranges, targets, decisions, totals, weights, proposal text, Markdown, or any field not shown in the JSON protocol.
