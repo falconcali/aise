@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AISE 对话</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, "Microsoft YaHei", system-ui, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 15% 0%, rgba(65, 88, 208, 0.2), transparent 35rem),
+        radial-gradient(circle at 90% 90%, rgba(200, 80, 120, 0.14), transparent 30rem),
+        #0d1117;
+    }
+    main {
+      width: min(1920px, 100%);
+      min-height: 100vh;
+      margin: 0 auto;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      padding: 0 20px;
+    }
+    header {
+      padding: 24px 4px 16px;
+      border-bottom: 1px solid #30363d;
+    }
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 650;
+    }
+    #subtitle {
+      margin-top: 6px;
+      color: #8b949e;
+      font-size: 13px;
+    }
+    #messages {
+      overflow-y: auto;
+      padding: 28px 4px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .message {
+      max-width: min(82%, 1600px);
+      padding: 13px 16px;
+      border: 1px solid #30363d;
+      border-radius: 16px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    }
+    .assistant {
+      align-self: flex-start;
+      background: #161b22;
+      border-bottom-left-radius: 5px;
+    }
+    .user {
+      align-self: flex-end;
+      background: #1f4f8a;
+      border-color: #2f6eb3;
+      border-bottom-right-radius: 5px;
+    }
+    .progress {
+      align-self: flex-start;
+      max-width: min(82%, 1600px);
+      padding: 12px 15px;
+      border: 1px dashed #3c4755;
+      border-radius: 13px;
+      background: rgba(22, 27, 34, 0.72);
+      color: #8b949e;
+      font-size: 13px;
+    }
+    .progress.failed {
+      border-color: #f85149;
+      color: #ffb3ad;
+    }
+    form {
+      padding: 16px 4px 24px;
+      border-top: 1px solid #30363d;
+      background: linear-gradient(180deg, rgba(13, 17, 23, 0.72), #0d1117 26%);
+    }
+    .composer {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid #30363d;
+      border-radius: 16px;
+      background: #161b22;
+    }
+    textarea {
+      flex: 1;
+      min-height: 44px;
+      max-height: 160px;
+      resize: none;
+      border: 0;
+      outline: 0;
+      padding: 10px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      line-height: 1.5;
+    }
+    textarea::placeholder {
+      color: #6e7681;
+    }
+    button {
+      height: 42px;
+      padding: 0 18px;
+      border: 0;
+      border-radius: 11px;
+      background: #2f81f7;
+      color: white;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    button:disabled, textarea:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .hint {
+      margin: 8px 4px 0;
+      color: #6e7681;
+      font-size: 12px;
+    }
+    @media (max-width: 640px) {
+      main {
+        padding: 0 12px;
+      }
+      .message, .progress {
+        max-width: 90%;
+        width: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1 id="title">AISE 对话</h1>
+      <div id="subtitle">正在载入故事……</div>
+    </header>
+    <section id="messages" aria-live="polite"></section>
+    <form id="form">
+      <div class="composer">
+        <textarea id="input" rows="1" maxlength="16384" placeholder="输入许仙接下来要做的事……" disabled></textarea>
+        <button id="send" type="submit" disabled>发送</button>
+      </div>
+      <div class="hint">Enter 发送，Shift + Enter 换行</div>
+    </form>
+  </main>
+  <script>
+    const messages = document.querySelector("#messages");
+    const form = document.querySelector("#form");
+    const input = document.querySelector("#input");
+    const send = document.querySelector("#send");
+    const title = document.querySelector("#title");
+    const subtitle = document.querySelector("#subtitle");
+
+    function scrollToLatest() {
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function appendMessage(role, text) {
+      const node = document.createElement("div");
+      node.className = `message ${role}`;
+      node.textContent = text;
+      messages.append(node);
+      scrollToLatest();
+    }
+
+    function createProgress() {
+      const node = document.createElement("div");
+      node.className = "progress";
+      let label = "";
+      let dots = 0;
+      let timer = null;
+
+      function render() {
+        node.textContent = `${label}${".".repeat(dots)}`;
+      }
+
+      return {
+        update(nextLabel) {
+          label = nextLabel;
+          dots = 1;
+          render();
+          if (!node.isConnected) {
+            messages.append(node);
+          }
+          if (!timer) {
+            timer = window.setInterval(() => {
+              dots = dots % 3 + 1;
+              render();
+            }, 450);
+          }
+          scrollToLatest();
+        },
+        remove() {
+          window.clearInterval(timer);
+          timer = null;
+          node.remove();
+        },
+        fail(message) {
+          window.clearInterval(timer);
+          timer = null;
+          node.classList.add("failed");
+          label = message;
+          dots = 0;
+          render();
+          if (!node.isConnected) {
+            messages.append(node);
+          }
+          scrollToLatest();
+        }
+      };
+    }
+
+    async function loadStory() {
+      try {
+        const response = await fetch("/api/story");
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+        const story = await response.json();
+        title.textContent = story.title;
+        subtitle.textContent = "你正在扮演许仙";
+        appendMessage("assistant", story.opening);
+        input.disabled = false;
+        send.disabled = false;
+        input.focus();
+      } catch (error) {
+        subtitle.textContent = "故事载入失败";
+        appendMessage("assistant", `无法载入故事：${error.message}`);
+      }
+    }
+
+    function parseEventBlock(block) {
+      let name = "message";
+      const data = [];
+      for (const line of block.replaceAll("\r", "").split("\n")) {
+        if (line.startsWith("event:")) {
+          name = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          data.push(line.slice(5).trimStart());
+        }
+      }
+      if (data.length === 0) {
+        return null;
+      }
+      return { name, data: JSON.parse(data.join("\n")) };
+    }
+
+    async function consumeEvents(response, progress) {
+      if (!response.body) {
+        throw new Error("浏览器未提供流式响应");
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let committed = false;
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        buffer = buffer.replaceAll("\r\n", "\n");
+        let boundary = buffer.indexOf("\n\n");
+        while (boundary >= 0) {
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          if (block.trim()) {
+            const event = parseEventBlock(block);
+            if (!event) {
+              boundary = buffer.indexOf("\n\n");
+              continue;
+            }
+            if (event.name === "status") {
+              progress.update(event.data.label);
+            } else if (event.name === "committed") {
+              committed = true;
+              progress.remove();
+              appendMessage("assistant", event.data.text);
+            } else if (event.name === "error") {
+              throw new Error(event.data.message);
+            }
+          }
+          boundary = buffer.indexOf("\n\n");
+        }
+        if (done) {
+          break;
+        }
+      }
+      if (!committed) {
+        throw new Error("连接在回合提交前结束");
+      }
+    }
+
+    async function submitTurn(message) {
+      appendMessage("user", message);
+      const progress = createProgress();
+      input.disabled = true;
+      send.disabled = true;
+      try {
+        const response = await fetch("/api/turn", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message })
+        });
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+        await consumeEvents(response, progress);
+      } catch (error) {
+        progress.fail(`失败：${error.message}`);
+      } finally {
+        input.disabled = false;
+        send.disabled = false;
+        input.focus();
+      }
+    }
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const message = input.value.trim();
+      if (!message || send.disabled) {
+        return;
+      }
+      input.value = "";
+      await submitTurn(message);
+    });
+
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    loadStory();
+  </script>
+</body>
+</html>

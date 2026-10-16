@@ -13,18 +13,13 @@ use aise_core::trace::{
     SessionOutcome, SessionSpec, TRACE_ENVIRONMENT, TRACE_METADATA_STORY_ID, TRACE_METADATA_TURN_NUMBER, TRACE_RELEASE,
     Trace, TraceOutcome, TraceSpec,
 };
+use aise_service::observability::{DETECTOR_OVERLAP_BYTES, ObservabilityBootstrap, ObservabilityConfig};
 use anyhow::Context;
-use observability::{DETECTOR_OVERLAP_BYTES, ObservabilityConfig, ObservabilityRuntime, TelemetryDiagnostics};
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
-use tracing_subscriber::EnvFilter;
-use tracing_subscriber::filter::filter_fn;
-use tracing_subscriber::prelude::*;
 use uuid::Uuid;
-
-pub mod observability;
 
 const MULTI_TURN_ENV: &str = "AISE_DEMO_MULTI_TURN";
 const TURN_TIMEOUT_ENV: &str = "AISE_TURN_TIMEOUT_MS";
@@ -76,10 +71,9 @@ impl TurnEventSink for ConsoleTurnEventSink {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
-    let (observability_config, observability_runtime) = initialize_observability();
-    let service_result = run_demo_turns(&observability_config).await;
-    let shutdown_report = tokio::task::spawn_blocking(move || observability_runtime.shutdown_with_timeout()).await?;
-    TelemetryDiagnostics.shutdown(&shutdown_report);
+    let observability = ObservabilityBootstrap::initialize();
+    let service_result = run_demo_turns(observability.config()).await;
+    observability.shutdown().await?;
     service_result
 }
 
@@ -290,42 +284,6 @@ where
             .with_context(|| format!("invalid value for environment variable {name}")),
         Err(_) => Ok(default),
     }
-}
-
-fn initialize_observability() -> (ObservabilityConfig, ObservabilityRuntime) {
-    let load = ObservabilityConfig::load_from_env();
-    let config = load.config.clone();
-    let issues = load.issues.clone();
-    let components = ObservabilityRuntime::initialize(load, TelemetryDiagnostics);
-    let enabled = components.runtime.is_enabled();
-    let normal_logs = filter_fn(|metadata| metadata.target() != "aise::observation");
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-
-    tracing_subscriber::registry()
-        .with(components.layer)
-        .with(tracing_subscriber::fmt::layer().with_filter(normal_logs))
-        .with(filter)
-        .init();
-
-    for issue in issues {
-        TelemetryDiagnostics.configuration(issue.field, issue.error_kind, config.endpoint_host().as_deref());
-    }
-    if config.enabled && !enabled {
-        TelemetryDiagnostics.initialization("provider_unavailable", config.endpoint_host().as_deref());
-    }
-    tracing::info!(
-        target: "aise::telemetry",
-        enabled,
-        environment = %config.environment,
-        release = %config.release,
-        sample_rate = config.sample_rate,
-        content_policy = ?config.content_policy,
-        queue_capacity = config.max_queue_size,
-        endpoint_host = config.endpoint_host().as_deref().unwrap_or("unknown"),
-        "OpenTelemetry configured"
-    );
-
-    (config, components.runtime)
 }
 
 fn begin_demo_session(config: &ObservabilityConfig) -> (ObservationSession, ContentCapture) {

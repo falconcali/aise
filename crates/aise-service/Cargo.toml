@@ -5,17 +5,21 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+default-run = "aise-service"
 
 [dependencies]
 aise-core = { path = "../aise-core" }
 anyhow.workspace = true
+axum.workspace = true
 base64.workspace = true
 chrono.workspace = true
 dotenvy.workspace = true
+futures.workspace = true
 opentelemetry.workspace = true
 opentelemetry-otlp.workspace = true
 opentelemetry_sdk.workspace = true
 reqwest.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
