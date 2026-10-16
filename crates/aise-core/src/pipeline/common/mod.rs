@@ -4,6 +4,7 @@ mod pipeline;
 pub(super) mod pipeline_prompt;
 mod pipeline_trace;
 mod proposal_quality;
+pub(in crate::pipeline) mod proposal_quality_prompt;
 mod validation;
 pub(in crate::pipeline) mod validation_prompt;
 

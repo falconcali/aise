@@ -4,7 +4,7 @@ use crate::core::{
 };
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
-use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
+use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage, ProposalQualityPolicy};
 use crate::pipeline::generate::{GenerateConfig, generate_llm, generate_prompt, generate_roles, generate_trace};
 use crate::prompt::Prompt;
 use crate::trace::Observation;
@@ -35,16 +35,29 @@ pub struct GeneratePipeline {
     prompt: Arc<Prompt>,
     store: Arc<Store>,
     config: GenerateConfig,
+    quality_policy: Arc<ProposalQualityPolicy>,
 }
 
 impl GeneratePipeline {
-    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, store: Arc<Store>, config: GenerateConfig) -> Self {
+    pub fn new(
+        gateway: Arc<LlmGateway>,
+        prompt: Arc<Prompt>,
+        store: Arc<Store>,
+        config: GenerateConfig,
+        quality_policy: Arc<ProposalQualityPolicy>,
+    ) -> Self {
         Self {
             gateway,
             prompt,
             store,
             config,
+            quality_policy,
         }
+    }
+
+    #[cfg(test)]
+    pub(in crate::pipeline) fn quality_policy(&self) -> &Arc<ProposalQualityPolicy> {
+        &self.quality_policy
     }
 
     async fn generate_story(
@@ -66,6 +79,7 @@ impl GeneratePipeline {
             story_ctx,
             input,
             &role_context,
+            self.quality_policy.as_ref(),
             self.store.as_ref(),
             observation,
         )
@@ -98,3 +112,7 @@ impl<'a> Pipeline<GenerateInput<'a>> for GeneratePipeline {
         result.map(|result| GenerateOutput { result })
     }
 }
+
+#[cfg(test)]
+#[path = "tests/generate_tests.rs"]
+mod tests;

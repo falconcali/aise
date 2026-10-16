@@ -1,4 +1,5 @@
 use super::*;
+use crate::pipeline::ValidateConfig;
 use crate::pipeline::common::{ProposalCheckCriterion, ProposalScoreCriterion};
 use serde_json::{Value, json};
 
@@ -50,7 +51,16 @@ fn valid_output() -> Value {
 }
 
 fn parse_value(value: &Value) -> Result<ValidationReport, PipelineError> {
-    parse_validation_report(&value.to_string(), 7, &config())
+    parse_with_config(&value.to_string(), 7, &config())
+}
+
+fn parse_with_config(
+    raw: &str,
+    proposal_version: u32,
+    config: &ValidateConfig,
+) -> Result<ValidationReport, PipelineError> {
+    let policy = config.quality_policy();
+    parse_validation_report(raw, proposal_version, &policy, config.max_issue_bytes)
 }
 
 fn error_code(error: PipelineError) -> &'static str {
@@ -80,7 +90,7 @@ fn parse_score(score: f64, issue: Option<&str>) -> Result<ValidationReport, Pipe
         "checks": [],
         "scores": [{"name": "score", "score": score, "issue": issue}]
     });
-    parse_validation_report(&value.to_string(), 1, &score_only_config())
+    parse_with_config(&value.to_string(), 1, &score_only_config())
 }
 
 #[test]
@@ -111,11 +121,16 @@ fn valid_reordered_items_are_materialized_in_configured_order() {
         report.checks[1].issue.as_ref().map(|issue| issue.as_str()),
         Some("Remove the forbidden outcome.")
     );
+    assert_eq!(report.checks[0].description, "Logical consistency.");
+    assert_eq!(report.scores[1].description, "Narrative quality.");
+    assert_eq!(report.scores[1].min_score, 1.0);
+    assert_eq!(report.scores[1].max_score, 5.0);
+    assert_eq!(report.scores[1].target_score, 4.0);
 }
 
 #[test]
 fn invalid_json_is_rejected() {
-    let error = parse_validation_report("not json", 1, &config()).expect_err("invalid JSON fails");
+    let error = parse_with_config("not json", 1, &config()).expect_err("invalid JSON fails");
 
     assert_eq!(error_code(error), "validate_output_invalid_json");
 }
@@ -194,7 +209,7 @@ fn wrong_criterion_kind_is_rejected() {
 fn non_finite_score_is_rejected() {
     let raw = r#"{"checks":[],"scores":[{"name":"score","score":1e999,"issue":null}]}"#;
 
-    let error = parse_validation_report(raw, 1, &score_only_config()).expect_err("non-finite score fails");
+    let error = parse_with_config(raw, 1, &score_only_config()).expect_err("non-finite score fails");
 
     assert_eq!(error_code(error), "validate_score_non_finite");
 }
@@ -203,7 +218,7 @@ fn non_finite_score_is_rejected() {
 fn nan_score_is_rejected() {
     let raw = r#"{"checks":[],"scores":[{"name":"score","score":NaN,"issue":null}]}"#;
 
-    let error = parse_validation_report(raw, 1, &score_only_config()).expect_err("NaN score fails");
+    let error = parse_with_config(raw, 1, &score_only_config()).expect_err("NaN score fails");
 
     assert_eq!(error_code(error), "validate_score_non_finite");
 }
@@ -212,7 +227,7 @@ fn nan_score_is_rejected() {
 fn positive_infinity_score_is_rejected() {
     let raw = r#"{"checks":[],"scores":[{"name":"score","score":Infinity,"issue":null}]}"#;
 
-    let error = parse_validation_report(raw, 1, &score_only_config()).expect_err("infinite score fails");
+    let error = parse_with_config(raw, 1, &score_only_config()).expect_err("infinite score fails");
 
     assert_eq!(error_code(error), "validate_score_non_finite");
 }
@@ -221,7 +236,7 @@ fn positive_infinity_score_is_rejected() {
 fn negative_infinity_score_is_rejected() {
     let raw = r#"{"checks":[],"scores":[{"name":"score","score":-Infinity,"issue":null}]}"#;
 
-    let error = parse_validation_report(raw, 1, &score_only_config()).expect_err("infinite score fails");
+    let error = parse_with_config(raw, 1, &score_only_config()).expect_err("infinite score fails");
 
     assert_eq!(error_code(error), "validate_score_non_finite");
 }

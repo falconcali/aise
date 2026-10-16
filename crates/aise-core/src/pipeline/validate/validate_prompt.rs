@@ -1,11 +1,11 @@
 use crate::core::StoryContext;
 use crate::persistence::Store;
+use crate::pipeline::common::proposal_quality_prompt::project_proposal_quality;
 use crate::pipeline::common::validation_prompt::{ValidationPromptEvidence, project_validation_evidence};
-use crate::pipeline::common::{PipelineError, PipelineStage};
-use crate::pipeline::validate::{ValidateConfig, ValidateInput};
+use crate::pipeline::common::{PipelineError, PipelineStage, ProposalQualityPolicy};
+use crate::pipeline::validate::ValidateInput;
 use crate::prompt::{Prompt, PromptSpec, PromptVars, RenderedPrompt};
 use crate::trace::Observation;
-use serde::Serialize;
 use serde_json::Value;
 
 const EVALUATE_STORY_PROMPT_ID: &str = "validate.evaluate_story";
@@ -33,12 +33,13 @@ pub(super) async fn evaluate_story(
     prompt: &Prompt,
     story_ctx: &StoryContext,
     input: &ValidateInput<'_>,
-    config: &ValidateConfig,
+    policy: &ProposalQualityPolicy,
+    max_issue_bytes: usize,
     store: &Store,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
     let evidence = project_validation_evidence(PipelineStage::Validate, story_ctx, &input.context, store).await?;
-    let vars = evaluate_vars(input, config, evidence)?;
+    let vars = evaluate_vars(input, policy, max_issue_bytes, evidence)?;
     prompt
         .render(PromptSpec::new(EVALUATE_STORY_PROMPT_ID, vars), observation)
         .map_err(PipelineError::prompt(PipelineStage::Validate))
@@ -46,9 +47,11 @@ pub(super) async fn evaluate_story(
 
 fn evaluate_vars(
     input: &ValidateInput<'_>,
-    config: &ValidateConfig,
+    policy: &ProposalQualityPolicy,
+    max_issue_bytes: usize,
     evidence: ValidationPromptEvidence,
 ) -> Result<PromptVars, PipelineError> {
+    let quality = project_proposal_quality(PipelineStage::Validate, policy)?;
     Ok(PromptVars::from([
         (STORY_SUMMARY_VAR.to_owned(), Value::String(evidence.story_summary)),
         (STORY_OPENING_VAR.to_owned(), Value::String(evidence.story_opening)),
@@ -69,21 +72,10 @@ fn evaluate_vars(
         (CHARACTER_DECISIONS_VAR.to_owned(), Value::String(evidence.character_decisions)),
         (CURRENT_PROPOSAL_VAR.to_owned(), Value::String(input.proposal.to_owned())),
         (PROPOSAL_VERSION_VAR.to_owned(), Value::from(input.proposal_version)),
-        (
-            CHECK_CRITERIA_VAR.to_owned(),
-            Value::String(serialize(&config.checks, "validate_check_criteria_serialization")?),
-        ),
-        (
-            SCORE_CRITERIA_VAR.to_owned(),
-            Value::String(serialize(&config.scores, "validate_score_criteria_serialization")?),
-        ),
-        (MAX_ISSUE_BYTES_VAR.to_owned(), Value::from(config.max_issue_bytes as u64)),
+        (CHECK_CRITERIA_VAR.to_owned(), Value::String(quality.check_criteria)),
+        (SCORE_CRITERIA_VAR.to_owned(), Value::String(quality.score_criteria)),
+        (MAX_ISSUE_BYTES_VAR.to_owned(), Value::from(max_issue_bytes as u64)),
     ]))
-}
-
-fn serialize(value: &impl Serialize, code: &'static str) -> Result<String, PipelineError> {
-    serde_json::to_string(value)
-        .map_err(|error| PipelineError::inconsistent_data(PipelineStage::Validate, code, error.to_string()))
 }
 
 #[cfg(test)]

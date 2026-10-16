@@ -1,8 +1,7 @@
 use crate::core::BoundedText;
 use crate::pipeline::common::{
-    PipelineError, PipelineStage, ValidationCheckResult, ValidationReport, ValidationScoreResult,
+    PipelineError, PipelineStage, ProposalQualityPolicy, ValidationCheckResult, ValidationReport, ValidationScoreResult,
 };
-use crate::pipeline::validate::ValidateConfig;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 
@@ -32,7 +31,8 @@ struct ValidateScoreDto {
 pub(super) fn parse_validation_report(
     raw: &str,
     proposal_version: u32,
-    config: &ValidateConfig,
+    policy: &ProposalQualityPolicy,
+    max_issue_bytes: usize,
 ) -> Result<ValidationReport, PipelineError> {
     let output = serde_json::from_str::<ValidateLlmOutputDto>(raw).map_err(|error| {
         let code = if error.to_string().contains("number out of range") || contains_non_finite_score_token(raw) {
@@ -45,24 +45,24 @@ pub(super) fn parse_validation_report(
             format!("invalid validation JSON at line {} column {}", error.line(), error.column()),
         )
     })?;
-    validate_returned_names(&output, config)?;
-    if output.checks.len() != config.checks.len() {
+    validate_returned_names(&output, policy)?;
+    if output.checks.len() != policy.checks().len() {
         return Err(invalid_output(
             "validate_check_count_mismatch",
             format!(
                 "returned check count {} does not match configured count {}",
                 output.checks.len(),
-                config.checks.len()
+                policy.checks().len()
             ),
         ));
     }
-    if output.scores.len() != config.scores.len() {
+    if output.scores.len() != policy.scores().len() {
         return Err(invalid_output(
             "validate_score_count_mismatch",
             format!(
                 "returned score count {} does not match configured count {}",
                 output.scores.len(),
-                config.scores.len()
+                policy.scores().len()
             ),
         ));
     }
@@ -77,8 +77,8 @@ pub(super) fn parse_validation_report(
         .into_iter()
         .map(|score| (score.name.clone(), score))
         .collect::<HashMap<_, _>>();
-    let checks = config
-        .checks
+    let checks = policy
+        .checks()
         .iter()
         .map(|criterion| {
             let result = checks.remove(&criterion.name).ok_or_else(|| {
@@ -87,7 +87,7 @@ pub(super) fn parse_validation_report(
                     format!("configured check {} is missing", criterion.name),
                 )
             })?;
-            let issue = validate_issue(&result.name, result.issue, !result.passed, config.max_issue_bytes)?;
+            let issue = validate_issue(&result.name, result.issue, !result.passed, max_issue_bytes)?;
             Ok(ValidationCheckResult {
                 name: criterion.name.clone(),
                 description: criterion.description.clone(),
@@ -96,8 +96,8 @@ pub(super) fn parse_validation_report(
             })
         })
         .collect::<Result<Vec<_>, PipelineError>>()?;
-    let scores = config
-        .scores
+    let scores = policy
+        .scores()
         .iter()
         .map(|criterion| {
             let result = scores.remove(&criterion.name).ok_or_else(|| {
@@ -125,7 +125,7 @@ pub(super) fn parse_validation_report(
                 &result.name,
                 result.issue,
                 result.score < criterion.target_score,
-                config.max_issue_bytes,
+                max_issue_bytes,
             )?;
             Ok(ValidationScoreResult {
                 name: criterion.name.clone(),
@@ -146,9 +146,9 @@ pub(super) fn parse_validation_report(
     })
 }
 
-fn validate_returned_names(output: &ValidateLlmOutputDto, config: &ValidateConfig) -> Result<(), PipelineError> {
-    let configured_checks = config.checks.iter().map(|check| check.name.as_str()).collect::<HashSet<_>>();
-    let configured_scores = config.scores.iter().map(|score| score.name.as_str()).collect::<HashSet<_>>();
+fn validate_returned_names(output: &ValidateLlmOutputDto, policy: &ProposalQualityPolicy) -> Result<(), PipelineError> {
+    let configured_checks = policy.checks().iter().map(|check| check.name.as_str()).collect::<HashSet<_>>();
+    let configured_scores = policy.scores().iter().map(|score| score.name.as_str()).collect::<HashSet<_>>();
     let mut seen_checks = HashSet::with_capacity(output.checks.len());
     for check in &output.checks {
         if !seen_checks.insert(check.name.as_str()) {

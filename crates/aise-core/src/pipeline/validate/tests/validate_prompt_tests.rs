@@ -5,6 +5,7 @@ use crate::core::{
     FactEntry, FactId, PlayerContribution, PlayerRoleContext, ResolvedRole, RetrievalHint, RoleId, RumorBody,
     RumorEntry, RumorId, StoryContext,
 };
+use crate::pipeline::ValidateConfig;
 use crate::pipeline::common::ValidationContext;
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -169,7 +170,9 @@ async fn evaluate_vars_contain_exact_contract_names() {
     let evidence = project_validation_evidence(PipelineStage::Validate, &story_ctx, &input.context, &store)
         .await
         .expect("evidence projects");
-    let vars = evaluate_vars(&input, &ValidateConfig::default(), evidence).expect("vars build");
+    let config = ValidateConfig::default();
+    let policy = config.quality_policy();
+    let vars = evaluate_vars(&input, &policy, config.max_issue_bytes, evidence).expect("vars build");
     let actual = vars.keys().map(String::as_str).collect::<HashSet<_>>();
     let expected = [
         "story_summary",
@@ -207,7 +210,9 @@ async fn evaluate_vars_keep_evidence_collections_separate() {
     let evidence = project_validation_evidence(PipelineStage::Validate, &story_ctx, &input.context, &store)
         .await
         .expect("evidence projects");
-    let vars = evaluate_vars(&input, &ValidateConfig::default(), evidence).expect("vars build");
+    let config = ValidateConfig::default();
+    let policy = config.quality_policy();
+    let vars = evaluate_vars(&input, &policy, config.max_issue_bytes, evidence).expect("vars build");
 
     assert_eq!(var(&vars, "activated_facts"), "- Activated fact.");
     assert_eq!(var(&vars, "retrieved_facts"), "- Retrieved fact.");
@@ -220,16 +225,39 @@ async fn evaluate_vars_keep_evidence_collections_separate() {
 }
 
 #[tokio::test]
+async fn evaluate_vars_include_target_guidance_from_policy() {
+    let fixture = fixture();
+    let input = fixture.input();
+    let story_ctx = StoryContext::new();
+    let store = store_with_default_pack().await;
+    let config = ValidateConfig::default();
+    let policy = config.quality_policy();
+    let evidence = project_validation_evidence(PipelineStage::Validate, &story_ctx, &input.context, &store)
+        .await
+        .expect("evidence projects");
+    let vars = evaluate_vars(&input, &policy, config.max_issue_bytes, evidence).expect("vars build");
+    let expected = serde_json::to_string(policy.scores()).expect("scores serialize");
+
+    assert_eq!(var(&vars, "score_criteria"), expected);
+    for score in policy.scores() {
+        assert!(var(&vars, "score_criteria").contains(&score.target_guidance));
+    }
+}
+
+#[tokio::test]
 async fn rendered_prompt_labels_untrusted_sections_and_character_decisions() {
     let fixture = fixture();
     let story_ctx = StoryContext::new();
     let store = store_with_default_pack().await;
     let trace = trace();
+    let config = ValidateConfig::default();
+    let policy = config.quality_policy();
     let messages = evaluate_story(
         &prompt(),
         &story_ctx,
         &fixture.input(),
-        &ValidateConfig::default(),
+        &policy,
+        config.max_issue_bytes,
         &store,
         trace.root(),
     )

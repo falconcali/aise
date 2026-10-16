@@ -5,7 +5,7 @@ use crate::core::{
     TurnCancellation,
 };
 use crate::llm::{
-    LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
+    LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
 };
 use crate::pipeline::common::ValidationContext;
 use crate::prompt::PromptConfig;
@@ -24,7 +24,7 @@ struct ValidateProvider {
 }
 
 #[async_trait]
-impl LlmProvider for ValidateProvider {
+impl Provider for ValidateProvider {
     fn name(&self) -> &'static str {
         "validate"
     }
@@ -92,11 +92,14 @@ async fn execute_calls_gateway_once_and_returns_report() {
         calls: AtomicUsize::new(0),
     });
     let store = Arc::new(store_with_default_pack().await);
+    let config = ValidateConfig::default();
+    let policy = Arc::new(config.quality_policy());
     let pipeline = ValidatePipeline::new(
         Arc::new(LlmGateway::new(provider.clone(), LlmConfig::default())),
         Arc::new(prompt()),
         store,
-        ValidateConfig::default(),
+        config,
+        policy,
     );
     let goal = text("Reach the gate.");
     let contribution = PlayerContribution {

@@ -44,6 +44,7 @@ impl Runtime {
         pipeline_config: PipelineConfig,
     ) -> Result<Self, PipelineError> {
         pipeline_config.validate()?;
+        let quality_policy = Arc::new(pipeline_config.validate.quality_policy());
         let repair_max_proposal_bytes = pipeline_config.repair.max_proposal_bytes;
         Ok(Self {
             baseline: BaselinePipeline::new(
@@ -70,12 +71,14 @@ impl Runtime {
                 Arc::clone(&prompt),
                 Arc::clone(&store),
                 pipeline_config.generate,
+                Arc::clone(&quality_policy),
             ),
             validate: ValidatePipeline::new(
                 Arc::clone(&gateway),
                 Arc::clone(&prompt),
                 Arc::clone(&store),
                 pipeline_config.validate,
+                Arc::clone(&quality_policy),
             ),
             repair: RepairPipeline::new(
                 Arc::clone(&gateway),

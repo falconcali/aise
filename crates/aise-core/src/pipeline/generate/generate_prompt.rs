@@ -1,6 +1,7 @@
 use crate::core::StoryContext;
 use crate::persistence::Store;
-use crate::pipeline::common::{PipelineError, PipelineStage, pipeline_prompt};
+use crate::pipeline::common::proposal_quality_prompt::project_proposal_quality;
+use crate::pipeline::common::{PipelineError, PipelineStage, ProposalQualityPolicy, pipeline_prompt};
 use crate::pipeline::generate::GenerateInput;
 use crate::pipeline::generate::generate_roles::GenerateRoleContext;
 use crate::prompt::{Prompt, PromptSpec, PromptVars, RenderedPrompt};
@@ -20,17 +21,20 @@ const NARRATIVE_DIRECTIONS_VAR: &str = "narrative_directions";
 const STORY_CONSTRAINTS_VAR: &str = "story_constraints";
 const STORY_GOAL_VAR: &str = "story_goal";
 const PLAYER_CONTRIBUTION_VAR: &str = "player_contribution";
+const CHECK_CRITERIA_VAR: &str = "check_criteria";
+const SCORE_CRITERIA_VAR: &str = "score_criteria";
 
 pub async fn generate_story(
     prompt: &Prompt,
     story_ctx: &StoryContext,
     input: &GenerateInput<'_>,
     role_context: &GenerateRoleContext,
+    quality_policy: &ProposalQualityPolicy,
     store: &Store,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
     let story_opening = pipeline_prompt::load_story_opening(PipelineStage::Generate, story_ctx, store).await?;
-    let vars = generate_vars(story_ctx, input, role_context, story_opening);
+    let vars = generate_vars(story_ctx, input, role_context, quality_policy, story_opening)?;
     prompt
         .render(PromptSpec::new(GENERATE_STORY_PROMPT_ID, vars), observation)
         .map_err(PipelineError::prompt(PipelineStage::Generate))
@@ -40,9 +44,11 @@ fn generate_vars(
     story_ctx: &StoryContext,
     input: &GenerateInput<'_>,
     role_context: &GenerateRoleContext,
+    quality_policy: &ProposalQualityPolicy,
     story_opening: String,
-) -> PromptVars {
-    PromptVars::from([
+) -> Result<PromptVars, PipelineError> {
+    let quality = project_proposal_quality(PipelineStage::Generate, quality_policy)?;
+    Ok(PromptVars::from([
         (
             STORY_SUMMARY_VAR.to_owned(),
             Value::String(pipeline_prompt::story_summary(story_ctx).unwrap_or_default().to_owned()),
@@ -85,7 +91,9 @@ fn generate_vars(
             PLAYER_CONTRIBUTION_VAR.to_owned(),
             Value::String(input.player_contribution.processed.clone()),
         ),
-    ])
+        (CHECK_CRITERIA_VAR.to_owned(), Value::String(quality.check_criteria)),
+        (SCORE_CRITERIA_VAR.to_owned(), Value::String(quality.score_criteria)),
+    ]))
 }
 
 #[cfg(test)]

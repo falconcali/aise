@@ -1,7 +1,9 @@
 use crate::core::{StoryContext, TurnControl};
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
-use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage, ValidationContext, ValidationReport};
+use crate::pipeline::common::{
+    Pipeline, PipelineError, PipelineStage, ProposalQualityPolicy, ValidationContext, ValidationReport,
+};
 use crate::pipeline::validate::{ValidateConfig, validate_llm, validate_prompt, validate_report, validate_trace};
 use crate::prompt::Prompt;
 use crate::trace::Observation;
@@ -27,16 +29,29 @@ pub struct ValidatePipeline {
     prompt: Arc<Prompt>,
     store: Arc<Store>,
     config: ValidateConfig,
+    quality_policy: Arc<ProposalQualityPolicy>,
 }
 
 impl ValidatePipeline {
-    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, store: Arc<Store>, config: ValidateConfig) -> Self {
+    pub fn new(
+        gateway: Arc<LlmGateway>,
+        prompt: Arc<Prompt>,
+        store: Arc<Store>,
+        config: ValidateConfig,
+        quality_policy: Arc<ProposalQualityPolicy>,
+    ) -> Self {
         Self {
             gateway,
             prompt,
             store,
             config,
+            quality_policy,
         }
+    }
+
+    #[cfg(test)]
+    pub(in crate::pipeline) fn quality_policy(&self) -> &Arc<ProposalQualityPolicy> {
+        &self.quality_policy
     }
 
     async fn evaluate(
@@ -50,7 +65,8 @@ impl ValidatePipeline {
             self.prompt.as_ref(),
             story_ctx,
             input,
-            &self.config,
+            self.quality_policy.as_ref(),
+            self.config.max_issue_bytes,
             self.store.as_ref(),
             observation,
         )
@@ -59,7 +75,12 @@ impl ValidatePipeline {
             validate_llm::evaluate_story(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
                 .await
                 .map_err(PipelineError::llm(PipelineStage::Validate))?;
-        validate_report::parse_validation_report(&raw, input.proposal_version, &self.config)
+        validate_report::parse_validation_report(
+            &raw,
+            input.proposal_version,
+            self.quality_policy.as_ref(),
+            self.config.max_issue_bytes,
+        )
     }
 }
 
