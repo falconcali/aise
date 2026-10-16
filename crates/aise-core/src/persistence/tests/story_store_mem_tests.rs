@@ -1,8 +1,9 @@
 use super::*;
+use crate::core::tests::turn_evaluation;
 use crate::core::{
     Change, IdempotencyKey, NarrativeNodeId, NarrativeState, NodeStatus, PackId, PackRef, PlayerId, RoleId,
-    SemanticVersion, Sha256Digest, StoryCommit, StoryId, StoryInstanceSpec, StorySummary, Turn, TurnEvaluation,
-    TurnNumber, TurnSegment, TurnStatus, WorldChange,
+    SemanticVersion, Sha256Digest, StoryCommit, StoryId, StoryInstanceSpec, StorySummary, Turn, TurnNumber,
+    TurnSegment, TurnStatus, WorldChange,
 };
 use crate::persistence::StoreType;
 
@@ -41,8 +42,8 @@ fn commit(story_id: &StoryId, turn_number: u64, key: &str, summary: Change<Story
             },
             turn_segment: TurnSegment::new(format!("segment-{turn_number}")),
             world_change: WorldChange {},
-            turn_evaluation: TurnEvaluation {},
-            turn_status: TurnStatus::Accepted,
+            turn_evaluation: turn_evaluation(),
+            turn_status: TurnStatus::Pass,
         },
         summary,
         narrative: Change::Unchanged,

@@ -1,8 +1,7 @@
 use super::*;
-use crate::core::tests::store_with_default_pack;
+use crate::core::tests::{store_with_default_pack, turn_evaluation};
 use crate::core::{
-    IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus,
-    WorldChange,
+    IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnNumber, TurnSegment, TurnStatus, WorldChange,
 };
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -54,7 +53,7 @@ fn turn(number: u64, segment: &str, status: TurnStatus) -> Turn {
         },
         turn_segment: TurnSegment::new(segment.to_owned()),
         world_change: WorldChange {},
-        turn_evaluation: TurnEvaluation {},
+        turn_evaluation: turn_evaluation(),
         turn_status: status,
     }
 }
@@ -94,12 +93,8 @@ fn vars_for_new_story_carry_opening_and_empty_summary_and_recent_story() {
 fn vars_with_summary_carry_trimmed_summary_and_segments_only() {
     let mut story_ctx = StoryContext::new();
     story_ctx.summary = Some(summary("  Earlier events.  ", 1));
-    story_ctx
-        .recent_turns
-        .push_back(turn(2, "The door creaks.", TurnStatus::Accepted));
-    story_ctx
-        .recent_turns
-        .push_back(turn(3, "The hall is dark.", TurnStatus::Accepted));
+    story_ctx.recent_turns.push_back(turn(2, "The door creaks.", TurnStatus::Pass));
+    story_ctx.recent_turns.push_back(turn(3, "The hall is dark.", TurnStatus::Pass));
     let vars = player_input_vars(&story_ctx, "I look around.", String::new());
 
     assert_eq!(var(&vars, "story_summary"), "Earlier events.");
@@ -131,9 +126,7 @@ async fn new_story_runtime_context_has_opening_then_input() {
 async fn new_story_runtime_context_orders_opening_recent_story_and_input() {
     let store = store_with_default_pack().await;
     let mut story_ctx = StoryContext::new();
-    story_ctx
-        .recent_turns
-        .push_back(turn(1, "The door creaks.", TurnStatus::Accepted));
+    story_ctx.recent_turns.push_back(turn(1, "The door creaks.", TurnStatus::Pass));
     let opening = store
         .pack_store()
         .get_pack(&story_ctx.pack_ref)
@@ -156,9 +149,7 @@ async fn new_story_runtime_context_orders_opening_recent_story_and_input() {
 async fn summarized_story_runtime_context_omits_opening() {
     let mut story_ctx = StoryContext::new();
     story_ctx.summary = Some(summary("Earlier events.", 1));
-    story_ctx
-        .recent_turns
-        .push_back(turn(2, "The door creaks.", TurnStatus::Accepted));
+    story_ctx.recent_turns.push_back(turn(2, "The door creaks.", TurnStatus::Pass));
 
     let content = runtime_context(&story_ctx, "I wave.").await;
 

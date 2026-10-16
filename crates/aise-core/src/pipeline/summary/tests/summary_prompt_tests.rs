@@ -1,8 +1,7 @@
 use super::*;
-use crate::core::tests::store_with_default_pack;
+use crate::core::tests::{store_with_default_pack, turn_evaluation};
 use crate::core::{
-    IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, TurnStatus,
-    WorldChange,
+    IdempotencyKey, PlayerContribution, StorySummary, Turn, TurnNumber, TurnSegment, TurnStatus, WorldChange,
 };
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -61,8 +60,8 @@ fn accepted_turn(number: u64, segment: &str) -> Turn {
         },
         turn_segment: TurnSegment::new(segment.to_owned()),
         world_change: WorldChange {},
-        turn_evaluation: TurnEvaluation {},
-        turn_status: TurnStatus::Accepted,
+        turn_evaluation: turn_evaluation(),
+        turn_status: TurnStatus::Pass,
     }
 }
 

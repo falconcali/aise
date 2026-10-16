@@ -1,8 +1,8 @@
 use super::*;
-use crate::core::tests::store_with_default_pack;
+use crate::core::tests::{store_with_default_pack, turn_evaluation};
 use crate::core::{
     ActivationRule, EntryOrigin, FactBody, FactId, IdempotencyKey, PlayerContribution, RetrievalHint, RumorBody,
-    RumorId, StorySummary, Turn, TurnEvaluation, TurnNumber, TurnSegment, WorldChange,
+    RumorId, StorySummary, Turn, TurnNumber, TurnSegment, WorldChange,
 };
 
 fn summary(text: &str, covered_through: u64) -> StorySummary {
@@ -22,7 +22,7 @@ fn turn(number: u64, segment: &str, status: TurnStatus) -> Turn {
         },
         turn_segment: TurnSegment::new(segment.to_owned()),
         world_change: WorldChange {},
-        turn_evaluation: TurnEvaluation {},
+        turn_evaluation: turn_evaluation(),
         turn_status: status,
     }
 }
@@ -44,17 +44,15 @@ fn summary_is_trimmed() {
 }
 
 #[test]
-fn recent_story_skips_rejected_turns_and_blank_segments() {
+fn turns_story_includes_pass_and_choice() {
     let mut story_ctx = StoryContext::new();
+    story_ctx.recent_turns.push_back(turn(1, "The door creaks.", TurnStatus::Pass));
     story_ctx
         .recent_turns
-        .push_back(turn(1, "The door creaks.", TurnStatus::Rejected));
-    story_ctx
-        .recent_turns
-        .push_back(turn(2, "  The hall is dark.  ", TurnStatus::Accepted));
-    story_ctx.recent_turns.push_back(turn(3, "  ", TurnStatus::Accepted));
+        .push_back(turn(2, "  The hall is dark.  ", TurnStatus::Choice));
+    story_ctx.recent_turns.push_back(turn(3, "  ", TurnStatus::Pass));
 
-    assert_eq!(recent_story(&story_ctx), "The hall is dark.");
+    assert_eq!(recent_story(&story_ctx), "The door creaks.\n\nThe hall is dark.");
 }
 
 #[tokio::test]
@@ -78,9 +76,7 @@ async fn opening_is_loaded_only_when_summary_is_absent() {
 async fn opening_is_loaded_when_summary_is_absent_even_with_recent_story() {
     let store = store_with_default_pack().await;
     let mut story_ctx = StoryContext::new();
-    story_ctx
-        .recent_turns
-        .push_back(turn(1, "The door creaks.", TurnStatus::Accepted));
+    story_ctx.recent_turns.push_back(turn(1, "The door creaks.", TurnStatus::Pass));
 
     let opening = load_story_opening(PipelineStage::Plan, &story_ctx, &store)
         .await

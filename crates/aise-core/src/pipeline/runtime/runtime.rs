@@ -1,21 +1,23 @@
 use crate::core::{
-    BoundedText, PlayerContribution, RoleId, StoryCommit, StoryContext, TurnControl, TurnEvaluation, TurnEventSink,
-    TurnRequest, TurnSegment, WorldChange,
+    RoleId, StoryCommit, StoryContext, TurnCheckEvaluation, TurnChoiceEvaluation, TurnControl, TurnEvaluation,
+    TurnEventSink, TurnRequest, TurnScoreEvaluation, TurnSegment, TurnStatus, WorldChange,
 };
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
-use crate::pipeline::PipelineConfig;
-use crate::pipeline::baseline::{BaselineInput, BaselinePipeline};
+use crate::pipeline::baseline::{BaselineInput, BaselineOutput, BaselinePipeline};
 use crate::pipeline::commit::{CommitInput, CommitPipeline};
-use crate::pipeline::common::{PipelineError, PipelineRunner};
+use crate::pipeline::common::{
+    PipelineError, PipelineRunner, ValidationContext, ValidationCriterionKind, ValidationIssue, ValidationReport,
+};
 use crate::pipeline::extract::{ExtractInput, ExtractPipeline};
 use crate::pipeline::generate::{GenerateInput, GeneratePipeline};
 use crate::pipeline::plan::{PlanInput, PlanOutput, PlanPipeline};
-use crate::pipeline::repair::{RepairInput, RepairPipeline};
+use crate::pipeline::repair::{RepairInput, RepairOutput, RepairPipeline};
 use crate::pipeline::retrieval::{RetrievalInput, RetrievalOutput, RetrievalPipeline};
 use crate::pipeline::summary::{SummaryInput, SummaryPipeline};
 use crate::pipeline::think::{ThinkInput, ThinkOutput, ThinkPipeline};
-use crate::pipeline::validate::{ValidateInput, ValidateOutput, ValidatePipeline, ValidationDecision};
+use crate::pipeline::validate::{ValidateInput, ValidateOutput, ValidatePipeline};
+use crate::pipeline::{PipelineConfig, ValidationLoopConfig};
 use crate::prompt::Prompt;
 use crate::trace::Trace;
 use std::collections::HashSet;
@@ -32,6 +34,15 @@ pub struct Runtime {
     extract: ExtractPipeline,
     summary: SummaryPipeline,
     commit: CommitPipeline,
+    validation_loop: ValidationLoopConfig,
+}
+
+struct ValidationLoopResult {
+    proposal: String,
+    report: ValidationReport,
+    repair_rounds: u32,
+    status: TurnStatus,
+    choice: Option<TurnChoiceEvaluation>,
 }
 
 impl Runtime {
@@ -40,8 +51,9 @@ impl Runtime {
         prompt: Arc<Prompt>,
         store: Arc<Store>,
         pipeline_config: PipelineConfig,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, PipelineError> {
+        pipeline_config.validate()?;
+        Ok(Self {
             baseline: BaselinePipeline::new(
                 Arc::clone(&gateway),
                 Arc::clone(&prompt),
@@ -67,8 +79,8 @@ impl Runtime {
                 Arc::clone(&store),
                 pipeline_config.generate,
             ),
-            validate: ValidatePipeline { score_configs: vec![] },
-            repair: RepairPipeline,
+            validate: ValidatePipeline::new(pipeline_config.validate),
+            repair: RepairPipeline::new(pipeline_config.repair),
             extract: ExtractPipeline::new(Arc::clone(&store)),
             summary: SummaryPipeline::new(
                 Arc::clone(&gateway),
@@ -77,7 +89,8 @@ impl Runtime {
                 pipeline_config.summary,
             ),
             commit: CommitPipeline::new(Arc::clone(&store)),
-        }
+            validation_loop: pipeline_config.validation_loop,
+        })
     }
 
     pub async fn run_turn(
@@ -150,18 +163,17 @@ impl Runtime {
 
         let generate_output = pipeline_runner.run(&self.generate, generate_input, story_ctx).await?;
 
-        let final_proposal = self
+        let validation_result = self
             .validate_and_repair(
                 &pipeline_runner,
                 story_ctx,
+                validation_context(&plan_output, &baseline_output, &retrieval_output, &think_output),
                 generate_output.result,
-                &baseline_output.narrative.constraints,
-                &baseline_output.player_contribution,
             )
             .await?;
 
         let extract_input = ExtractInput {
-            query: &final_proposal,
+            query: &validation_result.proposal,
             player_contribution: &baseline_output.player_contribution,
             queries: &baseline_output.narrative.queries,
         };
@@ -173,13 +185,15 @@ impl Runtime {
         };
 
         let summary_output = pipeline_runner.run(&self.summary, summary_input, story_ctx).await?;
+        let turn_evaluation = turn_evaluation(&validation_result);
 
         let commit_input: CommitInput = CommitInput {
             player_contribution: baseline_output.player_contribution,
             idempotency_key: turn_request.idempotency_key,
-            turn_segment: TurnSegment::new(final_proposal),
+            turn_segment: TurnSegment::new(validation_result.proposal),
             world_change: WorldChange {},
-            turn_evaluation: TurnEvaluation {},
+            turn_status: validation_result.status,
+            turn_evaluation,
             summary: summary_output.summary,
             narrative: extract_output.narrative,
             life_cycle: extract_output.life_cycle,
@@ -192,46 +206,73 @@ impl Runtime {
         &self,
         pipeline_runner: &PipelineRunner<'_>,
         story_ctx: &StoryContext,
+        context: ValidationContext<'_>,
         initial_proposal: String,
-        constraints: &[BoundedText],
-        player_contribution: &PlayerContribution,
-    ) -> Result<String, PipelineError> {
-        let mut proposals = vec![initial_proposal];
-        let mut validations: Vec<ValidateOutput> = Vec::new();
+    ) -> Result<ValidationLoopResult, PipelineError> {
+        let mut proposal = initial_proposal;
+        let mut proposal_version = 1;
+        let mut repair_rounds = 0;
 
         loop {
-            let current = proposals.len() - 1;
             let validate_input = ValidateInput {
-                original_proposal: &proposals[0],
-                current_proposal: &proposals[current],
-                proposal_version: proposal_version(&proposals),
-                constraints,
-                player_contribution,
+                context,
+                proposal: &proposal,
+                proposal_version,
+                repair_rounds_used: repair_rounds,
+                repair_rounds_remaining: self.validation_loop.max_repair_rounds - repair_rounds,
             };
 
-            let validate_output = pipeline_runner.run(&self.validate, validate_input, story_ctx).await?;
-            let decision = validate_output.decision;
-            validations.push(validate_output);
-
-            if decision != ValidationDecision::Repair {
-                break;
+            let validate_output: ValidateOutput =
+                pipeline_runner.run(&self.validate, validate_input, story_ctx).await?;
+            let report = validate_output.report;
+            if report.all_checks_pass() && report.all_scores_meet_target() {
+                return Ok(ValidationLoopResult {
+                    proposal,
+                    report,
+                    repair_rounds,
+                    status: TurnStatus::Pass,
+                    choice: None,
+                });
             }
 
+            let issues = report.failed_issues();
+            if repair_rounds >= self.validation_loop.max_repair_rounds {
+                if !report.all_checks_pass() {
+                    let (failed_checks, unmet_scores) = failed_issue_counts(&issues);
+                    return Err(PipelineError::ValidationFailed {
+                        code: "validation_hard_gate_exhausted",
+                        proposal_version: report.proposal_version,
+                        message: format!(
+                            "repair budget exhausted with {failed_checks} failed checks and {unmet_scores} unmet scores"
+                        ),
+                    });
+                }
+                return Ok(ValidationLoopResult {
+                    proposal,
+                    choice: Some(TurnChoiceEvaluation {
+                        selected_proposal_version: report.proposal_version,
+                        target_gap_mse: target_gap_mse(&report),
+                    }),
+                    report,
+                    repair_rounds,
+                    status: TurnStatus::Choice,
+                });
+            }
+
+            repair_rounds += 1;
             let repair_input = RepairInput {
-                original_proposal: &proposals[0],
-                current_proposal: &proposals[current],
-                scores: &validations[current].scores,
-                proposal_version: proposal_version(&proposals),
-                constraints,
-                player_contribution,
+                context,
+                proposal: &proposal,
+                proposal_version,
+                issues: &issues,
+                repair_round: repair_rounds,
+                repair_rounds_remaining: self.validation_loop.max_repair_rounds - repair_rounds,
             };
 
-            let repair_output = pipeline_runner.run(&self.repair, repair_input, story_ctx).await?;
-            proposals.push(repair_output.current_proposal);
+            let repair_output: RepairOutput = pipeline_runner.run(&self.repair, repair_input, story_ctx).await?;
+            proposal = repair_output.proposal;
+            proposal_version += 1;
         }
-
-        let final_index = select_final_index(&validations);
-        Ok(proposals.swap_remove(final_index))
     }
 }
 
@@ -251,21 +292,77 @@ fn effective_role_ids(plan_output: &PlanOutput) -> Vec<RoleId> {
     role_ids
 }
 
-fn proposal_version(proposals: &[String]) -> u32 {
-    u32::try_from(proposals.len()).unwrap_or(u32::MAX)
+fn validation_context<'a>(
+    plan_output: &'a PlanOutput,
+    baseline_output: &'a BaselineOutput,
+    retrieval_output: &'a RetrievalOutput,
+    think_output: &'a ThinkOutput,
+) -> ValidationContext<'a> {
+    ValidationContext {
+        story_goal: &plan_output.story_goal,
+        player_contribution: &baseline_output.player_contribution,
+        directions: &baseline_output.narrative.directions,
+        constraints: &baseline_output.narrative.constraints,
+        knowledge: &baseline_output.knowledge,
+        retrieved_facts: &retrieval_output.facts,
+        retrieved_rumors: &retrieval_output.rumors,
+        player_role: &plan_output.player_role,
+        roles: &retrieval_output.roles,
+        character_decisions: &think_output.decisions,
+    }
 }
 
-fn select_final_index(validations: &[ValidateOutput]) -> usize {
-    let last = validations.len().saturating_sub(1);
-    if validations.get(last).map(|validation| validation.decision) != Some(ValidationDecision::Reject) {
-        return last;
+fn turn_evaluation(result: &ValidationLoopResult) -> TurnEvaluation {
+    TurnEvaluation {
+        proposal_version: result.report.proposal_version,
+        repair_rounds: result.repair_rounds,
+        checks: result
+            .report
+            .checks
+            .iter()
+            .map(|check| TurnCheckEvaluation {
+                name: check.name.clone(),
+                passed: check.passed,
+                issue: check.issue.clone(),
+            })
+            .collect(),
+        scores: result
+            .report
+            .scores
+            .iter()
+            .map(|score| TurnScoreEvaluation {
+                name: score.name.clone(),
+                min_score: score.min_score,
+                max_score: score.max_score,
+                target_score: score.target_score,
+                score: score.score,
+                issue: score.issue.clone(),
+            })
+            .collect(),
+        choice: result.choice.clone(),
     }
+}
 
-    validations
+fn target_gap_mse(report: &ValidationReport) -> f64 {
+    if report.scores.is_empty() || report.unmet_score_count() == 0 {
+        return 0.0;
+    }
+    report
+        .scores
         .iter()
-        .enumerate()
-        .max_by(|(_, left), (_, right)| left.total_score().total_cmp(&right.total_score()))
-        .map_or(last, |(index, _)| index)
+        .map(|score| {
+            let deficit = ((score.target_score - score.score) / (score.max_score - score.min_score)).max(0.0);
+            deficit * deficit
+        })
+        .sum::<f64>()
+        / report.scores.len() as f64
+}
+
+fn failed_issue_counts(issues: &[ValidationIssue]) -> (usize, usize) {
+    issues.iter().fold((0, 0), |(checks, scores), issue| match issue.kind {
+        ValidationCriterionKind::Check => (checks + 1, scores),
+        ValidationCriterionKind::Score => (checks, scores + 1),
+    })
 }
 
 #[cfg(test)]

@@ -105,6 +105,8 @@ fn observation_error(error: &PipelineError) -> ObservationError {
         | PipelineError::Narrative { .. }
         | PipelineError::EmptyOutput { .. }
         | PipelineError::InvalidOutput { .. } => ("pipeline_error", "pipeline"),
+        PipelineError::InvalidConfig { code, .. } => (*code, "invalid_config"),
+        PipelineError::ValidationFailed { code, .. } => (*code, "validation"),
     };
     ObservationError {
         code: code.into(),

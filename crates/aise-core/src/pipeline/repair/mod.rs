@@ -1,3 +1,5 @@
+mod config;
 mod repair;
 
-pub(super) use repair::{RepairInput, RepairPipeline};
+pub use config::RepairConfig;
+pub(super) use repair::{RepairInput, RepairOutput, RepairPipeline};

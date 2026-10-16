@@ -1,4 +1,4 @@
-use super::{IdempotencyKey, StoryId, WorldChange};
+use super::{BoundedText, IdempotencyKey, StoryId, WorldChange};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::time::Instant;
@@ -121,13 +121,42 @@ impl Display for TurnSegment {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TurnEvaluation {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TurnStatus {
-    Accepted,
-    Rejected,
+    Pass,
+    Choice,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnCheckEvaluation {
+    pub name: String,
+    pub passed: bool,
+    pub issue: Option<BoundedText>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TurnScoreEvaluation {
+    pub name: String,
+    pub min_score: f64,
+    pub max_score: f64,
+    pub target_score: f64,
+    pub score: f64,
+    pub issue: Option<BoundedText>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TurnChoiceEvaluation {
+    pub selected_proposal_version: u32,
+    pub target_gap_mse: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TurnEvaluation {
+    pub proposal_version: u32,
+    pub repair_rounds: u32,
+    pub checks: Vec<TurnCheckEvaluation>,
+    pub scores: Vec<TurnScoreEvaluation>,
+    pub choice: Option<TurnChoiceEvaluation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,3 +169,7 @@ pub struct Turn {
     pub turn_evaluation: TurnEvaluation,
     pub turn_status: TurnStatus,
 }
+
+#[cfg(test)]
+#[path = "tests/turn_tests.rs"]
+mod tests;

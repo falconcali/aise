@@ -45,6 +45,18 @@ pub enum PipelineError {
         code: &'static str,
         message: String,
     },
+    #[error("pipeline stage {stage} has invalid configuration ({code}): {message}")]
+    InvalidConfig {
+        stage: PipelineStage,
+        code: &'static str,
+        message: String,
+    },
+    #[error("validation failed at proposal version {proposal_version} ({code}): {message}")]
+    ValidationFailed {
+        code: &'static str,
+        proposal_version: u32,
+        message: String,
+    },
 }
 
 impl PipelineError {
@@ -74,6 +86,14 @@ impl PipelineError {
 
     pub fn inconsistent_data(stage: PipelineStage, code: &'static str, message: impl Into<String>) -> Self {
         Self::InconsistentData {
+            stage,
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn invalid_config(stage: PipelineStage, code: &'static str, message: impl Into<String>) -> Self {
+        Self::InvalidConfig {
             stage,
             code,
             message: message.into(),

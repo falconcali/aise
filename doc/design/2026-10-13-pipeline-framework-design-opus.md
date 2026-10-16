@@ -115,12 +115,16 @@ crates/aise-core/src/pipeline/
     mod.rs                    只声明子模块并 pub(super) 导出 Input/Output/Pipeline
     {stage}.rs                Input、Output、{Stage}Pipeline、impl Pipeline
     {stage}_prompt.rs         prompt id、变量名常量、PromptVars 组装
-    {stage}_llm.rs            对 LlmGateway::complete 的薄封装与结果映射
+    {stage}_llm.rs            LLM 调用、返回内容解析与校验、类型化结果映射
     {stage}_trace.rs          阶段内 Span 的 begin_* / finish_*
-    {stage}_{domain}.rs       纯领域计算（如 baseline_narrative、extract_narrative）
+    {stage}_{domain}.rs       与 LLM 请求和返回契约无关的纯领域计算
     config.rs                 {Stage}Config（需要配置时）
     tests/{source}_tests.rs   单元测试（R-CODE-02）
 ```
+
+`{stage}_llm.rs` 负责完整的 LLM 交互边界，包括调用 `LlmGateway`、反序列化原始返回、
+依据阶段提供的候选项及输出契约进行校验，并构造类型化阶段结果。`{stage}_{domain}.rs` 只容纳与 LLM 请求及返回契约无关、
+且不执行 I/O 的纯计算。
 
 ### 2. 核心类型与职责
 

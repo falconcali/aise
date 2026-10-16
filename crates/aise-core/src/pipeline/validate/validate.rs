@@ -1,57 +1,34 @@
-use crate::core::{BoundedText, PlayerContribution, StoryContext, TurnControl};
-use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
+use crate::core::{StoryContext, TurnControl};
+use crate::pipeline::common::{
+    Pipeline, PipelineError, PipelineStage, ValidationCheckResult, ValidationContext, ValidationReport,
+    ValidationScoreResult,
+};
+use crate::pipeline::validate::ValidateConfig;
 use crate::trace::Observation;
 use serde::Serialize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum ValidationDecision {
-    Accept,
-    Reject,
-    Repair,
-}
-
 #[derive(Serialize)]
 pub struct ValidateInput<'a> {
-    pub original_proposal: &'a str,
-    pub current_proposal: &'a str,
+    pub context: ValidationContext<'a>,
+    pub proposal: &'a str,
     pub proposal_version: u32,
-    pub constraints: &'a [BoundedText],
-
-    pub player_contribution: &'a PlayerContribution,
-}
-
-#[derive(Clone, Serialize)]
-pub struct ValidateScoreConfig {
-    pub name: String,
-    pub description: String,
-
-    pub target_score: f32,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ValidateScoreResult {
-    pub name: String,
-    pub description: String,
-
-    pub score: f32,
-    pub target_score: f32,
-    pub issue: String,
+    pub repair_rounds_used: u32,
+    pub repair_rounds_remaining: u32,
 }
 
 #[derive(Serialize)]
 pub struct ValidateOutput {
-    pub scores: Vec<ValidateScoreResult>,
-    pub decision: ValidationDecision,
-}
-
-impl ValidateOutput {
-    pub fn total_score(&self) -> f32 {
-        self.scores.iter().map(|score| score.score).sum()
-    }
+    pub report: ValidationReport,
 }
 
 pub struct ValidatePipeline {
-    pub score_configs: Vec<ValidateScoreConfig>,
+    config: ValidateConfig,
+}
+
+impl ValidatePipeline {
+    pub fn new(config: ValidateConfig) -> Self {
+        Self { config }
+    }
 }
 
 impl<'a> Pipeline<ValidateInput<'a>> for ValidatePipeline {
@@ -63,24 +40,40 @@ impl<'a> Pipeline<ValidateInput<'a>> for ValidatePipeline {
 
     async fn execute(
         &self,
-        _input: ValidateInput<'a>,
+        input: ValidateInput<'a>,
         _story_ctx: &StoryContext,
         _control: &TurnControl,
         _observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
         Ok(ValidateOutput {
-            decision: ValidationDecision::Accept,
-            scores: self
-                .score_configs
-                .iter()
-                .map(|config| ValidateScoreResult {
-                    name: config.name.clone(),
-                    description: config.description.clone(),
-                    score: 10.0,
-                    target_score: config.target_score,
-                    issue: "Not so good".to_string(),
-                })
-                .collect(),
+            report: ValidationReport {
+                proposal_version: input.proposal_version,
+                checks: self
+                    .config
+                    .checks
+                    .iter()
+                    .map(|config| ValidationCheckResult {
+                        name: config.name.clone(),
+                        description: config.description.clone(),
+                        passed: true,
+                        issue: None,
+                    })
+                    .collect(),
+                scores: self
+                    .config
+                    .scores
+                    .iter()
+                    .map(|config| ValidationScoreResult {
+                        name: config.name.clone(),
+                        description: config.description.clone(),
+                        min_score: config.min_score,
+                        max_score: config.max_score,
+                        target_score: config.target_score,
+                        score: config.target_score,
+                        issue: None,
+                    })
+                    .collect(),
+            },
         })
     }
 }

@@ -6,5 +6,5 @@ mod baseline_prompt;
 mod baseline_trace;
 mod config;
 
-pub(super) use baseline::{BaselineInput, BaselinePipeline};
+pub(super) use baseline::{BaselineInput, BaselineOutput, BaselinePipeline};
 pub use config::BaselineConfig;

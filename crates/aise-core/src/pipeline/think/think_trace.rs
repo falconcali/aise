@@ -87,6 +87,8 @@ fn observation_error(error: &PipelineError) -> ObservationError {
         PipelineError::Persistence { .. } => ("persistence_error", "persistence"),
         PipelineError::Narrative { .. } => ("narrative_error", "narrative"),
         PipelineError::EmptyOutput { .. } => ("empty_output", "pipeline"),
+        PipelineError::InvalidConfig { code, .. } => (*code, "invalid_config"),
+        PipelineError::ValidationFailed { code, .. } => (*code, "validation"),
     };
     ObservationError {
         code: code.to_owned(),

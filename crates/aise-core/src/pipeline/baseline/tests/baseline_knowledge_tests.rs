@@ -1,8 +1,8 @@
 use super::*;
-use crate::core::tests::{demo_pack, snake_pack};
+use crate::core::tests::{demo_pack, snake_pack, turn_evaluation};
 use crate::core::{
-    ActivationRule, BoundedText, IdempotencyKey, NarrativeDirection, NarrativeNodeId, StorySummary, Turn,
-    TurnEvaluation, TurnNumber, TurnSegment, TurnStatus, WorldChange,
+    ActivationRule, BoundedText, IdempotencyKey, NarrativeDirection, NarrativeNodeId, StorySummary, Turn, TurnNumber,
+    TurnSegment, TurnStatus, WorldChange,
 };
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
@@ -65,8 +65,8 @@ fn turn(number: u64, segment: &str) -> Turn {
         player_contribution: contribution("继续"),
         turn_segment: TurnSegment::new(segment.to_owned()),
         world_change: WorldChange {},
-        turn_evaluation: TurnEvaluation {},
-        turn_status: TurnStatus::Accepted,
+        turn_evaluation: turn_evaluation(),
+        turn_status: TurnStatus::Pass,
     }
 }
 

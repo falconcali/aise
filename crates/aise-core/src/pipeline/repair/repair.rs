@@ -1,25 +1,33 @@
-use crate::core::{BoundedText, PlayerContribution, StoryContext, TurnControl};
-use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
-use crate::pipeline::validate::ValidateScoreResult;
+use crate::core::{StoryContext, TurnControl};
+use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage, ValidationContext, ValidationIssue};
+use crate::pipeline::repair::RepairConfig;
 use crate::trace::Observation;
 use serde::Serialize;
 
 #[derive(Serialize)]
 pub struct RepairInput<'a> {
-    pub original_proposal: &'a str,
-    pub current_proposal: &'a str,
-    pub scores: &'a [ValidateScoreResult],
+    pub context: ValidationContext<'a>,
+    pub proposal: &'a str,
     pub proposal_version: u32,
-    pub constraints: &'a [BoundedText],
-    pub player_contribution: &'a PlayerContribution,
+    pub issues: &'a [ValidationIssue],
+    pub repair_round: u32,
+    pub repair_rounds_remaining: u32,
 }
 
 #[derive(Serialize)]
 pub struct RepairOutput {
-    pub current_proposal: String,
+    pub proposal: String,
 }
 
-pub struct RepairPipeline;
+pub struct RepairPipeline {
+    config: RepairConfig,
+}
+
+impl RepairPipeline {
+    pub fn new(config: RepairConfig) -> Self {
+        Self { config }
+    }
+}
 
 impl<'a> Pipeline<RepairInput<'a>> for RepairPipeline {
     type Output = RepairOutput;
@@ -35,8 +43,15 @@ impl<'a> Pipeline<RepairInput<'a>> for RepairPipeline {
         _control: &TurnControl,
         _observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
+        if input.proposal.len() > self.config.max_proposal_bytes {
+            return Err(PipelineError::invalid_output(
+                PipelineStage::Repair,
+                "repair_proposal_too_long",
+                format!("repair proposal exceeds {} bytes", self.config.max_proposal_bytes),
+            ));
+        }
         Ok(RepairOutput {
-            current_proposal: input.current_proposal.to_owned(),
+            proposal: input.proposal.to_owned(),
         })
     }
 }

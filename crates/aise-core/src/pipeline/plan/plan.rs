@@ -6,7 +6,7 @@ use crate::llm::LlmGateway;
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::pipeline::plan::{
-    PlanConfig, plan_candidates, plan_llm, plan_output, plan_prompt, plan_roles,
+    PlanConfig, plan_candidates, plan_llm, plan_prompt, plan_roles,
     plan_trace::{self, PlanTraceMetrics},
 };
 use crate::prompt::Prompt;
@@ -109,8 +109,7 @@ impl PlanPipeline {
             plan_llm::process_plan(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
                 .await
                 .map_err(PipelineError::llm(PipelineStage::Plan))?;
-        let output =
-            plan_output::parse_plan_output(&raw_output, &candidates, &role_catalog, player_role, &self.config)?;
+        let output = plan_llm::parse_plan_output(&raw_output, &candidates, &role_catalog, player_role, &self.config)?;
         metrics.facts_selected = output.facts_to_retrieve.len();
         metrics.rumors_selected = output.rumors_to_retrieve.len();
         metrics.generation_roles_selected = output.roles_for_generation.len();

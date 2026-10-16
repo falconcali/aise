@@ -1,7 +1,7 @@
 use super::*;
 use crate::core::tests::snake_pack;
 use crate::core::{
-    ActivationRule, CharacterThinkRequest, FactBody, FactId, IdempotencyKey, NarrativeState, PlayerId,
+    ActivationRule, BoundedText, CharacterThinkRequest, FactBody, FactId, IdempotencyKey, NarrativeState, PlayerId,
     PlayerRoleContext, RetrievalHint, RoleActor, RumorBody, RumorId, StoryAssetSpec, StoryCommit, StoryInstanceSpec,
     StoryPack, TurnCancellation, TurnEvent,
 };
@@ -9,7 +9,6 @@ use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
 };
 use crate::pipeline::common::PipelineStage;
-use crate::pipeline::validate::ValidateScoreResult;
 use crate::prompt::PromptConfig;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, TraceSpec,
@@ -259,7 +258,8 @@ async fn run_runtime_with_think_responses(
         Arc::new(bundled_prompt()),
         Arc::clone(&store),
         PipelineConfig::default(),
-    );
+    )
+    .expect("runtime config should be valid");
     let sink = CapturingSink::default();
     let control = TurnControl::new(Instant::now() + Duration::from_secs(30), TurnCancellation::new());
     let trace = test_trace();
@@ -344,48 +344,35 @@ fn assert_plan_prompt_contract(requests: &[LlmCompletionRequest]) {
     assert!(!ai_catalog.contains("role_id: \"xu_xian\""));
 }
 
-fn validation(decision: ValidationDecision, scores: &[f32]) -> ValidateOutput {
-    ValidateOutput {
-        scores: scores
-            .iter()
-            .map(|score| ValidateScoreResult {
-                name: "score".to_owned(),
-                description: "score".to_owned(),
-                score: *score,
-                target_score: 10.0,
-                issue: String::new(),
-            })
-            .collect(),
-        decision,
-    }
-}
-
 #[test]
-fn accepted_final_validation_selects_last_proposal() {
-    let validations = vec![
-        validation(ValidationDecision::Repair, &[9.0]),
-        validation(ValidationDecision::Accept, &[1.0]),
-    ];
+fn runtime_new_rejects_invalid_pipeline_config() {
+    let store = Arc::new(Store::default());
+    let provider = ScriptedProvider {
+        calls: AtomicUsize::new(0),
+        responses: Mutex::new(VecDeque::new()),
+        requests: Arc::new(Mutex::new(Vec::new())),
+        store: Arc::clone(&store),
+        replacement_after_plan: Mutex::new(None),
+    };
+    let mut config = PipelineConfig::default();
+    config.validate.checks.clear();
+    config.validate.scores.clear();
 
-    assert_eq!(select_final_index(&validations), 1);
-}
+    let result = Runtime::new(
+        Arc::new(LlmGateway::new(Arc::new(provider), LlmConfig::default())),
+        Arc::new(bundled_prompt()),
+        store,
+        config,
+    );
 
-#[test]
-fn rejected_final_validation_selects_best_scored_proposal() {
-    let validations = vec![
-        validation(ValidationDecision::Repair, &[3.0, 4.0]),
-        validation(ValidationDecision::Repair, &[9.0, 4.0]),
-        validation(ValidationDecision::Reject, &[1.0, 1.0]),
-    ];
-
-    assert_eq!(select_final_index(&validations), 1);
-}
-
-#[test]
-fn proposal_version_counts_proposals() {
-    let proposals = vec!["a".to_owned(), "b".to_owned()];
-
-    assert_eq!(proposal_version(&proposals), 2);
+    assert!(matches!(
+        result,
+        Err(PipelineError::InvalidConfig {
+            stage: PipelineStage::Validate,
+            code: "validate_criteria_empty",
+            ..
+        })
+    ));
 }
 
 #[test]

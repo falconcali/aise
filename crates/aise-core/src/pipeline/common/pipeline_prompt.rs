@@ -16,7 +16,7 @@ pub(in crate::pipeline) fn recent_story(story_ctx: &StoryContext) -> String {
 
 pub(in crate::pipeline) fn turns_story<'a>(turns: impl Iterator<Item = &'a Turn>) -> String {
     turns
-        .filter(|turn| matches!(turn.turn_status, TurnStatus::Accepted))
+        .filter(|turn| matches!(turn.turn_status, TurnStatus::Pass | TurnStatus::Choice))
         .map(|turn| turn.turn_segment.text().trim())
         .filter(|segment| !segment.is_empty())
         .collect::<Vec<_>>()

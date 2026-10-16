@@ -1,4 +1,4 @@
-use crate::core::{CharacterCard, StoryAssetSpec, StoryContext, StoryPack};
+use crate::core::{CharacterCard, StoryAssetSpec, StoryContext, StoryPack, TurnCheckEvaluation, TurnEvaluation};
 use crate::persistence::Store;
 
 pub(crate) const SNAKE_PACK_JSON: &str =
@@ -17,6 +17,20 @@ pub(crate) fn demo_pack() -> StoryPack {
 
 pub(crate) fn xu_xian_card() -> CharacterCard {
     serde_json::from_str(XU_XIAN_CARD_JSON).expect("character card example should import")
+}
+
+pub(crate) fn turn_evaluation() -> TurnEvaluation {
+    TurnEvaluation {
+        proposal_version: 1,
+        repair_rounds: 0,
+        checks: vec![TurnCheckEvaluation {
+            name: "test_check".to_owned(),
+            passed: true,
+            issue: None,
+        }],
+        scores: Vec::new(),
+        choice: None,
+    }
 }
 
 pub(crate) async fn store_with_default_pack() -> Store {

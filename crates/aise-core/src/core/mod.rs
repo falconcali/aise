@@ -45,8 +45,8 @@ pub use story::{
     StorySummary,
 };
 pub use turn::{
-    PlayerContribution, Turn, TurnCancellation, TurnControl, TurnEvaluation, TurnEvent, TurnEventSink, TurnNumber,
-    TurnRequest, TurnSegment, TurnStatus,
+    PlayerContribution, Turn, TurnCancellation, TurnCheckEvaluation, TurnChoiceEvaluation, TurnControl, TurnEvaluation,
+    TurnEvent, TurnEventSink, TurnNumber, TurnRequest, TurnScoreEvaluation, TurnSegment, TurnStatus,
 };
 
 pub use bounded_text::BoundedText;

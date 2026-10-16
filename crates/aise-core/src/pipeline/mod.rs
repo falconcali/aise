@@ -12,9 +12,11 @@ mod validate;
 
 pub(crate) mod runtime;
 pub use baseline::BaselineConfig;
-pub use common::{PipelineConfig, PipelineError, PipelineStage};
+pub use common::{PipelineConfig, PipelineError, PipelineStage, ValidationLoopConfig};
 pub use generate::GenerateConfig;
 pub use plan::PlanConfig;
+pub use repair::RepairConfig;
 pub(crate) use runtime::Runtime;
 pub use summary::SummaryConfig;
 pub use think::ThinkConfig;
+pub use validate::{ValidateCheckConfig, ValidateConfig, ValidateScoreConfig};

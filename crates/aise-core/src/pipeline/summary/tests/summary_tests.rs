@@ -1,8 +1,6 @@
 use super::*;
-use crate::core::tests::store_with_default_pack;
-use crate::core::{
-    IdempotencyKey, PlayerContribution, Turn, TurnCancellation, TurnEvaluation, TurnSegment, TurnStatus, WorldChange,
-};
+use crate::core::tests::{store_with_default_pack, turn_evaluation};
+use crate::core::{IdempotencyKey, PlayerContribution, Turn, TurnCancellation, TurnSegment, TurnStatus, WorldChange};
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
 };
@@ -88,8 +86,8 @@ fn accepted_turn(number: u64) -> Turn {
         },
         turn_segment: TurnSegment::new(format!("Segment {number}.")),
         world_change: WorldChange {},
-        turn_evaluation: TurnEvaluation {},
-        turn_status: TurnStatus::Accepted,
+        turn_evaluation: turn_evaluation(),
+        turn_status: TurnStatus::Pass,
     }
 }
 
