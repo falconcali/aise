@@ -1,7 +1,7 @@
 use crate::core::{ChatMessage, ChatMessageRole};
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
-    LlmReasoningEffort,
+    LlmReasoningEffort, LlmTokenUsage,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -30,6 +30,8 @@ struct OpenAiChatMessage<'a> {
 #[derive(Deserialize)]
 struct OpenAiChatResponse {
     choices: Vec<OpenAiChatChoice>,
+    #[serde(default)]
+    usage: Option<OpenAiUsage>,
 }
 
 #[derive(Deserialize)]
@@ -41,6 +43,29 @@ struct OpenAiChatChoice {
 #[derive(Deserialize)]
 struct OpenAiChatChoiceMessage {
     content: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiUsage {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    total_tokens: Option<u64>,
+    #[serde(default)]
+    prompt_tokens_details: Option<OpenAiPromptTokensDetails>,
+    #[serde(default)]
+    completion_tokens_details: Option<OpenAiCompletionTokensDetails>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiPromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiCompletionTokensDetails {
+    #[serde(default)]
+    reasoning_tokens: Option<u64>,
 }
 
 impl OpenAiCompatProvider {
@@ -113,6 +138,7 @@ fn parse_chat_response(body: &str) -> Result<LlmCompletionResponse, LlmError> {
     let response: OpenAiChatResponse = serde_json::from_str(body).map_err(|_| LlmError::InvalidResponse {
         reason: "malformed chat completion json",
     })?;
+    let usage = response.usage.map(to_token_usage);
     let choice = response.choices.into_iter().next().ok_or(LlmError::InvalidResponse {
         reason: "missing choices",
     })?;
@@ -124,7 +150,21 @@ fn parse_chat_response(body: &str) -> Result<LlmCompletionResponse, LlmError> {
     Ok(LlmCompletionResponse {
         content,
         finish_reason: map_finish_reason(choice.finish_reason.as_deref()),
+        usage,
     })
+}
+
+fn to_token_usage(usage: OpenAiUsage) -> LlmTokenUsage {
+    let total_tokens = usage
+        .total_tokens
+        .unwrap_or_else(|| usage.prompt_tokens.saturating_add(usage.completion_tokens));
+    LlmTokenUsage {
+        input_tokens: usage.prompt_tokens,
+        cached_input_tokens: usage.prompt_tokens_details.and_then(|details| details.cached_tokens),
+        output_tokens: usage.completion_tokens,
+        reasoning_tokens: usage.completion_tokens_details.and_then(|details| details.reasoning_tokens),
+        total_tokens,
+    }
 }
 
 fn map_finish_reason(reason: Option<&str>) -> LlmCompletionFinishReason {

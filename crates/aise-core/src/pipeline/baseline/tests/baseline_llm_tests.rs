@@ -25,6 +25,7 @@ impl LlmProvider for CapturingProvider {
         Ok(LlmCompletionResponse {
             content: "processed".to_owned(),
             finish_reason: LlmCompletionFinishReason::Stop,
+            usage: None,
         })
     }
 }

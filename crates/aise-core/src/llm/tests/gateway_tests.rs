@@ -39,6 +39,7 @@ impl LlmProvider for DelayedProvider {
         Ok(LlmCompletionResponse {
             content: "done".to_owned(),
             finish_reason: crate::llm::LlmCompletionFinishReason::Stop,
+            usage: None,
         })
     }
 }

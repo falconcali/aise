@@ -31,6 +31,7 @@ impl Provider for CountingProvider {
         Ok(LlmCompletionResponse {
             content: r#"{"story_goal":"Continue the encounter.","facts_to_retrieve":[],"rumors_to_retrieve":[],"roles_for_generation":[],"character_think_requests":[]}"#.to_owned(),
             finish_reason: LlmCompletionFinishReason::Stop,
+            usage: None,
         })
     }
 }

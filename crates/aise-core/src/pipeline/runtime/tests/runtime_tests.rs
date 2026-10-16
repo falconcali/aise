@@ -55,6 +55,7 @@ impl Provider for ScriptedProvider {
         Ok(LlmCompletionResponse {
             content,
             finish_reason: LlmCompletionFinishReason::Stop,
+            usage: None,
         })
     }
 }

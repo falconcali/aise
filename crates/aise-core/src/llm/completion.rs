@@ -47,8 +47,18 @@ pub struct LlmCompletionRequest {
     pub reasoning_effort: Option<LlmReasoningEffort>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct LlmTokenUsage {
+    pub input_tokens: u64,
+    pub cached_input_tokens: Option<u64>,
+    pub output_tokens: u64,
+    pub reasoning_tokens: Option<u64>,
+    pub total_tokens: u64,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct LlmCompletionResponse {
     pub content: String,
     pub finish_reason: LlmCompletionFinishReason,
+    pub usage: Option<LlmTokenUsage>,
 }

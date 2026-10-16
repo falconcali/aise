@@ -31,6 +31,7 @@ impl Provider for FixedProvider {
             Ok(content) => Ok(LlmCompletionResponse {
                 content: content.clone(),
                 finish_reason: LlmCompletionFinishReason::Stop,
+                usage: None,
             }),
             Err(message) => Err(LlmError::Transport {
                 source: (*message).into(),
