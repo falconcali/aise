@@ -3,7 +3,7 @@ use crate::core::tests::store_with_default_pack;
 use crate::core::{
     ActivatedKnowledge, BoundedText, CharacterProfile, PlayerContribution, PlayerRoleContext, RoleId, StoryContext,
 };
-use crate::pipeline::common::{ValidationContext, ValidationCriterionKind, ValidationIssue};
+use crate::pipeline::common::{ValidationContext, ValidationIssue};
 use crate::prompt::PromptConfig;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
@@ -70,14 +70,14 @@ fn fixture() -> RepairFixture {
             },
         },
         issues: vec![
-            ValidationIssue {
-                kind: ValidationCriterionKind::Check,
+            ValidationIssue::Check {
                 name: "explicit_constraints".to_owned(),
                 message: text("Remove the conflict."),
             },
-            ValidationIssue {
-                kind: ValidationCriterionKind::Score,
+            ValidationIssue::Score {
                 name: "narrative_quality".to_owned(),
+                current_score: 6.5,
+                target_score: 8.0,
                 message: text("Clarify the ending."),
             },
         ],

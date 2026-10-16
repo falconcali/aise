@@ -1,35 +1,21 @@
-use crate::pipeline::common::{PipelineError, PipelineStage};
-use serde::{Deserialize, Serialize};
+use crate::pipeline::common::{
+    PipelineError, PipelineStage, ProposalCheckCriterion, ProposalQualityPolicy, ProposalScoreCriterion,
+};
+use serde::Deserialize;
 use std::collections::HashSet;
 
 pub const MAX_VALIDATE_CHECKS: usize = 16;
 pub const MAX_VALIDATE_SCORES: usize = 16;
 pub const MAX_CRITERION_NAME_BYTES: usize = 64;
 pub const MAX_CRITERION_DESCRIPTION_BYTES: usize = 2 * 1024;
+pub const MAX_TARGET_GUIDANCE_BYTES: usize = 2 * 1024;
 pub const MAX_ISSUE_BYTES_LIMIT: usize = 16 * 1024;
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ValidateCheckConfig {
-    pub name: String,
-    pub description: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ValidateScoreConfig {
-    pub name: String,
-    pub description: String,
-    pub min_score: f64,
-    pub max_score: f64,
-    pub target_score: f64,
-}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ValidateConfig {
-    pub checks: Vec<ValidateCheckConfig>,
-    pub scores: Vec<ValidateScoreConfig>,
+    pub checks: Vec<ProposalCheckCriterion>,
+    pub scores: Vec<ProposalScoreCriterion>,
     pub max_issue_bytes: usize,
 }
 
@@ -87,6 +73,21 @@ impl ValidateConfig {
                     format!("score criterion at index {index} has an invalid range or target"),
                 ));
             }
+            let target_guidance = score.target_guidance.trim();
+            if target_guidance.is_empty() {
+                return Err(invalid_config(
+                    "validate_score_target_guidance_empty",
+                    format!("score criterion at index {index} has empty target guidance"),
+                ));
+            }
+            if target_guidance.len() > MAX_TARGET_GUIDANCE_BYTES {
+                return Err(invalid_config(
+                    "validate_score_target_guidance_too_long",
+                    format!(
+                        "score criterion at index {index} has target guidance exceeding {MAX_TARGET_GUIDANCE_BYTES} bytes"
+                    ),
+                ));
+            }
         }
 
         if !(1..=MAX_ISSUE_BYTES_LIMIT).contains(&self.max_issue_bytes) {
@@ -96,6 +97,10 @@ impl ValidateConfig {
             ));
         }
         Ok(())
+    }
+
+    pub fn quality_policy(&self) -> ProposalQualityPolicy {
+        ProposalQualityPolicy::new(self.checks.clone(), self.scores.clone())
     }
 }
 
@@ -121,36 +126,47 @@ impl Default for ValidateConfig {
                 ),
             ],
             scores: vec![
-                score("story_goal_completion", "The proposal advances the immediate story goal."),
+                score(
+                    "story_goal_completion",
+                    "The proposal advances the immediate story goal.",
+                    "The segment makes visible, causally grounded progress toward the immediate story goal without forcing completion unsupported by the evidence.",
+                ),
                 score(
                     "player_response",
                     "The proposal responds directly to the player's contribution.",
+                    "The segment realizes the pending player contribution in the prose, preserves its essential meaning, and does not invent an unprovided consequential player choice.",
                 ),
                 score(
                     "character_consistency",
                     "The proposal keeps each character consistent with the supplied role evidence.",
+                    "Character actions, knowledge, voice, and immediate intent remain consistent with supplied role evidence and character decisions unless visible events justify a change.",
                 ),
-                score("narrative_quality", "The proposal is coherent and readable as story prose."),
+                score(
+                    "narrative_quality",
+                    "The proposal is coherent and readable as story prose.",
+                    "The segment uses clear causal and temporal transitions, readable prose, and a natural interaction boundary without relying on abrupt or unsupported developments.",
+                ),
             ],
             max_issue_bytes: 2048,
         }
     }
 }
 
-fn check(name: &str, description: &str) -> ValidateCheckConfig {
-    ValidateCheckConfig {
+fn check(name: &str, description: &str) -> ProposalCheckCriterion {
+    ProposalCheckCriterion {
         name: name.to_owned(),
         description: description.to_owned(),
     }
 }
 
-fn score(name: &str, description: &str) -> ValidateScoreConfig {
-    ValidateScoreConfig {
+fn score(name: &str, description: &str, target_guidance: &str) -> ProposalScoreCriterion {
+    ProposalScoreCriterion {
         name: name.to_owned(),
         description: description.to_owned(),
         min_score: 0.0,
         max_score: 10.0,
         target_score: 8.0,
+        target_guidance: target_guidance.to_owned(),
     }
 }
 

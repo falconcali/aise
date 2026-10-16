@@ -58,12 +58,23 @@ fn failed_issues_preserve_checks_before_scores() {
     let issues = report().failed_issues();
 
     assert_eq!(issues.len(), 2);
-    assert_eq!(issues[0].kind, ValidationCriterionKind::Check);
-    assert_eq!(issues[0].name, "failed_check");
-    assert_eq!(issues[0].message.as_str(), "check issue");
-    assert_eq!(issues[1].kind, ValidationCriterionKind::Score);
-    assert_eq!(issues[1].name, "unmet_score");
-    assert_eq!(issues[1].message.as_str(), "score issue");
+    assert!(matches!(
+        &issues[0],
+        ValidationIssue::Check { name, message }
+            if name == "failed_check" && message.as_str() == "check issue"
+    ));
+    assert!(matches!(
+        &issues[1],
+        ValidationIssue::Score {
+            name,
+            current_score,
+            target_score,
+            message,
+        } if name == "unmet_score"
+            && *current_score == 7.0
+            && *target_score == 8.0
+            && message.as_str() == "score issue"
+    ));
 }
 
 #[test]

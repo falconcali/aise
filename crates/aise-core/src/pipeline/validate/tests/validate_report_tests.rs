@@ -1,33 +1,35 @@
 use super::*;
-use crate::pipeline::validate::{ValidateCheckConfig, ValidateScoreConfig};
+use crate::pipeline::common::{ProposalCheckCriterion, ProposalScoreCriterion};
 use serde_json::{Value, json};
 
 fn config() -> ValidateConfig {
     ValidateConfig {
         checks: vec![
-            ValidateCheckConfig {
+            ProposalCheckCriterion {
                 name: "logic".to_owned(),
                 description: "Logical consistency.".to_owned(),
             },
-            ValidateCheckConfig {
+            ProposalCheckCriterion {
                 name: "constraints".to_owned(),
                 description: "Constraint compliance.".to_owned(),
             },
         ],
         scores: vec![
-            ValidateScoreConfig {
+            ProposalScoreCriterion {
                 name: "goal".to_owned(),
                 description: "Goal completion.".to_owned(),
                 min_score: 0.0,
                 max_score: 10.0,
                 target_score: 8.0,
+                target_guidance: "Advance the goal.".to_owned(),
             },
-            ValidateScoreConfig {
+            ProposalScoreCriterion {
                 name: "quality".to_owned(),
                 description: "Narrative quality.".to_owned(),
                 min_score: 1.0,
                 max_score: 5.0,
                 target_score: 4.0,
+                target_guidance: "Use clear prose.".to_owned(),
             },
         ],
         max_issue_bytes: 32,
@@ -61,12 +63,13 @@ fn error_code(error: PipelineError) -> &'static str {
 fn score_only_config() -> ValidateConfig {
     ValidateConfig {
         checks: Vec::new(),
-        scores: vec![ValidateScoreConfig {
+        scores: vec![ProposalScoreCriterion {
             name: "score".to_owned(),
             description: "Score criterion.".to_owned(),
             min_score: 0.0,
             max_score: 10.0,
             target_score: 5.0,
+            target_guidance: "Meet the target.".to_owned(),
         }],
         max_issue_bytes: 8,
     }

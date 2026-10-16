@@ -7,7 +7,7 @@ use crate::core::{
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
 };
-use crate::pipeline::common::{ValidationContext, ValidationCriterionKind, ValidationIssue};
+use crate::pipeline::common::{ValidationContext, ValidationIssue};
 use crate::prompt::PromptConfig;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
@@ -105,8 +105,7 @@ async fn execute_calls_gateway_once_and_returns_complete_replacement() {
             dialogue_examples: Vec::new(),
         },
     };
-    let issues = vec![ValidationIssue {
-        kind: ValidationCriterionKind::Check,
+    let issues = vec![ValidationIssue::Check {
         name: "internal_logic".to_owned(),
         message: text("Fix the contradiction."),
     }];

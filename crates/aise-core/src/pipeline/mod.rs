@@ -19,4 +19,4 @@ pub use repair::RepairConfig;
 pub(crate) use runtime::Runtime;
 pub use summary::SummaryConfig;
 pub use think::ThinkConfig;
-pub use validate::{ValidateCheckConfig, ValidateConfig, ValidateScoreConfig};
+pub use validate::ValidateConfig;

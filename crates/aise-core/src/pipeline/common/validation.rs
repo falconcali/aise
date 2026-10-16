@@ -2,6 +2,7 @@ use crate::core::{
     ActivatedKnowledge, BoundedText, CharacterDecision, FactEntry, NarrativeDirection, PlayerContribution,
     PlayerRoleContext, ResolvedRole, RumorEntry,
 };
+use crate::pipeline::common::ValidationIssue;
 use serde::Serialize;
 
 #[derive(Clone, Copy, Serialize)]
@@ -16,19 +17,6 @@ pub struct ValidationContext<'a> {
     pub player_role: &'a PlayerRoleContext,
     pub roles: &'a [ResolvedRole],
     pub character_decisions: &'a [CharacterDecision],
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum ValidationCriterionKind {
-    Check,
-    Score,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ValidationIssue {
-    pub kind: ValidationCriterionKind,
-    pub name: String,
-    pub message: BoundedText,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -70,8 +58,7 @@ impl ValidationReport {
         self.checks
             .iter()
             .filter(|check| !check.passed)
-            .map(|check| ValidationIssue {
-                kind: ValidationCriterionKind::Check,
+            .map(|check| ValidationIssue::Check {
                 name: check.name.clone(),
                 message: check.issue.clone().expect("failed validation check must include an issue"),
             })
@@ -79,9 +66,10 @@ impl ValidationReport {
                 self.scores
                     .iter()
                     .filter(|score| score.score < score.target_score)
-                    .map(|score| ValidationIssue {
-                        kind: ValidationCriterionKind::Score,
+                    .map(|score| ValidationIssue::Score {
                         name: score.name.clone(),
+                        current_score: score.score,
+                        target_score: score.target_score,
                         message: score.issue.clone().expect("unmet validation score must include an issue"),
                     }),
             )

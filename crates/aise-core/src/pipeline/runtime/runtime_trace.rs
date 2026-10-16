@@ -1,5 +1,5 @@
 use crate::pipeline::common::PipelineError;
-use crate::pipeline::runtime::runtime::ValidationLoopResult;
+use crate::pipeline::runtime::runtime_validation::ValidationLoopResult;
 use crate::trace::{
     Observation, ObservationError, ObservationKind, ObservationOutcome, ObservationSpec, ObservationStatus, Trace,
 };

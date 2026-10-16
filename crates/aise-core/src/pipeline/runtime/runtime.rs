@@ -11,10 +11,7 @@ use crate::pipeline::generate::{GenerateInput, GeneratePipeline};
 use crate::pipeline::plan::{PlanInput, PlanOutput, PlanPipeline};
 use crate::pipeline::repair::RepairPipeline;
 use crate::pipeline::retrieval::{RetrievalInput, RetrievalOutput, RetrievalPipeline};
-use crate::pipeline::runtime::runtime_trace;
-use crate::pipeline::runtime::runtime_validation::{
-    turn_evaluation, validate_generated_proposal, validation_context,
-};
+use crate::pipeline::runtime::runtime_validation::{turn_evaluation, validate_generated_proposal, validation_context};
 use crate::pipeline::summary::{SummaryInput, SummaryPipeline};
 use crate::pipeline::think::{ThinkInput, ThinkOutput, ThinkPipeline};
 use crate::pipeline::validate::ValidatePipeline;
@@ -168,19 +165,16 @@ impl Runtime {
         };
 
         let generate_output = pipeline_runner.run(&self.generate, generate_input, story_ctx).await?;
-
         let initial_proposal = validate_generated_proposal(generate_output.result, self.repair_max_proposal_bytes)?;
-        let validation_observation = runtime_trace::begin_validation_loop(trace, &initial_proposal);
         let validation_result = self
-            .validate_and_repair(
+            .validate_repair_loop(
                 &pipeline_runner,
                 story_ctx,
                 validation_context(&plan_output, &baseline_output, &retrieval_output, &think_output),
                 initial_proposal,
+                trace,
             )
-            .await;
-        runtime_trace::finish_validation_loop(validation_observation, &validation_result);
-        let validation_result = validation_result?;
+            .await?;
 
         let extract_input = ExtractInput {
             query: &validation_result.proposal,
