@@ -66,9 +66,9 @@ pipeline/{stage}/
   mod.rs                  pub(super) re-exports only
   {stage}.rs              Input, Output, {Stage}Pipeline, impl Pipeline
   {stage}_prompt.rs       prompt id, *_VAR constants, PromptVars assembly
-  {stage}_llm.rs          thin LlmGateway::complete wrapper and result mapping
+  {stage}_llm.rs          LLM invocation and response parsing, validation, and typed result mapping
   {stage}_trace.rs        begin_* / finish_* observation helpers
-  {stage}_{domain}.rs     pure computation, no I/O or LLM
+  {stage}_{domain}.rs     pure computation independent of LLM request and response contracts
   config.rs               {Stage}Config (optional)
   tests/{source}_tests.rs
 ```
