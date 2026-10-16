@@ -85,6 +85,7 @@ impl Runtime {
                 Arc::clone(&prompt),
                 Arc::clone(&store),
                 pipeline_config.repair,
+                Arc::clone(&quality_policy),
             ),
             extract: ExtractPipeline::new(Arc::clone(&store)),
             summary: SummaryPipeline::new(
@@ -97,6 +98,12 @@ impl Runtime {
             validation_loop: pipeline_config.validation_loop,
             repair_max_proposal_bytes,
         })
+    }
+
+    #[cfg(test)]
+    pub(super) fn stages_share_quality_policy(&self) -> bool {
+        Arc::ptr_eq(self.generate.quality_policy(), self.validate.quality_policy())
+            && Arc::ptr_eq(self.generate.quality_policy(), self.repair.quality_policy())
     }
 
     pub async fn run_turn(

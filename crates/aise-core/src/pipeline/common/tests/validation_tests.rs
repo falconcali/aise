@@ -54,15 +54,9 @@ fn report_detects_failed_checks_and_unmet_scores() {
 }
 
 #[test]
-fn failed_issues_preserve_checks_before_scores() {
+fn failed_issues_include_score_gap() {
     let issues = report().failed_issues();
 
-    assert_eq!(issues.len(), 2);
-    assert!(matches!(
-        &issues[0],
-        ValidationIssue::Check { name, message }
-            if name == "failed_check" && message.as_str() == "check issue"
-    ));
     assert!(matches!(
         &issues[1],
         ValidationIssue::Score {
@@ -78,7 +72,34 @@ fn failed_issues_preserve_checks_before_scores() {
 }
 
 #[test]
-fn passing_results_contribute_no_issues() {
+fn failed_issues_exclude_passing_results() {
+    let issues = report().failed_issues();
+
+    assert_eq!(issues.len(), 2);
+    assert!(!issues.iter().any(|issue| matches!(
+        issue,
+        ValidationIssue::Check { name, .. } if name == "passing_check"
+    )));
+    assert!(!issues.iter().any(|issue| matches!(
+        issue,
+        ValidationIssue::Score { name, .. } if name == "met_score"
+    )));
+}
+
+#[test]
+fn failed_issues_preserve_check_then_score_order() {
+    let issues = report().failed_issues();
+
+    assert!(matches!(
+        &issues[0],
+        ValidationIssue::Check { name, message }
+            if name == "failed_check" && message.as_str() == "check issue"
+    ));
+    assert!(matches!(&issues[1], ValidationIssue::Score { name, .. } if name == "unmet_score"));
+}
+
+#[test]
+fn passing_report_contributes_no_issues() {
     let mut report = report();
     report.checks[1].passed = true;
     report.checks[1].issue = None;

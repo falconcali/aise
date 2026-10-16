@@ -1,7 +1,8 @@
 use crate::core::StoryContext;
 use crate::persistence::Store;
+use crate::pipeline::common::proposal_quality_prompt::project_proposal_quality;
 use crate::pipeline::common::validation_prompt::{ValidationPromptEvidence, project_validation_evidence};
-use crate::pipeline::common::{PipelineError, PipelineStage};
+use crate::pipeline::common::{PipelineError, PipelineStage, ProposalQualityPolicy};
 use crate::pipeline::repair::{RepairConfig, RepairInput};
 use crate::prompt::{Prompt, PromptSpec, PromptVars, RenderedPrompt};
 use crate::trace::Observation;
@@ -22,6 +23,8 @@ const RETRIEVED_RUMORS_VAR: &str = "retrieved_rumors";
 const PLAYER_ROLE_VAR: &str = "player_role";
 const RESOLVED_ROLES_VAR: &str = "resolved_roles";
 const CHARACTER_DECISIONS_VAR: &str = "character_decisions";
+const CHECK_CRITERIA_VAR: &str = "check_criteria";
+const SCORE_CRITERIA_VAR: &str = "score_criteria";
 const CURRENT_PROPOSAL_VAR: &str = "current_proposal";
 const PROPOSAL_VERSION_VAR: &str = "proposal_version";
 const REPAIR_ISSUES_VAR: &str = "repair_issues";
@@ -31,12 +34,13 @@ pub(super) async fn repair_story(
     prompt: &Prompt,
     story_ctx: &StoryContext,
     input: &RepairInput<'_>,
+    quality_policy: &ProposalQualityPolicy,
     config: &RepairConfig,
     store: &Store,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
     let evidence = project_validation_evidence(PipelineStage::Repair, story_ctx, &input.context, store).await?;
-    let vars = repair_vars(input, config, evidence)?;
+    let vars = repair_vars(input, quality_policy, config, evidence)?;
     prompt
         .render(PromptSpec::new(REPAIR_STORY_PROMPT_ID, vars), observation)
         .map_err(PipelineError::prompt(PipelineStage::Repair))
@@ -44,9 +48,11 @@ pub(super) async fn repair_story(
 
 fn repair_vars(
     input: &RepairInput<'_>,
+    quality_policy: &ProposalQualityPolicy,
     config: &RepairConfig,
     evidence: ValidationPromptEvidence,
 ) -> Result<PromptVars, PipelineError> {
+    let quality = project_proposal_quality(PipelineStage::Repair, quality_policy)?;
     let repair_issues = serde_json::to_string(input.issues).map_err(|error| {
         PipelineError::inconsistent_data(PipelineStage::Repair, "repair_issues_serialization", error.to_string())
     })?;
@@ -68,6 +74,8 @@ fn repair_vars(
         (PLAYER_ROLE_VAR.to_owned(), Value::String(evidence.player_role)),
         (RESOLVED_ROLES_VAR.to_owned(), Value::String(evidence.resolved_roles)),
         (CHARACTER_DECISIONS_VAR.to_owned(), Value::String(evidence.character_decisions)),
+        (CHECK_CRITERIA_VAR.to_owned(), Value::String(quality.check_criteria)),
+        (SCORE_CRITERIA_VAR.to_owned(), Value::String(quality.score_criteria)),
         (CURRENT_PROPOSAL_VAR.to_owned(), Value::String(input.proposal.to_owned())),
         (PROPOSAL_VERSION_VAR.to_owned(), Value::from(input.proposal_version)),
         (REPAIR_ISSUES_VAR.to_owned(), Value::String(repair_issues)),

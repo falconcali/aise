@@ -55,4 +55,6 @@ async fn projection_preserves_validation_evidence_boundaries() {
     assert!(evidence.retrieved_facts.is_empty());
     assert!(evidence.activated_rumors.is_empty());
     assert!(evidence.retrieved_rumors.is_empty());
+    assert!(evidence.resolved_roles.is_empty());
+    assert!(evidence.character_decisions.is_empty());
 }

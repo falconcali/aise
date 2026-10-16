@@ -236,7 +236,7 @@ resolved roles != character decisions
 character decisions = viewpoint and writing guidance, never committed world fact
 ```
 
-CSI MUST define an evaluator that cannot rewrite the story or invent evidence. RC MUST label every runtime section as untrusted content. FTI MUST require the exact JSON protocol from §3.2, one result per configured criterion, actionable issues, and no surrounding prose.
+CSI MUST define an evaluator that cannot rewrite the story or invent evidence. RC MUST keep all runtime sections in the untrusted user-message layer, use plain headings, and omit optional sections when their content is empty. FTI MUST require the exact JSON protocol from §3.2, one result per configured criterion, actionable issues, and no surrounding prose.
 
 ### 3.4 LLM call
 

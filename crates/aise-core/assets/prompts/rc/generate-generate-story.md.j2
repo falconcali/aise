@@ -1,72 +1,76 @@
 {%- if story_summary -%}
-# [UNTRUSTED CONTENT] Story Summary
+# Story Summary
 
 {{ story_summary }}
 
 {% endif -%}
 {%- if story_opening -%}
-# [UNTRUSTED CONTENT] Story Opening
+# Story Opening
 
 {{ story_opening }}
 
 {% endif -%}
 {%- if recent_story -%}
-# [UNTRUSTED CONTENT] Recent Story
+# Recent Story
 
 {{ recent_story }}
 
 {% endif -%}
 {%- if known_facts -%}
-# [UNTRUSTED CONTENT] Known Facts
+# Known Facts
 
 {{ known_facts }}
 
 {% endif -%}
 {%- if rumors -%}
-# [UNTRUSTED CONTENT] Rumors
+# Rumors
 
 {{ rumors }}
 
 {% endif -%}
-# [UNTRUSTED CONTENT] Player Character
+# Player Character
 
 {{ player_role ~ "\n\n" }}
 {%- if relevant_roles -%}
-# [UNTRUSTED CONTENT] Relevant AI Roles
+# Relevant AI Roles
 
 {{ relevant_roles }}
 
 {% endif -%}
 {%- if character_decisions -%}
-# [UNTRUSTED CONTENT] Character Decisions
+# Character Decisions
 
 {{ character_decisions }}
 
 {% endif -%}
 {%- if narrative_directions -%}
-# [UNTRUSTED CONTENT] Narrative Direction
+# Narrative Direction
 
 {{ narrative_directions }}
 
 {% endif -%}
 {%- if story_constraints -%}
-# [UNTRUSTED CONTENT] Story Constraints
+# Story Constraints
 
 {{ story_constraints }}
 
 {% endif -%}
-# [UNTRUSTED CONTENT] Hard Check Criteria
+{%- if check_criteria -%}
+# Hard Check Criteria
 
 {{ check_criteria }}
 
-# [UNTRUSTED CONTENT] Score Quality Targets
+{% endif -%}
+{%- if score_criteria -%}
+# Score Quality Targets
 
 {{ score_criteria }}
 
-# [UNTRUSTED CONTENT] Immediate Story Goal
+{% endif -%}
+# Immediate Story Goal
 
 {{ story_goal }}
 
-# [UNTRUSTED CONTENT] Pending Player Contribution
+# Pending Player Contribution
 
 {{ player_contribution }}

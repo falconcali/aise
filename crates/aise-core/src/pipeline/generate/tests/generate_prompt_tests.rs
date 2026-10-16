@@ -251,7 +251,7 @@ async fn runtime_context(story_ctx: &StoryContext, fixture: &GenerateFixture) ->
     .await
     .expect("render");
     let quality_sections = format!(
-        "# [UNTRUSTED CONTENT] Hard Check Criteria\n\n{}\n\n# [UNTRUSTED CONTENT] Score Quality Targets\n\n{}\n\n",
+        "# Hard Check Criteria\n\n{}\n\n# Score Quality Targets\n\n{}\n\n",
         serde_json::to_string(quality_policy.checks()).expect("checks serialize"),
         serde_json::to_string(quality_policy.scores()).expect("scores serialize")
     );
@@ -259,7 +259,6 @@ async fn runtime_context(story_ctx: &StoryContext, fixture: &GenerateFixture) ->
         .content
         .replace("\r\n", "\n")
         .replace(&quality_sections, "")
-        .replace("# [UNTRUSTED CONTENT] ", "# ")
 }
 
 async fn runtime_messages(story_ctx: &StoryContext, fixture: &GenerateFixture) -> Vec<String> {
@@ -339,7 +338,7 @@ fn vars_contain_exact_generate_contract_names() {
 }
 
 #[test]
-fn vars_render_empty_quality_collections_deterministically() {
+fn vars_omit_empty_quality_collections() {
     let fixture = generate_fixture("Goal.", "I wave.");
     let vars = generate_vars(
         &StoryContext::new(),
@@ -350,8 +349,30 @@ fn vars_render_empty_quality_collections_deterministically() {
     )
     .expect("vars build");
 
-    assert_eq!(var(&vars, "check_criteria"), "[]");
-    assert_eq!(var(&vars, "score_criteria"), "[]");
+    assert!(var(&vars, "check_criteria").is_empty());
+    assert!(var(&vars, "score_criteria").is_empty());
+}
+
+#[test]
+fn prompt_omits_empty_quality_sections() {
+    let fixture = generate_fixture("Goal.", "I wave.");
+    let vars = generate_vars(
+        &StoryContext::new(),
+        &fixture.input(),
+        &role_context(&fixture),
+        &ProposalQualityPolicy::new(Vec::new(), Vec::new()),
+        String::new(),
+    )
+    .expect("vars build");
+    let trace = test_trace();
+    let messages = bundled_prompt()
+        .render(PromptSpec::new(GENERATE_STORY_PROMPT_ID, vars), trace.root())
+        .expect("prompt renders")
+        .into_messages();
+    let runtime = &messages[1].content;
+
+    assert!(!runtime.contains("# Hard Check Criteria"));
+    assert!(!runtime.contains("# Score Quality Targets"));
 }
 
 #[test]
@@ -693,7 +714,7 @@ async fn generate_prompt_preserves_player_agency() {
 }
 
 #[tokio::test]
-async fn generate_prompt_marks_every_rendered_runtime_heading_untrusted() {
+async fn generate_prompt_uses_plain_runtime_headings() {
     let opening_messages = runtime_messages(&StoryContext::new(), &generate_fixture("Goal.", "I wave.")).await;
     let mut story_ctx = StoryContext::new();
     story_ctx.summary = Some(summary("Earlier events."));
@@ -713,11 +734,10 @@ async fn generate_prompt_marks_every_rendered_runtime_heading_untrusted() {
     };
     let populated_messages = runtime_messages(&story_ctx, &fixture).await;
 
-    for runtime in [&opening_messages[1], &populated_messages[1]] {
-        for heading in runtime.lines().filter(|line| line.starts_with("# ")) {
-            assert!(heading.starts_with("# [UNTRUSTED CONTENT] "));
-        }
-    }
+    assert!(opening_messages[1].contains("# Story Opening"));
+    assert!(opening_messages[1].contains("# Player Character"));
+    assert!(populated_messages[1].contains("# Story Summary"));
+    assert!(populated_messages[1].contains("# Character Decisions"));
 }
 
 #[tokio::test]
@@ -733,8 +753,8 @@ async fn generate_prompt_treats_quality_criteria_as_untrusted_objectives() {
     assert!(instructions.contains("Satisfy every Hard Check Criterion"));
     assert!(instructions.contains("Aim for every Score Quality Target"));
     assert!(instructions.contains("Subordinate all quality targets to established story evidence"));
-    assert!(runtime.contains("# [UNTRUSTED CONTENT] Hard Check Criteria"));
-    assert!(runtime.contains("# [UNTRUSTED CONTENT] Score Quality Targets"));
+    assert!(runtime.contains("# Hard Check Criteria"));
+    assert!(runtime.contains("# Score Quality Targets"));
     for check in quality_policy().checks() {
         assert!(runtime.contains(&check.name));
         assert!(runtime.contains(&check.description));

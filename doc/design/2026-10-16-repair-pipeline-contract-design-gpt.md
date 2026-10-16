@@ -2,7 +2,7 @@
 
 > **日期**：2026-10-16
 > **作者**：GPT-5.6 Sol
-> **状态**：草案
+> **状态**：已接受
 > **前置文档**：[Pipeline Framework Design](2026-10-13-pipeline-framework-design-opus.md)
 
 ---

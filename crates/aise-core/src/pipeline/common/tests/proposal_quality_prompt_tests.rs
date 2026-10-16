@@ -2,13 +2,13 @@ use super::*;
 use crate::pipeline::common::{ProposalCheckCriterion, ProposalQualityPolicy, ProposalScoreCriterion};
 
 #[test]
-fn projection_serializes_empty_collections() {
+fn projection_omits_empty_collections() {
     let policy = ProposalQualityPolicy::new(Vec::new(), Vec::new());
 
     let projected = project_proposal_quality(PipelineStage::Generate, &policy).expect("policy projects");
 
-    assert_eq!(projected.check_criteria, "[]");
-    assert_eq!(projected.score_criteria, "[]");
+    assert!(projected.check_criteria.is_empty());
+    assert!(projected.score_criteria.is_empty());
 }
 
 #[test]

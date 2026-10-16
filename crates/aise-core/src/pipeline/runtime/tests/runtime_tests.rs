@@ -343,6 +343,15 @@ fn validation_response_with(checks_pass: bool, score_value: Option<f64>) -> Stri
 }
 
 fn validation_response_with_scores(checks_pass: bool, score_values: &[f64]) -> String {
+    validation_response_with_feedback(checks_pass, score_values, "Fix the hard-gate conflict.", "Improve this score.")
+}
+
+fn validation_response_with_feedback(
+    checks_pass: bool,
+    score_values: &[f64],
+    check_issue: &str,
+    score_issue: &str,
+) -> String {
     let config = ValidateConfig::default();
     assert_eq!(score_values.len(), config.scores.len());
     let checks = config
@@ -352,7 +361,7 @@ fn validation_response_with_scores(checks_pass: bool, score_values: &[f64]) -> S
             json!({
                 "name": check.name,
                 "passed": checks_pass,
-                "issue": (!checks_pass).then_some("Fix the hard-gate conflict.")
+                "issue": (!checks_pass).then_some(check_issue)
             })
         })
         .collect::<Vec<_>>();
@@ -364,7 +373,7 @@ fn validation_response_with_scores(checks_pass: bool, score_values: &[f64]) -> S
             json!({
                 "name": score.name,
                 "score": value,
-                "issue": (*value < score.target_score).then_some("Improve this score.")
+                "issue": (*value < score.target_score).then_some(score_issue)
             })
         })
         .collect::<Vec<_>>();
@@ -440,7 +449,7 @@ fn runtime_new_rejects_invalid_pipeline_config() {
 }
 
 #[test]
-fn runtime_shares_one_quality_policy_allocation_with_generate_and_validate() {
+fn runtime_constructor_shares_one_policy_across_generate_validate_and_repair() {
     let store = Arc::new(Store::default());
     let provider = ScriptedProvider {
         calls: AtomicUsize::new(0),
@@ -457,10 +466,7 @@ fn runtime_shares_one_quality_policy_allocation_with_generate_and_validate() {
     )
     .expect("runtime config should be valid");
 
-    assert!(Arc::ptr_eq(
-        runtime.generate.quality_policy(),
-        runtime.validate.quality_policy()
-    ));
+    assert!(runtime.stages_share_quality_policy());
 }
 
 #[test]
@@ -513,13 +519,13 @@ async fn runtime_skips_role_retrieval_and_think_when_plan_selects_no_roles() {
     assert_eq!(run.requests.len(), 4);
     assert_plan_prompt_contract(&run.requests);
     let generate_prompt = request_text(&run.requests[2]);
-    assert!(generate_prompt.contains("# [UNTRUSTED CONTENT] Player Character"));
+    assert!(generate_prompt.contains("# Player Character"));
     assert!(generate_prompt.contains("role_id: \"xu_xian\""));
     assert!(generate_prompt.contains("profile.speaking_style: \"温和克制"));
     assert!(!generate_prompt.contains("xu_memory_west_lake_meeting"));
     assert!(!generate_prompt.contains("清明时节西湖骤雨"));
-    assert!(generate_prompt.contains("# [UNTRUSTED CONTENT] Known Facts\n\n- Activated fact body."));
-    assert!(generate_prompt.contains("# [UNTRUSTED CONTENT] Rumors\n\n- Activated rumor body."));
+    assert!(generate_prompt.contains("# Known Facts\n\n- Activated fact body."));
+    assert!(generate_prompt.contains("# Rumors\n\n- Activated rumor body."));
     assert!(!generate_prompt.contains("Retrieved fact body."));
     assert!(!generate_prompt.contains("Retrieved rumor body."));
 }
@@ -532,10 +538,8 @@ async fn runtime_runs_retrieval_for_fact_selection() {
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
     assert_eq!(run.requests.len(), 4);
     let generate_prompt = request_text(&run.requests[2]);
-    assert!(
-        generate_prompt.contains("# [UNTRUSTED CONTENT] Known Facts\n\n- Activated fact body.\n- Retrieved fact body.")
-    );
-    assert!(generate_prompt.contains("# [UNTRUSTED CONTENT] Rumors\n\n- Activated rumor body."));
+    assert!(generate_prompt.contains("# Known Facts\n\n- Activated fact body.\n- Retrieved fact body."));
+    assert!(generate_prompt.contains("# Rumors\n\n- Activated rumor body."));
     assert!(!generate_prompt.contains("Retrieved rumor body."));
 }
 
@@ -547,10 +551,8 @@ async fn runtime_runs_retrieval_for_rumor_selection() {
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
     assert_eq!(run.requests.len(), 4);
     let generate_prompt = request_text(&run.requests[2]);
-    assert!(generate_prompt.contains("# [UNTRUSTED CONTENT] Known Facts\n\n- Activated fact body."));
-    assert!(
-        generate_prompt.contains("# [UNTRUSTED CONTENT] Rumors\n\n- Activated rumor body.\n- Retrieved rumor body.")
-    );
+    assert!(generate_prompt.contains("# Known Facts\n\n- Activated fact body."));
+    assert!(generate_prompt.contains("# Rumors\n\n- Activated rumor body.\n- Retrieved rumor body."));
     assert!(!generate_prompt.contains("Retrieved fact body."));
 }
 
@@ -564,7 +566,7 @@ async fn runtime_delivers_retrieved_knowledge_to_generate() {
     assert_plan_prompt_contract(&run.requests);
     let generate_prompt = request_text(&run.requests[2]);
     assert!(generate_prompt.contains(
-        "# [UNTRUSTED CONTENT] Known Facts\n\n- Activated fact body.\n- Retrieved fact body.\n\n# [UNTRUSTED CONTENT] Rumors\n\n- Activated rumor body.\n- Retrieved rumor body."
+        "# Known Facts\n\n- Activated fact body.\n- Retrieved fact body.\n\n# Rumors\n\n- Activated rumor body.\n- Retrieved rumor body."
     ));
 }
 
@@ -577,10 +579,10 @@ async fn runtime_retrieves_generation_only_role_without_think() {
     assert_eq!(stage_count(&run.stages, "think"), 0);
     assert_eq!(run.requests.len(), 4);
     let generate_prompt = request_text(&run.requests[2]);
-    assert!(generate_prompt.contains("# [UNTRUSTED CONTENT] Player Character"));
-    assert!(generate_prompt.contains("# [UNTRUSTED CONTENT] Relevant AI Roles"));
+    assert!(generate_prompt.contains("# Player Character"));
+    assert!(generate_prompt.contains("# Relevant AI Roles"));
     assert!(generate_prompt.contains("role_id: \"bai_suzhen\""));
-    assert!(!generate_prompt.contains("# [UNTRUSTED CONTENT] Character Decisions"));
+    assert!(!generate_prompt.contains("# Character Decisions"));
 }
 
 #[tokio::test]
@@ -592,9 +594,9 @@ async fn runtime_runs_one_character_think_and_delivers_decision_to_generate() {
     assert_eq!(stage_count(&run.stages, "think"), 1);
     assert_eq!(run.requests.len(), 5);
     let generate_prompt = request_text(&run.requests[3]);
-    assert!(generate_prompt.contains("# [UNTRUSTED CONTENT] Player Character"));
-    assert!(generate_prompt.contains("# [UNTRUSTED CONTENT] Relevant AI Roles"));
-    assert!(generate_prompt.contains("# [UNTRUSTED CONTENT] Character Decisions"));
+    assert!(generate_prompt.contains("# Player Character"));
+    assert!(generate_prompt.contains("# Relevant AI Roles"));
+    assert!(generate_prompt.contains("# Character Decisions"));
     assert!(generate_prompt.contains("role_id: \"bai_suzhen\""));
     assert!(generate_prompt.contains("decision: \"decision-0\""));
 }
@@ -637,10 +639,10 @@ async fn runtime_stable_union_resolves_cross_list_role_once() {
     assert_eq!(run.requests.len(), 6);
     let generate_prompt = request_text(&run.requests[4]);
     let relevant_roles = generate_prompt
-        .split("# [UNTRUSTED CONTENT] Relevant AI Roles")
+        .split("# Relevant AI Roles")
         .nth(1)
         .expect("roles section")
-        .split("# [UNTRUSTED CONTENT] Character Decisions")
+        .split("# Character Decisions")
         .next()
         .expect("roles section body");
     assert_eq!(relevant_roles.matches("role_id: \"bai_suzhen\"").count(), 1);
@@ -656,7 +658,7 @@ async fn runtime_preserves_multi_role_think_request_order() {
     assert_eq!(run.requests.len(), 6);
     let generate_prompt = request_text(&run.requests[4]);
     let decisions = generate_prompt
-        .split("# [UNTRUSTED CONTENT] Character Decisions")
+        .split("# Character Decisions")
         .nth(1)
         .expect("decisions section");
     let xiaoqing = decisions.find("role_id: \"xiaoqing\"").expect("xiaoqing decision");
@@ -768,32 +770,49 @@ async fn runtime_projects_identical_quality_policy_into_generate_and_validate() 
 }
 
 #[tokio::test]
-async fn runtime_repairs_then_passes_new_version() {
+async fn runtime_repairs_with_current_report_feedback_only_end_to_end() {
+    let config = ValidateConfig::default();
+    let target_scores = config.scores.iter().map(|score| score.target_score).collect::<Vec<_>>();
+    let mut pipeline_config = PipelineConfig::default();
+    pipeline_config.validation_loop.max_repair_rounds = 2;
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
         false,
         None,
         "Generated story.".to_owned(),
         vec![
-            validation_response_with(false, Some(7.0)),
-            "Repaired story.".to_owned(),
+            validation_response_with_feedback(false, &target_scores, "First report issue.", "Unused score issue."),
+            "Repair one.".to_owned(),
+            validation_response_with_feedback(false, &target_scores, "Current report issue.", "Unused score issue."),
+            "Repair two.".to_owned(),
             validation_response(),
         ],
-        PipelineConfig::default(),
+        pipeline_config,
     )
     .await;
     let commit = run.result.expect("turn succeeds");
+    let repair_prompts = run
+        .requests
+        .iter()
+        .map(request_text)
+        .filter(|request| request.contains("# Repair Issues"))
+        .collect::<Vec<_>>();
 
-    assert_eq!(stage_count(&run.stages, "validate"), 2);
-    assert_eq!(stage_count(&run.stages, "repair"), 1);
-    assert_eq!(commit.turn.turn_segment.text(), "Repaired story.");
+    assert_eq!(stage_count(&run.stages, "validate"), 3);
+    assert_eq!(stage_count(&run.stages, "repair"), 2);
+    assert_eq!(repair_prompts.len(), 2);
+    assert!(repair_prompts[0].contains("First report issue."));
+    assert!(repair_prompts[1].contains("Current report issue."));
+    assert!(!repair_prompts[1].contains("First report issue."));
+    assert!(!repair_prompts[1].contains("Generated story."));
+    assert_eq!(commit.turn.turn_segment.text(), "Repair two.");
     assert_eq!(commit.turn.turn_status, TurnStatus::Pass);
-    assert_eq!(commit.turn.turn_evaluation.proposal_version, 2);
-    assert_eq!(commit.turn.turn_evaluation.repair_rounds, 1);
+    assert_eq!(commit.turn.turn_evaluation.proposal_version, 3);
+    assert_eq!(commit.turn.turn_evaluation.repair_rounds, 2);
 }
 
 #[tokio::test]
-async fn runtime_revalidates_all_criteria_after_repair() {
+async fn runtime_revalidates_complete_policy_after_repair_end_to_end() {
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
         false,
@@ -811,7 +830,7 @@ async fn runtime_revalidates_all_criteria_after_repair() {
     let validate_requests = run
         .requests
         .iter()
-        .filter(|request| request_text(request).contains("# [UNTRUSTED CONTENT] Check Criteria"))
+        .filter(|request| request_text(request).contains("# Check Criteria"))
         .collect::<Vec<_>>();
 
     assert_eq!(stage_count(&run.stages, "validate"), 2);
@@ -829,6 +848,34 @@ async fn runtime_revalidates_all_criteria_after_repair() {
     assert_eq!(commit.turn.turn_segment.text(), "Repaired story.");
     assert_eq!(commit.turn.turn_evaluation.proposal_version, 2);
     assert_eq!(commit.turn.turn_evaluation.repair_rounds, 1);
+}
+
+#[tokio::test]
+async fn runtime_score_feedback_uses_validated_current_and_target_values_end_to_end() {
+    let current_score = 6.25;
+    let run = run_runtime_scenario(
+        plan_response(&[], &[]),
+        false,
+        None,
+        "Generated story.".to_owned(),
+        vec![
+            validation_response_with(true, Some(current_score)),
+            "Repaired story.".to_owned(),
+            validation_response(),
+        ],
+        PipelineConfig::default(),
+    )
+    .await;
+    let repair_prompt = run
+        .requests
+        .iter()
+        .map(request_text)
+        .find(|request| request.contains("# Repair Issues"))
+        .expect("repair prompt");
+
+    assert!(run.result.is_ok());
+    assert!(repair_prompt.contains(&format!("\"current_score\":{current_score}")));
+    assert!(repair_prompt.contains("\"target_score\":8.0"));
 }
 
 #[tokio::test]
@@ -974,7 +1021,7 @@ async fn runtime_validate_contract_error_skips_repair_and_commit() {
 }
 
 #[tokio::test]
-async fn runtime_repair_error_skips_next_validate_and_commit() {
+async fn runtime_failed_repair_consumes_reserved_budget_end_to_end() {
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
         false,

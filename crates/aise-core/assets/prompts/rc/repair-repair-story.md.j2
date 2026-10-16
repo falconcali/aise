@@ -1,69 +1,103 @@
-# [UNTRUSTED CONTENT] Story Summary
+{%- if story_summary -%}
+# Story Summary
 
 {{ story_summary }}
 
-# [UNTRUSTED CONTENT] Story Opening
+{% endif -%}
+{%- if story_opening -%}
+# Story Opening
 
 {{ story_opening }}
 
-# [UNTRUSTED CONTENT] Recent Story
+{% endif -%}
+{%- if recent_story -%}
+# Recent Story
 
 {{ recent_story }}
 
-# [UNTRUSTED CONTENT] Immediate Story Goal
+{% endif -%}
+# Immediate Story Goal
 
 {{ story_goal }}
 
-# [UNTRUSTED CONTENT] Pending Player Contribution
+# Pending Player Contribution
 
 {{ player_contribution }}
 
-# [UNTRUSTED CONTENT] Narrative Directions
+{% if narrative_directions -%}
+# Narrative Directions
 
 {{ narrative_directions }}
 
-# [UNTRUSTED CONTENT] Story Constraints
+{% endif -%}
+{%- if story_constraints -%}
+# Story Constraints
 
 {{ story_constraints }}
 
-# [UNTRUSTED CONTENT] Activated Facts
+{% endif -%}
+{%- if activated_facts -%}
+# Activated Facts
 
 {{ activated_facts }}
 
-# [UNTRUSTED CONTENT] Activated Rumors
+{% endif -%}
+{%- if activated_rumors -%}
+# Activated Rumors
 
 {{ activated_rumors }}
 
-# [UNTRUSTED CONTENT] Retrieved Facts
+{% endif -%}
+{%- if retrieved_facts -%}
+# Retrieved Facts
 
 {{ retrieved_facts }}
 
-# [UNTRUSTED CONTENT] Retrieved Rumors
+{% endif -%}
+{%- if retrieved_rumors -%}
+# Retrieved Rumors
 
 {{ retrieved_rumors }}
 
-# [UNTRUSTED CONTENT] Player Role
+{% endif -%}
+# Player Role
 
 {{ player_role }}
 
-# [UNTRUSTED CONTENT] Resolved Roles
+{% if resolved_roles -%}
+# Resolved Roles
 
 {{ resolved_roles }}
 
-# [UNTRUSTED CONTENT] Character Decisions
+{% endif -%}
+{%- if character_decisions -%}
+# Character Decisions
 
 {{ character_decisions }}
 
-# [UNTRUSTED CONTENT] Current Proposal
+{% endif -%}
+{%- if check_criteria -%}
+# Hard Check Criteria
+
+{{ check_criteria }}
+
+{% endif -%}
+{%- if score_criteria -%}
+# Score Quality Targets
+
+{{ score_criteria }}
+
+{% endif -%}
+# Current Proposal
 
 proposal_version: {{ proposal_version }}
 
 {{ current_proposal }}
 
-# [UNTRUSTED CONTENT] Repair Issues
+# Repair Issues
 
 {{ repair_issues }}
 
-# [UNTRUSTED CONTENT] Maximum Proposal Bytes
+# Maximum Proposal Bytes
 
 {{ max_proposal_bytes }}

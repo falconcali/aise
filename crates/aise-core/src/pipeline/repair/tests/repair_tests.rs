@@ -7,6 +7,7 @@ use crate::core::{
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
 };
+use crate::pipeline::ValidateConfig;
 use crate::pipeline::common::{ValidationContext, ValidationIssue};
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -76,16 +77,18 @@ fn trace() -> Trace {
 }
 
 #[tokio::test]
-async fn execute_calls_gateway_once_and_returns_complete_replacement() {
+async fn repair_performs_one_gateway_call() {
     let provider = Arc::new(RepairProvider {
         calls: AtomicUsize::new(0),
     });
     let store = Arc::new(store_with_default_pack().await);
+    let quality_policy = Arc::new(ValidateConfig::default().quality_policy());
     let pipeline = RepairPipeline::new(
         Arc::new(LlmGateway::new(provider.clone(), LlmConfig::default())),
         Arc::new(prompt()),
         store,
         RepairConfig::default(),
+        quality_policy,
     );
     let goal = text("Reach the gate.");
     let contribution = PlayerContribution {
@@ -139,4 +142,22 @@ async fn execute_calls_gateway_once_and_returns_complete_replacement() {
 
     assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
     assert_eq!(output.proposal, "Repaired story.");
+}
+
+#[tokio::test]
+async fn repair_uses_runtime_shared_quality_policy() {
+    let provider = Arc::new(RepairProvider {
+        calls: AtomicUsize::new(0),
+    });
+    let store = Arc::new(store_with_default_pack().await);
+    let quality_policy = Arc::new(ValidateConfig::default().quality_policy());
+    let pipeline = RepairPipeline::new(
+        Arc::new(LlmGateway::new(provider, LlmConfig::default())),
+        Arc::new(prompt()),
+        store,
+        RepairConfig::default(),
+        Arc::clone(&quality_policy),
+    );
+
+    assert!(Arc::ptr_eq(pipeline.quality_policy(), &quality_policy));
 }

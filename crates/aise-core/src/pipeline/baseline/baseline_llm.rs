@@ -12,7 +12,7 @@ pub async fn process_player_input(
     let llm_result = gateway
         .complete_with_reasoning_effort(
             LlmCompletionSpec { messages },
-            LlmReasoningEffort::High,
+            LlmReasoningEffort::None,
             turn_control,
             observation,
         )

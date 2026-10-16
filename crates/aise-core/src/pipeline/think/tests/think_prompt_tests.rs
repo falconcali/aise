@@ -160,10 +160,13 @@ async fn prompt_contains_only_target_role_private_context() {
 }
 
 #[tokio::test]
-async fn prompt_renders_required_runtime_sections_in_order() {
+async fn prompt_omits_empty_optional_runtime_sections() {
     let store = store_with_default_pack().await;
     let story_ctx = StoryContext::new();
-    let roles = [role("target", "TARGET")];
+    let mut target = role("target", "TARGET");
+    target.backstory = text("");
+    target.seed_memories.clear();
+    let roles = [target];
     let requests = [CharacterThinkRequest {
         role_id: roles[0].role_id.clone(),
         thinking_focus: text("focus"),
@@ -198,14 +201,10 @@ async fn prompt_renders_required_runtime_sections_in_order() {
     let text = rendered_text(&rendered);
     let sections = [
         "## Story Opening",
-        "## Recent Story",
         "## Pending Player Contribution",
-        "## Rumors",
         "## Target Role ID",
         "## Target Name and Aliases",
         "## Target Profile",
-        "## Target Backstory",
-        "## Target Seed Memories",
         "## Thinking Focus",
     ];
     let positions = sections
@@ -216,6 +215,10 @@ async fn prompt_renders_required_runtime_sections_in_order() {
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     assert!(!text.contains("## Story Summary"));
     assert!(!text.contains("## Story Summary or Story Opening"));
+    assert!(!text.contains("## Recent Story"));
+    assert!(!text.contains("## Rumors"));
+    assert!(!text.contains("## Target Backstory"));
+    assert!(!text.contains("## Target Seed Memories"));
     assert!(text.contains(r#"Aliases: ["TARGET alias"]"#));
     assert!(text.contains(r#"{"appearance":"TARGET appearance""#));
 }

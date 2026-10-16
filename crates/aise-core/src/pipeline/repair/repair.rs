@@ -1,7 +1,9 @@
 use crate::core::{StoryContext, TurnControl};
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
-use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage, ValidationContext, ValidationIssue};
+use crate::pipeline::common::{
+    Pipeline, PipelineError, PipelineStage, ProposalQualityPolicy, ValidationContext, ValidationIssue,
+};
 use crate::pipeline::repair::{RepairConfig, repair_llm, repair_output, repair_prompt, repair_trace};
 use crate::prompt::Prompt;
 use crate::trace::Observation;
@@ -28,16 +30,29 @@ pub struct RepairPipeline {
     prompt: Arc<Prompt>,
     store: Arc<Store>,
     config: RepairConfig,
+    quality_policy: Arc<ProposalQualityPolicy>,
 }
 
 impl RepairPipeline {
-    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, store: Arc<Store>, config: RepairConfig) -> Self {
+    pub fn new(
+        gateway: Arc<LlmGateway>,
+        prompt: Arc<Prompt>,
+        store: Arc<Store>,
+        config: RepairConfig,
+        quality_policy: Arc<ProposalQualityPolicy>,
+    ) -> Self {
         Self {
             gateway,
             prompt,
             store,
             config,
+            quality_policy,
         }
+    }
+
+    #[cfg(test)]
+    pub(in crate::pipeline) fn quality_policy(&self) -> &Arc<ProposalQualityPolicy> {
+        &self.quality_policy
     }
 
     async fn repair(
@@ -51,6 +66,7 @@ impl RepairPipeline {
             self.prompt.as_ref(),
             story_ctx,
             input,
+            self.quality_policy.as_ref(),
             &self.config,
             self.store.as_ref(),
             observation,

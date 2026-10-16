@@ -250,7 +250,7 @@ CSI MUST:
 RC MUST:
 
 ```text
-- prefix every dynamic section heading with [UNTRUSTED CONTENT]
+- keep every dynamic section in the untrusted RC layer
 - add Hard Check Criteria using check_criteria
 - add Score Quality Targets using score_criteria
 - retain existing evidence values and conditional elision behavior
@@ -434,8 +434,8 @@ crates/aise-core/
 - [ ] Constructor tests prove Generate and Validate receive the same policy allocation.
 - [ ] `project_proposal_quality` is the only quality-policy JSON serializer under `pipeline/`.
 - [ ] Generate prompt tests assert the exact variable set in §3.5.
-- [ ] Generate rendering tests assert all runtime headings are marked `[UNTRUSTED CONTENT]`.
-- [ ] Generate tests assert both empty and populated criterion collections render deterministically.
+- [ ] Generate rendering tests assert runtime data remains in the untrusted RC layer with plain headings.
+- [ ] Generate tests assert empty criterion collections are omitted and populated collections preserve configured order.
 - [ ] Generate tests assert no validation result, score result, issue, report, round, or budget variable exists.
 - [ ] Validate prompt tests assert score criteria include `target_guidance`.
 - [ ] Validate parser tests prove report metadata is restored from `ProposalQualityPolicy`, not model output.
