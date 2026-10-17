@@ -41,6 +41,18 @@ rc = "rc/extract-evaluate-narrative.md.j2"
 fti = "fti/extract-evaluate-narrative.md.j2"
 
 [[prompts]]
+id = "extract.extract_world_knowledge"
+csi = "csi/extract-extract-world-knowledge.md.j2"
+rc = "rc/extract-extract-world-knowledge.md.j2"
+fti = "fti/extract-extract-world-knowledge.md.j2"
+
+[[prompts]]
+id = "extract.extract_role_memory"
+csi = "csi/extract-extract-role-memory.md.j2"
+rc = "rc/extract-extract-role-memory.md.j2"
+fti = "fti/extract-extract-role-memory.md.j2"
+
+[[prompts]]
 id = "summary.summarize_story"
 csi = "csi/summary-summarize-story.md.j2"
 rc = "rc/summary-summarize-story.md.j2"

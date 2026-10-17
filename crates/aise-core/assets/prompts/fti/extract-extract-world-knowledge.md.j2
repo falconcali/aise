@@ -1,0 +1,86 @@
+Extract world knowledge changes and select roles requiring memory extraction now.
+
+Return exactly one JSON object with no Markdown fence and no surrounding prose:
+
+{
+  "facts": [
+    {
+      "op": "add",
+      "body": {
+        "content": "Objective truth established in the Current Proposal.",
+        "retrieval": "One-sentence summary for on-demand retrieval",
+        "activation": {
+          "match": {
+            "keys": ["primary keyword"],
+            "secondary_keys": [],
+            "secondary_logic": "and_any",
+            "case_sensitive": false,
+            "match_whole_words": false,
+            "scan_depth": null
+          },
+          "mode": { "enabled": true, "constant": false },
+          "recursion": {
+            "exclude_recursion": false,
+            "prevent_recursion": false,
+            "delay_until_recursion": null
+          },
+          "selection": {
+            "order": 0,
+            "probability": 100,
+            "groups": [],
+            "group_override": false,
+            "group_weight": 100,
+            "use_group_scoring": false
+          }
+        }
+      }
+    },
+    {
+      "op": "update",
+      "id": "existing_fact_id",
+      "body": {
+        "content": "Updated objective truth preserving prior historical state and current state.",
+        "retrieval": "One-sentence summary of the evolved fact",
+        "activation": {
+          "match": { "keys": ["primary keyword"] }
+        }
+      }
+    }
+  ],
+  "rumors": [
+    {
+      "op": "add",
+      "body": {
+        "content": "New public belief circulating in the world.",
+        "retrieval": "One-sentence summary of the public rumor",
+        "activation": {
+          "match": { "keys": ["primary keyword"] }
+        }
+      }
+    },
+    {
+      "op": "update",
+      "id": "existing_rumor_id",
+      "body": {
+        "content": "Revised public belief.",
+        "retrieval": "One-sentence summary of the updated rumor",
+        "activation": {
+          "match": { "keys": ["primary keyword"] }
+        }
+      }
+    },
+    {
+      "op": "remove",
+      "id": "obsolete_rumor_id"
+    }
+  ],
+  "roles_for_memory": ["existing_role_id"]
+}
+
+Strict protocol constraints:
+- `facts` items allow only `"op": "add"` (with `body`) and `"op": "update"` (with existing `id` and `body`). Never emit `"op": "remove"` in `facts`.
+- `rumors` items allow `"op": "add"` (with `body`), `"op": "update"` (with existing `id` and `body`), and `"op": "remove"` (with existing `id` only).
+- `roles_for_memory` must contain only unique `role_id` strings from Role Catalog.
+- Respect `max_fact_changes`, `max_rumor_changes`, and `max_roles_for_memory`.
+- For every `activation`, when `mode.enabled` is `true` and `mode.constant` is `false`, `match.keys` must contain at least one non-empty keyword.
+- Do not include explanations, comments, Markdown fences, or any field not defined in the JSON protocol.

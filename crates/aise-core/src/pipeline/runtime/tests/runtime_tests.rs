@@ -41,9 +41,9 @@ impl Provider for ScriptedProvider {
 
     async fn complete(&self, request: LlmCompletionRequest) -> Result<LlmCompletionResponse, LlmError> {
         lock(&self.requests).push(request);
-        let content = lock(&self.responses).pop_front().ok_or(LlmError::InvalidResponse {
-            reason: "missing scripted response",
-        })?;
+        let content = lock(&self.responses)
+            .pop_front()
+            .unwrap_or_else(|| r#"{"facts":[],"rumors":[],"roles_for_memory":[]}"#.to_owned());
         Ok(LlmCompletionResponse {
             content,
             finish_reason: LlmCompletionFinishReason::Stop,
@@ -525,7 +525,7 @@ async fn runtime_skips_role_retrieval_and_think_when_plan_selects_no_roles() {
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 0);
     assert_eq!(stage_count(&run.stages, "think"), 0);
-    assert_eq!(run.requests.len(), 4);
+    assert_eq!(run.requests.len(), 5);
     assert_plan_prompt_contract(&run.requests);
     let generate_prompt = request_text(&run.requests[2]);
     assert!(generate_prompt.contains("# Player Character"));
@@ -545,7 +545,7 @@ async fn runtime_runs_retrieval_for_fact_selection() {
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
-    assert_eq!(run.requests.len(), 4);
+    assert_eq!(run.requests.len(), 5);
     let generate_prompt = request_text(&run.requests[2]);
     assert!(generate_prompt.contains("# Known Facts\n\n- Activated fact body.\n- Retrieved fact body."));
     assert!(generate_prompt.contains("# Rumors\n\n- Activated rumor body."));
@@ -558,7 +558,7 @@ async fn runtime_runs_retrieval_for_rumor_selection() {
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
-    assert_eq!(run.requests.len(), 4);
+    assert_eq!(run.requests.len(), 5);
     let generate_prompt = request_text(&run.requests[2]);
     assert!(generate_prompt.contains("# Known Facts\n\n- Activated fact body."));
     assert!(generate_prompt.contains("# Rumors\n\n- Activated rumor body.\n- Retrieved rumor body."));
@@ -571,7 +571,7 @@ async fn runtime_delivers_retrieved_knowledge_to_generate() {
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
-    assert_eq!(run.requests.len(), 4);
+    assert_eq!(run.requests.len(), 5);
     assert_plan_prompt_contract(&run.requests);
     let generate_prompt = request_text(&run.requests[2]);
     assert!(generate_prompt.contains(
@@ -586,7 +586,7 @@ async fn runtime_retrieves_generation_only_role_without_think() {
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
     assert_eq!(stage_count(&run.stages, "think"), 0);
-    assert_eq!(run.requests.len(), 4);
+    assert_eq!(run.requests.len(), 5);
     let generate_prompt = request_text(&run.requests[2]);
     assert!(generate_prompt.contains("# Player Character"));
     assert!(generate_prompt.contains("# Relevant AI Roles"));
@@ -601,7 +601,7 @@ async fn runtime_runs_one_character_think_and_delivers_decision_to_generate() {
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
     assert_eq!(stage_count(&run.stages, "think"), 1);
-    assert_eq!(run.requests.len(), 5);
+    assert_eq!(run.requests.len(), 6);
     let generate_prompt = request_text(&run.requests[3]);
     assert!(generate_prompt.contains("# Player Character"));
     assert!(generate_prompt.contains("# Relevant AI Roles"));
@@ -615,7 +615,7 @@ async fn runtime_delivers_relevant_rumors_but_not_narrative_direction_to_charact
     let run = run_runtime(plan_response_with_roles(&[], &[RETRIEVED_RUMOR_ID], &[], &["bai_suzhen"])).await;
 
     assert!(run.result.is_ok());
-    assert_eq!(run.requests.len(), 5);
+    assert_eq!(run.requests.len(), 6);
     let think_prompt = request_text(&run.requests[2]);
     assert!(think_prompt.contains("## Rumors\n\n- \"Activated rumor body.\"\n- \"Retrieved rumor body.\""));
     assert!(!think_prompt.contains(ACTIVATED_RUMOR_ID));
@@ -638,7 +638,7 @@ async fn runtime_stable_union_resolves_cross_list_role_once() {
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
     assert_eq!(stage_count(&run.stages, "think"), 1);
-    assert_eq!(run.requests.len(), 6);
+    assert_eq!(run.requests.len(), 7);
     let generate_prompt = request_text(&run.requests[4]);
     let relevant_roles = generate_prompt
         .split("# Relevant AI Roles")
@@ -657,7 +657,7 @@ async fn runtime_preserves_multi_role_think_request_order() {
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "think"), 1);
-    assert_eq!(run.requests.len(), 6);
+    assert_eq!(run.requests.len(), 7);
     let generate_prompt = request_text(&run.requests[4]);
     let decisions = generate_prompt
         .split("# Character Decisions")
@@ -1123,4 +1123,221 @@ async fn runtime_rejects_invalid_generated_proposal_before_validate() {
     assert_eq!(stage_count(&run.stages, "validate"), 0);
     assert_eq!(stage_count(&run.stages, "repair"), 0);
     assert_eq!(stage_count(&run.stages, "commit"), 0);
+}
+
+#[tokio::test]
+async fn runtime_commits_extracted_knowledge_change_and_exposes_it_to_next_turn_stages() {
+    let store = Arc::new(Store::default());
+    let pack = knowledge_pack();
+    let story_ctx = seeded_context(&pack);
+    store
+        .pack_store()
+        .retain(
+            &story_ctx.story_id,
+            StoryAssetSpec {
+                pack_ref: story_ctx.pack_ref.clone(),
+                pack: pack.clone(),
+                cards: Vec::new(),
+            },
+        )
+        .await
+        .expect("pack should be retained");
+    store
+        .story_store()
+        .create(StoryInstanceSpec {
+            story_id: story_ctx.story_id.clone(),
+            pack_ref: story_ctx.pack_ref.clone(),
+            roles: story_ctx.roles.clone(),
+            facts: story_ctx.facts.clone(),
+            rumors: story_ctx.rumors.clone(),
+            player_id: PlayerId::try_new("player").expect("player id should be valid"),
+            player_role: story_ctx.player.clone(),
+            narrative: NarrativeState::default(),
+        })
+        .await
+        .expect("story should be created");
+
+    let turn1_world_extract = json!({
+        "facts": [
+            {
+                "op": "add",
+                "body": {
+                    "content": "Newly extracted fact body for retrieval.",
+                    "retrieval": "newly extracted fact hint",
+                    "activation": {
+                        "match": { "keys": ["unmatched-fact-trigger"] }
+                    }
+                }
+            },
+            {
+                "op": "update",
+                "id": ACTIVATED_FACT_ID,
+                "body": {
+                    "content": "Activated fact body evolved in turn 1.",
+                    "retrieval": "evolved activated fact hint",
+                    "activation": {
+                        "match": { "keys": ["activation-key"] }
+                    }
+                }
+            }
+        ],
+        "rumors": [
+            {
+                "op": "add",
+                "body": {
+                    "content": "Newly extracted rumor body for retrieval.",
+                    "retrieval": "newly extracted rumor hint",
+                    "activation": {
+                        "match": { "keys": ["unmatched-rumor-trigger"] }
+                    }
+                }
+            },
+            {
+                "op": "update",
+                "id": ACTIVATED_RUMOR_ID,
+                "body": {
+                    "content": "Activated rumor body evolved in turn 1.",
+                    "retrieval": "evolved activated rumor hint",
+                    "activation": {
+                        "match": { "keys": ["activation-key"] }
+                    }
+                }
+            },
+            {
+                "op": "remove",
+                "id": RETRIEVED_RUMOR_ID
+            }
+        ],
+        "roles_for_memory": ["bai_suzhen"]
+    })
+    .to_string();
+    let turn1_role_memory_extract = json!({
+        "memories": [
+            {
+                "op": "add",
+                "body": {
+                    "content": "I privately witnessed the bronze seal being moved in turn 1.",
+                    "retrieval": "Turn 1 private memory of bronze seal",
+                    "activation": {
+                        "match": { "keys": ["bronze seal"] }
+                    }
+                }
+            }
+        ]
+    })
+    .to_string();
+
+    let responses = VecDeque::from([
+        "activation-key".to_owned(),
+        plan_response(&[], &[]),
+        "Turn 1 story segment.".to_owned(),
+        validation_response(),
+        turn1_world_extract,
+        turn1_role_memory_extract,
+        "activation-key".to_owned(),
+        plan_response_with_roles(&["fact_t1_1"], &["rumor_t1_1"], &["bai_suzhen"], &["bai_suzhen"]),
+        json!({"decision": "Use turn 1 memory.", "suggested_utterance": null}).to_string(),
+        "Turn 2 story segment.".to_owned(),
+        validation_response(),
+        r#"{"facts":[],"rumors":[],"roles_for_memory":[]}"#.to_owned(),
+    ]);
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let provider = ScriptedProvider {
+        responses: Mutex::new(responses),
+        requests: Arc::clone(&requests),
+    };
+    let runtime = Runtime::new(
+        Arc::new(LlmGateway::new(Arc::new(provider), LlmConfig::default())),
+        Arc::new(bundled_prompt()),
+        Arc::clone(&store),
+        PipelineConfig::default(),
+    )
+    .expect("runtime config should be valid");
+    let sink = CapturingSink::default();
+    let control = TurnControl::new(Instant::now() + Duration::from_secs(30), TurnCancellation::new());
+    let trace1 = test_trace();
+
+    let commit1 = runtime
+        .run_turn(
+            &story_ctx,
+            TurnRequest {
+                story_id: story_ctx.story_id.clone(),
+                idempotency_key: IdempotencyKey::try_new("turn-1").expect("valid key"),
+                player_input: "turn 1 input".to_owned(),
+            },
+            &control,
+            &sink,
+            &trace1,
+        )
+        .await
+        .expect("turn 1 should succeed");
+
+    assert_eq!(commit1.turn.knowledge_change.facts.len(), 2);
+    assert_eq!(commit1.turn.knowledge_change.rumors.len(), 3);
+    assert_eq!(commit1.turn.knowledge_change.memories.len(), 1);
+
+    let updated_ctx = store
+        .story_store()
+        .load(&story_ctx.story_id)
+        .await
+        .expect("updated story context should load");
+    assert!(updated_ctx.facts.contains_key(&FactId::try_new("fact_t1_1").expect("id")));
+    assert_eq!(
+        updated_ctx.facts[&FactId::try_new(ACTIVATED_FACT_ID).expect("id")]
+            .body
+            .content
+            .as_str(),
+        "Activated fact body evolved in turn 1."
+    );
+    assert!(updated_ctx.rumors.contains_key(&RumorId::try_new("rumor_t1_1").expect("id")));
+    assert!(
+        !updated_ctx
+            .rumors
+            .contains_key(&RumorId::try_new(RETRIEVED_RUMOR_ID).expect("id"))
+    );
+    let bai_id = RoleId::try_new("bai_suzhen").expect("id");
+    assert!(
+        updated_ctx.roles[&bai_id]
+            .memories
+            .contains_key(&serde_json::from_value::<crate::core::MemoryId>(json!("mem_t1_1")).expect("id"))
+    );
+
+    let trace2 = test_trace();
+    let commit2 = runtime
+        .run_turn(
+            &updated_ctx,
+            TurnRequest {
+                story_id: story_ctx.story_id.clone(),
+                idempotency_key: IdempotencyKey::try_new("turn-2").expect("valid key"),
+                player_input: "turn 2 input".to_owned(),
+            },
+            &control,
+            &sink,
+            &trace2,
+        )
+        .await
+        .expect("turn 2 should succeed");
+    assert_eq!(commit2.turn.turn_segment.text(), "Turn 2 story segment.");
+
+    let captured = lock(&requests).clone();
+    let turn2_plan_prompt = request_text(&captured[7]);
+    assert!(turn2_plan_prompt.contains("Activated fact body evolved in turn 1."));
+    assert!(turn2_plan_prompt.contains("Activated rumor body evolved in turn 1."));
+    assert!(turn2_plan_prompt.contains("- id: \"fact_t1_1\""));
+    assert!(turn2_plan_prompt.contains("newly extracted fact hint"));
+    assert!(turn2_plan_prompt.contains("- id: \"rumor_t1_1\""));
+    assert!(turn2_plan_prompt.contains("newly extracted rumor hint"));
+    assert!(!turn2_plan_prompt.contains(&format!("- id: \"{RETRIEVED_RUMOR_ID}\"")));
+
+    let turn2_think_prompt = request_text(&captured[8]);
+    assert!(turn2_think_prompt.contains("I privately witnessed the bronze seal being moved in turn 1."));
+    assert!(turn2_think_prompt.contains("Activated rumor body evolved in turn 1."));
+    assert!(turn2_think_prompt.contains("Newly extracted rumor body for retrieval."));
+
+    let turn2_generate_prompt = request_text(&captured[9]);
+    assert!(turn2_generate_prompt.contains("Activated fact body evolved in turn 1."));
+    assert!(turn2_generate_prompt.contains("Newly extracted fact body for retrieval."));
+    assert!(turn2_generate_prompt.contains("Activated rumor body evolved in turn 1."));
+    assert!(turn2_generate_prompt.contains("Newly extracted rumor body for retrieval."));
+    assert!(turn2_generate_prompt.contains("decision: \"Use turn 1 memory.\""));
 }

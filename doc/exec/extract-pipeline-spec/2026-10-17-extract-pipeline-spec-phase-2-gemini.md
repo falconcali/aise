@@ -2,7 +2,7 @@
 
 > **Model**: Gemini 4 Argon
 > **Date**: 2026-10-17
-> **Status**: Proposed
+> **Status**: Implemented
 > **Source Design**: [Extract Pipeline 与动态知识存储 — Design](../../design/2026-10-16-extract-pipeline-design-gemini.md)
 > **Phase**: Phase 2
 
@@ -427,12 +427,12 @@ crates/aise-core/
 
 ## 5. Acceptance Criteria
 
-- [ ] Prompts `extract.extract_world_knowledge` and `extract.extract_role_memory` are registered in `crates/aise-core/assets/prompts/index.toml` and their CSI/RC/FTI files exist.
-- [ ] `extract_prompt_tests` verifies that `extract.extract_world_knowledge` includes `existing_facts`, `existing_rumors`, and `role_catalog` without leaking any role's `memories`, and `extract.extract_role_memory` includes only the target role's `existing_memories`.
-- [ ] `extract_knowledge_tests` and `extract_llm_tests` cover every error code listed in §4.1, including `Fact` `Remove` rejection (via serde `deny_unknown_fields` / enum variants), `Memory` `Remove` rejection, and invalid `ActivationRule` rejection.
-- [ ] `extract_tests` verifies concurrent execution of `evaluate_narrative` + `extract_world_knowledge`, 0 `extract_role_memory` calls when `roles_for_memory` is empty, and bounded-concurrent `extract_role_memory` calls when `roles_for_memory` is non-empty.
-- [ ] End-to-end `runtime_tests` verifies that `ExtractOutput.knowledge_change` is committed via `CommitPipeline` into `StoryContext` and observed by the next Turn's `baseline`, `plan`, `retrieval`, and `think` stages.
-- [ ] `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` pass.
+- [x] Prompts `extract.extract_world_knowledge` and `extract.extract_role_memory` are registered in `crates/aise-core/assets/prompts/index.toml` and their CSI/RC/FTI files exist.
+- [x] `extract_prompt_tests` verifies that `extract.extract_world_knowledge` includes `existing_facts`, `existing_rumors`, and `role_catalog` without leaking any role's `memories`, and `extract.extract_role_memory` includes only the target role's `existing_memories`.
+- [x] `extract_knowledge_tests` and `extract_llm_tests` cover every error code listed in §4.1, including `Fact` `Remove` rejection (via serde `deny_unknown_fields` / enum variants), `Memory` `Remove` rejection, and invalid `ActivationRule` rejection.
+- [x] `extract_tests` verifies concurrent execution of `evaluate_narrative` + `extract_world_knowledge`, 0 `extract_role_memory` calls when `roles_for_memory` is empty, and bounded-concurrent `extract_role_memory` calls when `roles_for_memory` is non-empty.
+- [x] End-to-end `runtime_tests` verifies that `ExtractOutput.knowledge_change` is committed via `CommitPipeline` into `StoryContext` and observed by the next Turn's `baseline`, `plan`, `retrieval`, and `think` stages.
+- [x] `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` pass.
 
 ---
 

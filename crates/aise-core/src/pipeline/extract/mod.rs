@@ -1,5 +1,6 @@
 mod config;
 mod extract;
+mod extract_knowledge;
 mod extract_llm;
 mod extract_narrative;
 mod extract_prompt;

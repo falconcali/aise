@@ -1,0 +1,39 @@
+{%- if story_summary -%}
+# Story Summary
+
+{{ story_summary }}
+
+{% endif -%}
+{%- if story_opening -%}
+# Story Opening
+
+{{ story_opening }}
+
+{% endif -%}
+{%- if recent_story -%}
+# Recent Story
+
+{{ recent_story }}
+
+{% endif -%}
+# Current Proposal
+
+{{ current_proposal }}
+
+# Existing Facts
+
+{{ existing_facts }}
+
+# Existing Rumors
+
+{{ existing_rumors }}
+
+# Role Catalog
+
+{{ role_catalog }}
+
+# Operation Limits
+
+- max_fact_changes: {{ max_fact_changes }}
+- max_rumor_changes: {{ max_rumor_changes }}
+- max_roles_for_memory: {{ max_roles_for_memory }}

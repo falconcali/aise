@@ -34,7 +34,6 @@
 
 - 硬重构（`R-REFACTOR-01` / `R-REFACTOR-02`）：一次性替换旧的 `RoleBody` / `RoleActor` / `ResolvedRole` / `PlayerRoleContext` / `StoryInstanceSpec` 路径，不保留兼容垫片或双轨字段。
 - 角色卡（`CharacterCard`）绑定仅发生在开局创建故事（`AiseFactory::create_story`）阶段，且只覆盖角色的 `CharacterProfile`，不改变角色在剧本中的 `name`、`alias`、`backstory` 和 `retrieval`。
-- 不可变文本的物理内存共享（通过 `Arc<str>` 避免 `StoryPack` 与 `StoryContext` 之间的重复堆内存分配）在配套设计文档中独立处理，本设计聚焦逻辑领域模型与生命周期解耦。
 
 ---
 
@@ -105,14 +104,14 @@
 #### Option 2B：在 `freeze_story` 完成一次性实例化，收缩 `PackStore` 职责
 
 - **Idea**：
-  - `StoryContext` 直接持有 `opening: BoundedText`，提供同步的先验背景读取，使 `generate`、`validate`、`repair`、`summary`、`plan`、`retrieval` 不再为 `opening` 或 `CharacterCard` 访问 `PackStore`。
+  - `StoryContext` 直接持有 `opening: BoundedText`，提供同步的先验背景读取，使 `plan`、`retrieval`、`think`、`generate`、`validate`、`repair`、`summary` 不再为 `opening` 或 `CharacterCard` 访问 `PackStore`（同时 `baseline_prompt` 也直接从 `story_ctx.opening` 读取）。
   - 移除 `PackStore` 中的 `CharacterCard` 存储与 `get_character_card` 接口（`StoryAssetSpec` 精简为仅保留 `StoryPack`）。
   - 删除冗余的 `StoryInstanceSpec` 与 `StoryContext::new()` 假数据，`AiseFactory::freeze_story` 直接构造初始 `StoryContext`，并将 `player_id` 存入 `StoryInstanceInfo`。
 - **Pros**：
-  - 除需要评估 `NarrativeGraph` 的阶段（`baseline`、`extract`）和写存储的 `commit` 外，其余 6 个 Pipeline 阶段彻底解除 `Arc<Store>` 依赖。
+  - 除需要评估 `NarrativeGraph` 的阶段（`baseline`、`extract`）和写存储的 `commit` 外，其余 7 个 Pipeline 阶段（`plan`、`retrieval`、`think`、`generate`、`validate`、`repair`、`summary`）彻底解除 `Arc<Store>` 依赖。
   - `PackStore` 职责收敛为单一的 `StoryPack` 快照管理。
 - **Cons**：
-  - `StoryContext` 新增 `opening` 字段（结合配套的 `BoundedText(Arc<str>)` 设计，内存开销仅为 16 字节指针拷贝）。
+  - `StoryContext` 新增 `opening: BoundedText` 字段（每个故事实例持有一份开场白副本）。
 - **Risk**：无。
 
 ### Choice
@@ -170,13 +169,13 @@ Before:
 
 After:
   StoryPack.roles: BTreeMap<RoleId, SeedRole>
-    SeedRole { #[serde(flatten)] spec: RoleSpec, default_profile: CharacterProfile, seed_memories: BTreeMap<MemoryId, MemoryBody> }
+    SeedRole { spec: RoleSpec (平铺序列化), default_profile: CharacterProfile, seed_memories: BTreeMap<MemoryId, MemoryBody> }
   StoryContext.roles: BTreeMap<RoleId, RoleEntry>
     RoleEntry { id: RoleId, origin: RoleOrigin, spec: RoleSpec, profile: CharacterProfile, memories: BTreeMap<MemoryId, MemoryEntry> }
   LLM 动态创建载荷:
     NewRole { spec: RoleSpec, profile: CharacterProfile, initial_memories: BTreeMap<MemoryId, MemoryBody> }
   Pipeline 中间态:
-    直接传递 &RoleEntry（删除 ResolvedRole、PlayerRoleContext、RoleActor）
+    RetrievalOutput.roles: Vec<RoleEntry>；下游 Input 直接借用 &'a RoleEntry / &'a [RoleEntry]（删除 ResolvedRole、PlayerRoleContext、RoleActor）
 ```
 
 ### 2. Core types & responsibilities
@@ -186,10 +185,10 @@ After:
 | Type | Fields / Variants | Responsibility | Out of scope |
 |---|---|---|---|
 | `RoleSpec` | `pub name: BoundedText`<br/>`#[serde(default)] pub alias: Vec<BoundedText>`<br/>`pub backstory: BoundedText`<br/>`pub retrieval: RetrievalHint` | 表达角色在故事中的身份设定与召回提示；在 `SeedRole`、`NewRole` 与 `RoleEntry` 之间 100% 复用 | 人物性格画像（`CharacterProfile`）、记忆（`memories`） |
-| `SeedRole` | `#[serde(flatten)] pub spec: RoleSpec`<br/>`pub default_profile: CharacterProfile`<br/>`#[serde(default)] pub seed_memories: BTreeMap<MemoryId, MemoryBody>` | 仅用于 `StoryPack.roles` 的静态角色槽位模板，保持原有 JSON 序列化形状不变 | 运行时状态存储 |
-| `RoleOrigin` | `Seed { #[serde(default, skip_serializing_if = "Option::is_none")] card: Option<CharacterCardRef> }`<br/>`Turn(TurnNumber)` | 记录 `RoleEntry` 的创建来源；若为初始剧本角色则可选记录绑定的 `CharacterCardRef`，若为故事中途由 LLM 创建则记录对应 `TurnNumber` | 运行时查表路由 |
+| `SeedRole` | `pub spec: RoleSpec`<br/>`pub default_profile: CharacterProfile`<br/>`#[serde(default)] pub seed_memories: BTreeMap<MemoryId, MemoryBody>` | 仅用于 `StoryPack.roles` 的静态角色槽位模板；通过自定义平铺序列化/反序列化（避免 `#[serde(flatten)]` 与 `#[serde(deny_unknown_fields)]` 冲突）保持原有 JSON Schema 与未知字段拒绝行为不变 | 运行时状态存储 |
+| `RoleOrigin` | `Seed { #[serde(default, skip_serializing_if = "Option::is_none")] card: Option<CharacterCardRef> }`<br/>`Turn(TurnNumber)` | 记录 `RoleEntry` 的创建来源（与 `EntryOrigin` 语义对齐）；若为初始剧本角色则可选记录绑定的 `CharacterCardRef`，若为故事中途由 LLM 创建则记录对应 `TurnNumber` | 运行时查表路由 |
 | `RoleEntry` | `pub id: RoleId`<br/>`pub origin: RoleOrigin`<br/>`pub spec: RoleSpec`<br/>`pub profile: CharacterProfile`<br/>`pub memories: BTreeMap<MemoryId, MemoryEntry>` | `StoryContext.roles` 中的唯一运行时角色聚合根；`profile` 始终为当前生效画像，`memories` 包含存活的 Seed 记忆与动态记忆 | 默认画像备份、未转换的 `seed_memories` |
-| `RoleChangeOp` | `Add { id: RoleId, spec: RoleSpec, profile: CharacterProfile, #[serde(default)] initial_memories: BTreeMap<MemoryId, MemoryBody> }`<br/>`Update { id: RoleId, spec: RoleSpec, profile: CharacterProfile }` | （供 `KnowledgeChange.roles` 扩展使用）支持 LLM 在故事演进中动态创建角色并设置初始值，或更新既有角色的 `spec` / `profile` | 单条记忆的增改（仍由 `RoleMemoryChangeOp` 负责） |
+| `RoleChangeOp` | `Add { id: RoleId, spec: RoleSpec, profile: CharacterProfile, #[serde(default)] initial_memories: BTreeMap<MemoryId, MemoryBody> }`<br/>`Update { id: RoleId, spec: RoleSpec, profile: CharacterProfile }` | （Phase 1 供 `KnowledgeChange.roles` 扩展使用）支持 LLM 在故事演进中动态创建角色并设置初始值，或更新既有角色的 `spec` / `profile` | 单条记忆的增改（仍由 `RoleMemoryChangeOp` 负责） |
 
 #### 2.2 `core/story/` 与 `persistence/` 调整类型
 
@@ -217,32 +216,31 @@ After:
 
 #### 3.2 Turn 内角色消费流（无 `PackStore` 查卡、无中间转换类型）
 
-1. **`baseline`**：从 `story_ctx.roles.get(&story_ctx.player)` 直接读取 `role.spec.name` 构造 `ScanBuffer`。
+1. **`baseline`**：从 `story_ctx.roles.get(&story_ctx.player)` 直接读取 `role.spec.name` 构造 `ScanBuffer`；`baseline_prompt` 直接从 `story_ctx.opening` 同步获取开场白，不再接收 `store` 参数。
 2. **`plan`**：
    - 玩家角色直接通过 `story_ctx.roles.get(&story_ctx.player)` 获取 `&RoleEntry`，读取 `role.id`、`role.spec` 与 `role.profile` 渲染 Player Role Prompt 区域；
    - AI 角色目录直接遍历 `story_ctx.roles`（排除 `story_ctx.player`），投影 `role.id`、`role.spec.name`、`role.spec.alias`、`role.spec.retrieval`。
-   - `PlanOutput` 不再需要向外传递 `player_role: PlayerRoleContext`。
+   - `PlanOutput` 不再需要向外传递 `player_role: PlayerRoleContext`，且 `PlanPipeline` 移除 `Arc<Store>`。
 3. **`retrieval`**：
-   - 仅需根据 `PlanOutput` 选出的 `fact_ids`、`rumor_ids`、`role_ids` 从 `story_ctx` 同步校验并提取对应条目（或直接由后续阶段按 ID 从 `story_ctx.roles` 读取 `&RoleEntry`）；不再调用 `PackStore::get_character_card`。
-4. **`think` / `generate` / `validate` / `repair`**：
-   - 统一接收 `&RoleEntry`（玩家角色直接从 `story_ctx.roles[&story_ctx.player]` 读取，AI 角色从选中的 `RoleEntry` 列表读取）；
-   - `think` 读取目标角色的 `role.spec`、`role.profile` 与 `role.memories`；
-   - `generate` / `validate` / `repair` 读取玩家角色与选中 AI 角色的 `role.spec`、`role.profile`，并通过 `story_ctx.opening`（当 `story_ctx.summary` 为空时）同步获取开场白，不再持有 `Arc<Store>`。
+   - 根据 `PlanOutput` 选出的 `fact_ids`、`rumor_ids`、`role_ids` 从 `story_ctx` 同步校验并克隆提取对应条目，产出 `RetrievalOutput { facts: Vec<FactEntry>, rumors: Vec<RumorEntry>, roles: Vec<RoleEntry> }`；不再调用 `PackStore::get_character_card`，`RetrievalPipeline` 移除 `Arc<Store>`。
+4. **`think` / `generate` / `validate` / `repair` / `summary`**：
+   - `ThinkInput<'a>` 接收 `resolved_roles: &'a [RoleEntry]`（借用自 `&retrieval_output.roles`），读取目标角色的 `role.spec`、`role.profile` 与 `role.memories`；
+   - `GenerateInput<'a>` 与 `ValidationContext<'a>` 统一接收 `player_role: &'a RoleEntry`（直接从 `&story_ctx.roles[&story_ctx.player]` 借用）和 `roles: &'a [RoleEntry]`（从 `&retrieval_output.roles` 借用），读取玩家角色与选中 AI 角色的 `role.spec`、`role.profile`；
+   - `think`、`generate`、`validate`、`repair`、`summary` 通过 `pipeline_prompt::story_opening(story_ctx)`（当 `story_ctx.summary` 为空时返回 `story_ctx.opening.as_str()`）同步获取开场白，全部移除 `Arc<Store>` 字段。
 
-#### 3.3 故事运行中 LLM 动态创建/更新角色流（`extract` → `commit`）
+#### 3.3 故事运行中 LLM 动态创建/更新角色流（Phase 1：`extract` → `commit`）
 
-1. 当 LLM 在第 $N$ 轮创建新角色时，`extract` 阶段产出 `RoleChangeOp::Add { id, spec, profile, initial_memories }`。
-2. `StoryStore::commit` 在原子事务中校验 `id` 在 `story_ctx.roles` 中不存在，然后构造：
-   - `origin = RoleOrigin::Turn(turn_number)`；
-   - `memories` 由 `initial_memories` 映射为 `EntryOrigin::Turn(turn_number)` 的 `MemoryEntry`；
-   - 插入 `RoleEntry { id, origin, spec, profile, memories }`。
-3. 下一轮 Turn 开始时，该新角色与初始 `Seed` 角色在 `StoryContext.roles` 中完全同构，自动参与 `plan` 角色目录、`retrieval`、`think` 与 `generate`。
+1. 当 LLM 在第 $N$ 轮创建或更新角色时，`extract` 阶段产出 `RoleChangeOp::Add { id, spec, profile, initial_memories }` 或 `RoleChangeOp::Update { id, spec, profile }`，并复用 `RoleSpec::validate` 校验字段边界（如 `alias` 数量上限）。
+2. `StoryStore::commit` 在原子事务中校验同轮 `RoleId` 无重复冲突、`Add` 目标不存在、`Update` 目标已存在，并校验累计角色数、角色目录字节及单角色记忆上限，然后应用变更：
+   - 对 `Add`：构造 `origin = RoleOrigin::Turn(turn_number)`，将 `initial_memories` 映射为 `EntryOrigin::Turn(turn_number)` 的 `MemoryEntry`，插入 `RoleEntry { id, origin, spec, profile, memories }`；
+   - 对 `Update`：保留原 `RoleEntry.origin` 与 `memories`，更新 `spec` 与 `profile`。
+3. 下一轮 Turn 开始时，动态角色与初始 `Seed` 角色在 `StoryContext.roles` 中完全同构，自动参与 `plan` 角色目录、`retrieval`、`think` 与 `generate`。
 
 ### 4. Key decisions
 
-- **将 `RoleBody` 拆解为 `RoleSpec` + `CharacterProfile` + `memories`，并在 `StoryPack` 中使用 `SeedRole`** → `SeedRole` 使用 `#[serde(flatten)] pub spec: RoleSpec` 保持外部 JSON 格式兼容，同时在 Rust 类型层面把“不可被角色卡替换的剧本身份（`RoleSpec`）”与“可被角色卡替换的画像（`CharacterProfile`）”彻底分开 → 使角色卡覆盖、LLM 动态创建角色与运行时读取拥有最小且正交的公共组件。
+- **将 `RoleBody` 拆解为 `RoleSpec` + `CharacterProfile` + `memories`，并在 `StoryPack` 中使用 `SeedRole`** → `SeedRole` 通过自定义平铺序列化/反序列化保持外部 JSON 格式与 `deny_unknown_fields` 校验不变，同时在 Rust 类型层面把“不可被角色卡替换的剧本身份（`RoleSpec`）”与“可被角色卡替换的画像（`CharacterProfile`）”彻底分开 → 使角色卡覆盖、LLM 动态创建角色与运行时读取拥有最小且正交的公共组件。
 - **开局直接将 `CharacterCard.profile` 合入 `RoleEntry.profile`，用 `RoleOrigin` 替代 `RoleActor`** → 删除 `RoleActor`、`ResolvedRole`、`PlayerRoleContext` 以及 `PackStore::get_character_card` → 选角在故事创建后不可变，没有理由在每个 Turn 重复异步查表和转换类型；`RoleOrigin::Seed { card: Option<CharacterCardRef> }` 既保留了卡片溯源摘要，又在类型上禁止了 `RoleOrigin::Turn` 角色绑卡的非法状态。
-- **`StoryContext` 直接携带 `opening: BoundedText`** → 移除 `pipeline_prompt::load_story_opening` 对 `Store` 的异步调用 → 让 `generate`、`validate`、`repair`、`summary`、`plan`、`retrieval` 彻底摆脱为读取一段静态开场白而持有的 `Arc<Store>` 依赖。
+- **`StoryContext` 直接携带 `opening: BoundedText`** → 将异步 `pipeline_prompt::load_story_opening` 替换为纯同步 `pipeline_prompt::story_opening(story_ctx)` → 让 `plan`、`retrieval`、`think`、`generate`、`validate`、`repair`、`summary` 共 7 个阶段彻底摆脱为读取静态开场白或角色卡而持有的 `Arc<Store>` 依赖。
 - **删除 `StoryInstanceSpec` 与 `StoryContext::new()` 默认假数据** → `AiseFactory::freeze_story` 直接构造初始 `StoryContext`，并将 `player_id` 写入 `StoryInstanceInfo` → 消除无意义的平行结构体复制与 `player_id` 丢失问题，避免测试假数据污染生产 `core` 代码。
 
 ---
@@ -253,7 +251,7 @@ After:
   - `crates/aise-core/src/core/role/`：
     - `role.rs`：定义 `RoleSpec`、`SeedRole`、`RoleOrigin`、`RoleEntry`；
     - 删除 `actor.rs`（`RoleActor`）、`player_context.rs`（`PlayerRoleContext`）以及 `character_think.rs` 中的 `ResolvedRole`；
-  - `crates/aise-core/src/core/knowledge/change.rs`：支持扩展 `RoleChangeOp`。
+  - `crates/aise-core/src/core/knowledge/change.rs`：（Phase 1）支持扩展 `RoleChangeOp`。
   - `crates/aise-core/src/core/story/`：
     - `story_pack.rs`：`roles` 类型改为 `BTreeMap<RoleId, SeedRole>`；移除 `StoryAssetSpec` 中的 `cards`（或直接简化 `PackStore::retain` 参数）；
     - `story_context.rs`：新增 `pub opening: BoundedText`，移除 `StoryContext::new()` 与 `Default`；
@@ -263,10 +261,10 @@ After:
     - `pack_store.rs` / `pack_store_mem.rs` / `pack_store_sqlite.rs`：移除 `CharacterCard` 存储与 `get_character_card`；
     - `story_store.rs` / `story_store_mem.rs` / `story_store_sqlite.rs`：`create` 直接接收 `PlayerId` 与初始 `StoryContext`。
   - `crates/aise-core/src/pipeline/`：
-    - `plan`、`retrieval`、`think`、`generate`、`validate`、`repair`、`summary`：统一使用 `RoleEntry` 替代 `ResolvedRole` / `PlayerRoleContext`，使用 `story_ctx.opening` 替代 `load_story_opening` 异步查询，并移除 `retrieval`、`generate`、`validate`、`repair`、`summary` 中不再需要的 `Arc<Store>` 字段。
+    - `plan`、`retrieval`、`think`、`generate`、`validate`、`repair`、`summary`：统一使用 `RoleEntry` 替代 `ResolvedRole` / `PlayerRoleContext`，使用同步 `pipeline_prompt::story_opening(story_ctx)` 替代异步 `load_story_opening`（同时更新 `baseline_prompt`），并移除这 7 个阶段中不再需要的 `Arc<Store>` 字段。
 - **Config**：`PackStoreConfig` 移除 `max_character_cards` 配置项。
 - **Data**：
-  - `StoryPack` 的外部 JSON Schema 保持不变（`SeedRole` 通过 `#[serde(flatten)]` 保持字段名一致）。
+  - `StoryPack` 的外部 JSON Schema 保持不变（`SeedRole` 通过自定义平铺序列化/反序列化保持字段名与未知字段拒绝行为一致）。
   - `StoryContext` 的内部持久化结构更新为新 `RoleEntry` 格式并包含 `opening`。
 - **External interface**：`aise-core` 公开 Rust 类型发生破坏性重构（遵循 `R-REFACTOR-01/02`）。
 
@@ -276,12 +274,12 @@ After:
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| `SeedRole` 使用 `#[serde(flatten)]` 与 `#[serde(deny_unknown_fields)]` 组合时在部分 `serde` 版本下存在反序列化兼容性问题 | med | med | 若 `serde` 对 `flatten` + `deny_unknown_fields` 报错，可在 `SeedRole` 中直接展开或通过自定义反序列化/单测（`story_pack_tests.rs`）验证未知字段拒绝行为 |
+| `SeedRole` 若直接使用派生 `#[serde(flatten)]` 与 `#[serde(deny_unknown_fields)]` 会在 Serde 中冲突 | high | med | 不在 `SeedRole` 上混用派生 `flatten` + `deny_unknown_fields`，改用自定义反序列化或内部平铺辅助结构，并通过 `story_pack_tests.rs` 验证未知字段拒绝行为 |
 | 移除 `ResolvedRole` 与 `PlayerRoleContext` 涉及多个 Pipeline 的测试 Fixture 改动 | high | low | 在 `core/tests/fixture.rs` 提供统一的 `RoleEntry` 与 `StoryContext` 构造辅助函数，批量替换各阶段单测 |
 
 ---
 
 ## Roadmap
 
-- **Phase 0（`Role` 与 `StoryContext` / `PackStore` 解耦重构）**：落地 `RoleSpec`、`SeedRole`、`RoleOrigin`、`RoleEntry`，在 `StoryContext` 中内聚 `opening`，删除 `RoleActor`、`ResolvedRole`、`PlayerRoleContext`、`StoryInstanceSpec` 及 `PackStore` 角色卡缓存，清理各 Pipeline 的 `Store` 依赖 → spec `TBD`
-- **Phase 1（动态角色提取扩展）**：在 `KnowledgeChange` 与 `ExtractPipeline` 中接入 `RoleChangeOp` → spec `TBD`
+- **Phase 0（`Role` 与 `StoryContext` / `PackStore` 解耦重构）**：落地 `RoleSpec`、`SeedRole`、`RoleOrigin`、`RoleEntry`，在 `StoryContext` 中内聚 `opening`，删除 `RoleActor`、`ResolvedRole`、`PlayerRoleContext`、`StoryInstanceSpec` 及 `PackStore` 角色卡缓存，清理 7 个 Pipeline 阶段的 `Store` 依赖 → spec `TBD`
+- **Phase 1（动态角色提取扩展）**：在 `KnowledgeChange`、`ExtractPipeline` 与 `StoryStore::commit` 中接入 `RoleChangeOp` 及累计角色容量与字段校验 → spec `TBD`

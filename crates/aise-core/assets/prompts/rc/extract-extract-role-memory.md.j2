@@ -1,0 +1,36 @@
+{%- if story_summary -%}
+# Story Summary
+
+{{ story_summary }}
+
+{% endif -%}
+{%- if story_opening -%}
+# Story Opening
+
+{{ story_opening }}
+
+{% endif -%}
+{%- if recent_story -%}
+# Recent Story
+
+{{ recent_story }}
+
+{% endif -%}
+# Current Proposal
+
+{{ current_proposal }}
+
+# Target Role
+
+- role_id: {{ target_role_id }}
+- name: {{ target_name }}
+- aliases: {{ target_aliases }}
+- backstory: {{ target_backstory }}
+
+# Existing Memories
+
+{{ existing_memories }}
+
+# Operation Limits
+
+- max_memory_changes_per_role: {{ max_memory_changes_per_role }}

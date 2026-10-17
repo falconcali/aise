@@ -1,0 +1,57 @@
+Extract private memory changes for the Target Role now.
+
+Return exactly one JSON object with no Markdown fence and no surrounding prose:
+
+{
+  "memories": [
+    {
+      "op": "add",
+      "body": {
+        "content": "First-person or role-perspective memory of a major event personally experienced or learned.",
+        "retrieval": "One-sentence summary of the memory for retrieval",
+        "activation": {
+          "match": {
+            "keys": ["primary keyword"],
+            "secondary_keys": [],
+            "secondary_logic": "and_any",
+            "case_sensitive": false,
+            "match_whole_words": false,
+            "scan_depth": null
+          },
+          "mode": { "enabled": true, "constant": false },
+          "recursion": {
+            "exclude_recursion": false,
+            "prevent_recursion": false,
+            "delay_until_recursion": null
+          },
+          "selection": {
+            "order": 0,
+            "probability": 100,
+            "groups": [],
+            "group_override": false,
+            "group_weight": 100,
+            "use_group_scoring": false
+          }
+        }
+      }
+    },
+    {
+      "op": "update",
+      "id": "existing_memory_id",
+      "body": {
+        "content": "Updated memory preserving earlier subjective context and current understanding.",
+        "retrieval": "One-sentence summary of the updated memory",
+        "activation": {
+          "match": { "keys": ["primary keyword"] }
+        }
+      }
+    }
+  ]
+}
+
+Strict protocol constraints:
+- `memories` items allow only `"op": "add"` (with `body`) and `"op": "update"` (with existing `id` from Existing Memories and `body`). Never emit `"op": "remove"`.
+- Record only information within the Target Role's perception boundary (personally experienced, witnessed, heard, explicitly told, or reasonably inferred from prior knowledge). Never include omniscient narration, other characters' inner thoughts, secret dialogues out of earshot, or off-scene events. Record misunderstandings from the Target Role's subjective viewpoint.
+- Respect `max_memory_changes_per_role`.
+- For every `activation`, when `mode.enabled` is `true` and `mode.constant` is `false`, `match.keys` must contain at least one non-empty keyword.
+- Do not include explanations, comments, Markdown fences, or any field not defined in the JSON protocol.
