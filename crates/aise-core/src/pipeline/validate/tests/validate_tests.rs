@@ -5,7 +5,8 @@ use crate::core::{
     TurnCancellation,
 };
 use crate::llm::{
-    LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
+    LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmReasoningEffort,
+    Provider,
 };
 use crate::pipeline::common::ValidationContext;
 use crate::prompt::PromptConfig;
@@ -14,6 +15,7 @@ use crate::trace::{
 };
 use async_trait::async_trait;
 use std::path::Path;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -21,6 +23,7 @@ const BUNDLED_PROMPT_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/ass
 
 struct ValidateProvider {
     calls: AtomicUsize,
+    reasoning_effort: Mutex<Option<LlmReasoningEffort>>,
 }
 
 #[async_trait]
@@ -29,8 +32,9 @@ impl Provider for ValidateProvider {
         "validate"
     }
 
-    async fn complete(&self, _request: LlmCompletionRequest) -> Result<LlmCompletionResponse, LlmError> {
+    async fn complete(&self, request: LlmCompletionRequest) -> Result<LlmCompletionResponse, LlmError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        *self.reasoning_effort.lock().expect("reasoning effort lock") = request.reasoning_effort;
         let config = ValidateConfig::default();
         let checks = config
             .checks
@@ -90,6 +94,7 @@ fn trace() -> Trace {
 async fn execute_calls_gateway_once_and_returns_report() {
     let provider = Arc::new(ValidateProvider {
         calls: AtomicUsize::new(0),
+        reasoning_effort: Mutex::new(None),
     });
     let store = Arc::new(store_with_default_pack().await);
     let config = ValidateConfig::default();
@@ -147,6 +152,10 @@ async fn execute_calls_gateway_once_and_returns_report() {
         .expect("validate succeeds");
 
     assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *provider.reasoning_effort.lock().expect("reasoning effort lock"),
+        Some(LlmReasoningEffort::High)
+    );
     assert_eq!(output.report.proposal_version, 2);
     assert!(output.report.all_checks_pass());
     assert!(output.report.all_scores_meet_target());

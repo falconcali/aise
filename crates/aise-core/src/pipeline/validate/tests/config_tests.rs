@@ -73,7 +73,7 @@ fn default_config_has_stable_criteria_and_limits() {
             .collect::<Vec<_>>(),
         [
             "The segment makes visible, causally grounded progress toward the immediate story goal without forcing completion unsupported by the evidence.",
-            "The segment realizes the pending player contribution in the prose, preserves its essential meaning, and does not invent an unprovided consequential player choice.",
+            "The segment visibly acknowledges, reacts to, or is causally influenced by the pending player contribution. It may paraphrase, soften, redirect, delay, partially realize, or reject the contribution when warranted by story context, character agency, logic, or constraints. Judge whether the contribution affects the narrative, not whether its requested wording, intensity, or outcome is preserved. Do not invent an unprovided consequential player choice.",
             "Character actions, knowledge, voice, and immediate intent remain consistent with supplied role evidence and character decisions unless visible events justify a change.",
             "The segment uses clear causal and temporal transitions, readable prose, and a natural interaction boundary without relying on abrupt or unsupported developments."
         ]

@@ -133,8 +133,8 @@ impl Default for ValidateConfig {
                 ),
                 score(
                     "player_response",
-                    "The proposal responds directly to the player's contribution.",
-                    "The segment realizes the pending player contribution in the prose, preserves its essential meaning, and does not invent an unprovided consequential player choice.",
+                    "The proposal gives the player's contribution a visible, context-appropriate response.",
+                    "The segment visibly acknowledges, reacts to, or is causally influenced by the pending player contribution. It may paraphrase, soften, redirect, delay, partially realize, or reject the contribution when warranted by story context, character agency, logic, or constraints. Judge whether the contribution affects the narrative, not whether its requested wording, intensity, or outcome is preserved. Do not invent an unprovided consequential player choice.",
                 ),
                 score(
                     "character_consistency",

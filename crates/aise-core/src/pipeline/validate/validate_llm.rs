@@ -1,5 +1,5 @@
 use crate::core::{ChatMessage, TurnControl};
-use crate::llm::{LlmCompletionSpec, LlmError, LlmGateway};
+use crate::llm::{LlmCompletionSpec, LlmError, LlmGateway, LlmReasoningEffort};
 use crate::trace::Observation;
 
 pub(super) async fn evaluate_story(
@@ -9,7 +9,7 @@ pub(super) async fn evaluate_story(
     observation: &Observation,
 ) -> Result<String, LlmError> {
     gateway
-        .complete(LlmCompletionSpec { messages }, control, observation)
+        .complete_with_reasoning_effort(LlmCompletionSpec { messages }, LlmReasoningEffort::High, control, observation)
         .await
         .map(|result| result.content)
 }
