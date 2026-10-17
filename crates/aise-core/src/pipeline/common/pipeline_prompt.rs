@@ -1,6 +1,4 @@
 use crate::core::{BoundedText, FactEntry, NarrativeDirection, RumorEntry, StoryContext, Turn, TurnStatus};
-use crate::persistence::Store;
-use crate::pipeline::common::{PipelineError, PipelineStage};
 
 pub(in crate::pipeline) fn story_summary(story_ctx: &StoryContext) -> Option<&str> {
     story_ctx
@@ -56,20 +54,11 @@ fn bullet_list<'a>(items: impl Iterator<Item = &'a str>) -> String {
         .join("\n")
 }
 
-pub(in crate::pipeline) async fn load_story_opening(
-    stage: PipelineStage,
-    story_ctx: &StoryContext,
-    store: &Store,
-) -> Result<String, PipelineError> {
-    if story_summary(story_ctx).is_some() {
-        return Ok(String::new());
+pub(in crate::pipeline) fn story_opening(story_ctx: &StoryContext) -> &str {
+    match story_summary(story_ctx) {
+        Some(_) => "",
+        None => story_ctx.opening.as_str(),
     }
-    let story_pack = store
-        .pack_store()
-        .get_pack(&story_ctx.pack_ref)
-        .await
-        .map_err(PipelineError::persistence(stage))?;
-    Ok(story_pack.opening.as_str().to_owned())
 }
 
 #[cfg(test)]

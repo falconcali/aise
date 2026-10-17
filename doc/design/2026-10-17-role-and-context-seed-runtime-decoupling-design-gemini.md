@@ -37,6 +37,7 @@
 - 硬重构（`R-REFACTOR-01` / `R-REFACTOR-02`）：一次性替换旧的 `RoleBody` / `RoleActor` / `ResolvedRole` / `PlayerRoleContext` / `StoryAssetSpec.cards` 路径，不保留兼容垫片或双轨字段。
 - 角色卡（`CharacterCard`）绑定仅发生在开局创建故事（`AiseFactory::create_story`）阶段，且只覆盖角色的 `CharacterProfile`，不改变角色在剧本中的 `name`、`alias`、`backstory` 和 `retrieval`。
 - 当前 `StoryStoreSqlite` 仍委托内存实现，没有需要迁移的生产持久化数据；本次内部序列化格式采用硬断，不增加兼容读取。
+- 本设计只收敛角色聚合与 opening 的容量；StoryPack/StoryContext 中 fact、rumor、narrative 等既有非角色边界不在本次范围，原有 `R-ARCH-03` / `R-ARCH-04` waiver 必须缩到这些仍未收敛的精确边界，不能因角色边界落地而整体删除。
 
 ---
 
@@ -214,10 +215,12 @@ After:
 | `MAX_ALIASES_PER_ROLE` | 8 | `RoleSpec::validate` |
 | `MAX_ROLE_CATALOG_BYTES` | 32 KiB | 初始有效角色集合与 commit 后候选集合 |
 | `MAX_MEMORIES_PER_ROLE` | 32 | Seed、角色新增初始记忆、后续 `RoleMemoryChangeOp` |
-| `MAX_ROLE_STATE_BYTES` | 2 MiB | 完整 Runtime roles 集合，包含有效 profile 与 memories |
+| `MAX_ROLE_STATE_BYTES` | 2 MiB | `StoryPack` 将 SeedRole 按 default profile、`EntryOrigin::Seed` 与 seed `MemoryEntry` 投影成 Runtime 形状后预检；create/commit 校验包含有效 profile / memories 的完整 Runtime roles，角色卡覆盖后的 create 校验为最终结果 |
 | `MAX_OPENING_BYTES` | 16 KiB | `AiseFactory::freeze_story` 与 `StoryStore::create` |
 
-累计校验对“应用全部变更后的候选集合”执行；失败拒绝整个 create/commit。角色与记忆不做局部淘汰，故事删除时整体清理；到达上限后新增失败并返回可诊断约束错误。`ExtractConfig.max_role_additions_per_turn` 只限制单轮 LLM 输出扇出，不替代累计状态边界。总状态字节使用带上限的 counting writer 流式计算，超过 `MAX_ROLE_STATE_BYTES` 立即停止，不得先 `serde_json::to_vec` 分配一个可能超限的临时缓冲。
+`MAX_ROLE_CATALOG_BYTES` 与现有 pack 规则保持字节级一致：使用 `saturating_add` 对每个角色累加 `role_id.as_str().len()`、`spec.name.as_str().len()`、每个 alias 的 UTF-8 byte length 及 `spec.retrieval.as_str().len()`；不计 JSON 标点，也不计 `backstory`、profile 或 memories。后三者统一由 `MAX_ROLE_STATE_BYTES` 覆盖。
+
+累计校验对“应用全部变更后的候选集合”执行；失败拒绝整个 create/commit。角色与记忆不做局部淘汰，故事删除时整体清理；到达上限后新增失败并返回可诊断约束错误。`ExtractConfig.max_role_additions_per_turn`、`max_roles_for_memory` 与 `max_memory_extractions_per_turn` 只限制单轮提案和 LLM 扇出，不替代累计状态边界。总状态字节使用带上限的 counting writer 流式计算，超过 `MAX_ROLE_STATE_BYTES` 立即停止，不得先 `serde_json::to_vec` 分配一个可能超限的临时缓冲。
 
 #### 2.3 `core/story/` 与 `persistence/` 调整类型
 
@@ -227,8 +230,8 @@ After:
 | `StoryContext` | 新增 `pub opening: Arc<BoundedText>`；移除 `StoryContext::new()` 与 `Default` | 运行时权威快照；Context clone 只增加 opening 引用计数 | 制造测试假数据（移交 `core/tests/fixture.rs`） |
 | `StoryInstanceSpec` | 改为 `pub(crate)` 且字段私有，新增 `opening` 与仅供后端消费的 `pub(crate) into_parts()` | Store 后端使用的创建命令；只能由同模块的 `StoryCreateBundle` 构造并表达 Turn 0 所需字段 | 任意运行时快照、外部或其他模块直接构造 |
 | `StoryInstanceInfo` | 新增 `pub player_id: PlayerId` | 记录故事实例归属玩家、描述、时间戳与生命周期状态 | 故事正文与认知状态 |
-| `StoryPackSnapshot` | `pub(crate)`，从单个 `StoryPack` 计算并私有封装匹配的 `PackRef` 与内容 | 防止 `retain(pack_ref, pack)` 接收不一致的独立值；其 `pack_ref` 是 `StoryInstanceSpec.pack_ref` 的唯一来源；替代 `StoryAssetSpec` | 角色卡 |
-| `StoryCreateBundle` | `pub(crate)` 且字段私有；构造器接收 snapshot 与其余 Turn 0 字段，在同模块内部生成 `StoryInstanceSpec` | `engine` 到 persistence 的唯一建档载荷；两个部分只能由 `Store::create_story` 在 crate 内拆分 | Turn 运行状态、接收调用方预制的 `StoryInstanceSpec` |
+| `StoryPackSnapshot` | `pub(crate)`，`from_pack` 从单个 `StoryPack` 计算并私有封装匹配的 `PackRef` 与内容；提供 crate-private `pack_ref()` 与消费型 `into_parts()` | 防止 `retain(pack_ref, pack)` 接收不一致的独立值；bundle 只能读取其 `pack_ref()`，PackStore 只能用 `into_parts()` 取得已绑定值；替代 `StoryAssetSpec` | 角色卡 |
+| `StoryCreateBundle` | `pub(crate)` 且字段私有；`assemble(snapshot, turn0_fields)` 在同模块内部生成 `StoryInstanceSpec`，`into_parts(self)` 仅供 Store 消费 | `engine` 到 persistence 的唯一建档载荷；engine 只能 assemble，`Store::create_story` 通过 crate-private `into_parts` 拆分 | Turn 运行状态、接收调用方预制的 `StoryInstanceSpec` |
 | `PackStore` | 收窄为 crate-private；`retain` 接收 `StoryPackSnapshot`；移除 `get_character_card` 与 cards 表 | 管理运行中故事引用的 `Arc<StoryPack>` 快照；每个 `StoryId` 最多关联一个 pack holder | 缓存 `CharacterCard` |
 
 `StoryStore`、内存/SQLite backend 类型及 `Store::story_store` / `Store::pack_store` 原始访问器同步收窄为 crate-private；外部调用只经过 `Engine`。这样私有创建命令不会出现在一个外部可实现却无法读取参数的 public trait 中。
@@ -245,13 +248,13 @@ After:
    - 组装 `RoleEntry { id, origin: EntryOrigin::Seed, spec, profile, memories }`。
 3. 对合并角色卡后的完整 Runtime roles 执行累计角色校验；单张卡 profile 或整体状态超限均在建档期失败。
 4. 将 `seed_facts`、`seed_rumors` 映射为 `EntryOrigin::Seed` 的 `FactEntry`、`RumorEntry`；校验 opening 字节后用 `Arc` 挂入初始字段。
-5. 从 `StoryPack` 构造 `StoryPackSnapshot`，再由 engine 调用 crate-private bundle 构造器并传入其余 Turn 0 字段；构造器在 `core/story/story_instance.rs` 内部生成 `StoryInstanceSpec`，从 snapshot 写入唯一 `pack_ref`。调用方既不能预制 spec，也不能独立传入或再次计算该引用。
-6. `Store::create_story(bundle)` 在 persistence 层拆分 bundle，先执行 `PackStore::retain`，再执行 `StoryStore::create`。`retain` 在同一写锁内先校验该 `story_id` 尚未绑定任何 snapshot 及容量约束，再一次性写入 holder；不得让同一故事同时关联多个 digest。`StoryStore::create` 同样保证失败不留下可见的部分插入，并再次校验 opening 与 Runtime roles，只从初始字段构造 `turn_number = 0`、`summary = None`、空 `recent_turns`、`life_cycle = Active` 的 `StoryContext`，同时把 `player_id` 写入 `StoryInstanceInfo`。
+5. 通过 `StoryPackSnapshot::from_pack` 消费 `StoryPack` 并计算唯一引用，再由 engine 调用 `StoryCreateBundle::assemble(snapshot, turn0_fields)`；该 crate-private 构造器在 `core/story/story_instance.rs` 内部通过 `snapshot.pack_ref()` 生成 `StoryInstanceSpec`。调用方既不能预制 spec，也不能独立传入或再次计算该引用。
+6. `Store::create_story(bundle)` 通过 `StoryCreateBundle::into_parts(self)` 在 persistence 层取得 snapshot 与 spec，先执行 `PackStore::retain`，再执行 `StoryStore::create`。`retain` 在同一写锁内先校验该 `story_id` 尚未绑定任何 snapshot 及容量约束，再一次性写入 holder；不得让同一故事同时关联多个 digest。`StoryStore::create` 同样保证失败不留下可见的部分插入，并再次校验 opening 与 Runtime roles，只从初始字段构造 `turn_number = 0`、`summary = None`、空 `recent_turns`、`life_cycle = Active` 的 `StoryContext`，同时把 `player_id` 写入 `StoryInstanceInfo`。
 7. 若 `StoryStore::create` 失败且 release 补偿成功，返回原 create 错误；若补偿也失败，返回携带 `story_id`、`Box<PersistenceError>` create source 与 `Box<PersistenceError>` cleanup source 的 typed `PersistenceError::CreateCompensationFailed`，以打断递归 enum 的无限大小。该错误经 `EngineError::Persistence` 原样保留，使外部调用方可取得 `story_id` 并调用幂等 `Engine::remove_story`；内部清理路径调用 `Store::remove_story`。不得只记录日志后丢失清理句柄。
 
 #### 3.2 Turn 内角色消费流（无 `PackStore` 查卡、无角色聚合搬运）
 
-1. **`baseline`**：从 `story_ctx.roles.get(&story_ctx.player)` 直接读取 `role.spec.name` 构造 `ScanBuffer`；`baseline_prompt` 直接从 `story_ctx.opening` 同步获取开场白，不再接收 `store` 参数。
+1. **`baseline`**：从 `story_ctx.roles.get(&story_ctx.player)` 直接读取 `role.spec.name` 构造 `ScanBuffer`；知识扫描的 prior-story fallback 与 `baseline_prompt` 都直接从 `story_ctx.opening` 同步获取开场白，prompt helper 不再接收 `store` 参数。Pipeline 本身仍为 NarrativeGraph / constraints 保留 Store。
 2. **`plan`**：
    - 玩家角色直接通过 `story_ctx.roles.get(&story_ctx.player)` 获取 `&RoleEntry`，读取 `role.id`、`role.spec` 与 `role.profile` 渲染 Player Role Prompt 区域；
    - AI 角色目录直接遍历 `story_ctx.roles`（排除 `story_ctx.player`），投影 `role.id`、`role.spec.name`、`role.spec.alias`、`role.spec.retrieval`。
@@ -268,14 +271,16 @@ After:
 
 `PipelineRunner` 会序列化阶段 Input/Output，因此上述 ID-only 契约同时是热路径与私有记忆 trace 边界；`RoleEntry` 是权威聚合，但不是跨阶段 DTO。
 
+观测边界按内容职责区分：普通 stage Input/Output 不序列化既有角色的完整 memories；think 的 Prompt 子 observation 可以记录经 `max_memories_in_prompt` 截断后实际发送给 LLM 的目标角色记忆；extract/commit observation 可以记录本轮有界的 memory delta 与 `RoleAddOp.initial_memories`，但不得附带未变更角色的完整记忆库。本设计不新增全局 prompt redaction 机制，测试以未选中/未变更记忆 sentinel 不出现在对应 stage、prompt 与 commit observation 中作为可执行断言。
+
 #### 3.3 故事运行中 LLM 动态创建角色流（Phase 1：`extract` → `commit`）
 
 1. `extract_world_knowledge` 的结构化结果新增 `new_roles: Vec<NewRoleProposal>`；proposal 只含 `RoleSpec` 与 profile，不含 `RoleId`、`MemoryId` 或任何私有记忆。现有 `roles_for_memory` 仍只允许引用快照中已存在的角色。
-2. `extract_knowledge` 校验单轮新增数、`RoleSpec` 与 profile，再按提案顺序从当前快照及本批次已保留 ID 中选择首个未占用的 `role_t{turn}_{seq}`。同一快照与同一输出产生相同角色 ID，批内提案不会碰撞。
-3. `ExtractConfig::validate` 要求 `max_role_additions_per_turn <= max_roles_for_memory <= MAX_ROLES_PER_STORY`，并要求 `max_memory_changes_per_role <= MAX_MEMORIES_PER_ROLE`，避免配置放大无意义的 LLM 调用扇出。世界知识 Prompt 同时接收两个角色上限，并要求 `new_roles.len() <= max_role_additions_per_turn` 且 `new_roles.len() + roles_for_memory.len() <= max_roles_for_memory`；Rust 对两条输出规则再次校验。
+2. `extract_knowledge` 校验单轮新增数、`RoleSpec` 与 profile，再按提案顺序分配 ID：每个提案从 `seq >= 1` 开始递增生成 `role_t{turn}_{seq}`，仅当该 ID 同时不在 `story_ctx.roles` 与本批次 `reserved_role_ids` 中时才插入 reserved set 并采用。同一快照与同一输出产生相同角色 ID，seed/dynamic 既有 ID 与批内提案均不会碰撞。
+3. `ExtractConfig` 新增默认值为 `2` 的 `max_role_additions_per_turn` 与默认值为 `4` 的 `max_memory_extractions_per_turn`；既有 `max_roles_for_memory` 继续只约束 `roles_for_memory`。`validate` 要求 `max_role_additions_per_turn <= max_memory_extractions_per_turn <= MAX_ROLES_PER_STORY`、`max_roles_for_memory <= max_memory_extractions_per_turn` 及 `max_memory_changes_per_role <= MAX_MEMORIES_PER_ROLE`。Runtime 根据当前角色数计算 `effective_max_role_additions = min(config.max_role_additions_per_turn, MAX_ROLES_PER_STORY.saturating_sub(story_ctx.roles.len()))`；世界知识 Prompt 接收该有效上限、既有角色上限与总任务上限，并要求 `new_roles.len() <= effective_max_role_additions`、`roles_for_memory.len() <= max_roles_for_memory` 且两者用 checked addition 得到的总数不超过 `max_memory_extractions_per_turn`；Rust 对三条输出规则再次校验。所有记忆任务再由 `max_memory_concurrency` 限制同时在途数量。
 4. 现有角色与新角色的记忆工作共享 `max_memory_concurrency`。每个新角色使用已分配的 `RoleId`、自身 spec/profile、空当前记忆与本轮定稿正文，复用隔离的单角色记忆提取规则，只允许输出新增 `MemoryBody` 提案，不允许 Update。世界知识 Prompt 始终不生成或接收角色私有记忆。
-5. `extract_knowledge` 为通过校验的新角色初始记忆按角色内作用域分配与现有约定一致的 `mem_t{turn}_{memory_seq}`，组装 `RoleAddOp`；`ExtractOutput.role_additions` 与 `knowledge_change` 分开返回。Runtime 将前者传入 `CommitInput`，最终写入 `StoryCommit.role_additions`。LLM 永远不直接选择持久化 ID。
-6. `StoryStore::commit` 先按 Turn 开始前的原始 Context 校验：所有 `RoleAddOp.id` 必须不存在且无重复；所有 `RoleMemoryChangeOp.role_id` 必须属于原始 Context，禁止指向本轮新增角色。新角色的记忆只能来自对应 `RoleAddOp.initial_memories`。
+5. `extract_knowledge` 为通过校验的新角色初始记忆按角色内作用域分配与现有约定一致的 `mem_t{turn}_{memory_seq}`，组装 `RoleAddOp`。该分配器接收空角色记忆和批内 `reserved_memory_ids`，不调用要求角色已存在于 `story_ctx.roles` 的既有角色 allocator。`ExtractOutput.role_additions` 与 `knowledge_change` 分开返回；Runtime 将前者传入 `CommitInput`，最终写入 `StoryCommit.role_additions`。LLM 永远不直接选择持久化 ID。
+6. `StoryStore::commit` 先按 Turn 开始前的原始 Context 校验：所有 `RoleAddOp.id` 必须不存在且无重复；每个 `initial_memories` 因使用 `BTreeMap` 在结构上不能含重复 `MemoryId`，其条数仍须显式校验不超过 `MAX_MEMORIES_PER_ROLE`；所有 `RoleMemoryChangeOp.role_id` 必须属于原始 Context，禁止指向本轮新增角色，因此也不会与 initial memory ID 形成跨载荷冲突。新角色的记忆只能来自对应 `RoleAddOp.initial_memories`。
 7. 通过引用校验后，在 `next_context` 副本中应用 role additions 与 knowledge changes，再对候选 roles 执行 `RoleSpec`、累计角色数、目录字节、单角色记忆数和总角色状态字节校验；任何失败拒绝整个 commit。
 8. 应用 `RoleAddOp` 时使用 `EntryOrigin::Turn(turn_number)` 构造角色与全部 initial `MemoryEntry`。下一轮开始后，动态角色与 Seed 角色完全同构并自动进入角色目录。
 
@@ -296,6 +301,7 @@ Phase 1 不支持修改或删除既有角色，也不允许将动态角色切换
 - **`StoryContext` 携带有界的 `Arc<BoundedText>` opening** → 将异步 `load_story_opening` 替换为同步 `story_opening`，并让 Context clone 只复制 Arc → `plan`、`retrieval`、`think`、`generate`、`validate`、`repair`、`summary` 共 7 个阶段移除不再需要的 `Arc<Store>`。
 - **保留 `StoryInstanceSpec`，删除 `StoryContext::new()` 假数据** → 创建 DTO 只含初始字段，Store 统一构造固定 Turn 0 状态并保存 `player_id` → 消除非法初始快照，而不是为了减少一个类型放宽 Store 接口。
 - **动态角色第一期只支持 Add，初始记忆仍按角色隔离提取** → 世界提取只生成 spec/profile，Rust 分配 RoleId 后复用单角色记忆规则 → 避免世界知识 Prompt 混入私有认知，同时避免模型覆盖既有角色或玩家角色。
+- **`RoleAddOp` 放在 `StoryCommit` 而不是 `Turn`** → 角色创建与 summary/narrative/lifecycle 一样属于提交级状态变更，不进入面向 Prompt 的 `recent_turns`，避免初始 profile/memories 被历史窗口重复保留；同时不让 `Turn` 引入 `role` 依赖链。
 - **`StoryCreateBundle` 原子绑定 snapshot 与 instance spec** → bundle 构造时从 snapshot 写入唯一 `PackRef`，`Store::create_story` 统一执行跨后端建档与补偿 → 避免公开字段绕过引用一致性，并在补偿失败时返回可清理的 story ID。
 - **故事删除跨 Store 幂等** → Story 不存在仍继续 release，release 不存在 holder 也成功 → 删除第二步失败后能够安全重试。
 
@@ -309,29 +315,32 @@ Phase 1 不支持修改或删除既有角色，也不允许将动态角色切换
     - `role_change.rs`：Phase 1 定义 `RoleAddOp`；
     - 删除 `actor.rs`、`player_context.rs`、`character_think.rs` 中的 `ResolvedRole`，以及 `character_card.rs` 中的 `CharacterCardRef` / `card_ref()`。
   - `crates/aise-core/src/core/story/`：
-    - `story_pack.rs`：`roles` 改为 `BTreeMap<RoleId, SeedRole>`；用 `StoryPackSnapshot` 替代 `StoryAssetSpec`；
+    - `story_pack.rs`：`roles` 改为 `BTreeMap<RoleId, SeedRole>`；将 `MAX_ROLES_PER_PACK` / `MAX_SEED_MEMORIES_PER_ROLE` / `MAX_ROLE_ASSETS_BYTES` 硬重命名为统一 Runtime 语义常量；pack 预检与 Runtime 校验共用 role 边界 helper 和有上限的 counting writer，删除 `serde_json::to_vec` 尺寸探测；用带 `from_pack` / `pack_ref` / `into_parts` 窄接口的 `StoryPackSnapshot` 替代 `StoryAssetSpec`；删除返回 `RoleActor` 的 `resolve_cast`，改为只校验 player/cast RoleId 的方法；
     - `story_context.rs`：新增 `opening: Arc<BoundedText>`，删除生产用 `new()` / `Default`；
-    - `story_instance.rs`：crate-private `StoryInstanceSpec` 新增 opening 且字段私有，只能由新增的 crate-private `StoryCreateBundle` 构造；`StoryInstanceInfo` 新增 `player_id`；
+    - `story_instance.rs`：crate-private `StoryInstanceSpec` 新增 opening 且字段私有，只能由新增的 `StoryCreateBundle::assemble` 构造；bundle 只通过 crate-private `into_parts` 被 Store 拆分；`StoryInstanceInfo` 新增 `player_id`；
     - `story_commit.rs`：Phase 1 新增 `role_additions: Vec<RoleAddOp>`；`KnowledgeChange` 与 `Turn` 继续只承载 facts / rumors / memories 及既有 Turn 数据，避免内部模块依赖环。
-  - `crates/aise-core/src/engine/factory.rs`：合并有效 profile、验证 opening 与 Runtime roles并构造 `StoryCreateBundle`；跨 Store 写入与补偿移交 `Store`。
+  - `crates/aise-core/src/engine/factory.rs`：合并有效 profile、验证 opening 与 Runtime roles 并构造 `StoryCreateBundle`；删除 `FrozenStory` / `FrozenCast`、旧 `RoleActor` 组装与 `release_story_assets`，create/remove 均委托 `Store::create_story` / `Store::remove_story`；角色/opening 不再依赖 waiver，原 waiver 仅缩到仍属范围外的非角色状态边界。
   - `crates/aise-core/src/persistence/`：
     - `mod.rs` / `store.rs`：`StoryStore`、`PackStore`、具体 backend 及 Store 原始 backend 访问器收窄为 crate-private；
     - `pack_store.rs` / `pack_store_mem.rs` / `pack_store_sqlite.rs`：移除 cards 表与 `get_character_card`，`retain` 改收 `StoryPackSnapshot`，并维护唯一 `StoryId → digest` holder 索引；
-    - `story_store_mem.rs` / `story_store_sqlite.rs`：create 保存 `player_id`；commit 在候选副本上应用并校验角色与记忆累计边界；remove 改为幂等。
+    - `story_store_mem.rs` / `story_store_sqlite.rs`：create 保存 `player_id`；commit 新增 `validate_role_additions` / `apply_role_additions`，先按原 Context 校验角色与 memory-op 引用，再在候选副本上应用全部变更并校验累计边界；remove 改为幂等。
     - `store.rs`：新增 crate-private `create_story(bundle)` 与幂等 `remove_story(story_id)` 跨后端协调；补偿失败返回同时携带 story ID 和两个 boxed 错误的 typed persistence error。
   - `crates/aise-core/src/pipeline/`：
-    - `plan`：删除 `PlanOutput.player_role`、`PlanPromptContext.story_pack` 和 Store 查询；
+    - `baseline`：Prompt 与知识扫描改读 `story_ctx.opening`；Pipeline 因 NarrativeGraph / constraints 读取继续保留 Store；
+    - `plan`：删除 `PlanOutput.player_role`、`PlanPromptContext.story_pack` 和 Store 查询；`PlanOutput::requires_retrieval` 只检查 fact/rumor，Runtime 对仅 generation/think 的计划跳过 retrieval；
     - `retrieval`：删除角色输入/输出与 Store 字段；
     - `think` / `generate` / `validate` / `repair`：输入改传 `RoleId`，从 `StoryContext` 借用角色并投影；
     - `runtime/runtime.rs`、`runtime/runtime_validation.rs`、`common/validation.rs`：同步改为 ID-only 角色契约，保留 `effective_role_ids` 稳定去重并集规则，并独立搬运 `role_additions`；
-    - `common/pipeline_prompt.rs` 与各阶段 prompt：使用同步 opening；将误导性的 `TARGET_SEED_MEMORIES_VAR` 改为 runtime memories 语义；
-    - `extract`：Phase 1 扩展 new-role Prompt DTO、角色 ID 分配、隔离的初始记忆提取、记忆 ID 分配和单轮校验，输出独立 `role_additions`；
+    - `summary`：改用同步 opening 并移除 Store；
+    - `common/pipeline_prompt.rs`、`common/validation_prompt.rs` 与各阶段 prompt：用 `story_opening(story_ctx)` 取代异步 `load_story_opening`；将 think 的 `target_seed_memories` Prompt 变量与模板改为 `target_memories`；
+    - `think/config.rs` / `think_context.rs`：将 `max_seed_memories` 硬重命名为 `max_memories_in_prompt`，选择逻辑继续读取 Runtime `RoleEntry.memories`；
+    - `extract`：现有 story context Prompt 的 opening 改读 `story_ctx.opening`，Pipeline 仅为 NarrativeGraph / constraints 保留 Store；Phase 1 扩展 new-role Prompt DTO、角色 ID 分配、隔离的初始记忆提取、记忆 ID 分配和单轮校验，输出独立 `role_additions`；
     - `commit`：`CommitInput` 携带 `role_additions` 并写入 `StoryCommit`，不塞入 `Turn` 或 `KnowledgeChange`。
-- **Config**：`PackStoreConfig` 移除 `max_character_cards`；`ExtractConfig` 新增 `max_role_additions_per_turn`，并校验 `max_role_additions_per_turn <= max_roles_for_memory <= MAX_ROLES_PER_STORY` 及 `max_memory_changes_per_role <= MAX_MEMORIES_PER_ROLE`。累计角色与 opening 边界使用 core 常量，不复制到配置。
+- **Config**：`PackStoreConfig` 移除 `max_character_cards`；`ThinkConfig.max_seed_memories` 硬重命名为 `max_memories_in_prompt`，不保留 serde alias；`ExtractConfig` 新增 `max_role_additions_per_turn = 2` 与 `max_memory_extractions_per_turn = 4`，保留 `max_roles_for_memory` 的既有角色语义，并校验三者的单轮提案/总任务关系及 `max_memory_changes_per_role <= MAX_MEMORIES_PER_ROLE`；同步更新两个 stage 的默认值/反序列化测试。累计角色与 opening 边界使用 core 常量，不复制到配置；不修改 frozen reference crates 使用的 `config/aise_config.toml`。
 - **Data**：
   - `StoryPack` 外部 JSON Schema 与规范化 digest 必须保持不变；`SeedRole` 序列化字节顺序与旧 `RoleBody` 一致。
   - `StoryContext` 内部格式破坏性更新为新 `RoleEntry` 并包含 opening；`StoryCommit` 新增独立 `role_additions`。当前无真实 SQLite 持久化，直接更新/清空测试 fixture，不提供旧格式兼容读取。
-- **Tests**：迁移 runtime、common validation、factory、store 与各 stage fixture；增加 card profile 合并、ID-only trace、effective-role 稳定并集、create rollback 与双错误保留、重复 story holder 拒绝、幂等 remove 重试、bundle 引用一致性、角色累计边界与流式超限、合并记忆角色预算、新角色记忆隔离、禁止 memory op 指向同轮新角色、new-role ID 分配、Serde round-trip 与 golden digest 测试。
+- **Tests**：迁移 runtime、common validation、factory、store 与各 stage fixture；StoryStore 测试也必须经 bundle fixture 取得不可伪造的 spec，不直接 struct literal；增加 card profile 合并、ID-only stage trace、think Prompt 仅含被选中且受限的 memories、commit trace 中的私有记忆仅来自本轮 delta、effective-role 稳定并集、仅 generation/仅 think 时 retrieval 调用数为 0、create rollback 与双错误保留、重复 story holder 拒绝、Store 及 Engine 入口幂等 remove 重试、bundle 引用一致性、角色目录公式与 Runtime 累计边界、counting writer 超限、新角色单角色记忆上限、三项单轮记忆提取预算、接近角色总上限时的有效新增预算、新角色记忆隔离、禁止 memory op 指向同轮新角色、同批及既有 ID 碰撞下的稳定 new-role ID 分配、Serde round-trip 与 golden digest 测试。
 - **External interface**：`aise-core` 公开 Rust 类型发生破坏性重构；raw persistence traits/backends 与创建 DTO 不再公开，外部故事操作统一经过 `Engine`。`StoryPack` JSON 和 `PackRef` 保持稳定。
 
 ---
@@ -341,7 +350,7 @@ Phase 1 不支持修改或删除既有角色，也不允许将动态角色切换
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | `SeedRole` 自定义 Serde 改变字段顺序、缺省行为或未知字段处理，导致 `PackRef.digest` 变化 | high | high | 使用内部平铺辅助结构；增加旧/新角色序列化字节等价、round-trip、duplicate/unknown field 与固定 fixture golden digest 测试 |
-| Runtime roles 复制或进入 trace，暴露私有记忆并放大热路径成本 | med | high | 阶段 Input/Output 只携带 `RoleId`；测试 trace 序列化结果不含 memories |
+| Runtime roles 复制或完整进入 trace，暴露私有记忆并放大热路径成本 | med | high | 既有角色选择的 stage Input/Output 只携带 `RoleId`；仅 think Prompt 使用受 `max_memories_in_prompt` 限制的选中记忆，extract/commit 只观察本轮有界 delta，并用未选中记忆 sentinel 测试边界 |
 | 世界知识提取同时生成新角色私有记忆，造成认知边界混淆 | med | high | `NewRoleProposal` 不含 memories；分配 RoleId 后通过单角色、空历史上下文独立提取初始记忆 |
 | 动态角色或记忆持续增长 | high | high | create 与 commit 共用 core 累计边界；Extract 另有单轮新增数；达到上限原子拒绝，故事删除整体清理 |
 | opening 在 Pack 与 Context 中重复常驻 | high | low | 16 KiB 固定上限；Context 使用 `Arc`，避免 load/commit clone 再复制文本 |
@@ -355,5 +364,5 @@ Phase 1 不支持修改或删除既有角色，也不允许将动态角色切换
 
 ## Roadmap
 
-- **Phase 0（`Role` 与 `StoryContext` / `PackStore` 解耦重构）**：落地 `RoleSpec`、`SeedRole`、`RoleEntry`、`StoryPackSnapshot` 与统一 Runtime 角色/opening 边界；保留并封装 `StoryInstanceSpec`；删除 `RoleActor`、`CharacterCardRef`、`ResolvedRole`、`PlayerRoleContext` 及 PackStore card 缓存；将角色消费改为 ID-only 契约，并从 `plan`、`retrieval`、`think`、`generate`、`validate`、`repair`、`summary` 7 个阶段移除 Store 依赖 → spec `TBD`
-- **Phase 1（动态角色新增闭环）**：扩展 Extract Prompt 与 `StoryCommit.role_additions`，世界提取只生成 spec/profile，随后隔离提取新角色初始记忆；由 Rust 分配角色/记忆 ID，在 `StoryStore::commit` 中与 `KnowledgeChange` 原子应用并执行累计校验；不支持 Update / Remove → spec `TBD`
+- **Phase 0（`Role` 与 `StoryContext` / `PackStore` 解耦重构）**：落地 `RoleSpec`、`SeedRole`、`RoleEntry`、`StoryPackSnapshot` 与统一 Runtime 角色/opening 边界；保留并封装 `StoryInstanceSpec`；删除 `RoleActor`、`CharacterCardRef`、`ResolvedRole`、`PlayerRoleContext` 及 PackStore card 缓存；将角色消费改为 ID-only 契约，并从 `plan`、`retrieval`、`think`、`generate`、`validate`、`repair`、`summary` 7 个阶段移除 Store 依赖。验收条件：旧路径与旧配置键全部删除，StoryPack golden digest 不变，仅选择 generation 角色或仅请求 think 的计划不运行 retrieval，create/remove 补偿测试通过，`cargo fmt`、全量测试和 warnings-as-errors clippy 通过。
+- **Phase 1（动态角色新增闭环）**：扩展世界知识提取的 CSI/RC/FTI 模板与 `StoryCommit.role_additions`，世界提取只生成 spec/profile，随后隔离提取新角色初始记忆；由 Rust 分配角色/记忆 ID，在 `StoryStore::commit` 中与 `KnowledgeChange` 原子应用并执行累计校验；不支持 Update / Remove。验收条件：单轮/累计边界、同批碰撞、同轮 memory-op 隔离、并发预算、原子拒绝与幂等 replay 测试全部通过，Prompt 注册表继续只引用存在的三层模板，`cargo fmt`、全量测试和 warnings-as-errors clippy 通过。

@@ -16,18 +16,21 @@ pub enum StoryError {
     #[error("story pack role catalog size {actual} exceeds maximum {maximum}")]
     RoleCatalogTooLarge { actual: usize, maximum: usize },
 
-    #[error("role {role_id} seed memory count {actual} exceeds maximum {maximum}")]
-    TooManySeedMemories {
+    #[error("role {role_id} memory count {actual} exceeds maximum {maximum}")]
+    TooManyRoleMemories {
         role_id: RoleId,
         actual: usize,
         maximum: usize,
     },
 
-    #[error("story pack role assets size {actual} exceeds maximum {maximum}")]
-    RoleAssetsTooLarge { actual: usize, maximum: usize },
+    #[error("story role state size {actual} exceeds maximum {maximum}")]
+    RoleStateTooLarge { actual: usize, maximum: usize },
 
-    #[error("story pack role assets cannot be serialized: {message}")]
-    RoleAssetsSerialization { message: String },
+    #[error("story role state cannot be serialized: {message}")]
+    RoleStateSerialization { message: String },
+
+    #[error("story opening size {actual} exceeds maximum {maximum}")]
+    OpeningTooLarge { actual: usize, maximum: usize },
 
     #[error("story pack defines no playable role")]
     NoPlayableRole,

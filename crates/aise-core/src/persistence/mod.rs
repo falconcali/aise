@@ -10,10 +10,10 @@ mod story_store_sqlite;
 
 pub use config::{PackStoreConfig, PersistanceConfig, StoreType, StoryStoreConfig};
 pub use error::PersistenceError;
-pub use pack_store::PackStore;
-pub use pack_store_mem::PackStoreMem;
-pub use pack_store_sqlite::PackStoreSqlite;
 pub use store::Store;
-pub use story_store::StoryStore;
-pub use story_store_mem::StoryStoreMem;
-pub use story_store_sqlite::StoryStoreSqlite;
+pub(crate) use pack_store::PackStore;
+pub(crate) use pack_store_mem::PackStoreMem;
+pub(crate) use pack_store_sqlite::PackStoreSqlite;
+pub(crate) use story_store::StoryStore;
+pub(crate) use story_store_mem::StoryStoreMem;
+pub(crate) use story_store_sqlite::StoryStoreSqlite;

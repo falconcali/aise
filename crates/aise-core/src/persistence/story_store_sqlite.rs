@@ -6,12 +6,12 @@ use crate::core::{IdempotencyKey, StoryCommit, StoryContext, StoryId, StoryInsta
 use async_trait::async_trait;
 
 #[derive(Debug)]
-pub struct StoryStoreSqlite {
+pub(crate) struct StoryStoreSqlite {
     fake_store: StoryStoreMem,
 }
 
 impl StoryStoreSqlite {
-    pub fn new(config: StoryStoreConfig) -> Self {
+    pub(crate) fn new(config: StoryStoreConfig) -> Self {
         Self {
             fake_store: StoryStoreMem::with_config(config),
         }

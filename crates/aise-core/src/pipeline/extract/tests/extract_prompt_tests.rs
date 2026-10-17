@@ -204,7 +204,13 @@ fn world_knowledge_prompt_includes_facts_rumors_and_role_catalog_without_leaking
     let fti = &rendered.messages()[2].content;
 
     assert!(csi.contains("ActivationRule"));
+    assert!(csi.contains("Default to no extraction"));
+    assert!(csi.contains("Recent Story and later compressed into Story Summary"));
+    assert!(csi.contains("character's suspicion"));
+    assert!(csi.contains("hard ceilings, never output targets"));
     assert!(fti.contains("\"roles_for_memory\""));
+    assert!(fti.contains("\"facts\": []"));
+    assert!(fti.contains("ceilings, not targets"));
     assert!(rc.contains("# Existing Facts"));
     assert!(rc.contains("# Existing Rumors"));
     assert!(rc.contains("# Role Catalog"));
@@ -252,7 +258,12 @@ fn role_memory_prompt_isolates_target_role_memories_and_enforces_perspective_bou
     assert!(csi.contains("inner thoughts"));
     assert!(csi.contains("off-scene"));
     assert!(csi.contains("subjective viewpoint"));
+    assert!(csi.contains("Default to `\"memories\": []`"));
+    assert!(csi.contains("vague unease"));
+    assert!(csi.contains("Prefer one cohesive update"));
     assert!(fti.contains("perception boundary"));
+    assert!(fti.contains("\"memories\": []"));
+    assert!(fti.contains("ceiling, not a target"));
     assert!(rc.contains("- role_id: bai_suzhen"));
     assert!(rc.contains("PRIVATE_SECRET_OF_bai_suzhen"));
     assert!(rc.contains("max_memory_changes_per_role: 4"));

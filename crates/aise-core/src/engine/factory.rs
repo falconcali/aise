@@ -1,7 +1,7 @@
 use crate::core::{
-    CharacterCard, CharacterCardRef, EntryOrigin, FactEntry, FactId, MemoryEntry, MemoryId, NarrativeGraph, PlayerId,
-    RoleActor, RoleEntry, RoleId, RumorEntry, RumorId, StoryAssetSpec, StoryId, StoryInstanceInfo, StoryInstanceSpec,
-    StoryPack,
+    CharacterCard, EntryOrigin, FactEntry, FactId, MAX_OPENING_BYTES, MemoryEntry, MemoryId, NarrativeGraph, PlayerId,
+    RoleEntry, RoleId, RumorEntry, RumorId, StoryCreateBundle, StoryError, StoryId, StoryInstanceInfo,
+    StoryPack, StoryPackSnapshot, validate_runtime_roles,
 };
 use crate::engine::EngineError;
 use crate::llm::{LlmConfig, LlmGateway, LlmProviderType, OpenAiCompatProvider};
@@ -23,16 +23,6 @@ pub enum RoleActorSpec {
     Card(Box<CharacterCard>),
 }
 
-struct FrozenStory {
-    assets: StoryAssetSpec,
-    instance: StoryInstanceSpec,
-}
-
-struct FrozenCast {
-    actors: BTreeMap<RoleId, RoleActor>,
-    cards: Vec<(CharacterCardRef, CharacterCard)>,
-}
-
 pub struct AiseFactory;
 
 impl AiseFactory {
@@ -41,21 +31,12 @@ impl AiseFactory {
         store: Arc<Store>,
         spec: StoryCreationSpec,
     ) -> Result<StoryInstanceInfo, EngineError> {
-        let story = self.freeze_story(self.generate_story_id(), spec)?;
-        let story_id = story.instance.story_id.clone();
-        store.pack_store().retain(&story_id, story.assets).await?;
-        match store.story_store().create(story.instance).await {
-            Ok(info) => Ok(info),
-            Err(error) => {
-                self.release_story_assets(&store, &story_id).await;
-                Err(EngineError::from(error))
-            }
-        }
+        let bundle = self.freeze_story(self.generate_story_id(), spec)?;
+        store.create_story(bundle).await.map_err(EngineError::from)
     }
 
     pub async fn remove_story(&self, store: Arc<Store>, story_id: &StoryId) -> Result<(), EngineError> {
-        store.story_store().remove(story_id).await?;
-        store.pack_store().release(story_id).await.map_err(EngineError::from)
+        store.remove_story(story_id).await.map_err(EngineError::from)
     }
 
     pub fn create_llm_gateway(&self, llm_config: LlmConfig) -> Arc<LlmGateway> {
@@ -75,71 +56,41 @@ impl AiseFactory {
         Arc::new(Store::new(persistence_config))
     }
 
-    fn freeze_story(&self, story_id: StoryId, spec: StoryCreationSpec) -> Result<FrozenStory, EngineError> {
-        // WAIVER: R-ARCH-03
-        // WAIVER: R-ARCH-04
+    fn freeze_story(&self, story_id: StoryId, spec: StoryCreationSpec) -> Result<StoryCreateBundle, EngineError> {
         spec.story_pack.validate_play()?;
         spec.story_pack.validate_narrative()?;
         spec.story_pack.validate_roles()?;
-        let frozen_cast = self.freeze_cast(spec.cast)?;
-        let cast = spec.story_pack.resolve_cast(&spec.player_role, frozen_cast.actors)?;
-        let roles = freeze_roles(&spec.story_pack, cast);
+        validate_cast(&spec.story_pack, &spec.player_role, &spec.cast)?;
+        if spec.story_pack.opening.as_str().len() > MAX_OPENING_BYTES {
+            return Err(StoryError::OpeningTooLarge {
+                actual: spec.story_pack.opening.as_str().len(),
+                maximum: MAX_OPENING_BYTES,
+            }
+            .into());
+        }
+        let roles = freeze_roles(&spec.story_pack, spec.cast);
+        validate_runtime_roles(&roles)?;
         let facts = freeze_facts(&spec.story_pack);
         let rumors = freeze_rumors(&spec.story_pack);
-        let pack_ref = spec.story_pack.pack_ref()?;
+        let opening = Arc::new(spec.story_pack.opening.clone());
         let narrative = spec
             .story_pack
             .narrative
             .as_ref()
             .map(NarrativeGraph::initial_state)
             .unwrap_or_default();
-        Ok(FrozenStory {
-            instance: StoryInstanceSpec {
-                story_id,
-                pack_ref: pack_ref.clone(),
-                roles,
-                facts,
-                rumors,
-                player_id: spec.player_id,
-                player_role: spec.player_role,
-                narrative,
-            },
-            assets: StoryAssetSpec {
-                pack_ref,
-                pack: spec.story_pack,
-                cards: frozen_cast.cards,
-            },
-        })
-    }
-
-    fn freeze_cast(&self, cast: BTreeMap<RoleId, RoleActorSpec>) -> Result<FrozenCast, EngineError> {
-        let mut frozen_cast = FrozenCast {
-            actors: BTreeMap::new(),
-            cards: Vec::new(),
-        };
-        for (role_id, actor) in cast {
-            let actor = match actor {
-                RoleActorSpec::Default => RoleActor::Default,
-                RoleActorSpec::Card(card) => {
-                    let card_ref = card.card_ref()?;
-                    frozen_cast.cards.push((card_ref.clone(), *card));
-                    RoleActor::Card(card_ref)
-                }
-            };
-            frozen_cast.actors.insert(role_id, actor);
-        }
-        Ok(frozen_cast)
-    }
-
-    async fn release_story_assets(&self, store: &Store, story_id: &StoryId) {
-        if let Err(error) = store.pack_store().release(story_id).await {
-            tracing::error!(
-                target: "aise::engine",
-                story_id = %story_id,
-                error = %error,
-                "story asset release failed"
-            );
-        }
+        let snapshot = StoryPackSnapshot::from_pack(spec.story_pack)?;
+        Ok(StoryCreateBundle::assemble(
+            snapshot,
+            story_id,
+            opening,
+            roles,
+            facts,
+            rumors,
+            spec.player_id,
+            spec.player_role,
+            narrative,
+        ))
     }
 
     fn generate_story_id(&self) -> StoryId {
@@ -147,13 +98,35 @@ impl AiseFactory {
     }
 }
 
-fn freeze_roles(story_pack: &StoryPack, mut cast: BTreeMap<RoleId, RoleActor>) -> BTreeMap<RoleId, RoleEntry> {
+fn validate_cast(
+    story_pack: &StoryPack,
+    player_role: &RoleId,
+    cast: &BTreeMap<RoleId, RoleActorSpec>,
+) -> Result<(), StoryError> {
+    if !story_pack.play.playable_roles.contains(player_role) {
+        return Err(StoryError::RoleNotPlayable {
+            role_id: player_role.to_string(),
+        });
+    }
+    if let Some(role_id) = cast.keys().find(|role_id| !story_pack.roles.contains_key(*role_id)) {
+        return Err(StoryError::UnknownRole {
+            field: "cast",
+            role_id: role_id.to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn freeze_roles(story_pack: &StoryPack, mut cast: BTreeMap<RoleId, RoleActorSpec>) -> BTreeMap<RoleId, RoleEntry> {
     story_pack
         .roles
         .iter()
-        .map(|(role_id, body)| {
-            let actor = cast.remove(role_id).unwrap_or(RoleActor::Default);
-            let memories = body
+        .map(|(role_id, seed_role)| {
+            let profile = match cast.remove(role_id) {
+                Some(RoleActorSpec::Card(card)) => card.profile,
+                Some(RoleActorSpec::Default) | None => seed_role.default_profile.clone(),
+            };
+            let memories = seed_role
                 .seed_memories
                 .iter()
                 .map(|(id, memory_body)| {
@@ -171,8 +144,9 @@ fn freeze_roles(story_pack: &StoryPack, mut cast: BTreeMap<RoleId, RoleActor>) -
                 role_id.clone(),
                 RoleEntry {
                     id: role_id.clone(),
-                    actor,
-                    body: body.clone(),
+                    origin: EntryOrigin::Seed,
+                    spec: seed_role.spec.clone(),
+                    profile,
                     memories,
                 },
             )
@@ -181,6 +155,7 @@ fn freeze_roles(story_pack: &StoryPack, mut cast: BTreeMap<RoleId, RoleActor>) -
 }
 
 fn freeze_facts(story_pack: &StoryPack) -> BTreeMap<FactId, FactEntry> {
+    // WAIVER: R-ARCH-04
     story_pack
         .seed_facts
         .iter()
@@ -198,6 +173,7 @@ fn freeze_facts(story_pack: &StoryPack) -> BTreeMap<FactId, FactEntry> {
 }
 
 fn freeze_rumors(story_pack: &StoryPack) -> BTreeMap<RumorId, RumorEntry> {
+    // WAIVER: R-ARCH-04
     story_pack
         .seed_rumors
         .iter()

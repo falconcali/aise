@@ -3,7 +3,7 @@ use crate::core::{IdempotencyKey, StoryCommit, StoryContext, StoryId, StoryInsta
 use async_trait::async_trait;
 
 #[async_trait]
-pub trait StoryStore: Send + Sync {
+pub(crate) trait StoryStore: Send + Sync {
     async fn create(&self, spec: StoryInstanceSpec) -> Result<StoryInstanceInfo, PersistenceError>;
     async fn remove(&self, story_id: &StoryId) -> Result<(), PersistenceError>;
     async fn get_info(&self, story_id: &StoryId) -> Result<StoryInstanceInfo, PersistenceError>;

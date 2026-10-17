@@ -4,7 +4,7 @@ use super::story_store::StoryStore;
 use crate::core::{
     Change, EntryOrigin, FactChangeOp, FactEntry, FactId, IdempotencyKey, KnowledgeChange, MemoryEntry, MemoryId,
     RoleId, RoleMemoryChangeOp, RumorChangeOp, RumorEntry, RumorId, StoryCommit, StoryContext, StoryId,
-    StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle, TurnNumber,
+    StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle, TurnNumber, validate_runtime_roles,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug)]
-pub struct StoryStoreMem {
+pub(crate) struct StoryStoreMem {
     stories: Arc<RwLock<HashMap<StoryId, StoredStory>>>,
     config: StoryStoreConfig,
 }
@@ -26,11 +26,11 @@ struct StoredStory {
 }
 
 impl StoryStoreMem {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::with_config(StoryStoreConfig::default())
     }
 
-    pub fn with_config(config: StoryStoreConfig) -> Self {
+    pub(crate) fn with_config(config: StoryStoreConfig) -> Self {
         Self {
             stories: Arc::new(RwLock::new(HashMap::new())),
             config,
@@ -234,9 +234,12 @@ impl Default for StoryStoreMem {
 impl StoryStore for StoryStoreMem {
     async fn create(&self, spec: StoryInstanceSpec) -> Result<StoryInstanceInfo, PersistenceError> {
         let now = Utc::now();
+        let spec = spec.into_parts();
+        validate_runtime_roles(&spec.roles)?;
         let context = StoryContext {
             story_id: spec.story_id,
             pack_ref: spec.pack_ref,
+            opening: spec.opening,
             roles: spec.roles,
             facts: spec.facts,
             rumors: spec.rumors,
@@ -249,6 +252,7 @@ impl StoryStore for StoryStoreMem {
         };
         let info = StoryInstanceInfo {
             story_id: context.story_id.clone(),
+            player_id: spec.player_id,
             description: String::new(),
             created_at: now,
             updated_at: now,
@@ -348,6 +352,7 @@ impl StoryStore for StoryStoreMem {
         if let Change::Replaced(narrative) = &commit.narrative {
             next_context.narrative = narrative.clone();
         }
+        validate_runtime_roles(&next_context.roles)?;
         if let Change::Replaced(life_cycle) = commit.life_cycle {
             next_context.life_cycle = life_cycle;
             story.info.life_cycle = life_cycle;

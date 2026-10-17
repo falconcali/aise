@@ -1,6 +1,4 @@
-use crate::core::{
-    BoundedText, CharacterThinkRequest, ChatMessage, FactId, PlayerRoleContext, RoleId, RumorId, TurnControl,
-};
+use crate::core::{BoundedText, CharacterThinkRequest, ChatMessage, FactId, RoleId, RumorId, TurnControl};
 use crate::llm::{LlmCompletionSpec, LlmError, LlmGateway};
 use crate::pipeline::common::{PipelineError, PipelineStage};
 use crate::pipeline::plan::{
@@ -45,7 +43,7 @@ pub(super) fn parse_plan_output(
     raw: &str,
     candidates: &PlanCandidates<'_>,
     role_catalog: &[RoleCatalogEntry<'_>],
-    player_role: PlayerRoleContext,
+    player_role: &RoleId,
     config: &PlanConfig,
 ) -> Result<PlanOutput, PipelineError> {
     let output = serde_json::from_str::<PlanLlmOutputDto>(raw).map_err(|error| {
@@ -75,9 +73,9 @@ pub(super) fn parse_plan_output(
     }
     validate_fact_ids(&output.facts_to_retrieve, candidates)?;
     validate_rumor_ids(&output.rumors_to_retrieve, candidates)?;
-    validate_generation_roles(&output.roles_for_generation, role_catalog, &player_role.role_id, config)?;
+    validate_generation_roles(&output.roles_for_generation, role_catalog, player_role, config)?;
     let character_think_requests =
-        validate_character_think_requests(output.character_think_requests, role_catalog, &player_role.role_id, config)?;
+        validate_character_think_requests(output.character_think_requests, role_catalog, player_role, config)?;
     let story_goal =
         BoundedText::try_new(output.story_goal, "story_goal", config.max_story_goal_bytes).map_err(|error| {
             PipelineError::invalid_output(PipelineStage::Plan, "plan_story_goal_too_long", error.to_string())
@@ -85,7 +83,6 @@ pub(super) fn parse_plan_output(
 
     Ok(PlanOutput {
         story_goal,
-        player_role,
         facts_to_retrieve: output.facts_to_retrieve,
         rumors_to_retrieve: output.rumors_to_retrieve,
         roles_for_generation: output.roles_for_generation,

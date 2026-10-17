@@ -34,16 +34,16 @@ pub use narrative::{
     NarrativeTransition, NodeStatus, SemanticQuery, Truth,
 };
 pub use role::{
-    CharacterCard, CharacterCardRef, CharacterCardSpec, CharacterDecision, CharacterMeta, CharacterProfile,
-    CharacterThinkRequest, DialogueExample, MemoryBody, MemoryEntry, PlayerRoleContext, ResolvedRole, RoleActor,
-    RoleBody, RoleEntry,
+    CharacterCard, CharacterCardSpec, CharacterDecision, CharacterMeta, CharacterProfile, CharacterThinkRequest,
+    DialogueExample, MAX_ALIASES_PER_ROLE, MAX_MEMORIES_PER_ROLE, MAX_OPENING_BYTES, MAX_ROLES_PER_STORY,
+    MAX_ROLE_CATALOG_BYTES, MAX_ROLE_STATE_BYTES, MemoryBody, MemoryEntry, RoleEntry, RoleSpec, SeedRole,
 };
 pub use story::{
-    MAX_ALIASES_PER_ROLE, MAX_ROLE_ASSETS_BYTES, MAX_ROLE_CATALOG_BYTES, MAX_ROLES_PER_PACK,
-    MAX_SEED_MEMORIES_PER_ROLE, PackRef, PlayDefinition, StoryAssetSpec, StoryCommit, StoryContext, StoryError,
-    StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle, StoryPack, StoryPackMeta, StoryPackProfile, StoryPackSpec,
-    StorySummary,
+    PackRef, PlayDefinition, StoryCommit, StoryContext, StoryError, StoryInstanceInfo, StoryLifeCycle, StoryPack,
+    StoryPackMeta, StoryPackProfile, StoryPackSpec, StorySummary,
 };
+pub(crate) use role::{validate_role_spec, validate_runtime_roles, validate_seed_roles};
+pub(crate) use story::{StoryCreateBundle, StoryInstanceParts, StoryInstanceSpec, StoryPackSnapshot};
 pub use turn::{
     PlayerContribution, Turn, TurnCancellation, TurnCheckEvaluation, TurnChoiceEvaluation, TurnControl, TurnEvaluation,
     TurnEvent, TurnEventSink, TurnNumber, TurnRequest, TurnScoreEvaluation, TurnSegment, TurnStatus,

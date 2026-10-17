@@ -2,6 +2,14 @@ Extract private memory changes for the Target Role now.
 
 Return exactly one JSON object with no Markdown fence and no surrounding prose:
 
+The expected response when nothing clearly passes the persistence test is:
+
+{
+  "memories": []
+}
+
+Use the following operation shapes only when a candidate clearly requires durable role-specific recall. The populated shapes illustrate the protocol, not a desired number of operations:
+
 {
   "memories": [
     {
@@ -50,8 +58,9 @@ Return exactly one JSON object with no Markdown fence and no surrounding prose:
 }
 
 Strict protocol constraints:
+- An empty `memories` array is valid and preferred over marginal, redundant, speculative, or merely narrative memories.
 - `memories` items allow only `"op": "add"` (with `body`) and `"op": "update"` (with existing `id` from Existing Memories and `body`). Never emit `"op": "remove"`.
 - Record only information within the Target Role's perception boundary (personally experienced, witnessed, heard, explicitly told, or reasonably inferred from prior knowledge). Never include omniscient narration, other characters' inner thoughts, secret dialogues out of earshot, or off-scene events. Record misunderstandings from the Target Role's subjective viewpoint.
-- Respect `max_memory_changes_per_role`.
+- Treat `max_memory_changes_per_role` strictly as a ceiling, not a target.
 - For every `activation`, when `mode.enabled` is `true` and `mode.constant` is `false`, `match.keys` must contain at least one non-empty keyword.
 - Do not include explanations, comments, Markdown fences, or any field not defined in the JSON protocol.

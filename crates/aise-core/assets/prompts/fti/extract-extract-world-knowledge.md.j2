@@ -2,6 +2,16 @@ Extract world knowledge changes and select roles requiring memory extraction now
 
 Return exactly one JSON object with no Markdown fence and no surrounding prose:
 
+The expected response when nothing clearly passes the persistence test is:
+
+{
+  "facts": [],
+  "rumors": [],
+  "roles_for_memory": []
+}
+
+Use the following operation shapes only when a candidate clearly requires durable structured storage. The populated shapes illustrate the protocol, not a desired number of operations:
+
 {
   "facts": [
     {
@@ -78,9 +88,10 @@ Return exactly one JSON object with no Markdown fence and no surrounding prose:
 }
 
 Strict protocol constraints:
+- Empty arrays are valid and preferred over marginal, redundant, speculative, or merely narrative entries.
 - `facts` items allow only `"op": "add"` (with `body`) and `"op": "update"` (with existing `id` and `body`). Never emit `"op": "remove"` in `facts`.
 - `rumors` items allow `"op": "add"` (with `body`), `"op": "update"` (with existing `id` and `body`), and `"op": "remove"` (with existing `id` only).
 - `roles_for_memory` must contain only unique `role_id` strings from Role Catalog.
-- Respect `max_fact_changes`, `max_rumor_changes`, and `max_roles_for_memory`.
+- Treat `max_fact_changes`, `max_rumor_changes`, and `max_roles_for_memory` strictly as ceilings, not targets.
 - For every `activation`, when `mode.enabled` is `true` and `mode.constant` is `false`, `match.keys` must contain at least one non-empty keyword.
 - Do not include explanations, comments, Markdown fences, or any field not defined in the JSON protocol.

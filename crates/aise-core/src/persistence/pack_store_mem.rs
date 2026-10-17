@@ -1,41 +1,37 @@
 use super::config::PackStoreConfig;
 use super::error::PersistenceError;
 use super::pack_store::PackStore;
-use crate::core::{CharacterCard, CharacterCardRef, PackRef, Sha256Digest, StoryAssetSpec, StoryId, StoryPack};
+use crate::core::{PackRef, Sha256Digest, StoryId, StoryPack, StoryPackSnapshot};
 use async_trait::async_trait;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug)]
-pub struct PackStoreMem {
+pub(crate) struct PackStoreMem {
     snapshots: RwLock<StorySnapshots>,
     config: PackStoreConfig,
 }
 
 #[derive(Debug, Default)]
 struct StorySnapshots {
-    packs: SnapshotTable<StoryPack>,
-    cards: SnapshotTable<CharacterCard>,
+    packs: HashMap<Sha256Digest, Snapshot>,
+    holders: HashMap<StoryId, Sha256Digest>,
 }
 
 #[derive(Debug)]
-struct SnapshotTable<T> {
-    entries: HashMap<Sha256Digest, Snapshot<T>>,
-}
-
-#[derive(Debug)]
-struct Snapshot<T> {
-    value: Arc<T>,
+struct Snapshot {
+    pack_ref: PackRef,
+    value: Arc<StoryPack>,
     holders: BTreeSet<StoryId>,
 }
 
 impl PackStoreMem {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::with_config(PackStoreConfig::default())
     }
 
-    pub fn with_config(config: PackStoreConfig) -> Self {
+    pub(crate) fn with_config(config: PackStoreConfig) -> Self {
         Self {
             snapshots: RwLock::new(StorySnapshots::default()),
             config,
@@ -53,89 +49,67 @@ impl StorySnapshots {
     fn retain(
         &mut self,
         story_id: &StoryId,
-        assets: StoryAssetSpec,
+        snapshot: StoryPackSnapshot,
         config: &PackStoreConfig,
     ) -> Result<(), PersistenceError> {
-        self.packs.check_capacity(
-            std::iter::once(&assets.pack_ref.digest),
-            config.max_packs,
-            "pack store capacity reached",
-        )?;
-        self.cards.check_capacity(
-            assets.cards.iter().map(|(card_ref, _)| &card_ref.digest),
-            config.max_character_cards,
-            "character card store capacity reached",
-        )?;
-        self.packs.retain(story_id, assets.pack_ref.digest, assets.pack);
-        for (card_ref, card) in assets.cards {
-            self.cards.retain(story_id, card_ref.digest, card);
-        }
-        Ok(())
-    }
-
-    fn release(&mut self, story_id: &StoryId) {
-        self.packs.release(story_id);
-        self.cards.release(story_id);
-    }
-}
-
-impl<T> Default for SnapshotTable<T> {
-    fn default() -> Self {
-        Self {
-            entries: HashMap::new(),
-        }
-    }
-}
-
-impl<T> SnapshotTable<T> {
-    fn check_capacity<'a>(
-        &self,
-        digests: impl Iterator<Item = &'a Sha256Digest>,
-        maximum: usize,
-        constraint: &str,
-    ) -> Result<(), PersistenceError> {
-        let incoming = digests
-            .filter(|digest| !self.entries.contains_key(*digest))
-            .collect::<BTreeSet<_>>()
-            .len();
-        if self.entries.len() + incoming > maximum {
-            return Err(PersistenceError::ConstraintViolation {
-                constraint: constraint.to_owned(),
+        if self.holders.contains_key(story_id) {
+            return Err(PersistenceError::StoryHolderAlreadyExists {
+                story_id: story_id.clone(),
             });
         }
-        Ok(())
-    }
-
-    fn retain(&mut self, story_id: &StoryId, digest: Sha256Digest, value: T) {
-        self.entries
-            .entry(digest)
+        let (pack_ref, pack) = snapshot.into_parts();
+        if !self.packs.contains_key(&pack_ref.digest) && self.packs.len() >= config.max_packs {
+            return Err(PersistenceError::PackCapacityExceeded {
+                actual: self.packs.len().saturating_add(1),
+                maximum: config.max_packs,
+            });
+        }
+        let digest = pack_ref.digest.clone();
+        if let Some(existing) = self.packs.get(&digest)
+            && existing.pack_ref != pack_ref
+        {
+            return Err(PersistenceError::InvalidPackReference { pack_ref });
+        }
+        self.packs
+            .entry(digest.clone())
             .or_insert_with(|| Snapshot {
-                value: Arc::new(value),
+                pack_ref,
+                value: Arc::new(pack),
                 holders: BTreeSet::new(),
             })
             .holders
             .insert(story_id.clone());
+        self.holders.insert(story_id.clone(), digest);
+        Ok(())
     }
 
     fn release(&mut self, story_id: &StoryId) {
-        self.entries.retain(|_, snapshot| {
+        let Some(digest) = self.holders.remove(story_id) else {
+            return;
+        };
+        if let Some(snapshot) = self.packs.get_mut(&digest) {
             snapshot.holders.remove(story_id);
-            !snapshot.holders.is_empty()
-        });
+            if snapshot.holders.is_empty() {
+                self.packs.remove(&digest);
+            }
+        }
     }
 
-    fn get(&self, digest: &Sha256Digest) -> Result<Arc<T>, PersistenceError> {
-        self.entries
-            .get(digest)
-            .map(|snapshot| Arc::clone(&snapshot.value))
-            .ok_or(PersistenceError::NotFound)
+    fn get(&self, pack_ref: &PackRef) -> Result<Arc<StoryPack>, PersistenceError> {
+        let snapshot = self.packs.get(&pack_ref.digest).ok_or(PersistenceError::NotFound)?;
+        if snapshot.pack_ref != *pack_ref {
+            return Err(PersistenceError::InvalidPackReference {
+                pack_ref: pack_ref.clone(),
+            });
+        }
+        Ok(Arc::clone(&snapshot.value))
     }
 }
 
 #[async_trait]
 impl PackStore for PackStoreMem {
-    async fn retain(&self, story_id: &StoryId, assets: StoryAssetSpec) -> Result<(), PersistenceError> {
-        self.snapshots.write().await.retain(story_id, assets, &self.config)
+    async fn retain(&self, story_id: &StoryId, snapshot: StoryPackSnapshot) -> Result<(), PersistenceError> {
+        self.snapshots.write().await.retain(story_id, snapshot, &self.config)
     }
 
     async fn release(&self, story_id: &StoryId) -> Result<(), PersistenceError> {
@@ -144,11 +118,7 @@ impl PackStore for PackStoreMem {
     }
 
     async fn get_pack(&self, pack_ref: &PackRef) -> Result<Arc<StoryPack>, PersistenceError> {
-        self.snapshots.read().await.packs.get(&pack_ref.digest)
-    }
-
-    async fn get_character_card(&self, card_ref: &CharacterCardRef) -> Result<Arc<CharacterCard>, PersistenceError> {
-        self.snapshots.read().await.cards.get(&card_ref.digest)
+        self.snapshots.read().await.get(pack_ref)
     }
 }
 

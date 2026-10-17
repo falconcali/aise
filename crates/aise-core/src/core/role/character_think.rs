@@ -1,22 +1,10 @@
-use crate::core::{BoundedText, CharacterProfile, MemoryEntry, MemoryId, RetrievalHint, RoleId};
+use crate::core::{BoundedText, RoleId};
 use serde::Serialize;
-use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CharacterThinkRequest {
     pub role_id: RoleId,
     pub thinking_focus: BoundedText,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ResolvedRole {
-    pub role_id: RoleId,
-    pub name: BoundedText,
-    pub aliases: Vec<BoundedText>,
-    pub backstory: BoundedText,
-    pub retrieval_hint: RetrievalHint,
-    pub profile: CharacterProfile,
-    pub memories: BTreeMap<MemoryId, MemoryEntry>,
 }
 
 #[derive(Debug, Clone, Serialize)]
