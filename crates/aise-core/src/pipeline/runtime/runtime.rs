@@ -85,7 +85,12 @@ impl Runtime {
                 pipeline_config.repair,
                 Arc::clone(&quality_policy),
             ),
-            extract: ExtractPipeline::new(Arc::clone(&store)),
+            extract: ExtractPipeline::new(
+                Arc::clone(&gateway),
+                Arc::clone(&prompt),
+                Arc::clone(&store),
+                pipeline_config.extract,
+            ),
             summary: SummaryPipeline::new(
                 Arc::clone(&gateway),
                 Arc::clone(&prompt),

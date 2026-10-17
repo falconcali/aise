@@ -1,5 +1,6 @@
 use crate::pipeline::baseline::BaselineConfig;
 use crate::pipeline::common::{PipelineError, PipelineStage};
+use crate::pipeline::extract::ExtractConfig;
 use crate::pipeline::generate::GenerateConfig;
 use crate::pipeline::plan::PlanConfig;
 use crate::pipeline::repair::RepairConfig;
@@ -45,6 +46,7 @@ pub struct PipelineConfig {
     pub validate: ValidateConfig,
     pub repair: RepairConfig,
     pub validation_loop: ValidationLoopConfig,
+    pub extract: ExtractConfig,
     pub summary: SummaryConfig,
 }
 
@@ -52,7 +54,8 @@ impl PipelineConfig {
     pub fn validate(&self) -> Result<(), PipelineError> {
         self.validate.validate()?;
         self.repair.validate()?;
-        self.validation_loop.validate()
+        self.validation_loop.validate()?;
+        self.extract.validate()
     }
 }
 

@@ -37,6 +37,7 @@ Complete the narrative extraction flow in `ExtractPipeline` by deterministically
 - Requires [Phase 0](./2026-10-17-extract-pipeline-spec-phase-0-gemini.md).
 - Every LLM call MUST route through the injected `LlmGateway` (`R-CONC-04`).
 - Prompt text MUST live exclusively in `crates/aise-core/assets/prompts/{csi,rc,fti}/`; Rust code holds only prompt IDs, variable names, and data assembly (`R-AISE-08`).
+- Keep type definitions and trait derives minimal and strictly necessary for production code: do **not** add test-only derives (such as `PartialEq`, `Eq`), speculative helper methods, or extra fields to `core` or `pipeline` types; tests MUST use `matches!`, field-level assertions, or `serde_json::to_value` comparisons instead of polluting production definitions.
 - Rust source files MUST remain comment-free (`R-CODE-05`) and unit tests MUST live in `tests/<source>_tests.rs` (`R-CODE-02`).
 
 ---

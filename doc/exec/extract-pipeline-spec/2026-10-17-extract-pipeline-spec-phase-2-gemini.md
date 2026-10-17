@@ -38,6 +38,7 @@ Implement two-phase dynamic knowledge extraction in `ExtractPipeline`: concurren
 - Requires [Phase 0](./2026-10-17-extract-pipeline-spec-phase-0-gemini.md) and [Phase 1](./2026-10-17-extract-pipeline-spec-phase-1-gemini.md).
 - `ExtractPipeline` MUST NOT write to `Store`; all mutations are returned in `ExtractOutput.knowledge_change` and committed by `CommitPipeline` (`R-AISE-05`).
 - Per-role memory extraction fan-out MUST be bounded by `ExtractConfig.max_roles_for_memory` and `ExtractConfig.max_memory_concurrency`, and every LLM call MUST go through `LlmGateway` (`R-ARCH-03`, `R-CONC-04`).
+- Keep type definitions and trait derives minimal and strictly necessary for production code: do **not** add test-only derives (such as `PartialEq`, `Eq`), speculative helper methods, or extra fields to `core` or `pipeline` types; tests MUST use `matches!`, field-level assertions, or `serde_json::to_value` comparisons instead of polluting production definitions.
 - Rust source files MUST remain comment-free (`R-CODE-05`) and unit tests MUST live in `tests/<source>_tests.rs` (`R-CODE-02`).
 
 ---

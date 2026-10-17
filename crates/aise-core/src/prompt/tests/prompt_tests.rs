@@ -100,6 +100,7 @@ fn bundled_catalog_has_expected_prompts() {
         prompt_ids,
         vec![
             BASELINE_PROMPT_ID,
+            "extract.evaluate_narrative",
             "generate.generate_story",
             PLAN_PROMPT_ID,
             "repair.repair_story",

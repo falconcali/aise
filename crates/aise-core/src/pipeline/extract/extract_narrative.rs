@@ -1,11 +1,22 @@
 use crate::core::{
-    Change, NarrativeConditionId, NarrativeEvidence, NarrativeState, StoryContext, StoryLifeCycle, StoryPack, Truth,
+    Change, NarrativeConditionId, NarrativeError, NarrativeEvidence, NarrativeState, SemanticQuery, StoryContext,
+    StoryLifeCycle, StoryPack, Truth,
 };
 use std::collections::BTreeMap;
 
 pub(super) struct NarrativeChange {
     pub narrative: Change<NarrativeState>,
     pub life_cycle: Change<StoryLifeCycle>,
+}
+
+pub(super) fn collect_semantic_queries(
+    story_pack: &StoryPack,
+    story_ctx: &StoryContext,
+) -> Result<Vec<SemanticQuery>, NarrativeError> {
+    match &story_pack.narrative {
+        Some(graph) => Ok(graph.plan(&story_ctx.narrative)?.queries),
+        None => Ok(Vec::new()),
+    }
 }
 
 pub(super) fn resolve_narrative(

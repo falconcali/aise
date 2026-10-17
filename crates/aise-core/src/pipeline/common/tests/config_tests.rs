@@ -48,6 +48,7 @@ fn pipeline_default_aggregates_validation_defaults() {
     assert_eq!(config.validate.max_issue_bytes, 2048);
     assert_eq!(config.repair.max_proposal_bytes, 64 * 1024);
     assert_eq!(config.validation_loop.max_repair_rounds, 2);
+    assert_eq!(config.extract.max_memory_concurrency.get(), 4);
     config.validate().expect("default pipeline config should be valid");
 }
 

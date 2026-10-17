@@ -102,6 +102,7 @@ fn rumor_body(content: &str, hint: &str, activated: bool) -> RumorBody {
 
 fn knowledge_pack() -> StoryPack {
     let mut pack = snake_pack();
+    pack.narrative = None;
     pack.seed_facts = BTreeMap::from([
         (
             FactId::try_new(ACTIVATED_FACT_ID).expect("fact id should be valid"),

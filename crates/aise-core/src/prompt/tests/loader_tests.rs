@@ -257,11 +257,11 @@ fn rejects_total_template_bytes_exceeded() {
 #[test]
 fn loads_bundled_assets() {
     let mut config = config(Path::new(BUNDLED_PROMPT_DIRECTORY));
-    config.max_prompts = 7;
+    config.max_prompts = 8;
     config.max_template_bytes = 64 * 1024;
     config.max_total_template_bytes = 1024 * 1024;
     let catalog = load_catalog(&config).expect("bundled assets load");
-    assert_eq!(catalog.prompts.len(), 7);
+    assert_eq!(catalog.prompts.len(), 8);
     for prompt in &catalog.prompts {
         assert!(
             [
@@ -271,6 +271,7 @@ fn loads_bundled_assets() {
                 "generate.generate_story",
                 "validate.evaluate_story",
                 "repair.repair_story",
+                "extract.evaluate_narrative",
                 "summary.summarize_story",
             ]
             .contains(&&*prompt.id)

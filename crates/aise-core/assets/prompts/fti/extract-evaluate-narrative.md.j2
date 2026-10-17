@@ -1,0 +1,18 @@
+Evaluate every Semantic Query now.
+
+Return exactly one JSON object with exactly this shape and no surrounding prose:
+
+{
+  "evaluations": [
+    {
+      "condition_id": "copy_the_supplied_condition_id_exactly",
+      "truth": "satisfied"
+    }
+  ]
+}
+
+Return exactly one evaluation for every supplied query. Copy each condition_id exactly and case-sensitively. Do not add, omit, rename, or duplicate condition IDs.
+
+truth must be exactly one of "satisfied", "unsatisfied", or "unknown". Use "unknown" rather than omitting a query when the evidence is inconclusive.
+
+Do not return criteria, explanations, evidence, confidence, Markdown, or any field not shown in the JSON protocol.
