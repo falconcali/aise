@@ -1,10 +1,9 @@
 use crate::core::{
-    NarrativeState, PackId, PackRef, RoleActor, RoleId, SemanticVersion, Sha256Digest, StoryId, StoryLifeCycle, Turn,
-    TurnNumber, WorldState,
+    FactEntry, FactId, NarrativeState, PackId, PackRef, RoleEntry, RoleId, RumorEntry, RumorId, SemanticVersion,
+    Sha256Digest, StoryId, StoryLifeCycle, Turn, TurnNumber,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorySummary {
@@ -16,13 +15,14 @@ pub struct StorySummary {
 pub struct StoryContext {
     pub story_id: StoryId,
     pub pack_ref: PackRef,
-    pub cast: BTreeMap<RoleId, RoleActor>,
+    pub roles: BTreeMap<RoleId, RoleEntry>,
+    pub facts: BTreeMap<FactId, FactEntry>,
+    pub rumors: BTreeMap<RumorId, RumorEntry>,
     pub player: RoleId,
     pub turn_number: TurnNumber,
     pub summary: Option<StorySummary>,
     pub recent_turns: VecDeque<Turn>,
     pub life_cycle: StoryLifeCycle,
-    pub world_state: WorldState,
     pub narrative: NarrativeState,
 }
 
@@ -35,13 +35,14 @@ impl StoryContext {
                 version: SemanticVersion::try_new("0.0.0").expect("valid default version"),
                 digest: Sha256Digest::try_new("default-digest").expect("valid default digest"),
             },
-            cast: BTreeMap::new(),
+            roles: BTreeMap::new(),
+            facts: BTreeMap::new(),
+            rumors: BTreeMap::new(),
             player: RoleId::try_new("player").expect("valid default role id"),
             turn_number: TurnNumber::new(0),
             summary: None,
             recent_turns: VecDeque::new(),
             life_cycle: StoryLifeCycle::Active,
-            world_state: WorldState {},
             narrative: NarrativeState::default(),
         }
     }

@@ -1,6 +1,9 @@
 use super::*;
 use crate::core::tests::snake_pack;
-use crate::core::{ActivatedKnowledge, PlayerRoleContext, RoleId, StoryPack};
+use crate::core::{
+    ActivatedKnowledge, EntryOrigin, FactEntry, MemoryEntry, PlayerRoleContext, RoleActor, RoleEntry, RoleId,
+    RumorEntry, StoryContext, StoryPack,
+};
 use crate::pipeline::plan::plan_candidates::{PlanCandidates, collect_candidates};
 use crate::pipeline::plan::plan_roles::collect_role_catalog;
 use serde_json::json;
@@ -21,8 +24,70 @@ fn candidate_pack() -> StoryPack {
     pack
 }
 
-fn candidates(pack: &StoryPack) -> PlanCandidates<'_> {
-    collect_candidates(pack, &ActivatedKnowledge::default(), 8)
+fn candidate_context(pack: &StoryPack) -> StoryContext {
+    let mut ctx = StoryContext::new();
+    ctx.facts = pack
+        .seed_facts
+        .iter()
+        .map(|(id, body)| {
+            (
+                id.clone(),
+                FactEntry {
+                    id: id.clone(),
+                    origin: EntryOrigin::Seed,
+                    body: body.clone(),
+                },
+            )
+        })
+        .collect();
+    ctx.rumors = pack
+        .seed_rumors
+        .iter()
+        .map(|(id, body)| {
+            (
+                id.clone(),
+                RumorEntry {
+                    id: id.clone(),
+                    origin: EntryOrigin::Seed,
+                    body: body.clone(),
+                },
+            )
+        })
+        .collect();
+    ctx.roles = pack
+        .roles
+        .iter()
+        .map(|(id, body)| {
+            let memories = body
+                .seed_memories
+                .iter()
+                .map(|(mem_id, mem_body)| {
+                    (
+                        mem_id.clone(),
+                        MemoryEntry {
+                            id: mem_id.clone(),
+                            origin: EntryOrigin::Seed,
+                            body: mem_body.clone(),
+                        },
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            (
+                id.clone(),
+                RoleEntry {
+                    id: id.clone(),
+                    actor: RoleActor::Default,
+                    body: body.clone(),
+                    memories,
+                },
+            )
+        })
+        .collect();
+    ctx
+}
+
+fn candidates(ctx: &StoryContext) -> PlanCandidates<'_> {
+    collect_candidates(ctx, &ActivatedKnowledge::default(), 8)
 }
 
 fn config(max_story_goal_bytes: usize) -> PlanConfig {
@@ -63,9 +128,10 @@ fn parse(raw: &str, pack: &StoryPack, config: &PlanConfig) -> Result<PlanOutput,
         }
         Err(_) => raw.to_owned(),
     };
-    let candidates = candidates(pack);
+    let ctx = candidate_context(pack);
+    let candidates = candidates(&ctx);
     let player_role = player_role(pack);
-    let role_catalog = collect_role_catalog(pack, &player_role.role_id);
+    let role_catalog = collect_role_catalog(&ctx, &player_role.role_id);
     parse_plan_output(&raw, &candidates, &role_catalog, player_role, config)
 }
 
@@ -268,9 +334,10 @@ fn missing_role_selection_field_is_rejected() {
         "rumors_to_retrieve":[],
         "roles_for_generation":[]
     }"#;
-    let candidates = candidates(&pack);
+    let ctx = candidate_context(&pack);
+    let candidates = candidates(&ctx);
     let player_role = player_role(&pack);
-    let role_catalog = collect_role_catalog(&pack, &player_role.role_id);
+    let role_catalog = collect_role_catalog(&ctx, &player_role.role_id);
 
     let error = parse_plan_output(raw, &candidates, &role_catalog, player_role, &config(512))
         .expect_err("missing field should fail");

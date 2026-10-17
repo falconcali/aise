@@ -1,4 +1,4 @@
-use crate::core::{BoundedText, CharacterProfile, MemoryBody, MemoryId, RetrievalHint, RoleId};
+use crate::core::{BoundedText, CharacterProfile, MemoryEntry, MemoryId, RetrievalHint, RoleId};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -16,7 +16,7 @@ pub struct ResolvedRole {
     pub backstory: BoundedText,
     pub retrieval_hint: RetrievalHint,
     pub profile: CharacterProfile,
-    pub seed_memories: BTreeMap<MemoryId, MemoryBody>,
+    pub memories: BTreeMap<MemoryId, MemoryEntry>,
 }
 
 #[derive(Debug, Clone, Serialize)]

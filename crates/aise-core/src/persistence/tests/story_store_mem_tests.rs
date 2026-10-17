@@ -1,11 +1,14 @@
 use super::*;
-use crate::core::tests::turn_evaluation;
+use crate::core::tests::{snake_pack, turn_evaluation};
 use crate::core::{
-    Change, IdempotencyKey, NarrativeNodeId, NarrativeState, NodeStatus, PackId, PackRef, PlayerId, RoleId,
-    SemanticVersion, Sha256Digest, StoryCommit, StoryId, StoryInstanceSpec, StorySummary, Turn, TurnNumber,
-    TurnSegment, TurnStatus, WorldChange,
+    ActivationRule, BoundedText, Change, EntryOrigin, FactBody, FactChangeOp, FactEntry, FactId, IdempotencyKey,
+    KnowledgeChange, MemoryBody, MemoryEntry, MemoryId, NarrativeNodeId, NarrativeState, NodeStatus, PackId, PackRef,
+    PlayerId, RetrievalHint, RoleActor, RoleEntry, RoleId, RoleMemoryChangeOp, RumorBody, RumorChangeOp, RumorEntry,
+    RumorId, SemanticVersion, Sha256Digest, StoryCommit, StoryId, StoryInstanceSpec, StorySummary, Turn, TurnNumber,
+    TurnSegment, TurnStatus,
 };
 use crate::persistence::StoreType;
+use std::collections::BTreeMap;
 
 fn story_id(value: &str) -> StoryId {
     StoryId::try_new(value).expect("test story id should be valid")
@@ -13,6 +16,50 @@ fn story_id(value: &str) -> StoryId {
 
 fn idempotency_key(value: &str) -> IdempotencyKey {
     IdempotencyKey::try_new(value).expect("test idempotency key should be valid")
+}
+
+fn fact_id(value: &str) -> FactId {
+    FactId::try_new(value).expect("test fact id should be valid")
+}
+
+fn rumor_id(value: &str) -> RumorId {
+    RumorId::try_new(value).expect("test rumor id should be valid")
+}
+
+fn role_id(value: &str) -> RoleId {
+    RoleId::try_new(value).expect("test role id should be valid")
+}
+
+fn memory_id(value: &str) -> MemoryId {
+    MemoryId::try_new(value).expect("test memory id should be valid")
+}
+
+fn text(value: &str) -> BoundedText {
+    BoundedText::try_new(value, "test", usize::MAX).expect("test text should be valid")
+}
+
+fn fact_body(content: &str) -> FactBody {
+    FactBody {
+        content: text(content),
+        activation: ActivationRule::default(),
+        retrieval: RetrievalHint::try_new(format!("hint-{content}")).expect("valid hint"),
+    }
+}
+
+fn rumor_body(content: &str) -> RumorBody {
+    RumorBody {
+        content: text(content),
+        activation: ActivationRule::default(),
+        retrieval: RetrievalHint::try_new(format!("hint-{content}")).expect("valid hint"),
+    }
+}
+
+fn memory_body(content: &str) -> MemoryBody {
+    MemoryBody {
+        content: text(content),
+        activation: ActivationRule::default(),
+        retrieval: RetrievalHint::try_new(format!("hint-{content}")).expect("valid hint"),
+    }
 }
 
 fn story_spec(value: &str) -> StoryInstanceSpec {
@@ -23,14 +70,65 @@ fn story_spec(value: &str) -> StoryInstanceSpec {
             version: SemanticVersion::try_new("1.0.0").expect("test version should be valid"),
             digest: Sha256Digest::try_new("digest").expect("test digest should be valid"),
         },
-        cast: std::collections::BTreeMap::new(),
+        roles: BTreeMap::new(),
+        facts: BTreeMap::new(),
+        rumors: BTreeMap::new(),
         player_id: PlayerId::try_new("player").expect("test player id should be valid"),
         player_role: RoleId::try_new("protagonist").expect("test role id should be valid"),
         narrative: NarrativeState::default(),
     }
 }
 
+fn seeded_story_spec(value: &str) -> StoryInstanceSpec {
+    let pack = snake_pack();
+    let role_body = pack.roles.values().next().expect("fixture role").clone();
+    let mut spec = story_spec(value);
+    spec.facts.insert(
+        fact_id("seed-fact"),
+        FactEntry {
+            id: fact_id("seed-fact"),
+            origin: EntryOrigin::Seed,
+            body: fact_body("seed fact"),
+        },
+    );
+    spec.rumors.insert(
+        rumor_id("seed-rumor"),
+        RumorEntry {
+            id: rumor_id("seed-rumor"),
+            origin: EntryOrigin::Seed,
+            body: rumor_body("seed rumor"),
+        },
+    );
+    spec.roles.insert(
+        role_id("npc"),
+        RoleEntry {
+            id: role_id("npc"),
+            actor: RoleActor::Default,
+            body: role_body,
+            memories: BTreeMap::from([(
+                memory_id("seed-mem"),
+                MemoryEntry {
+                    id: memory_id("seed-mem"),
+                    origin: EntryOrigin::Seed,
+                    body: memory_body("seed memory"),
+                },
+            )]),
+        },
+    );
+    spec
+}
+
 fn commit(story_id: &StoryId, turn_number: u64, key: &str, summary: Change<StorySummary>) -> StoryCommit {
+    commit_with_knowledge(story_id, turn_number, key, summary, KnowledgeChange::default())
+}
+
+fn commit_with_knowledge(
+    story_id: &StoryId,
+    turn_number: u64,
+    key: &str,
+    summary: Change<StorySummary>,
+    knowledge_change: KnowledgeChange,
+) -> StoryCommit {
     StoryCommit {
         story_id: story_id.clone(),
         turn: Turn {
@@ -41,7 +139,7 @@ fn commit(story_id: &StoryId, turn_number: u64, key: &str, summary: Change<Story
                 processed: format!("processed-{turn_number}"),
             },
             turn_segment: TurnSegment::new(format!("segment-{turn_number}")),
-            world_change: WorldChange {},
+            knowledge_change,
             turn_evaluation: turn_evaluation(),
             turn_status: TurnStatus::Pass,
         },
@@ -228,4 +326,243 @@ async fn completing_story_updates_life_cycle_and_rejects_further_turns() {
         .await
         .expect_err("completed story should reject new turns");
     assert!(matches!(error, PersistenceError::ConstraintViolation { .. }));
+}
+
+#[tokio::test]
+async fn commit_applies_knowledge_change_and_preserves_entry_origins() {
+    let store = StoryStoreMem::new();
+    let spec = seeded_story_spec("story-1");
+    store.create(spec.clone()).await.expect("story creation should succeed");
+
+    let turn_1_change = KnowledgeChange {
+        facts: vec![
+            FactChangeOp::Add {
+                id: fact_id("turn-fact"),
+                body: fact_body("turn 1 fact"),
+            },
+            FactChangeOp::Update {
+                id: fact_id("seed-fact"),
+                body: fact_body("updated seed fact"),
+            },
+        ],
+        rumors: vec![
+            RumorChangeOp::Add {
+                id: rumor_id("turn-rumor"),
+                body: rumor_body("turn 1 rumor"),
+            },
+            RumorChangeOp::Remove {
+                id: rumor_id("seed-rumor"),
+            },
+        ],
+        memories: vec![
+            RoleMemoryChangeOp::Add {
+                role_id: role_id("npc"),
+                id: memory_id("turn-mem"),
+                body: memory_body("turn 1 memory"),
+            },
+            RoleMemoryChangeOp::Update {
+                role_id: role_id("npc"),
+                id: memory_id("seed-mem"),
+                body: memory_body("updated seed memory"),
+            },
+        ],
+    };
+    store
+        .commit(commit_with_knowledge(
+            &spec.story_id,
+            1,
+            "key-1",
+            Change::Unchanged,
+            turn_1_change,
+        ))
+        .await
+        .expect("turn 1 commit should succeed");
+
+    let turn_2_change = KnowledgeChange {
+        facts: vec![FactChangeOp::Update {
+            id: fact_id("turn-fact"),
+            body: fact_body("updated turn 1 fact"),
+        }],
+        rumors: vec![RumorChangeOp::Update {
+            id: rumor_id("turn-rumor"),
+            body: rumor_body("updated turn 1 rumor"),
+        }],
+        memories: vec![RoleMemoryChangeOp::Update {
+            role_id: role_id("npc"),
+            id: memory_id("turn-mem"),
+            body: memory_body("updated turn 1 memory"),
+        }],
+    };
+    store
+        .commit(commit_with_knowledge(
+            &spec.story_id,
+            2,
+            "key-2",
+            Change::Unchanged,
+            turn_2_change,
+        ))
+        .await
+        .expect("turn 2 commit should succeed");
+
+    let loaded = store.load(&spec.story_id).await.expect("story should load");
+    assert!(matches!(loaded.facts[&fact_id("seed-fact")].origin, EntryOrigin::Seed));
+    assert_eq!(loaded.facts[&fact_id("seed-fact")].body.content.as_str(), "updated seed fact");
+    assert!(matches!(
+        &loaded.facts[&fact_id("turn-fact")].origin,
+        EntryOrigin::Turn(t) if t.value() == 1
+    ));
+    assert_eq!(loaded.facts[&fact_id("turn-fact")].body.content.as_str(), "updated turn 1 fact");
+
+    assert!(!loaded.rumors.contains_key(&rumor_id("seed-rumor")));
+    assert!(matches!(
+        &loaded.rumors[&rumor_id("turn-rumor")].origin,
+        EntryOrigin::Turn(t) if t.value() == 1
+    ));
+    assert_eq!(
+        loaded.rumors[&rumor_id("turn-rumor")].body.content.as_str(),
+        "updated turn 1 rumor"
+    );
+
+    let npc_memories = &loaded.roles[&role_id("npc")].memories;
+    assert!(matches!(npc_memories[&memory_id("seed-mem")].origin, EntryOrigin::Seed));
+    assert_eq!(
+        npc_memories[&memory_id("seed-mem")].body.content.as_str(),
+        "updated seed memory"
+    );
+    assert!(matches!(
+        &npc_memories[&memory_id("turn-mem")].origin,
+        EntryOrigin::Turn(t) if t.value() == 1
+    ));
+    assert_eq!(
+        npc_memories[&memory_id("turn-mem")].body.content.as_str(),
+        "updated turn 1 memory"
+    );
+}
+
+#[tokio::test]
+async fn commit_rejects_invalid_knowledge_change_without_mutating_context() {
+    let store = StoryStoreMem::new();
+    let spec = seeded_story_spec("story-1");
+    store.create(spec.clone()).await.expect("story creation should succeed");
+    let before = serde_json::to_value(store.load(&spec.story_id).await.expect("story should load"))
+        .expect("before context serializes");
+
+    let invalid_changes = [
+        KnowledgeChange {
+            facts: vec![
+                FactChangeOp::Add {
+                    id: fact_id("dup"),
+                    body: fact_body("one"),
+                },
+                FactChangeOp::Add {
+                    id: fact_id("dup"),
+                    body: fact_body("two"),
+                },
+            ],
+            ..KnowledgeChange::default()
+        },
+        KnowledgeChange {
+            facts: vec![FactChangeOp::Add {
+                id: fact_id("seed-fact"),
+                body: fact_body("existing"),
+            }],
+            ..KnowledgeChange::default()
+        },
+        KnowledgeChange {
+            facts: vec![FactChangeOp::Update {
+                id: fact_id("missing-fact"),
+                body: fact_body("missing"),
+            }],
+            ..KnowledgeChange::default()
+        },
+        KnowledgeChange {
+            rumors: vec![
+                RumorChangeOp::Update {
+                    id: rumor_id("seed-rumor"),
+                    body: rumor_body("one"),
+                },
+                RumorChangeOp::Remove {
+                    id: rumor_id("seed-rumor"),
+                },
+            ],
+            ..KnowledgeChange::default()
+        },
+        KnowledgeChange {
+            rumors: vec![RumorChangeOp::Add {
+                id: rumor_id("seed-rumor"),
+                body: rumor_body("existing"),
+            }],
+            ..KnowledgeChange::default()
+        },
+        KnowledgeChange {
+            rumors: vec![RumorChangeOp::Update {
+                id: rumor_id("missing-rumor"),
+                body: rumor_body("missing"),
+            }],
+            ..KnowledgeChange::default()
+        },
+        KnowledgeChange {
+            rumors: vec![RumorChangeOp::Remove {
+                id: rumor_id("missing-rumor"),
+            }],
+            ..KnowledgeChange::default()
+        },
+        KnowledgeChange {
+            memories: vec![
+                RoleMemoryChangeOp::Add {
+                    role_id: role_id("npc"),
+                    id: memory_id("dup-mem"),
+                    body: memory_body("one"),
+                },
+                RoleMemoryChangeOp::Add {
+                    role_id: role_id("npc"),
+                    id: memory_id("dup-mem"),
+                    body: memory_body("two"),
+                },
+            ],
+            ..KnowledgeChange::default()
+        },
+        KnowledgeChange {
+            memories: vec![RoleMemoryChangeOp::Add {
+                role_id: role_id("unknown-role"),
+                id: memory_id("new-mem"),
+                body: memory_body("unknown role"),
+            }],
+            ..KnowledgeChange::default()
+        },
+        KnowledgeChange {
+            memories: vec![RoleMemoryChangeOp::Add {
+                role_id: role_id("npc"),
+                id: memory_id("seed-mem"),
+                body: memory_body("existing"),
+            }],
+            ..KnowledgeChange::default()
+        },
+        KnowledgeChange {
+            memories: vec![RoleMemoryChangeOp::Update {
+                role_id: role_id("npc"),
+                id: memory_id("missing-mem"),
+                body: memory_body("missing"),
+            }],
+            ..KnowledgeChange::default()
+        },
+    ];
+
+    for (index, invalid) in invalid_changes.into_iter().enumerate() {
+        let error = store
+            .commit(commit_with_knowledge(
+                &spec.story_id,
+                1,
+                &format!("invalid-{index}"),
+                Change::Unchanged,
+                invalid,
+            ))
+            .await
+            .expect_err("invalid knowledge_change must fail");
+        assert!(matches!(error, PersistenceError::ConstraintViolation { .. }));
+
+        let after = serde_json::to_value(store.load(&spec.story_id).await.expect("story should load"))
+            .expect("after context serializes");
+        assert_eq!(after, before);
+    }
 }

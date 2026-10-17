@@ -1,6 +1,7 @@
 use crate::core::{
-    CharacterCard, CharacterCardRef, NarrativeGraph, PlayerId, RoleActor, RoleId, StoryAssetSpec, StoryId,
-    StoryInstanceInfo, StoryInstanceSpec, StoryPack,
+    CharacterCard, CharacterCardRef, EntryOrigin, FactEntry, FactId, MemoryEntry, MemoryId, NarrativeGraph, PlayerId,
+    RoleActor, RoleEntry, RoleId, RumorEntry, RumorId, StoryAssetSpec, StoryId, StoryInstanceInfo, StoryInstanceSpec,
+    StoryPack,
 };
 use crate::engine::EngineError;
 use crate::llm::{LlmConfig, LlmGateway, LlmProviderType, OpenAiCompatProvider};
@@ -82,6 +83,9 @@ impl AiseFactory {
         spec.story_pack.validate_roles()?;
         let frozen_cast = self.freeze_cast(spec.cast)?;
         let cast = spec.story_pack.resolve_cast(&spec.player_role, frozen_cast.actors)?;
+        let roles = freeze_roles(&spec.story_pack, cast);
+        let facts = freeze_facts(&spec.story_pack);
+        let rumors = freeze_rumors(&spec.story_pack);
         let pack_ref = spec.story_pack.pack_ref()?;
         let narrative = spec
             .story_pack
@@ -93,7 +97,9 @@ impl AiseFactory {
             instance: StoryInstanceSpec {
                 story_id,
                 pack_ref: pack_ref.clone(),
-                cast,
+                roles,
+                facts,
+                rumors,
                 player_id: spec.player_id,
                 player_role: spec.player_role,
                 narrative,
@@ -139,6 +145,73 @@ impl AiseFactory {
     fn generate_story_id(&self) -> StoryId {
         StoryId::try_new(format!("story-{}", Uuid::new_v4())).expect("generated story id must be valid")
     }
+}
+
+fn freeze_roles(story_pack: &StoryPack, mut cast: BTreeMap<RoleId, RoleActor>) -> BTreeMap<RoleId, RoleEntry> {
+    story_pack
+        .roles
+        .iter()
+        .map(|(role_id, body)| {
+            let actor = cast.remove(role_id).unwrap_or(RoleActor::Default);
+            let memories = body
+                .seed_memories
+                .iter()
+                .map(|(id, memory_body)| {
+                    (
+                        id.clone(),
+                        MemoryEntry {
+                            id: id.clone(),
+                            origin: EntryOrigin::Seed,
+                            body: memory_body.clone(),
+                        },
+                    )
+                })
+                .collect::<BTreeMap<MemoryId, MemoryEntry>>();
+            (
+                role_id.clone(),
+                RoleEntry {
+                    id: role_id.clone(),
+                    actor,
+                    body: body.clone(),
+                    memories,
+                },
+            )
+        })
+        .collect()
+}
+
+fn freeze_facts(story_pack: &StoryPack) -> BTreeMap<FactId, FactEntry> {
+    story_pack
+        .seed_facts
+        .iter()
+        .map(|(id, body)| {
+            (
+                id.clone(),
+                FactEntry {
+                    id: id.clone(),
+                    origin: EntryOrigin::Seed,
+                    body: body.clone(),
+                },
+            )
+        })
+        .collect()
+}
+
+fn freeze_rumors(story_pack: &StoryPack) -> BTreeMap<RumorId, RumorEntry> {
+    story_pack
+        .seed_rumors
+        .iter()
+        .map(|(id, body)| {
+            (
+                id.clone(),
+                RumorEntry {
+                    id: id.clone(),
+                    origin: EntryOrigin::Seed,
+                    body: body.clone(),
+                },
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]

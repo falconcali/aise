@@ -1,4 +1,4 @@
-use super::{BoundedText, IdempotencyKey, StoryId, WorldChange};
+use super::{BoundedText, IdempotencyKey, KnowledgeChange, StoryId};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::time::Instant;
@@ -165,7 +165,7 @@ pub struct Turn {
     pub idempotency_key: IdempotencyKey,
     pub player_contribution: PlayerContribution,
     pub turn_segment: TurnSegment,
-    pub world_change: WorldChange,
+    pub knowledge_change: KnowledgeChange,
     pub turn_evaluation: TurnEvaluation,
     pub turn_status: TurnStatus,
 }

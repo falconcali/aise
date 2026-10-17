@@ -1,7 +1,7 @@
 use crate::core::{
-    ActivatedKnowledge, ActivationCandidate, ActivationConfig, ActivationOutcome, ActivationTurn, EntryOrigin,
-    FactEntry, FactId, PlayerContribution, Recallable, RumorEntry, RumorId, ScanBuffer, ScanFragment, ScanFragmentKind,
-    StoryContext, StoryPack, activate,
+    ActivatedKnowledge, ActivationCandidate, ActivationConfig, ActivationOutcome, ActivationTurn, FactId,
+    PlayerContribution, Recallable, RumorId, ScanBuffer, ScanFragment, ScanFragmentKind, StoryContext, StoryPack,
+    activate,
 };
 use crate::pipeline::baseline::baseline_narrative::NarrativeProjection;
 use crate::pipeline::baseline::baseline_trace;
@@ -40,20 +40,20 @@ pub fn activate_knowledge(
     let knowledge_observation = baseline_trace::begin_knowledge_activation(observation, scope.player_contribution);
     let outcome = run_activation(&scope, config);
     baseline_trace::finish_knowledge_activation(knowledge_observation, &outcome);
-    collect_knowledge(scope.story_pack, outcome)
+    collect_knowledge(scope.story_ctx, outcome)
 }
 
 fn run_activation(scope: &KnowledgeScope<'_>, config: &ActivationConfig) -> ActivationOutcome<KnowledgeKey> {
-    let story_pack = scope.story_pack;
-    let candidates = story_pack
-        .seed_facts
+    let story_ctx = scope.story_ctx;
+    let candidates = story_ctx
+        .facts
         .iter()
-        .map(|(id, body)| candidate(KnowledgeKey::Fact(id.clone()), body))
+        .map(|(id, entry)| candidate(KnowledgeKey::Fact(id.clone()), &entry.body))
         .chain(
-            story_pack
-                .seed_rumors
+            story_ctx
+                .rumors
                 .iter()
-                .map(|(id, body)| candidate(KnowledgeKey::Rumor(id.clone()), body)),
+                .map(|(id, entry)| candidate(KnowledgeKey::Rumor(id.clone()), &entry.body)),
         )
         .collect();
     let turn = ActivationTurn {
@@ -73,11 +73,10 @@ fn candidate<'a>(key: KnowledgeKey, body: &'a impl Recallable) -> ActivationCand
 
 fn build_scan_buffer(scope: &KnowledgeScope<'_>) -> ScanBuffer {
     let story_ctx = scope.story_ctx;
-    let player_role_name = scope
-        .story_pack
+    let player_role_name = story_ctx
         .roles
         .get(&story_ctx.player)
-        .map(|role| ScanFragment::new(ScanFragmentKind::PlayerRoleName, 0, role.name.as_str()));
+        .map(|role| ScanFragment::new(ScanFragmentKind::PlayerRoleName, 0, role.body.name.as_str()));
     let directions =
         scope.narrative.directions.iter().map(|direction| {
             ScanFragment::new(ScanFragmentKind::NarrativeDirection, 0, direction.dramatic_focus.as_str())
@@ -117,26 +116,18 @@ fn build_scan_buffer(scope: &KnowledgeScope<'_>) -> ScanBuffer {
     )
 }
 
-fn collect_knowledge(story_pack: &StoryPack, outcome: ActivationOutcome<KnowledgeKey>) -> ActivatedKnowledge {
+fn collect_knowledge(story_ctx: &StoryContext, outcome: ActivationOutcome<KnowledgeKey>) -> ActivatedKnowledge {
     let mut knowledge = ActivatedKnowledge::default();
     for activated in outcome.activated {
         match activated.key {
             KnowledgeKey::Fact(id) => {
-                if let Some(body) = story_pack.seed_facts.get(&id) {
-                    knowledge.facts.push(FactEntry {
-                        id,
-                        origin: EntryOrigin::Seed,
-                        body: body.clone(),
-                    });
+                if let Some(entry) = story_ctx.facts.get(&id) {
+                    knowledge.facts.push(entry.clone());
                 }
             }
             KnowledgeKey::Rumor(id) => {
-                if let Some(body) = story_pack.seed_rumors.get(&id) {
-                    knowledge.rumors.push(RumorEntry {
-                        id,
-                        origin: EntryOrigin::Seed,
-                        body: body.clone(),
-                    });
+                if let Some(entry) = story_ctx.rumors.get(&id) {
+                    knowledge.rumors.push(entry.clone());
                 }
             }
         }

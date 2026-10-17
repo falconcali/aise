@@ -1,8 +1,9 @@
 use super::*;
 use crate::core::tests::store_with_default_pack;
 use crate::core::{
-    BoundedText, CharacterProfile, CharacterThinkRequest, EntryOrigin, MemoryBody, MemoryId, PlayerContribution,
-    ResolvedRole, RetrievalHint, RoleId, RumorBody, RumorEntry, RumorId, StoryContext, StorySummary, TurnNumber,
+    BoundedText, CharacterProfile, CharacterThinkRequest, EntryOrigin, MemoryBody, MemoryEntry, MemoryId,
+    PlayerContribution, ResolvedRole, RetrievalHint, RoleId, RumorBody, RumorEntry, RumorId, StoryContext,
+    StorySummary, TurnNumber,
 };
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -30,12 +31,16 @@ fn role(id: &str, marker: &str) -> ResolvedRole {
             speaking_style: None,
             dialogue_examples: Vec::new(),
         },
-        seed_memories: BTreeMap::from([(
+        memories: BTreeMap::from([(
             MemoryId::try_new(format!("{marker}-memory")).expect("valid memory id"),
-            MemoryBody {
-                content: text(&format!("{marker} memory content")),
-                activation: Default::default(),
-                retrieval: RetrievalHint::try_new(format!("{marker} memory hint")).expect("valid memory hint"),
+            MemoryEntry {
+                id: MemoryId::try_new(format!("{marker}-memory")).expect("valid memory id"),
+                origin: EntryOrigin::Seed,
+                body: MemoryBody {
+                    content: text(&format!("{marker} memory content")),
+                    activation: Default::default(),
+                    retrieval: RetrievalHint::try_new(format!("{marker} memory hint")).expect("valid memory hint"),
+                },
             },
         )]),
     }
@@ -165,7 +170,7 @@ async fn prompt_omits_empty_optional_runtime_sections() {
     let story_ctx = StoryContext::new();
     let mut target = role("target", "TARGET");
     target.backstory = text("");
-    target.seed_memories.clear();
+    target.memories.clear();
     let roles = [target];
     let requests = [CharacterThinkRequest {
         role_id: roles[0].role_id.clone(),

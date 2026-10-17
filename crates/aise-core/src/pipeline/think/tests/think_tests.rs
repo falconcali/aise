@@ -89,7 +89,7 @@ fn role(index: usize) -> ResolvedRole {
             speaking_style: None,
             dialogue_examples: Vec::new(),
         },
-        seed_memories: BTreeMap::new(),
+        memories: BTreeMap::new(),
     }
 }
 

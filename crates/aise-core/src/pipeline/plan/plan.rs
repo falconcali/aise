@@ -73,12 +73,12 @@ impl PlanPipeline {
             .await
             .map_err(PipelineError::persistence(PipelineStage::Plan))?;
         let candidates = plan_candidates::collect_candidates(
-            story_pack.as_ref(),
+            story_ctx,
             input.knowledge,
             self.config.max_retrieval_candidates_per_kind,
         );
-        let player_role = plan_roles::resolve_player_role(self.store.as_ref(), story_pack.as_ref(), story_ctx).await?;
-        let role_catalog = plan_roles::collect_role_catalog(story_pack.as_ref(), &story_ctx.player);
+        let player_role = plan_roles::resolve_player_role(self.store.as_ref(), story_ctx).await?;
+        let role_catalog = plan_roles::collect_role_catalog(story_ctx, &story_ctx.player);
         let rendered_prompt = plan_prompt::process_plan(
             self.prompt.as_ref(),
             plan_prompt::PlanPromptContext {

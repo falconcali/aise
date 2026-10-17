@@ -1,6 +1,4 @@
-use crate::core::{
-    BoundedText, NarrativeDirection, NarrativeError, NarrativePlan, SemanticQuery, StoryContext, StoryPack,
-};
+use crate::core::{BoundedText, NarrativeDirection, NarrativeError, NarrativePlan, StoryContext, StoryPack};
 use crate::pipeline::baseline::baseline_trace;
 use crate::trace::Observation;
 use serde::Serialize;
@@ -9,7 +7,6 @@ use serde::Serialize;
 pub struct NarrativeProjection {
     pub directions: Vec<NarrativeDirection>,
     pub constraints: Vec<BoundedText>,
-    pub queries: Vec<SemanticQuery>,
 }
 
 pub fn project_narrative(
@@ -37,7 +34,6 @@ fn build_projection(story_pack: &StoryPack, story_ctx: &StoryContext) -> Result<
     Ok(NarrativeProjection {
         directions: plan.directions,
         constraints,
-        queries: plan.queries,
     })
 }
 

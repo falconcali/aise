@@ -1,6 +1,4 @@
-use crate::core::{
-    Change, NarrativeState, PlayerContribution, SemanticQuery, StoryContext, StoryLifeCycle, TurnControl,
-};
+use crate::core::{Change, KnowledgeChange, NarrativeState, StoryContext, StoryLifeCycle, TurnControl};
 use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::pipeline::extract::extract_narrative;
@@ -11,13 +9,12 @@ use std::sync::Arc;
 
 #[derive(Serialize)]
 pub struct ExtractInput<'a> {
-    pub query: &'a str,
-    pub player_contribution: &'a PlayerContribution,
-    pub queries: &'a [SemanticQuery],
+    pub proposal: &'a str,
 }
 
 #[derive(Serialize)]
 pub struct ExtractOutput {
+    pub knowledge_change: KnowledgeChange,
     pub narrative: Change<NarrativeState>,
     pub life_cycle: Change<StoryLifeCycle>,
 }
@@ -55,6 +52,7 @@ impl<'a> Pipeline<ExtractInput<'a>> for ExtractPipeline {
         let semantic_results = BTreeMap::new();
         let change = extract_narrative::resolve_narrative(&story_pack, story_ctx, &semantic_results);
         Ok(ExtractOutput {
+            knowledge_change: KnowledgeChange::default(),
             narrative: change.narrative,
             life_cycle: change.life_cycle,
         })

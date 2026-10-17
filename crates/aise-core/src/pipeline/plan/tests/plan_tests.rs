@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::tests::{snake_pack, store_with_default_pack};
-use crate::core::{PlayerContribution, PlayerRoleContext, RoleActor, TurnCancellation};
+use crate::core::{PlayerContribution, PlayerRoleContext, RoleActor, RoleEntry, TurnCancellation};
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
 };
@@ -9,6 +9,7 @@ use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
 };
 use async_trait::async_trait;
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -162,9 +163,18 @@ fn character_think_request_requires_retrieval_and_thinking() {
 async fn pipeline_calls_llm_once_and_returns_validated_output() {
     let calls = Arc::new(AtomicUsize::new(0));
     let pipeline = pipeline(Arc::clone(&calls)).await;
+    let pack = snake_pack();
     let mut story_ctx = StoryContext::new();
     story_ctx.player = RoleId::try_new("xu_xian").expect("valid role id");
-    story_ctx.cast.insert(story_ctx.player.clone(), RoleActor::Default);
+    story_ctx.roles.insert(
+        story_ctx.player.clone(),
+        RoleEntry {
+            id: story_ctx.player.clone(),
+            actor: RoleActor::Default,
+            body: pack.roles[&story_ctx.player].clone(),
+            memories: BTreeMap::new(),
+        },
+    );
     let player_contribution = PlayerContribution {
         raw: "I wave.".to_owned(),
         processed: "I wave.".to_owned(),

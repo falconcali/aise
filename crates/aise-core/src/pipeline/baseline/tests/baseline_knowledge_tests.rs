@@ -1,8 +1,9 @@
 use super::*;
 use crate::core::tests::{demo_pack, snake_pack, turn_evaluation};
 use crate::core::{
-    ActivationRule, BoundedText, IdempotencyKey, NarrativeDirection, NarrativeNodeId, StorySummary, Turn, TurnNumber,
-    TurnSegment, TurnStatus, WorldChange,
+    ActivationRule, BoundedText, EntryOrigin, FactBody, FactEntry, IdempotencyKey, KnowledgeChange, MemoryEntry,
+    NarrativeDirection, NarrativeNodeId, RetrievalHint, RoleActor, RoleEntry, RumorBody, RumorEntry, StorySummary,
+    Turn, TurnNumber, TurnSegment, TurnStatus,
 };
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
@@ -54,7 +55,6 @@ fn empty_narrative() -> NarrativeProjection {
     NarrativeProjection {
         directions: Vec::new(),
         constraints: Vec::new(),
-        queries: Vec::new(),
     }
 }
 
@@ -64,7 +64,7 @@ fn turn(number: u64, segment: &str) -> Turn {
         idempotency_key: IdempotencyKey::try_new(format!("turn-{number}")).expect("test key should be valid"),
         player_contribution: contribution("继续"),
         turn_segment: TurnSegment::new(segment.to_owned()),
-        world_change: WorldChange {},
+        knowledge_change: KnowledgeChange::default(),
         turn_evaluation: turn_evaluation(),
         turn_status: TurnStatus::Pass,
     }
@@ -96,18 +96,87 @@ fn pack_with_rules() -> StoryPack {
     pack
 }
 
+fn seed_context(pack: &StoryPack, story_ctx: &StoryContext) -> StoryContext {
+    let mut ctx = story_ctx.clone();
+    if ctx.facts.is_empty() {
+        ctx.facts = pack
+            .seed_facts
+            .iter()
+            .map(|(id, body)| {
+                (
+                    id.clone(),
+                    FactEntry {
+                        id: id.clone(),
+                        origin: EntryOrigin::Seed,
+                        body: body.clone(),
+                    },
+                )
+            })
+            .collect();
+    }
+    if ctx.rumors.is_empty() {
+        ctx.rumors = pack
+            .seed_rumors
+            .iter()
+            .map(|(id, body)| {
+                (
+                    id.clone(),
+                    RumorEntry {
+                        id: id.clone(),
+                        origin: EntryOrigin::Seed,
+                        body: body.clone(),
+                    },
+                )
+            })
+            .collect();
+    }
+    if ctx.roles.is_empty() {
+        ctx.roles = pack
+            .roles
+            .iter()
+            .map(|(id, body)| {
+                let memories = body
+                    .seed_memories
+                    .iter()
+                    .map(|(mem_id, mem_body)| {
+                        (
+                            mem_id.clone(),
+                            MemoryEntry {
+                                id: mem_id.clone(),
+                                origin: EntryOrigin::Seed,
+                                body: mem_body.clone(),
+                            },
+                        )
+                    })
+                    .collect();
+                (
+                    id.clone(),
+                    RoleEntry {
+                        id: id.clone(),
+                        actor: RoleActor::Default,
+                        body: body.clone(),
+                        memories,
+                    },
+                )
+            })
+            .collect();
+    }
+    ctx
+}
+
 fn activate_with(
     pack: &StoryPack,
     story_ctx: &StoryContext,
     player_text: &str,
     narrative: &NarrativeProjection,
 ) -> ActivatedKnowledge {
+    let seeded_ctx = seed_context(pack, story_ctx);
     let trace = test_trace();
     let player_contribution = contribution(player_text);
     activate_knowledge(
         KnowledgeScope {
             story_pack: pack,
-            story_ctx,
+            story_ctx: &seeded_ctx,
             player_contribution: &player_contribution,
             narrative,
         },
@@ -215,4 +284,68 @@ fn summary_is_only_visible_beyond_recent_story_depth() {
 
     assert_eq!(fact_ids(&near), ["bai_is_thousand_year_snake"]);
     assert!(far.facts.is_empty());
+}
+
+#[test]
+fn dynamically_added_and_updated_knowledge_in_context_is_activated_and_removed_rumors_are_absent() {
+    let pack = pack_with_rules();
+    let mut story_ctx = seed_context(&pack, &StoryContext::new());
+    story_ctx.facts.insert(
+        fact_id("dynamic_fact"),
+        FactEntry {
+            id: fact_id("dynamic_fact"),
+            origin: EntryOrigin::Turn(TurnNumber::new(2)),
+            body: FactBody {
+                content: BoundedText::try_new("Dynamic fact content.", "test", usize::MAX).expect("valid text"),
+                activation: rule(json!({ "match": { "keys": ["雷峰塔"] } })),
+                retrieval: RetrievalHint::try_new("dynamic fact hint").expect("valid hint"),
+            },
+        },
+    );
+    story_ctx
+        .facts
+        .get_mut(&fact_id("fahai_knows_identity"))
+        .expect("seed fact exists")
+        .body
+        .content = BoundedText::try_new("Updated seed fact content.", "test", usize::MAX).expect("valid text");
+    story_ctx.rumors.remove(&rumor_id("rumor_fahai_never_misses"));
+    story_ctx.rumors.insert(
+        rumor_id("dynamic_rumor"),
+        RumorEntry {
+            id: rumor_id("dynamic_rumor"),
+            origin: EntryOrigin::Turn(TurnNumber::new(3)),
+            body: RumorBody {
+                content: BoundedText::try_new("Dynamic rumor content.", "test", usize::MAX).expect("valid text"),
+                activation: rule(json!({ "match": { "keys": ["雷峰塔"] } })),
+                retrieval: RetrievalHint::try_new("dynamic rumor hint").expect("valid hint"),
+            },
+        },
+    );
+
+    let trace = test_trace();
+    let player_contribution = contribution("法海走向雷峰塔");
+    let knowledge = activate_knowledge(
+        KnowledgeScope {
+            story_pack: &pack,
+            story_ctx: &story_ctx,
+            player_contribution: &player_contribution,
+            narrative: &empty_narrative(),
+        },
+        &ActivationConfig::default(),
+        trace.root(),
+    );
+
+    assert_eq!(fact_ids(&knowledge), ["dynamic_fact", "fahai_knows_identity"]);
+    assert!(matches!(
+        &knowledge.facts[0].origin,
+        EntryOrigin::Turn(t) if t.value() == 2
+    ));
+    assert!(matches!(knowledge.facts[1].origin, EntryOrigin::Seed));
+    assert_eq!(knowledge.facts[1].body.content.as_str(), "Updated seed fact content.");
+    assert_eq!(knowledge.rumors.len(), 1);
+    assert_eq!(knowledge.rumors[0].id.as_str(), "dynamic_rumor");
+    assert!(matches!(
+        &knowledge.rumors[0].origin,
+        EntryOrigin::Turn(t) if t.value() == 3
+    ));
 }

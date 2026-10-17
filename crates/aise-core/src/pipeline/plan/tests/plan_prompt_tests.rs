@@ -2,8 +2,9 @@ use super::*;
 use crate::core::tests::{snake_pack, store_with_default_pack, turn_evaluation};
 use crate::core::{
     ActivatedKnowledge, ActivationRule, BoundedText, EntryOrigin, FactBody, FactEntry, FactId, IdempotencyKey,
-    NarrativeDirection, NarrativeNodeId, PlayerContribution, PlayerRoleContext, RetrievalHint, RoleId, RumorBody,
-    RumorEntry, RumorId, StoryPack, StorySummary, Turn, TurnNumber, TurnSegment, TurnStatus, WorldChange,
+    KnowledgeChange, MemoryEntry, NarrativeDirection, NarrativeNodeId, PlayerContribution, PlayerRoleContext,
+    RetrievalHint, RoleActor, RoleEntry, RoleId, RumorBody, RumorEntry, RumorId, StoryPack, StorySummary, Turn,
+    TurnNumber, TurnSegment, TurnStatus,
 };
 use crate::pipeline::plan::plan_candidates::collect_candidates;
 use crate::pipeline::plan::plan_roles::collect_role_catalog;
@@ -68,7 +69,7 @@ fn accepted_turn(number: u64, segment: &str) -> Turn {
         idempotency_key: IdempotencyKey::try_new(format!("key-{number}")).expect("valid idempotency key"),
         player_contribution: contribution(&format!("processed-{number}")),
         turn_segment: TurnSegment::new(segment.to_owned()),
-        world_change: WorldChange {},
+        knowledge_change: KnowledgeChange::default(),
         turn_evaluation: turn_evaluation(),
         turn_status: TurnStatus::Pass,
     }
@@ -107,6 +108,68 @@ fn plan_fixture(processed: &str) -> PlanFixture {
 
 fn text(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", usize::MAX).expect("test text should fit")
+}
+
+fn seed_context(pack: &StoryPack, story_ctx: &StoryContext) -> StoryContext {
+    let mut ctx = story_ctx.clone();
+    ctx.facts = pack
+        .seed_facts
+        .iter()
+        .map(|(id, body)| {
+            (
+                id.clone(),
+                FactEntry {
+                    id: id.clone(),
+                    origin: EntryOrigin::Seed,
+                    body: body.clone(),
+                },
+            )
+        })
+        .collect();
+    ctx.rumors = pack
+        .seed_rumors
+        .iter()
+        .map(|(id, body)| {
+            (
+                id.clone(),
+                RumorEntry {
+                    id: id.clone(),
+                    origin: EntryOrigin::Seed,
+                    body: body.clone(),
+                },
+            )
+        })
+        .collect();
+    ctx.roles = pack
+        .roles
+        .iter()
+        .map(|(id, body)| {
+            let memories = body
+                .seed_memories
+                .iter()
+                .map(|(mem_id, mem_body)| {
+                    (
+                        mem_id.clone(),
+                        MemoryEntry {
+                            id: mem_id.clone(),
+                            origin: EntryOrigin::Seed,
+                            body: mem_body.clone(),
+                        },
+                    )
+                })
+                .collect();
+            (
+                id.clone(),
+                RoleEntry {
+                    id: id.clone(),
+                    actor: RoleActor::Default,
+                    body: body.clone(),
+                    memories,
+                },
+            )
+        })
+        .collect();
+    ctx
 }
 
 fn player_role(pack: &StoryPack) -> PlayerRoleContext {
@@ -150,14 +213,15 @@ fn render_pack_context(
     story_pack: &StoryPack,
     candidate_limit: usize,
 ) -> String {
+    let seeded_ctx = seed_context(story_pack, story_ctx);
     let trace = test_trace();
-    let candidates = collect_candidates(story_pack, &fixture.knowledge, candidate_limit);
+    let candidates = collect_candidates(&seeded_ctx, &fixture.knowledge, candidate_limit);
     let player_role = player_role(story_pack);
-    let role_catalog = collect_role_catalog(story_pack, &player_role.role_id);
+    let role_catalog = collect_role_catalog(&seeded_ctx, &player_role.role_id);
     let rendered = process_plan(
         &bundled_prompt(),
         PlanPromptContext {
-            story_ctx,
+            story_ctx: &seeded_ctx,
             input: &fixture.input(),
             story_pack,
             candidates: &candidates,
@@ -177,13 +241,14 @@ async fn runtime_context(story_ctx: &StoryContext, processed: &str) -> String {
 
 fn vars(story_ctx: &StoryContext, fixture: &PlanFixture, story_opening: String) -> PromptVars {
     let pack = snake_pack();
-    let candidates = collect_candidates(&pack, &fixture.knowledge, 0);
+    let seeded_ctx = seed_context(&pack, story_ctx);
+    let candidates = collect_candidates(&seeded_ctx, &fixture.knowledge, 0);
     let player_role = player_role(&pack);
-    let role_catalog = collect_role_catalog(&pack, &player_role.role_id);
+    let role_catalog = collect_role_catalog(&seeded_ctx, &player_role.role_id);
     let player_role = player_role_text(&player_role, &PlanConfig::default()).expect("player role renders");
     let role_catalog = role_catalog_text(&role_catalog).expect("catalog renders");
     plan_vars(
-        story_ctx,
+        &seeded_ctx,
         &fixture.input(),
         story_opening,
         &candidates,
@@ -550,12 +615,12 @@ fn candidate_sections_follow_known_knowledge_and_precede_narrative_direction() {
 
 #[test]
 fn instructions_enforce_goal_budget_rumor_semantics_and_strict_json_protocol() {
-    let story_ctx = StoryContext::new();
-    let fixture = plan_fixture("I wave.");
     let pack = candidate_pack(&["fact-a"], &["rumor-a"]);
-    let candidates = collect_candidates(&pack, &fixture.knowledge, 8);
+    let story_ctx = seed_context(&pack, &StoryContext::new());
+    let fixture = plan_fixture("I wave.");
+    let candidates = collect_candidates(&story_ctx, &fixture.knowledge, 8);
     let player_role = player_role(&pack);
-    let role_catalog = collect_role_catalog(&pack, &player_role.role_id);
+    let role_catalog = collect_role_catalog(&story_ctx, &player_role.role_id);
     let trace = test_trace();
     let config = PlanConfig {
         max_story_goal_bytes: 321,

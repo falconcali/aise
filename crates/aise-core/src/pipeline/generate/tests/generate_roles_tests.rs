@@ -22,7 +22,7 @@ fn role(role_id: &str, name: &str, personality: &str) -> ResolvedRole {
                 response: text(&format!("I am {name}.")),
             }],
         },
-        seed_memories: BTreeMap::new(),
+        memories: BTreeMap::new(),
     }
 }
 
@@ -106,21 +106,29 @@ fn player_role_is_rejected_from_ai_roles() {
 #[test]
 fn role_projection_excludes_private_memories() {
     let mut first = role("first", "First", "calm");
-    first.seed_memories.insert(
+    first.memories.insert(
         crate::core::MemoryId::try_new("first_memory").expect("valid memory ID"),
-        crate::core::MemoryBody {
-            content: text("First secret"),
-            activation: crate::core::ActivationRule::default(),
-            retrieval: RetrievalHint::try_new("First secret").expect("valid retrieval hint"),
+        crate::core::MemoryEntry {
+            id: crate::core::MemoryId::try_new("first_memory").expect("valid memory ID"),
+            origin: crate::core::EntryOrigin::Seed,
+            body: crate::core::MemoryBody {
+                content: text("First secret"),
+                activation: crate::core::ActivationRule::default(),
+                retrieval: RetrievalHint::try_new("First secret").expect("valid retrieval hint"),
+            },
         },
     );
     let mut second = role("second", "Second", "bold");
-    second.seed_memories.insert(
+    second.memories.insert(
         crate::core::MemoryId::try_new("second_memory").expect("valid memory ID"),
-        crate::core::MemoryBody {
-            content: text("Second secret"),
-            activation: crate::core::ActivationRule::default(),
-            retrieval: RetrievalHint::try_new("Second secret").expect("valid retrieval hint"),
+        crate::core::MemoryEntry {
+            id: crate::core::MemoryId::try_new("second_memory").expect("valid memory ID"),
+            origin: crate::core::EntryOrigin::Seed,
+            body: crate::core::MemoryBody {
+                content: text("Second secret"),
+                activation: crate::core::ActivationRule::default(),
+                retrieval: RetrievalHint::try_new("Second secret").expect("valid retrieval hint"),
+            },
         },
     );
 

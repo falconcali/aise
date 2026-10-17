@@ -1,6 +1,6 @@
 use crate::core::{
-    CharacterProfile, EntryOrigin, FactEntry, FactId, ResolvedRole, RoleActor, RoleBody, RoleId, RumorEntry, RumorId,
-    StoryContext, StoryPack, TurnControl,
+    CharacterProfile, FactEntry, FactId, ResolvedRole, RoleActor, RoleBody, RoleId, RumorEntry, RumorId, StoryContext,
+    TurnControl,
 };
 use crate::persistence::{PersistenceError, Store};
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
@@ -33,113 +33,78 @@ impl RetrievalPipeline {
         Self { store }
     }
 
-    async fn load_story_pack(&self, story_ctx: &StoryContext) -> Result<Arc<StoryPack>, PipelineError> {
-        self.store
-            .pack_store()
-            .get_pack(&story_ctx.pack_ref)
-            .await
-            .map_err(PipelineError::persistence(PipelineStage::Retrieval))
-    }
-
-    fn resolve_facts(&self, story_pack: &StoryPack, fact_ids: &[FactId]) -> Result<Vec<FactEntry>, PipelineError> {
+    fn resolve_facts(&self, story_ctx: &StoryContext, fact_ids: &[FactId]) -> Result<Vec<FactEntry>, PipelineError> {
         fact_ids
             .iter()
             .map(|id| {
-                story_pack
-                    .seed_facts
-                    .get(id)
-                    .cloned()
-                    .map(|body| FactEntry {
-                        id: id.clone(),
-                        origin: EntryOrigin::Seed,
-                        body,
-                    })
-                    .ok_or_else(|| {
-                        PipelineError::inconsistent_data(
-                            PipelineStage::Retrieval,
-                            "retrieval_fact_missing",
-                            format!("selected fact ID {id} is missing from the story pack"),
-                        )
-                    })
+                story_ctx.facts.get(id).cloned().ok_or_else(|| {
+                    PipelineError::inconsistent_data(
+                        PipelineStage::Retrieval,
+                        "retrieval_fact_missing",
+                        format!("selected fact ID {id} is missing from the story context"),
+                    )
+                })
             })
             .collect()
     }
 
-    fn resolve_rumors(&self, story_pack: &StoryPack, rumor_ids: &[RumorId]) -> Result<Vec<RumorEntry>, PipelineError> {
+    fn resolve_rumors(
+        &self,
+        story_ctx: &StoryContext,
+        rumor_ids: &[RumorId],
+    ) -> Result<Vec<RumorEntry>, PipelineError> {
         rumor_ids
             .iter()
             .map(|id| {
-                story_pack
-                    .seed_rumors
-                    .get(id)
-                    .cloned()
-                    .map(|body| RumorEntry {
-                        id: id.clone(),
-                        origin: EntryOrigin::Seed,
-                        body,
-                    })
-                    .ok_or_else(|| {
-                        PipelineError::inconsistent_data(
-                            PipelineStage::Retrieval,
-                            "retrieval_rumor_missing",
-                            format!("selected rumor ID {id} is missing from the story pack"),
-                        )
-                    })
+                story_ctx.rumors.get(id).cloned().ok_or_else(|| {
+                    PipelineError::inconsistent_data(
+                        PipelineStage::Retrieval,
+                        "retrieval_rumor_missing",
+                        format!("selected rumor ID {id} is missing from the story context"),
+                    )
+                })
             })
             .collect()
     }
 
-    fn resolve(&self, story_pack: &StoryPack, input: &RetrievalInput<'_>) -> Result<RetrievalOutput, PipelineError> {
+    fn resolve(&self, story_ctx: &StoryContext, input: &RetrievalInput<'_>) -> Result<RetrievalOutput, PipelineError> {
         Ok(RetrievalOutput {
-            facts: self.resolve_facts(story_pack, input.fact_ids)?,
-            rumors: self.resolve_rumors(story_pack, input.rumor_ids)?,
+            facts: self.resolve_facts(story_ctx, input.fact_ids)?,
+            rumors: self.resolve_rumors(story_ctx, input.rumor_ids)?,
             roles: Vec::new(),
         })
     }
 
     async fn resolve_roles(
         &self,
-        story_pack: &StoryPack,
         story_ctx: &StoryContext,
         role_ids: &[RoleId],
     ) -> Result<Vec<ResolvedRole>, PipelineError> {
         validate_unique_role_ids(role_ids)?;
         let mut roles = Vec::with_capacity(role_ids.len());
         for role_id in role_ids {
-            roles.push(self.resolve_role(story_pack, story_ctx, role_id).await?);
+            roles.push(self.resolve_role(story_ctx, role_id).await?);
         }
         Ok(roles)
     }
 
-    async fn resolve_role(
-        &self,
-        story_pack: &StoryPack,
-        story_ctx: &StoryContext,
-        role_id: &RoleId,
-    ) -> Result<ResolvedRole, PipelineError> {
-        let role_body = story_pack.roles.get(role_id).ok_or_else(|| {
+    async fn resolve_role(&self, story_ctx: &StoryContext, role_id: &RoleId) -> Result<ResolvedRole, PipelineError> {
+        let role_entry = story_ctx.roles.get(role_id).ok_or_else(|| {
             PipelineError::inconsistent_data(
                 PipelineStage::Retrieval,
                 "retrieval_role_missing",
-                format!("requested role ID {role_id} is missing from the story pack"),
+                format!("requested role ID {role_id} is missing from the story context"),
             )
         })?;
-        let actor = story_ctx.cast.get(role_id).ok_or_else(|| {
-            PipelineError::inconsistent_data(
-                PipelineStage::Retrieval,
-                "retrieval_role_cast_missing",
-                format!("requested role ID {role_id} is missing from the story cast"),
-            )
-        })?;
-        let profile = self.resolve_profile(role_id, role_body, actor).await?;
+        let profile = self.resolve_profile(role_id, &role_entry.body, &role_entry.actor).await?;
         Ok(ResolvedRole {
             role_id: role_id.clone(),
-            name: role_body.name.clone(),
-            aliases: role_body.alias.clone(),
-            backstory: role_body.backstory.clone(),
-            retrieval_hint: role_body.retrieval.clone(),
+            name: role_entry.body.name.clone(),
+            aliases: role_entry.body.alias.clone(),
+            backstory: role_entry.body.backstory.clone(),
+            retrieval_hint: role_entry.body.retrieval.clone(),
             profile,
-            seed_memories: role_body.seed_memories.clone(),
+            memories: role_entry.memories.clone(),
         })
     }
 
@@ -166,9 +131,8 @@ impl RetrievalPipeline {
         input: &RetrievalInput<'_>,
         story_ctx: &StoryContext,
     ) -> Result<RetrievalOutput, PipelineError> {
-        let story_pack = self.load_story_pack(story_ctx).await?;
-        let mut output = self.resolve(story_pack.as_ref(), input)?;
-        output.roles = self.resolve_roles(story_pack.as_ref(), story_ctx, input.role_ids).await?;
+        let mut output = self.resolve(story_ctx, input)?;
+        output.roles = self.resolve_roles(story_ctx, input.role_ids).await?;
         Ok(output)
     }
 }

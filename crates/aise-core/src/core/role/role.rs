@@ -21,5 +21,6 @@ pub struct RoleBody {
 pub struct RoleEntry {
     pub id: RoleId,
     pub actor: RoleActor,
+    pub body: RoleBody,
     pub memories: BTreeMap<MemoryId, MemoryEntry>,
 }

@@ -10,7 +10,6 @@ mod narrative;
 mod role;
 mod story;
 pub mod turn;
-mod world;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -26,7 +25,8 @@ pub use ids::{
     PlayerId, RoleId, RumorId, SemanticVersion, Sha256Digest, StoryId,
 };
 pub use knowledge::{
-    ActivatedKnowledge, EntryOrigin, FactBody, FactEntry, Recallable, RetrievalHint, RumorBody, RumorEntry,
+    ActivatedKnowledge, EntryOrigin, FactBody, FactChangeOp, FactEntry, KnowledgeChange, Recallable, RetrievalHint,
+    RoleMemoryChangeOp, RumorBody, RumorChangeOp, RumorEntry,
 };
 pub use narrative::{
     ActiveConstraint, ConstraintWindow, NarrativeCondition, NarrativeConstraint, NarrativeDirection, NarrativeError,
@@ -52,7 +52,6 @@ pub use turn::{
 pub use bounded_text::BoundedText;
 
 pub use change::Change;
-pub use world::{WorldChange, WorldState};
 
 pub use error::CoreError;
 pub use message::{ChatMessage, ChatMessageRole};

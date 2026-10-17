@@ -115,7 +115,7 @@ fn fixture() -> ValidateFixture {
             backstory: text("Guide backstory."),
             retrieval_hint: RetrievalHint::try_new("guide").expect("valid retrieval hint"),
             profile: profile(),
-            seed_memories: BTreeMap::new(),
+            memories: BTreeMap::new(),
         }],
         decisions: vec![CharacterDecision {
             role_id,

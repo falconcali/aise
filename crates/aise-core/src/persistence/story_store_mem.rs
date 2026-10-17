@@ -2,12 +2,13 @@ use super::config::StoryStoreConfig;
 use super::error::PersistenceError;
 use super::story_store::StoryStore;
 use crate::core::{
-    Change, IdempotencyKey, StoryCommit, StoryContext, StoryId, StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle,
-    TurnNumber, WorldState,
+    Change, EntryOrigin, FactChangeOp, FactEntry, FactId, IdempotencyKey, KnowledgeChange, MemoryEntry, MemoryId,
+    RoleId, RoleMemoryChangeOp, RumorChangeOp, RumorEntry, RumorId, StoryCommit, StoryContext, StoryId,
+    StoryInstanceInfo, StoryInstanceSpec, StoryLifeCycle, TurnNumber,
 };
 use async_trait::async_trait;
 use chrono::Utc;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -54,6 +55,173 @@ impl StoryStoreMem {
             context.recent_turns.pop_front();
         }
     }
+
+    fn validate_knowledge_change(context: &StoryContext, change: &KnowledgeChange) -> Result<(), PersistenceError> {
+        let mut seen_facts = HashSet::<&FactId>::with_capacity(change.facts.len());
+        for op in &change.facts {
+            match op {
+                FactChangeOp::Add { id, .. } => {
+                    if !seen_facts.insert(id) {
+                        return Err(constraint_violation(format!("duplicate fact_id in knowledge_change: {id}")));
+                    }
+                    if context.facts.contains_key(id) {
+                        return Err(constraint_violation(format!("cannot add existing fact_id: {id}")));
+                    }
+                }
+                FactChangeOp::Update { id, .. } => {
+                    if !seen_facts.insert(id) {
+                        return Err(constraint_violation(format!("duplicate fact_id in knowledge_change: {id}")));
+                    }
+                    if !context.facts.contains_key(id) {
+                        return Err(constraint_violation(format!("cannot update missing fact_id: {id}")));
+                    }
+                }
+            }
+        }
+
+        let mut seen_rumors = HashSet::<&RumorId>::with_capacity(change.rumors.len());
+        for op in &change.rumors {
+            match op {
+                RumorChangeOp::Add { id, .. } => {
+                    if !seen_rumors.insert(id) {
+                        return Err(constraint_violation(format!("duplicate rumor_id in knowledge_change: {id}")));
+                    }
+                    if context.rumors.contains_key(id) {
+                        return Err(constraint_violation(format!("cannot add existing rumor_id: {id}")));
+                    }
+                }
+                RumorChangeOp::Update { id, .. } => {
+                    if !seen_rumors.insert(id) {
+                        return Err(constraint_violation(format!("duplicate rumor_id in knowledge_change: {id}")));
+                    }
+                    if !context.rumors.contains_key(id) {
+                        return Err(constraint_violation(format!("cannot update missing rumor_id: {id}")));
+                    }
+                }
+                RumorChangeOp::Remove { id } => {
+                    if !seen_rumors.insert(id) {
+                        return Err(constraint_violation(format!("duplicate rumor_id in knowledge_change: {id}")));
+                    }
+                    if !context.rumors.contains_key(id) {
+                        return Err(constraint_violation(format!("cannot remove missing rumor_id: {id}")));
+                    }
+                }
+            }
+        }
+
+        let mut seen_memories = HashSet::<(&RoleId, &MemoryId)>::with_capacity(change.memories.len());
+        for op in &change.memories {
+            match op {
+                RoleMemoryChangeOp::Add { role_id, id, .. } => {
+                    if !seen_memories.insert((role_id, id)) {
+                        return Err(constraint_violation(format!(
+                            "duplicate memory_id {id} for role {role_id} in knowledge_change"
+                        )));
+                    }
+                    let role = context.roles.get(role_id).ok_or_else(|| {
+                        constraint_violation(format!("unknown role_id in knowledge_change: {role_id}"))
+                    })?;
+                    if role.memories.contains_key(id) {
+                        return Err(constraint_violation(format!(
+                            "cannot add existing memory_id {id} for role {role_id}"
+                        )));
+                    }
+                }
+                RoleMemoryChangeOp::Update { role_id, id, .. } => {
+                    if !seen_memories.insert((role_id, id)) {
+                        return Err(constraint_violation(format!(
+                            "duplicate memory_id {id} for role {role_id} in knowledge_change"
+                        )));
+                    }
+                    let role = context.roles.get(role_id).ok_or_else(|| {
+                        constraint_violation(format!("unknown role_id in knowledge_change: {role_id}"))
+                    })?;
+                    if !role.memories.contains_key(id) {
+                        return Err(constraint_violation(format!(
+                            "cannot update missing memory_id {id} for role {role_id}"
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn apply_knowledge_change(context: &mut StoryContext, turn_number: &TurnNumber, change: &KnowledgeChange) {
+        for op in &change.facts {
+            match op {
+                FactChangeOp::Add { id, body } => {
+                    context.facts.insert(
+                        id.clone(),
+                        FactEntry {
+                            id: id.clone(),
+                            origin: EntryOrigin::Turn(turn_number.clone()),
+                            body: body.clone(),
+                        },
+                    );
+                }
+                FactChangeOp::Update { id, body } => {
+                    if let Some(entry) = context.facts.get_mut(id) {
+                        entry.body = body.clone();
+                    }
+                }
+            }
+        }
+
+        for op in &change.rumors {
+            match op {
+                RumorChangeOp::Add { id, body } => {
+                    context.rumors.insert(
+                        id.clone(),
+                        RumorEntry {
+                            id: id.clone(),
+                            origin: EntryOrigin::Turn(turn_number.clone()),
+                            body: body.clone(),
+                        },
+                    );
+                }
+                RumorChangeOp::Update { id, body } => {
+                    if let Some(entry) = context.rumors.get_mut(id) {
+                        entry.body = body.clone();
+                    }
+                }
+                RumorChangeOp::Remove { id } => {
+                    context.rumors.remove(id);
+                }
+            }
+        }
+
+        for op in &change.memories {
+            match op {
+                RoleMemoryChangeOp::Add { role_id, id, body } => {
+                    if let Some(role) = context.roles.get_mut(role_id) {
+                        role.memories.insert(
+                            id.clone(),
+                            MemoryEntry {
+                                id: id.clone(),
+                                origin: EntryOrigin::Turn(turn_number.clone()),
+                                body: body.clone(),
+                            },
+                        );
+                    }
+                }
+                RoleMemoryChangeOp::Update { role_id, id, body } => {
+                    if let Some(role) = context.roles.get_mut(role_id)
+                        && let Some(entry) = role.memories.get_mut(id)
+                    {
+                        entry.body = body.clone();
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn constraint_violation(constraint: impl Into<String>) -> PersistenceError {
+    PersistenceError::ConstraintViolation {
+        constraint: constraint.into(),
+    }
 }
 
 impl Default for StoryStoreMem {
@@ -69,13 +237,14 @@ impl StoryStore for StoryStoreMem {
         let context = StoryContext {
             story_id: spec.story_id,
             pack_ref: spec.pack_ref,
-            cast: spec.cast,
+            roles: spec.roles,
+            facts: spec.facts,
+            rumors: spec.rumors,
             player: spec.player_role,
             turn_number: TurnNumber::new(0),
             summary: None,
             recent_turns: std::collections::VecDeque::new(),
             life_cycle: StoryLifeCycle::Active,
-            world_state: WorldState {},
             narrative: spec.narrative,
         };
         let info = StoryInstanceInfo {
@@ -150,9 +319,6 @@ impl StoryStore for StoryStoreMem {
                 constraint: "turn number does not follow the current story context".to_owned(),
             });
         }
-        let mut next_context = story.context.clone();
-        next_context.turn_number = commit.turn.turn_number.clone();
-        next_context.recent_turns.push_back(commit.turn.clone());
         if let Change::Replaced(summary) = &commit.summary {
             if summary.covered_through.value() > commit.turn.turn_number.value() {
                 return Err(PersistenceError::ConstraintViolation {
@@ -169,6 +335,14 @@ impl StoryStore for StoryStoreMem {
                     constraint: "summary coverage cannot move backwards".to_owned(),
                 });
             }
+        }
+        Self::validate_knowledge_change(&story.context, &commit.turn.knowledge_change)?;
+
+        let mut next_context = story.context.clone();
+        next_context.turn_number = commit.turn.turn_number.clone();
+        Self::apply_knowledge_change(&mut next_context, &commit.turn.turn_number, &commit.turn.knowledge_change);
+        next_context.recent_turns.push_back(commit.turn.clone());
+        if let Change::Replaced(summary) = &commit.summary {
             next_context.summary = Some(summary.clone());
         }
         if let Change::Replaced(narrative) = &commit.narrative {

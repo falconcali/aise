@@ -1,9 +1,10 @@
 use super::*;
 use crate::core::tests::snake_pack;
 use crate::core::{
-    ActivationRule, BoundedText, CharacterThinkRequest, FactBody, FactId, IdempotencyKey, NarrativeState, PlayerId,
-    PlayerRoleContext, RetrievalHint, RoleActor, RumorBody, RumorId, StoryAssetSpec, StoryCommit, StoryInstanceSpec,
-    StoryPack, TurnCancellation, TurnEvent, TurnStatus,
+    ActivationRule, BoundedText, CharacterThinkRequest, EntryOrigin, FactBody, FactEntry, FactId, IdempotencyKey,
+    MemoryEntry, NarrativeState, PlayerId, PlayerRoleContext, RetrievalHint, RoleActor, RoleEntry, RumorBody,
+    RumorEntry, RumorId, StoryAssetSpec, StoryCommit, StoryInstanceSpec, StoryPack, TurnCancellation, TurnEvent,
+    TurnStatus,
 };
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
@@ -18,7 +19,6 @@ use async_trait::async_trait;
 use serde_json::json;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -29,11 +29,8 @@ const RETRIEVED_RUMOR_ID: &str = "retrieved_rumor";
 const BUNDLED_PROMPT_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/prompts");
 
 struct ScriptedProvider {
-    calls: AtomicUsize,
     responses: Mutex<VecDeque<String>>,
     requests: Arc<Mutex<Vec<LlmCompletionRequest>>>,
-    store: Arc<Store>,
-    replacement_after_plan: Mutex<Option<StoryPack>>,
 }
 
 #[async_trait]
@@ -43,15 +40,10 @@ impl Provider for ScriptedProvider {
     }
 
     async fn complete(&self, request: LlmCompletionRequest) -> Result<LlmCompletionResponse, LlmError> {
-        let call = self.calls.fetch_add(1, Ordering::SeqCst);
         lock(&self.requests).push(request);
         let content = lock(&self.responses).pop_front().ok_or(LlmError::InvalidResponse {
             reason: "missing scripted response",
         })?;
-        let replacement = (call == 1).then(|| lock(&self.replacement_after_plan).take()).flatten();
-        if let Some(pack) = replacement {
-            replace_default_pack(self.store.as_ref(), pack).await?;
-        }
         Ok(LlmCompletionResponse {
             content,
             finish_reason: LlmCompletionFinishReason::Stop,
@@ -133,29 +125,67 @@ fn knowledge_pack() -> StoryPack {
     pack
 }
 
-async fn replace_default_pack(store: &Store, pack: StoryPack) -> Result<(), LlmError> {
-    let story_ctx = StoryContext::new();
-    store
-        .pack_store()
-        .release(&story_ctx.story_id)
-        .await
-        .map_err(|source| LlmError::Transport {
-            source: Box::new(source),
-        })?;
-    store
-        .pack_store()
-        .retain(
-            &story_ctx.story_id,
-            StoryAssetSpec {
-                pack_ref: story_ctx.pack_ref,
-                pack,
-                cards: Vec::new(),
-            },
-        )
-        .await
-        .map_err(|source| LlmError::Transport {
-            source: Box::new(source),
+fn seeded_context(pack: &StoryPack) -> StoryContext {
+    let mut story_ctx = StoryContext::new();
+    story_ctx.player = RoleId::try_new("xu_xian").expect("player role id should be valid");
+    story_ctx.facts = pack
+        .seed_facts
+        .iter()
+        .map(|(id, body)| {
+            (
+                id.clone(),
+                FactEntry {
+                    id: id.clone(),
+                    origin: EntryOrigin::Seed,
+                    body: body.clone(),
+                },
+            )
         })
+        .collect();
+    story_ctx.rumors = pack
+        .seed_rumors
+        .iter()
+        .map(|(id, body)| {
+            (
+                id.clone(),
+                RumorEntry {
+                    id: id.clone(),
+                    origin: EntryOrigin::Seed,
+                    body: body.clone(),
+                },
+            )
+        })
+        .collect();
+    story_ctx.roles = pack
+        .roles
+        .iter()
+        .map(|(id, body)| {
+            let memories = body
+                .seed_memories
+                .iter()
+                .map(|(mem_id, mem_body)| {
+                    (
+                        mem_id.clone(),
+                        MemoryEntry {
+                            id: mem_id.clone(),
+                            origin: EntryOrigin::Seed,
+                            body: mem_body.clone(),
+                        },
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            (
+                id.clone(),
+                RoleEntry {
+                    id: id.clone(),
+                    actor: RoleActor::Default,
+                    body: body.clone(),
+                    memories,
+                },
+            )
+        })
+        .collect();
+    story_ctx
 }
 
 fn bundled_prompt() -> Prompt {
@@ -190,18 +220,13 @@ fn test_trace() -> Trace {
     })
 }
 
-async fn run_runtime(plan_response: String, remove_selected_fact_after_plan: bool) -> RuntimeRun {
-    run_runtime_with_think_responses(plan_response, remove_selected_fact_after_plan, None).await
+async fn run_runtime(plan_response: String) -> RuntimeRun {
+    run_runtime_with_think_responses(plan_response, None).await
 }
 
-async fn run_runtime_with_think_responses(
-    plan_response: String,
-    remove_selected_fact_after_plan: bool,
-    think_responses: Option<Vec<String>>,
-) -> RuntimeRun {
+async fn run_runtime_with_think_responses(plan_response: String, think_responses: Option<Vec<String>>) -> RuntimeRun {
     run_runtime_scenario(
         plan_response,
-        remove_selected_fact_after_plan,
         think_responses,
         "Generated story.".to_owned(),
         vec![validation_response()],
@@ -212,17 +237,14 @@ async fn run_runtime_with_think_responses(
 
 async fn run_runtime_scenario(
     plan_response: String,
-    remove_selected_fact_after_plan: bool,
     think_responses: Option<Vec<String>>,
     generated_proposal: String,
     validation_responses: Vec<String>,
     pipeline_config: PipelineConfig,
 ) -> RuntimeRun {
     let store = Arc::new(Store::default());
-    let mut story_ctx = StoryContext::new();
     let pack = knowledge_pack();
-    story_ctx.player = RoleId::try_new("xu_xian").expect("player role id should be valid");
-    story_ctx.cast = pack.roles.keys().map(|role_id| (role_id.clone(), RoleActor::Default)).collect();
+    let story_ctx = seeded_context(&pack);
     store
         .pack_store()
         .retain(
@@ -240,20 +262,15 @@ async fn run_runtime_scenario(
         .create(StoryInstanceSpec {
             story_id: story_ctx.story_id.clone(),
             pack_ref: story_ctx.pack_ref.clone(),
-            cast: story_ctx.cast.clone(),
+            roles: story_ctx.roles.clone(),
+            facts: story_ctx.facts.clone(),
+            rumors: story_ctx.rumors.clone(),
             player_id: PlayerId::try_new("player").expect("player id should be valid"),
             player_role: story_ctx.player.clone(),
             narrative: NarrativeState::default(),
         })
         .await
         .expect("story should be created");
-    let replacement_after_plan = remove_selected_fact_after_plan.then(|| {
-        let mut replacement = pack;
-        replacement
-            .seed_facts
-            .remove(&FactId::try_new(RETRIEVED_FACT_ID).expect("fact id should be valid"));
-        replacement
-    });
     let requests = Arc::new(Mutex::new(Vec::new()));
     let think_request_count = serde_json::from_str::<serde_json::Value>(&plan_response)
         .ok()
@@ -268,11 +285,8 @@ async fn run_runtime_scenario(
     responses.push_back(generated_proposal);
     responses.extend(validation_responses);
     let provider = ScriptedProvider {
-        calls: AtomicUsize::new(0),
         responses: Mutex::new(responses),
         requests: Arc::clone(&requests),
-        store: Arc::clone(&store),
-        replacement_after_plan: Mutex::new(replacement_after_plan),
     };
     let runtime = Runtime::new(
         Arc::new(LlmGateway::new(Arc::new(provider), LlmConfig::default())),
@@ -421,11 +435,8 @@ fn assert_plan_prompt_contract(requests: &[LlmCompletionRequest]) {
 fn runtime_new_rejects_invalid_pipeline_config() {
     let store = Arc::new(Store::default());
     let provider = ScriptedProvider {
-        calls: AtomicUsize::new(0),
         responses: Mutex::new(VecDeque::new()),
         requests: Arc::new(Mutex::new(Vec::new())),
-        store: Arc::clone(&store),
-        replacement_after_plan: Mutex::new(None),
     };
     let mut config = PipelineConfig::default();
     config.validate.checks.clear();
@@ -452,11 +463,8 @@ fn runtime_new_rejects_invalid_pipeline_config() {
 fn runtime_constructor_shares_one_policy_across_generate_validate_and_repair() {
     let store = Arc::new(Store::default());
     let provider = ScriptedProvider {
-        calls: AtomicUsize::new(0),
         responses: Mutex::new(VecDeque::new()),
         requests: Arc::new(Mutex::new(Vec::new())),
-        store: Arc::clone(&store),
-        replacement_after_plan: Mutex::new(None),
     };
     let runtime = Runtime::new(
         Arc::new(LlmGateway::new(Arc::new(provider), LlmConfig::default())),
@@ -511,7 +519,7 @@ fn effective_roles_preserve_generation_order_and_append_unique_think_targets() {
 
 #[tokio::test]
 async fn runtime_skips_role_retrieval_and_think_when_plan_selects_no_roles() {
-    let run = run_runtime(plan_response(&[], &[]), false).await;
+    let run = run_runtime(plan_response(&[], &[])).await;
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 0);
@@ -532,7 +540,7 @@ async fn runtime_skips_role_retrieval_and_think_when_plan_selects_no_roles() {
 
 #[tokio::test]
 async fn runtime_runs_retrieval_for_fact_selection() {
-    let run = run_runtime(plan_response(&[RETRIEVED_FACT_ID], &[]), false).await;
+    let run = run_runtime(plan_response(&[RETRIEVED_FACT_ID], &[])).await;
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
@@ -545,7 +553,7 @@ async fn runtime_runs_retrieval_for_fact_selection() {
 
 #[tokio::test]
 async fn runtime_runs_retrieval_for_rumor_selection() {
-    let run = run_runtime(plan_response(&[], &[RETRIEVED_RUMOR_ID]), false).await;
+    let run = run_runtime(plan_response(&[], &[RETRIEVED_RUMOR_ID])).await;
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
@@ -558,7 +566,7 @@ async fn runtime_runs_retrieval_for_rumor_selection() {
 
 #[tokio::test]
 async fn runtime_delivers_retrieved_knowledge_to_generate() {
-    let run = run_runtime(plan_response(&[RETRIEVED_FACT_ID], &[RETRIEVED_RUMOR_ID]), false).await;
+    let run = run_runtime(plan_response(&[RETRIEVED_FACT_ID], &[RETRIEVED_RUMOR_ID])).await;
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
@@ -572,7 +580,7 @@ async fn runtime_delivers_retrieved_knowledge_to_generate() {
 
 #[tokio::test]
 async fn runtime_retrieves_generation_only_role_without_think() {
-    let run = run_runtime(plan_response_with_roles(&[], &[], &["bai_suzhen"], &[]), false).await;
+    let run = run_runtime(plan_response_with_roles(&[], &[], &["bai_suzhen"], &[])).await;
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
@@ -587,7 +595,7 @@ async fn runtime_retrieves_generation_only_role_without_think() {
 
 #[tokio::test]
 async fn runtime_runs_one_character_think_and_delivers_decision_to_generate() {
-    let run = run_runtime(plan_response_with_roles(&[], &[], &[], &["bai_suzhen"]), false).await;
+    let run = run_runtime(plan_response_with_roles(&[], &[], &[], &["bai_suzhen"])).await;
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "retrieval"), 1);
@@ -603,11 +611,7 @@ async fn runtime_runs_one_character_think_and_delivers_decision_to_generate() {
 
 #[tokio::test]
 async fn runtime_delivers_relevant_rumors_but_not_narrative_direction_to_character_think() {
-    let run = run_runtime(
-        plan_response_with_roles(&[], &[RETRIEVED_RUMOR_ID], &[], &["bai_suzhen"]),
-        false,
-    )
-    .await;
+    let run = run_runtime(plan_response_with_roles(&[], &[RETRIEVED_RUMOR_ID], &[], &["bai_suzhen"])).await;
 
     assert!(run.result.is_ok());
     assert_eq!(run.requests.len(), 5);
@@ -622,15 +626,12 @@ async fn runtime_delivers_relevant_rumors_but_not_narrative_direction_to_charact
 
 #[tokio::test]
 async fn runtime_stable_union_resolves_cross_list_role_once() {
-    let run = run_runtime(
-        plan_response_with_roles(
-            &[RETRIEVED_FACT_ID],
-            &[RETRIEVED_RUMOR_ID],
-            &["bai_suzhen"],
-            &["bai_suzhen", "xiaoqing"],
-        ),
-        false,
-    )
+    let run = run_runtime(plan_response_with_roles(
+        &[RETRIEVED_FACT_ID],
+        &[RETRIEVED_RUMOR_ID],
+        &["bai_suzhen"],
+        &["bai_suzhen", "xiaoqing"],
+    ))
     .await;
 
     assert!(run.result.is_ok());
@@ -651,7 +652,7 @@ async fn runtime_stable_union_resolves_cross_list_role_once() {
 
 #[tokio::test]
 async fn runtime_preserves_multi_role_think_request_order() {
-    let run = run_runtime(plan_response_with_roles(&[], &[], &[], &["xiaoqing", "bai_suzhen"]), false).await;
+    let run = run_runtime(plan_response_with_roles(&[], &[], &[], &["xiaoqing", "bai_suzhen"])).await;
 
     assert!(run.result.is_ok());
     assert_eq!(stage_count(&run.stages, "think"), 1);
@@ -675,7 +676,6 @@ async fn runtime_fails_before_generate_when_one_character_think_fails() {
     let valid = json!({"decision": "valid", "suggested_utterance": null}).to_string();
     let run = run_runtime_with_think_responses(
         plan_response_with_roles(&[], &[], &[], &["bai_suzhen", "xiaoqing"]),
-        false,
         Some(vec![valid, "not json".to_owned()]),
     )
     .await;
@@ -695,7 +695,7 @@ async fn runtime_fails_before_generate_when_one_character_think_fails() {
 
 #[tokio::test]
 async fn runtime_never_places_character_decisions_in_commit() {
-    let run = run_runtime(plan_response_with_roles(&[], &[], &[], &["bai_suzhen"]), false).await;
+    let run = run_runtime(plan_response_with_roles(&[], &[], &[], &["bai_suzhen"])).await;
 
     let commit = run.result.expect("turn succeeds");
     let serialized = serde_json::to_string(&commit).expect("commit serializes");
@@ -707,7 +707,7 @@ async fn runtime_never_places_character_decisions_in_commit() {
 
 #[tokio::test]
 async fn runtime_rejects_plain_text_plan_before_retrieval_and_generate() {
-    let run = run_runtime("Continue the encounter.".to_owned(), false).await;
+    let run = run_runtime("Continue the encounter.".to_owned()).await;
 
     assert!(matches!(
         run.result,
@@ -723,25 +723,8 @@ async fn runtime_rejects_plain_text_plan_before_retrieval_and_generate() {
 }
 
 #[tokio::test]
-async fn runtime_stops_before_generate_when_selected_fact_disappears() {
-    let run = run_runtime(plan_response(&[RETRIEVED_FACT_ID], &[]), true).await;
-
-    assert!(matches!(
-        run.result,
-        Err(PipelineError::InconsistentData {
-            stage: PipelineStage::Retrieval,
-            code: "retrieval_fact_missing",
-            ..
-        })
-    ));
-    assert_eq!(stage_count(&run.stages, "retrieval"), 1);
-    assert_eq!(stage_count(&run.stages, "generate"), 0);
-    assert_eq!(run.requests.len(), 2);
-}
-
-#[tokio::test]
 async fn runtime_passes_initial_proposal_without_repair() {
-    let run = run_runtime(plan_response(&[], &[]), false).await;
+    let run = run_runtime(plan_response(&[], &[])).await;
     let commit = run.result.expect("turn succeeds");
 
     assert_eq!(stage_count(&run.stages, "validate"), 1);
@@ -754,7 +737,7 @@ async fn runtime_passes_initial_proposal_without_repair() {
 
 #[tokio::test]
 async fn runtime_projects_identical_quality_policy_into_generate_and_validate() {
-    let run = run_runtime(plan_response(&[], &[]), false).await;
+    let run = run_runtime(plan_response(&[], &[])).await;
     let config = ValidateConfig::default();
     let policy = config.quality_policy();
     let checks = serde_json::to_string(policy.checks()).expect("checks serialize");
@@ -777,7 +760,6 @@ async fn runtime_repairs_with_current_report_feedback_only_end_to_end() {
     pipeline_config.validation_loop.max_repair_rounds = 2;
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
-        false,
         None,
         "Generated story.".to_owned(),
         vec![
@@ -815,7 +797,6 @@ async fn runtime_repairs_with_current_report_feedback_only_end_to_end() {
 async fn runtime_revalidates_complete_policy_after_repair_end_to_end() {
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
-        false,
         None,
         "Generated story.".to_owned(),
         vec![
@@ -855,7 +836,6 @@ async fn runtime_score_feedback_uses_validated_current_and_target_values_end_to_
     let current_score = 6.25;
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
-        false,
         None,
         "Generated story.".to_owned(),
         vec![
@@ -884,7 +864,6 @@ async fn runtime_zero_budget_chooses_initial_score_only_candidate() {
     config.validation_loop.max_repair_rounds = 0;
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
-        false,
         None,
         "Generated story.".to_owned(),
         vec![validation_response_with(true, Some(7.0))],
@@ -905,7 +884,6 @@ async fn runtime_exhaustion_chooses_best_hard_gate_passing_candidate() {
     config.validation_loop.max_repair_rounds = 2;
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
-        false,
         None,
         "Generated story.".to_owned(),
         vec![
@@ -941,7 +919,6 @@ async fn runtime_choice_can_select_older_proposal() {
     config.validation_loop.max_repair_rounds = 1;
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
-        false,
         None,
         "Generated story.".to_owned(),
         vec![
@@ -968,7 +945,6 @@ async fn runtime_hard_gate_exhaustion_skips_extract_summary_and_commit() {
     config.validation_loop.max_repair_rounds = 1;
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
-        false,
         None,
         "Generated story.".to_owned(),
         vec![
@@ -999,7 +975,6 @@ async fn runtime_hard_gate_exhaustion_skips_extract_summary_and_commit() {
 async fn runtime_validate_contract_error_skips_repair_and_commit() {
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
-        false,
         None,
         "Generated story.".to_owned(),
         vec!["not json".to_owned()],
@@ -1024,7 +999,6 @@ async fn runtime_validate_contract_error_skips_repair_and_commit() {
 async fn runtime_failed_repair_consumes_reserved_budget_end_to_end() {
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
-        false,
         None,
         "Generated story.".to_owned(),
         vec![validation_response_with(true, Some(7.0)), " \n\t".to_owned()],
@@ -1045,7 +1019,7 @@ async fn runtime_failed_repair_consumes_reserved_budget_end_to_end() {
 
 #[tokio::test]
 async fn runtime_persists_pass_evaluation() {
-    let run = run_runtime(plan_response(&[], &[]), false).await;
+    let run = run_runtime(plan_response(&[], &[])).await;
     let commit = run.result.expect("turn succeeds");
     let evaluation = &commit.turn.turn_evaluation;
     let config = ValidateConfig::default();
@@ -1073,7 +1047,6 @@ async fn runtime_persists_choice_evaluation() {
     config.validation_loop.max_repair_rounds = 0;
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
-        false,
         None,
         "Generated story.".to_owned(),
         vec![validation_response_with(true, Some(7.0))],
@@ -1104,7 +1077,6 @@ async fn runtime_history_is_bounded_by_repair_budget_plus_one() {
     config.validation_loop.max_repair_rounds = 2;
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
-        false,
         None,
         "Generated story.".to_owned(),
         vec![
@@ -1134,7 +1106,6 @@ async fn runtime_history_is_bounded_by_repair_budget_plus_one() {
 async fn runtime_rejects_invalid_generated_proposal_before_validate() {
     let run = run_runtime_scenario(
         plan_response(&[], &[]),
-        false,
         None,
         " \n\t".to_owned(),
         Vec::new(),

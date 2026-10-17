@@ -1,4 +1,4 @@
-use crate::core::{BoundedText, PlayerRoleContext, RetrievalHint, RoleActor, RoleId, StoryContext, StoryPack};
+use crate::core::{BoundedText, PlayerRoleContext, RetrievalHint, RoleActor, RoleId, StoryContext};
 use crate::persistence::{PersistenceError, Store};
 use crate::pipeline::common::{PipelineError, PipelineStage};
 
@@ -9,42 +9,34 @@ pub(super) struct RoleCatalogEntry<'a> {
     pub retrieval_hint: &'a RetrievalHint,
 }
 
-pub(super) fn collect_role_catalog<'a>(story_pack: &'a StoryPack, player_role: &RoleId) -> Vec<RoleCatalogEntry<'a>> {
-    story_pack
+pub(super) fn collect_role_catalog<'a>(story_ctx: &'a StoryContext, player_role: &RoleId) -> Vec<RoleCatalogEntry<'a>> {
+    story_ctx
         .roles
         .iter()
         .filter(|(role_id, _)| *role_id != player_role)
         .map(|(role_id, role)| RoleCatalogEntry {
             role_id,
-            name: &role.name,
-            aliases: &role.alias,
-            retrieval_hint: &role.retrieval,
+            name: &role.body.name,
+            aliases: &role.body.alias,
+            retrieval_hint: &role.body.retrieval,
         })
         .collect()
 }
 
 pub(super) async fn resolve_player_role(
     store: &Store,
-    story_pack: &StoryPack,
     story_ctx: &StoryContext,
 ) -> Result<PlayerRoleContext, PipelineError> {
     let role_id = &story_ctx.player;
-    let role = story_pack.roles.get(role_id).ok_or_else(|| {
+    let role_entry = story_ctx.roles.get(role_id).ok_or_else(|| {
         PipelineError::inconsistent_data(
             PipelineStage::Plan,
             "plan_player_role_missing",
-            format!("player role ID {role_id} is missing from the story pack"),
+            format!("player role ID {role_id} is missing from the story context"),
         )
     })?;
-    let actor = story_ctx.cast.get(role_id).ok_or_else(|| {
-        PipelineError::inconsistent_data(
-            PipelineStage::Plan,
-            "plan_player_role_cast_missing",
-            format!("player role ID {role_id} is missing from the story cast"),
-        )
-    })?;
-    let profile = match actor {
-        RoleActor::Default => role.default_profile.clone(),
+    let profile = match &role_entry.actor {
+        RoleActor::Default => role_entry.body.default_profile.clone(),
         RoleActor::Card(card_ref) => store
             .pack_store()
             .get_character_card(card_ref)
@@ -54,9 +46,9 @@ pub(super) async fn resolve_player_role(
     };
     Ok(PlayerRoleContext {
         role_id: role_id.clone(),
-        name: role.name.clone(),
-        aliases: role.alias.clone(),
-        backstory: role.backstory.clone(),
+        name: role_entry.body.name.clone(),
+        aliases: role_entry.body.alias.clone(),
+        backstory: role_entry.body.backstory.clone(),
         profile,
     })
 }

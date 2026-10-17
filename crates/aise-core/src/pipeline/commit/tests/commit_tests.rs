@@ -1,7 +1,7 @@
 use super::*;
 use crate::core::{
-    BoundedText, Change, PlayerId, StoryInstanceSpec, TurnCancellation, TurnCheckEvaluation, TurnChoiceEvaluation,
-    TurnScoreEvaluation,
+    BoundedText, Change, KnowledgeChange, PlayerId, StoryInstanceSpec, TurnCancellation, TurnCheckEvaluation,
+    TurnChoiceEvaluation, TurnScoreEvaluation,
 };
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, TraceSpec,
@@ -63,7 +63,9 @@ async fn commit(status: TurnStatus, evaluation: TurnEvaluation) -> StoryCommit {
         .create(StoryInstanceSpec {
             story_id: story_ctx.story_id.clone(),
             pack_ref: story_ctx.pack_ref.clone(),
-            cast: story_ctx.cast.clone(),
+            roles: story_ctx.roles.clone(),
+            facts: story_ctx.facts.clone(),
+            rumors: story_ctx.rumors.clone(),
             player_id: PlayerId::try_new("player").expect("valid player id"),
             player_role: story_ctx.player.clone(),
             narrative: story_ctx.narrative.clone(),
@@ -83,7 +85,7 @@ async fn commit(status: TurnStatus, evaluation: TurnEvaluation) -> StoryCommit {
                 },
                 idempotency_key: IdempotencyKey::try_new("turn-1").expect("valid idempotency key"),
                 turn_segment: TurnSegment::new("story".to_owned()),
-                world_change: WorldChange {},
+                knowledge_change: KnowledgeChange::default(),
                 turn_status: status,
                 turn_evaluation: evaluation,
                 summary: Change::Unchanged,

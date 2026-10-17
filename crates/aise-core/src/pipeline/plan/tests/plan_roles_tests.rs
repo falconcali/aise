@@ -1,34 +1,67 @@
 use super::*;
 use crate::core::tests::{snake_pack, xu_xian_card};
-use crate::core::{RoleActor, StoryAssetSpec, StoryContext};
+use crate::core::{RoleActor, RoleEntry, StoryAssetSpec, StoryContext};
 use std::collections::BTreeMap;
+
+fn context_with_pack_roles() -> StoryContext {
+    let pack = snake_pack();
+    let mut story_ctx = StoryContext::new();
+    story_ctx.roles = pack
+        .roles
+        .iter()
+        .map(|(id, body)| {
+            (
+                id.clone(),
+                RoleEntry {
+                    id: id.clone(),
+                    actor: RoleActor::Default,
+                    body: body.clone(),
+                    memories: BTreeMap::new(),
+                },
+            )
+        })
+        .collect();
+    story_ctx
+}
 
 #[test]
 fn catalog_excludes_player_and_preserves_stable_role_id_order() {
-    let mut pack = snake_pack();
+    let pack = snake_pack();
     let role = pack.roles.values().next().expect("fixture role").clone();
-    pack.roles = ["z", "a", "m"]
+    let mut story_ctx = StoryContext::new();
+    story_ctx.roles = ["z", "a", "m"]
         .into_iter()
-        .map(|id| (RoleId::try_new(id).expect("valid role id"), role.clone()))
+        .map(|id| {
+            let role_id = RoleId::try_new(id).expect("valid role id");
+            (
+                role_id.clone(),
+                RoleEntry {
+                    id: role_id,
+                    actor: RoleActor::Default,
+                    body: role.clone(),
+                    memories: BTreeMap::new(),
+                },
+            )
+        })
         .collect::<BTreeMap<_, _>>();
 
     let player_role = RoleId::try_new("m").expect("valid role id");
-    let catalog = collect_role_catalog(&pack, &player_role);
+    let catalog = collect_role_catalog(&story_ctx, &player_role);
 
     assert_eq!(
         catalog.iter().map(|entry| entry.role_id.as_str()).collect::<Vec<_>>(),
         ["a", "z"]
     );
-    assert_eq!(catalog.len(), pack.roles.len() - 1);
+    assert_eq!(catalog.len(), story_ctx.roles.len() - 1);
 }
 
 #[test]
 fn catalog_projects_all_lightweight_role_fields() {
-    let pack = snake_pack();
+    let story_ctx = context_with_pack_roles();
     let player_role = RoleId::try_new("xu_xian").expect("valid role id");
-    let catalog = collect_role_catalog(&pack, &player_role);
+    let catalog = collect_role_catalog(&story_ctx, &player_role);
     let entry = catalog.first().expect("fixture role");
-    let body = &pack.roles[entry.role_id];
+    let body = &story_ctx.roles[entry.role_id].body;
 
     assert_eq!(entry.name.as_str(), body.name.as_str());
     assert_eq!(
@@ -48,9 +81,9 @@ async fn player_role_resolution_uses_effective_card_profile_without_memories() {
     let card = xu_xian_card();
     let expected_profile = card.profile.clone();
     let card_ref = card.card_ref().expect("card ref resolves");
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = context_with_pack_roles();
     story_ctx.player = player_role.clone();
-    story_ctx.cast.insert(player_role.clone(), RoleActor::Card(card_ref.clone()));
+    story_ctx.roles.get_mut(&player_role).expect("player role exists").actor = RoleActor::Card(card_ref.clone());
     store
         .pack_store()
         .retain(
@@ -64,9 +97,7 @@ async fn player_role_resolution_uses_effective_card_profile_without_memories() {
         .await
         .expect("assets retain");
 
-    let resolved = resolve_player_role(&store, &pack, &story_ctx)
-        .await
-        .expect("player role resolves");
+    let resolved = resolve_player_role(&store, &story_ctx).await.expect("player role resolves");
 
     assert_eq!(resolved.role_id, player_role);
     assert_eq!(resolved.name, role.name);
@@ -76,4 +107,23 @@ async fn player_role_resolution_uses_effective_card_profile_without_memories() {
         serde_json::to_value(resolved.profile).expect("profile serializes"),
         serde_json::to_value(expected_profile).expect("profile serializes")
     );
+}
+
+#[tokio::test]
+async fn missing_player_role_in_context_returns_inconsistent_data() {
+    let store = Store::default();
+    let story_ctx = StoryContext::new();
+
+    let error = resolve_player_role(&store, &story_ctx)
+        .await
+        .expect_err("missing player role should fail");
+
+    assert!(matches!(
+        error,
+        PipelineError::InconsistentData {
+            stage: PipelineStage::Plan,
+            code: "plan_player_role_missing",
+            ..
+        }
+    ));
 }

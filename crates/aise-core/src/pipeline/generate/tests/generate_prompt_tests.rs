@@ -2,9 +2,9 @@ use super::*;
 use crate::core::tests::{store_with_default_pack, turn_evaluation};
 use crate::core::{
     ActivatedKnowledge, ActivationRule, BoundedText, CharacterDecision, CharacterProfile, EntryOrigin, FactBody,
-    FactEntry, FactId, IdempotencyKey, NarrativeDirection, NarrativeNodeId, PlayerContribution, PlayerRoleContext,
-    ResolvedRole, RetrievalHint, RoleId, RumorBody, RumorEntry, RumorId, StorySummary, Turn, TurnNumber, TurnSegment,
-    TurnStatus, WorldChange,
+    FactEntry, FactId, IdempotencyKey, KnowledgeChange, NarrativeDirection, NarrativeNodeId, PlayerContribution,
+    PlayerRoleContext, ResolvedRole, RetrievalHint, RoleId, RumorBody, RumorEntry, RumorId, StorySummary, Turn,
+    TurnNumber, TurnSegment, TurnStatus,
 };
 use crate::pipeline::common::{ProposalCheckCriterion, ProposalQualityPolicy, ProposalScoreCriterion};
 use crate::pipeline::generate::generate_roles::project_role_context;
@@ -134,7 +134,7 @@ fn role(role_id: &str, name: &str) -> ResolvedRole {
             speaking_style: None,
             dialogue_examples: Vec::new(),
         },
-        seed_memories: BTreeMap::new(),
+        memories: BTreeMap::new(),
     }
 }
 
@@ -224,7 +224,7 @@ fn accepted_turn(number: u64, segment: &str) -> Turn {
             processed: format!("processed-{number}"),
         },
         turn_segment: TurnSegment::new(segment.to_owned()),
-        world_change: WorldChange {},
+        knowledge_change: KnowledgeChange::default(),
         turn_evaluation: turn_evaluation(),
         turn_status: TurnStatus::Pass,
     }

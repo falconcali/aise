@@ -72,7 +72,7 @@ pub async fn character_decision(
         ),
         (
             TARGET_SEED_MEMORIES_VAR.to_owned(),
-            Value::String(think_context::seed_memories(spec.role, spec.config)),
+            Value::String(think_context::memories(spec.role, spec.config)),
         ),
         (
             THINKING_FOCUS_VAR.to_owned(),

@@ -56,7 +56,6 @@ fn pack_without_narrative_projects_only_global_constraints() {
     let output = project_narrative(&pack, &StoryContext::new(), trace.root()).expect("projection should succeed");
 
     assert!(output.directions.is_empty());
-    assert!(output.queries.is_empty());
     assert_eq!(output.constraints, [text("Modern technology appears.")]);
 }
 
@@ -83,6 +82,4 @@ fn global_constraints_come_before_active_node_constraints() {
         ]
     );
     assert_eq!(output.directions.len(), 1);
-    assert_eq!(output.queries.len(), 1);
-    assert_eq!(output.queries[0].condition_id.as_str(), "identified");
 }

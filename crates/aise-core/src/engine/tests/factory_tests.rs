@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::tests::{snake_pack, xu_xian_card};
-use crate::core::{MAX_ROLES_PER_PACK, PackRef, StoryError};
+use crate::core::{EntryOrigin, MAX_ROLES_PER_PACK, PackRef, StoryError};
 use crate::persistence::PersistenceError;
 
 fn role_id(value: &str) -> RoleId {
@@ -42,6 +42,35 @@ async fn created_story_pins_a_frozen_pack_snapshot() {
         .await
         .expect("pack snapshot should load");
     assert_eq!(pack.opening, snake_pack().opening);
+    assert_eq!(story_ctx.facts.len(), pack.seed_facts.len());
+    for (id, body) in &pack.seed_facts {
+        let entry = &story_ctx.facts[id];
+        assert_eq!(entry.id, *id);
+        assert!(matches!(entry.origin, EntryOrigin::Seed));
+        assert_eq!(entry.body.content, body.content);
+        assert_eq!(entry.body.retrieval.as_str(), body.retrieval.as_str());
+    }
+    assert_eq!(story_ctx.rumors.len(), pack.seed_rumors.len());
+    for (id, body) in &pack.seed_rumors {
+        let entry = &story_ctx.rumors[id];
+        assert_eq!(entry.id, *id);
+        assert!(matches!(entry.origin, EntryOrigin::Seed));
+        assert_eq!(entry.body.content, body.content);
+        assert_eq!(entry.body.retrieval.as_str(), body.retrieval.as_str());
+    }
+    assert_eq!(story_ctx.roles.len(), pack.roles.len());
+    for (id, body) in &pack.roles {
+        let role_entry = &story_ctx.roles[id];
+        assert_eq!(role_entry.id, *id);
+        assert_eq!(role_entry.memories.len(), body.seed_memories.len());
+        for (mem_id, mem_body) in &body.seed_memories {
+            let mem_entry = &role_entry.memories[mem_id];
+            assert_eq!(mem_entry.id, *mem_id);
+            assert!(matches!(mem_entry.origin, EntryOrigin::Seed));
+            assert_eq!(mem_entry.body.content, mem_body.content);
+            assert_eq!(mem_entry.body.retrieval.as_str(), mem_body.retrieval.as_str());
+        }
+    }
 }
 
 #[tokio::test]
@@ -54,7 +83,7 @@ async fn story_can_cast_a_character_card() {
         .expect("story should be created");
 
     let story_ctx = store.story_store().load(&info.story_id).await.expect("story should load");
-    let RoleActor::Card(card_ref) = &story_ctx.cast[&role_id("xu_xian")] else {
+    let RoleActor::Card(card_ref) = &story_ctx.roles[&role_id("xu_xian")].actor else {
         panic!("xu_xian should be cast with a card");
     };
     let card = store
@@ -63,7 +92,7 @@ async fn story_can_cast_a_character_card() {
         .await
         .expect("card snapshot should load");
     assert_eq!(card.card_id, xu_xian_card().card_id);
-    assert!(matches!(story_ctx.cast[&role_id("bai_suzhen")], RoleActor::Default));
+    assert!(matches!(story_ctx.roles[&role_id("bai_suzhen")].actor, RoleActor::Default));
 }
 
 #[tokio::test]

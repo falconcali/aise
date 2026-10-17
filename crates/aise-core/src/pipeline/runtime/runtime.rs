@@ -1,6 +1,4 @@
-use crate::core::{
-    RoleId, StoryCommit, StoryContext, TurnControl, TurnEventSink, TurnRequest, TurnSegment, WorldChange,
-};
+use crate::core::{RoleId, StoryCommit, StoryContext, TurnControl, TurnEventSink, TurnRequest, TurnSegment};
 use crate::llm::LlmGateway;
 use crate::persistence::Store;
 use crate::pipeline::baseline::{BaselineInput, BaselinePipeline};
@@ -187,9 +185,7 @@ impl Runtime {
             .await?;
 
         let extract_input = ExtractInput {
-            query: &validation_result.proposal,
-            player_contribution: &baseline_output.player_contribution,
-            queries: &baseline_output.narrative.queries,
+            proposal: &validation_result.proposal,
         };
 
         let extract_output = pipeline_runner.run(&self.extract, extract_input, story_ctx).await?;
@@ -205,7 +201,7 @@ impl Runtime {
             player_contribution: baseline_output.player_contribution,
             idempotency_key: turn_request.idempotency_key,
             turn_segment: TurnSegment::new(validation_result.proposal),
-            world_change: WorldChange {},
+            knowledge_change: extract_output.knowledge_change,
             turn_status: validation_result.status,
             turn_evaluation,
             summary: summary_output.summary,

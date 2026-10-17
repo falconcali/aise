@@ -1,7 +1,8 @@
 use super::*;
 use crate::core::tests::snake_pack;
 use crate::core::{
-    BoundedText, EntryOrigin, MemoryBody, MemoryId, ResolvedRole, RetrievalHint, RoleId, RumorBody, RumorEntry, RumorId,
+    BoundedText, EntryOrigin, MemoryBody, MemoryEntry, MemoryId, ResolvedRole, RetrievalHint, RoleId, RumorBody,
+    RumorEntry, RumorId, TurnNumber,
 };
 use std::collections::BTreeMap;
 
@@ -9,15 +10,19 @@ fn text(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", usize::MAX).expect("valid text")
 }
 
-fn memory(content: &str, hint: &str) -> MemoryBody {
-    MemoryBody {
-        content: text(content),
-        activation: Default::default(),
-        retrieval: RetrievalHint::try_new(hint).expect("valid retrieval hint"),
+fn memory(id: &str, content: &str, hint: &str) -> MemoryEntry {
+    MemoryEntry {
+        id: MemoryId::try_new(id).expect("valid memory id"),
+        origin: EntryOrigin::Seed,
+        body: MemoryBody {
+            content: text(content),
+            activation: Default::default(),
+            retrieval: RetrievalHint::try_new(hint).expect("valid retrieval hint"),
+        },
     }
 }
 
-fn role(memories: &[(&str, &str, &str)]) -> ResolvedRole {
+fn role(entries: &[(&str, &str, &str)]) -> ResolvedRole {
     let pack = snake_pack();
     let role_id = RoleId::try_new("bai_suzhen").expect("valid role id");
     let body = pack.roles[&role_id].clone();
@@ -28,9 +33,9 @@ fn role(memories: &[(&str, &str, &str)]) -> ResolvedRole {
         backstory: body.backstory,
         retrieval_hint: body.retrieval,
         profile: body.default_profile,
-        seed_memories: memories
+        memories: entries
             .iter()
-            .map(|(id, content, hint)| (MemoryId::try_new(*id).expect("valid memory id"), memory(content, hint)))
+            .map(|(id, content, hint)| (MemoryId::try_new(*id).expect("valid memory id"), memory(id, content, hint)))
             .collect::<BTreeMap<_, _>>(),
     }
 }
@@ -48,34 +53,46 @@ fn rumor(id: &str, content: &str, hint: &str) -> RumorEntry {
 }
 
 #[test]
-fn seed_memories_render_only_content_in_memory_id_order() {
-    let role = role(&[("memory-b", "second", "hint-b"), ("memory-a", "first", "hint-a")]);
+fn memories_render_only_content_in_memory_id_order_across_seed_and_turn_entries() {
+    let mut role = role(&[("memory-b", "second", "hint-b"), ("memory-a", "first", "hint-a")]);
+    role.memories.insert(
+        MemoryId::try_new("memory-c").expect("valid memory id"),
+        MemoryEntry {
+            id: MemoryId::try_new("memory-c").expect("valid memory id"),
+            origin: EntryOrigin::Turn(TurnNumber::new(2)),
+            body: MemoryBody {
+                content: text("third dynamic"),
+                activation: Default::default(),
+                retrieval: RetrievalHint::try_new("hint-c").expect("valid retrieval hint"),
+            },
+        },
+    );
 
-    let rendered = seed_memories(&role, &ThinkConfig::default());
+    let rendered = memories(&role, &ThinkConfig::default());
 
-    assert_eq!(rendered, "- \"first\"\n- \"second\"");
+    assert_eq!(rendered, "- \"first\"\n- \"second\"\n- \"third dynamic\"");
     assert!(!rendered.contains("memory-a"));
     assert!(!rendered.contains("hint-a"));
 }
 
 #[test]
-fn seed_memories_respect_count_limit() {
+fn memories_respect_count_limit() {
     let role = role(&[("memory-a", "first", "hint-a"), ("memory-b", "second", "hint-b")]);
     let config = ThinkConfig {
         max_seed_memories: 1,
         ..ThinkConfig::default()
     };
 
-    let rendered = seed_memories(&role, &config);
+    let rendered = memories(&role, &config);
 
     assert!(rendered.contains("first"));
     assert!(!rendered.contains("second"));
 }
 
 #[test]
-fn seed_memories_respect_byte_limit_without_partial_item() {
+fn memories_respect_byte_limit_without_partial_item() {
     let role = role(&[("memory-a", "first", "hint-a"), ("memory-b", "second", "hint-b")]);
-    let first = seed_memories(
+    let first = memories(
         &role,
         &ThinkConfig {
             max_seed_memories: 1,
@@ -87,21 +104,21 @@ fn seed_memories_respect_byte_limit_without_partial_item() {
         ..ThinkConfig::default()
     };
 
-    let rendered = seed_memories(&role, &config);
+    let rendered = memories(&role, &config);
 
     assert_eq!(rendered, first);
     assert!(!rendered.contains("second"));
 }
 
 #[test]
-fn seed_memories_stop_when_first_item_exceeds_budget() {
+fn memories_stop_when_first_item_exceeds_budget() {
     let role = role(&[("memory-a", "first", "hint-a"), ("memory-b", "second", "hint-b")]);
     let config = ThinkConfig {
         max_seed_memory_bytes: 1,
         ..ThinkConfig::default()
     };
 
-    assert!(seed_memories(&role, &config).is_empty());
+    assert!(memories(&role, &config).is_empty());
 }
 
 #[test]
@@ -109,7 +126,7 @@ fn zero_memory_limits_render_empty_context() {
     let role = role(&[("memory-a", "first", "hint-a")]);
 
     assert!(
-        seed_memories(
+        memories(
             &role,
             &ThinkConfig {
                 max_seed_memories: 0,
@@ -119,7 +136,7 @@ fn zero_memory_limits_render_empty_context() {
         .is_empty()
     );
     assert!(
-        seed_memories(
+        memories(
             &role,
             &ThinkConfig {
                 max_seed_memory_bytes: 0,

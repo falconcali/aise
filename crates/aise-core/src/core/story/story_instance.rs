@@ -1,4 +1,6 @@
-use crate::core::{NarrativeState, PackRef, PlayerId, RoleActor, RoleId, StoryId};
+use crate::core::{
+    FactEntry, FactId, NarrativeState, PackRef, PlayerId, RoleEntry, RoleId, RumorEntry, RumorId, StoryId,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -7,7 +9,9 @@ use std::collections::BTreeMap;
 pub struct StoryInstanceSpec {
     pub story_id: StoryId,
     pub pack_ref: PackRef,
-    pub cast: BTreeMap<RoleId, RoleActor>,
+    pub roles: BTreeMap<RoleId, RoleEntry>,
+    pub facts: BTreeMap<FactId, FactEntry>,
+    pub rumors: BTreeMap<RumorId, RumorEntry>,
     pub player_id: PlayerId,
     pub player_role: RoleId,
     pub narrative: NarrativeState,

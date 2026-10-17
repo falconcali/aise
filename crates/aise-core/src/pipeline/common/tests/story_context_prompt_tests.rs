@@ -1,8 +1,8 @@
 use super::*;
 use crate::core::tests::{store_with_default_pack, turn_evaluation};
 use crate::core::{
-    ActivationRule, EntryOrigin, FactBody, FactId, IdempotencyKey, PlayerContribution, RetrievalHint, RumorBody,
-    RumorId, StorySummary, Turn, TurnNumber, TurnSegment, WorldChange,
+    ActivationRule, EntryOrigin, FactBody, FactId, IdempotencyKey, KnowledgeChange, PlayerContribution, RetrievalHint,
+    RumorBody, RumorId, StorySummary, Turn, TurnNumber, TurnSegment,
 };
 
 fn summary(text: &str, covered_through: u64) -> StorySummary {
@@ -21,7 +21,7 @@ fn turn(number: u64, segment: &str, status: TurnStatus) -> Turn {
             processed: format!("processed-{number}"),
         },
         turn_segment: TurnSegment::new(segment.to_owned()),
-        world_change: WorldChange {},
+        knowledge_change: KnowledgeChange::default(),
         turn_evaluation: turn_evaluation(),
         turn_status: status,
     }
