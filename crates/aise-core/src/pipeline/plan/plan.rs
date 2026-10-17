@@ -1,6 +1,6 @@
 use crate::core::{
-    ActivatedKnowledge, BoundedText, CharacterThinkRequest, FactId, NarrativeDirection, PlayerContribution,
-    RoleId, RumorId, StoryContext, TurnControl,
+    ActivatedKnowledge, BoundedText, CharacterThinkRequest, FactId, NarrativeDirection, PlayerContribution, RoleId,
+    RumorId, StoryContext, TurnControl,
 };
 use crate::llm::LlmGateway;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
@@ -72,7 +72,7 @@ impl PlanPipeline {
                 story_ctx,
                 input,
                 candidates: &candidates,
-                player_role: &player_role,
+                player_role,
                 role_catalog: &role_catalog,
                 config: &self.config,
             },

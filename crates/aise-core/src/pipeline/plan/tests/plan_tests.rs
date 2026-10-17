@@ -1,6 +1,6 @@
 use super::*;
-use crate::core::tests::{snake_pack, store_with_default_pack};
-use crate::core::{PlayerContribution, PlayerRoleContext, RoleActor, RoleEntry, TurnCancellation};
+use crate::core::tests::story_context;
+use crate::core::{PlayerContribution, TurnCancellation};
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
 };
@@ -9,7 +9,6 @@ use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
 };
 use async_trait::async_trait;
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -37,7 +36,7 @@ impl Provider for CountingProvider {
     }
 }
 
-async fn pipeline(calls: Arc<AtomicUsize>) -> PlanPipeline {
+fn pipeline(calls: Arc<AtomicUsize>) -> PlanPipeline {
     let prompt = Prompt::new(PromptConfig {
         directory: Path::new(BUNDLED_PROMPT_DIRECTORY).to_path_buf(),
         max_prompts: 16,
@@ -48,7 +47,6 @@ async fn pipeline(calls: Arc<AtomicUsize>) -> PlanPipeline {
     PlanPipeline::new(
         Arc::new(LlmGateway::new(Arc::new(CountingProvider { calls }), LlmConfig::default())),
         Arc::new(prompt),
-        Arc::new(store_with_default_pack().await),
         PlanConfig::default(),
     )
 }
@@ -81,18 +79,8 @@ fn plan_output(
     roles_for_generation: Vec<RoleId>,
     character_think_requests: Vec<CharacterThinkRequest>,
 ) -> PlanOutput {
-    let pack = snake_pack();
-    let role_id = RoleId::try_new("xu_xian").expect("valid role id");
-    let role = &pack.roles[&role_id];
     PlanOutput {
         story_goal: BoundedText::default(),
-        player_role: PlayerRoleContext {
-            role_id,
-            name: role.name.clone(),
-            aliases: role.alias.clone(),
-            backstory: role.backstory.clone(),
-            profile: role.default_profile.clone(),
-        },
         facts_to_retrieve,
         rumors_to_retrieve,
         roles_for_generation,
@@ -132,7 +120,7 @@ fn rumor_selection_requires_retrieval() {
 }
 
 #[test]
-fn generation_role_selection_requires_retrieval() {
+fn generation_role_selection_does_not_require_retrieval() {
     let output = plan_output(
         Vec::new(),
         Vec::new(),
@@ -140,11 +128,11 @@ fn generation_role_selection_requires_retrieval() {
         Vec::new(),
     );
 
-    assert!(output.requires_retrieval());
+    assert!(!output.requires_retrieval());
 }
 
 #[test]
-fn character_think_request_requires_retrieval_and_thinking() {
+fn character_think_request_does_not_require_retrieval_and_requires_thinking() {
     let output = plan_output(
         Vec::new(),
         Vec::new(),
@@ -155,26 +143,15 @@ fn character_think_request_requires_retrieval_and_thinking() {
         }],
     );
 
-    assert!(output.requires_retrieval());
+    assert!(!output.requires_retrieval());
     assert!(output.requires_character_thinking());
 }
 
 #[tokio::test]
 async fn pipeline_calls_llm_once_and_returns_validated_output() {
     let calls = Arc::new(AtomicUsize::new(0));
-    let pipeline = pipeline(Arc::clone(&calls)).await;
-    let pack = snake_pack();
-    let mut story_ctx = StoryContext::new();
-    story_ctx.player = RoleId::try_new("xu_xian").expect("valid role id");
-    story_ctx.roles.insert(
-        story_ctx.player.clone(),
-        RoleEntry {
-            id: story_ctx.player.clone(),
-            actor: RoleActor::Default,
-            body: pack.roles[&story_ctx.player].clone(),
-            memories: BTreeMap::new(),
-        },
-    );
+    let pipeline = pipeline(Arc::clone(&calls));
+    let story_ctx = story_context();
     let player_contribution = PlayerContribution {
         raw: "I wave.".to_owned(),
         processed: "I wave.".to_owned(),
@@ -198,7 +175,6 @@ async fn pipeline_calls_llm_once_and_returns_validated_output() {
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(output.story_goal.as_str(), "Continue the encounter.");
-    assert_eq!(output.player_role.role_id, story_ctx.player);
     assert!(output.facts_to_retrieve.is_empty());
     assert!(output.rumors_to_retrieve.is_empty());
     assert!(output.roles_for_generation.is_empty());

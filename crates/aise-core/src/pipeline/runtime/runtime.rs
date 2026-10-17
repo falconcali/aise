@@ -51,37 +51,24 @@ impl Runtime {
                 Arc::clone(&store),
                 pipeline_config.baseline,
             ),
-            plan: PlanPipeline::new(
-                Arc::clone(&gateway),
-                Arc::clone(&prompt),
-                Arc::clone(&store),
-                pipeline_config.plan,
-            ),
-            retrieval: RetrievalPipeline::new(Arc::clone(&store)),
-            think: ThinkPipeline::new(
-                Arc::clone(&gateway),
-                Arc::clone(&prompt),
-                Arc::clone(&store),
-                pipeline_config.think,
-            ),
+            plan: PlanPipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), pipeline_config.plan),
+            retrieval: RetrievalPipeline::new(),
+            think: ThinkPipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), pipeline_config.think),
             generate: GeneratePipeline::new(
                 Arc::clone(&gateway),
                 Arc::clone(&prompt),
-                Arc::clone(&store),
                 pipeline_config.generate,
                 Arc::clone(&quality_policy),
             ),
             validate: ValidatePipeline::new(
                 Arc::clone(&gateway),
                 Arc::clone(&prompt),
-                Arc::clone(&store),
                 pipeline_config.validate,
                 Arc::clone(&quality_policy),
             ),
             repair: RepairPipeline::new(
                 Arc::clone(&gateway),
                 Arc::clone(&prompt),
-                Arc::clone(&store),
                 pipeline_config.repair,
                 Arc::clone(&quality_policy),
             ),
@@ -91,12 +78,7 @@ impl Runtime {
                 Arc::clone(&store),
                 pipeline_config.extract,
             ),
-            summary: SummaryPipeline::new(
-                Arc::clone(&gateway),
-                Arc::clone(&prompt),
-                Arc::clone(&store),
-                pipeline_config.summary,
-            ),
+            summary: SummaryPipeline::new(Arc::clone(&gateway), Arc::clone(&prompt), pipeline_config.summary),
             commit: CommitPipeline::new(Arc::clone(&store)),
             validation_loop: pipeline_config.validation_loop,
             repair_max_proposal_bytes,
@@ -143,7 +125,6 @@ impl Runtime {
             let retrieval_input = RetrievalInput {
                 fact_ids: &plan_output.facts_to_retrieve,
                 rumor_ids: &plan_output.rumors_to_retrieve,
-                role_ids: &role_ids,
             };
             pipeline_runner.run(&self.retrieval, retrieval_input, story_ctx).await?
         } else {
@@ -153,7 +134,6 @@ impl Runtime {
         let think_output = if plan_output.requires_character_thinking() {
             let think_input = ThinkInput {
                 requests: &plan_output.character_think_requests,
-                resolved_roles: &retrieval_output.roles,
                 player_contribution: &baseline_output.player_contribution,
                 activated_rumors: &baseline_output.knowledge.rumors,
                 retrieved_rumors: &retrieval_output.rumors,
@@ -172,8 +152,7 @@ impl Runtime {
             knowledge: &baseline_output.knowledge,
             retrieved_facts: &retrieval_output.facts,
             retrieved_rumors: &retrieval_output.rumors,
-            player_role: &plan_output.player_role,
-            roles: &retrieval_output.roles,
+            role_ids: &role_ids,
             character_decisions: &think_output.decisions,
         };
 
@@ -183,9 +162,8 @@ impl Runtime {
             .validate_repair_loop(
                 &pipeline_runner,
                 story_ctx,
-                validation_context(&plan_output, &baseline_output, &retrieval_output, &think_output),
+                validation_context(&plan_output, &baseline_output, &retrieval_output, &role_ids, &think_output),
                 initial_proposal,
-                trace,
             )
             .await?;
 

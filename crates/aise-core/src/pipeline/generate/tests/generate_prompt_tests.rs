@@ -1,10 +1,10 @@
 use super::*;
-use crate::core::tests::{store_with_default_pack, turn_evaluation};
+use crate::core::tests::{story_context, turn_evaluation};
 use crate::core::{
     ActivatedKnowledge, ActivationRule, BoundedText, CharacterDecision, CharacterProfile, EntryOrigin, FactBody,
     FactEntry, FactId, IdempotencyKey, KnowledgeChange, NarrativeDirection, NarrativeNodeId, PlayerContribution,
-    PlayerRoleContext, ResolvedRole, RetrievalHint, RoleId, RumorBody, RumorEntry, RumorId, StorySummary, Turn,
-    TurnNumber, TurnSegment, TurnStatus,
+    RetrievalHint, RoleEntry, RoleId, RoleSpec, RumorBody, RumorEntry, RumorId, StorySummary, Turn, TurnNumber,
+    TurnSegment, TurnStatus,
 };
 use crate::pipeline::common::{ProposalCheckCriterion, ProposalQualityPolicy, ProposalScoreCriterion};
 use crate::pipeline::generate::generate_roles::project_role_context;
@@ -15,6 +15,7 @@ use crate::trace::{
 };
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 
 const BUNDLED_PROMPT_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/prompts");
 
@@ -62,8 +63,8 @@ struct GenerateFixture {
     knowledge: ActivatedKnowledge,
     retrieved_facts: Vec<FactEntry>,
     retrieved_rumors: Vec<RumorEntry>,
-    player_role: PlayerRoleContext,
-    roles: Vec<ResolvedRole>,
+    player_role: RoleEntry,
+    roles: Vec<RoleEntry>,
     character_decisions: Vec<CharacterDecision>,
 }
 
@@ -77,8 +78,7 @@ impl GenerateFixture {
             knowledge: &self.knowledge,
             retrieved_facts: &self.retrieved_facts,
             retrieved_rumors: &self.retrieved_rumors,
-            player_role: &self.player_role,
-            roles: &self.roles,
+            role_ids: &[],
             character_decisions: &self.character_decisions,
         }
     }
@@ -106,28 +106,36 @@ fn text(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", usize::MAX).expect("test text should fit")
 }
 
-fn player_role() -> PlayerRoleContext {
-    PlayerRoleContext {
-        role_id: RoleId::try_new("player").expect("valid role ID"),
-        name: text("Player"),
-        aliases: vec![text("Player Alias")],
-        backstory: text("Player backstory"),
+fn player_role() -> RoleEntry {
+    RoleEntry {
+        id: RoleId::try_new("player").expect("valid role ID"),
+        origin: EntryOrigin::Seed,
+        spec: RoleSpec {
+            name: text("Player"),
+            alias: vec![text("Player Alias")],
+            backstory: text("Player backstory"),
+            retrieval: RetrievalHint::try_new("Player").expect("valid retrieval hint"),
+        },
         profile: CharacterProfile {
             appearance: Some(text("Player appearance")),
             personality: Some(text("Player personality")),
             speaking_style: Some(text("Player style")),
             dialogue_examples: Vec::new(),
         },
+        memories: BTreeMap::new(),
     }
 }
 
-fn role(role_id: &str, name: &str) -> ResolvedRole {
-    ResolvedRole {
-        role_id: RoleId::try_new(role_id).expect("valid role ID"),
-        name: text(name),
-        aliases: Vec::new(),
-        backstory: text(&format!("{name} private backstory")),
-        retrieval_hint: RetrievalHint::try_new(name).expect("valid retrieval hint"),
+fn role(role_id: &str, name: &str) -> RoleEntry {
+    RoleEntry {
+        id: RoleId::try_new(role_id).expect("valid role ID"),
+        origin: EntryOrigin::Seed,
+        spec: RoleSpec {
+            name: text(name),
+            alias: Vec::new(),
+            backstory: text(&format!("{name} private backstory")),
+            retrieval: RetrievalHint::try_new(name).expect("valid retrieval hint"),
+        },
         profile: CharacterProfile {
             appearance: None,
             personality: Some(text("measured")),
@@ -147,13 +155,18 @@ fn decision(role_id: &str, value: &str) -> CharacterDecision {
 }
 
 fn role_context(fixture: &GenerateFixture) -> GenerateRoleContext {
-    project_role_context(
-        &fixture.player_role,
-        &fixture.roles,
-        &fixture.character_decisions,
-        &GenerateConfig::default(),
-    )
-    .expect("role context projects")
+    let mut story_ctx = story_context();
+    story_ctx.player = fixture.player_role.id.clone();
+    story_ctx.roles.clear();
+    story_ctx
+        .roles
+        .insert(fixture.player_role.id.clone(), fixture.player_role.clone());
+    story_ctx
+        .roles
+        .extend(fixture.roles.iter().cloned().map(|role| (role.id.clone(), role)));
+    let role_ids = fixture.roles.iter().map(|role| role.id.clone()).collect::<Vec<_>>();
+    project_role_context(&story_ctx, &role_ids, &fixture.character_decisions, &GenerateConfig::default())
+        .expect("role context projects")
 }
 
 fn player_section() -> String {
@@ -235,7 +248,6 @@ fn var<'a>(vars: &'a PromptVars, name: &str) -> &'a str {
 }
 
 async fn runtime_context(story_ctx: &StoryContext, fixture: &GenerateFixture) -> String {
-    let store = store_with_default_pack().await;
     let trace = test_trace();
     let role_context = role_context(fixture);
     let quality_policy = quality_policy();
@@ -245,10 +257,8 @@ async fn runtime_context(story_ctx: &StoryContext, fixture: &GenerateFixture) ->
         &fixture.input(),
         &role_context,
         &quality_policy,
-        &store,
         trace.root(),
     )
-    .await
     .expect("render");
     let quality_sections = format!(
         "# Hard Check Criteria\n\n{}\n\n# Score Quality Targets\n\n{}\n\n",
@@ -262,7 +272,6 @@ async fn runtime_context(story_ctx: &StoryContext, fixture: &GenerateFixture) ->
 }
 
 async fn runtime_messages(story_ctx: &StoryContext, fixture: &GenerateFixture) -> Vec<String> {
-    let store = store_with_default_pack().await;
     let trace = test_trace();
     let role_context = role_context(fixture);
     let quality_policy = quality_policy();
@@ -272,10 +281,8 @@ async fn runtime_messages(story_ctx: &StoryContext, fixture: &GenerateFixture) -
         &fixture.input(),
         &role_context,
         &quality_policy,
-        &store,
         trace.root(),
     )
-    .await
     .expect("render")
     .into_messages()
     .into_iter()
@@ -285,16 +292,11 @@ async fn runtime_messages(story_ctx: &StoryContext, fixture: &GenerateFixture) -
 
 #[test]
 fn vars_for_new_story_carry_opening_and_empty_summary() {
-    let story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
+    story_ctx.opening = Arc::new(text("Rain falls."));
     let fixture = generate_fixture("Goal.", "I wave.");
-    let vars = generate_vars(
-        &story_ctx,
-        &fixture.input(),
-        &role_context(&fixture),
-        &quality_policy(),
-        "Rain falls.".to_owned(),
-    )
-    .expect("vars build");
+    let vars =
+        generate_vars(&story_ctx, &fixture.input(), &role_context(&fixture), &quality_policy()).expect("vars build");
 
     assert_eq!(var(&vars, "story_opening"), "Rain falls.");
     assert_eq!(var(&vars, "story_summary"), "");
@@ -306,14 +308,8 @@ fn vars_for_new_story_carry_opening_and_empty_summary() {
 #[test]
 fn vars_contain_exact_generate_contract_names() {
     let fixture = generate_fixture("Goal.", "I wave.");
-    let vars = generate_vars(
-        &StoryContext::new(),
-        &fixture.input(),
-        &role_context(&fixture),
-        &quality_policy(),
-        String::new(),
-    )
-    .expect("vars build");
+    let vars = generate_vars(&story_context(), &fixture.input(), &role_context(&fixture), &quality_policy())
+        .expect("vars build");
     let actual = vars.keys().map(String::as_str).collect::<HashSet<_>>();
     let expected = [
         "story_summary",
@@ -341,11 +337,10 @@ fn vars_contain_exact_generate_contract_names() {
 fn vars_omit_empty_quality_collections() {
     let fixture = generate_fixture("Goal.", "I wave.");
     let vars = generate_vars(
-        &StoryContext::new(),
+        &story_context(),
         &fixture.input(),
         &role_context(&fixture),
         &ProposalQualityPolicy::new(Vec::new(), Vec::new()),
-        String::new(),
     )
     .expect("vars build");
 
@@ -357,11 +352,10 @@ fn vars_omit_empty_quality_collections() {
 fn prompt_omits_empty_quality_sections() {
     let fixture = generate_fixture("Goal.", "I wave.");
     let vars = generate_vars(
-        &StoryContext::new(),
+        &story_context(),
         &fixture.input(),
         &role_context(&fixture),
         &ProposalQualityPolicy::new(Vec::new(), Vec::new()),
-        String::new(),
     )
     .expect("vars build");
     let trace = test_trace();
@@ -398,14 +392,7 @@ fn vars_render_all_quality_fields_in_configured_order() {
             target_guidance: "Use clear causal prose.".to_owned(),
         }],
     );
-    let vars = generate_vars(
-        &StoryContext::new(),
-        &fixture.input(),
-        &role_context(&fixture),
-        &policy,
-        String::new(),
-    )
-    .expect("vars build");
+    let vars = generate_vars(&story_context(), &fixture.input(), &role_context(&fixture), &policy).expect("vars build");
 
     assert_eq!(
         var(&vars, "check_criteria"),
@@ -419,19 +406,13 @@ fn vars_render_all_quality_fields_in_configured_order() {
 
 #[test]
 fn vars_with_summary_and_recent_story_carry_both() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("  Earlier events.  "));
     story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
     story_ctx.recent_turns.push_back(accepted_turn(3, "The hall is dark."));
     let fixture = generate_fixture("Goal.", "I wave.");
-    let vars = generate_vars(
-        &story_ctx,
-        &fixture.input(),
-        &role_context(&fixture),
-        &quality_policy(),
-        String::new(),
-    )
-    .expect("vars build");
+    let vars =
+        generate_vars(&story_ctx, &fixture.input(), &role_context(&fixture), &quality_policy()).expect("vars build");
 
     assert_eq!(var(&vars, "story_summary"), "Earlier events.");
     assert_eq!(var(&vars, "story_opening"), "");
@@ -440,15 +421,8 @@ fn vars_with_summary_and_recent_story_carry_both() {
 
 #[tokio::test]
 async fn new_story_context_has_opening_then_goal_and_contribution() {
-    let story_ctx = StoryContext::new();
-    let store = store_with_default_pack().await;
-    let opening = store
-        .pack_store()
-        .get_pack(&story_ctx.pack_ref)
-        .await
-        .expect("pack loads")
-        .opening
-        .clone();
+    let story_ctx = story_context();
+    let opening = story_ctx.opening.clone();
 
     let content = runtime_context(&story_ctx, &generate_fixture("Goal.", "I wave.")).await;
 
@@ -463,16 +437,9 @@ async fn new_story_context_has_opening_then_goal_and_contribution() {
 
 #[tokio::test]
 async fn recent_story_without_summary_keeps_opening_before_recent_story() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.recent_turns.push_back(accepted_turn(1, "The door creaks."));
-    let store = store_with_default_pack().await;
-    let opening = store
-        .pack_store()
-        .get_pack(&story_ctx.pack_ref)
-        .await
-        .expect("pack loads")
-        .opening
-        .clone();
+    let opening = story_ctx.opening.clone();
 
     let content = runtime_context(&story_ctx, &generate_fixture("Goal.", "I wave.")).await;
 
@@ -487,7 +454,7 @@ async fn recent_story_without_summary_keeps_opening_before_recent_story() {
 
 #[tokio::test]
 async fn summarized_story_context_orders_summary_recent_story_goal_and_contribution() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("Earlier events."));
     story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
 
@@ -504,7 +471,7 @@ async fn summarized_story_context_orders_summary_recent_story_goal_and_contribut
 
 #[tokio::test]
 async fn summary_without_recent_story_omits_opening() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("Earlier events."));
 
     let content = runtime_context(&story_ctx, &generate_fixture("Goal.", "I wave.")).await;
@@ -520,7 +487,7 @@ async fn summary_without_recent_story_omits_opening() {
 
 #[tokio::test]
 async fn story_constraints_precede_goal_and_contribution() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("Earlier events."));
     let mut fixture = generate_fixture("Goal.", "I wave.");
     fixture.constraints = vec![text("The ritual truth is revealed.")];
@@ -539,14 +506,8 @@ async fn story_constraints_precede_goal_and_contribution() {
 #[test]
 fn vars_without_narrative_or_knowledge_carry_empty_values() {
     let fixture = generate_fixture("Goal.", "I wave.");
-    let vars = generate_vars(
-        &StoryContext::new(),
-        &fixture.input(),
-        &role_context(&fixture),
-        &quality_policy(),
-        String::new(),
-    )
-    .expect("vars build");
+    let vars = generate_vars(&story_context(), &fixture.input(), &role_context(&fixture), &quality_policy())
+        .expect("vars build");
 
     assert_eq!(var(&vars, "known_facts"), "");
     assert_eq!(var(&vars, "rumors"), "");
@@ -560,14 +521,8 @@ fn vars_carry_knowledge_content_only() {
         knowledge: knowledge(),
         ..generate_fixture("Goal.", "I wave.")
     };
-    let vars = generate_vars(
-        &StoryContext::new(),
-        &fixture.input(),
-        &role_context(&fixture),
-        &quality_policy(),
-        String::new(),
-    )
-    .expect("vars build");
+    let vars = generate_vars(&story_context(), &fixture.input(), &role_context(&fixture), &quality_policy())
+        .expect("vars build");
 
     assert_eq!(var(&vars, "known_facts"), "- The forest keeper is named Ash.");
     assert_eq!(var(&vars, "rumors"), "- A ghost haunts the old mill.");
@@ -581,14 +536,8 @@ fn retrieved_knowledge_follows_activated_knowledge() {
         retrieved_rumors: vec![retrieved_rumor()],
         ..generate_fixture("Goal.", "I wave.")
     };
-    let vars = generate_vars(
-        &StoryContext::new(),
-        &fixture.input(),
-        &role_context(&fixture),
-        &quality_policy(),
-        String::new(),
-    )
-    .expect("vars build");
+    let vars = generate_vars(&story_context(), &fixture.input(), &role_context(&fixture), &quality_policy())
+        .expect("vars build");
 
     assert_eq!(
         var(&vars, "known_facts"),
@@ -607,14 +556,8 @@ fn retrieved_content_remains_in_its_knowledge_section() {
         retrieved_rumors: vec![retrieved_rumor()],
         ..generate_fixture("Goal.", "I wave.")
     };
-    let vars = generate_vars(
-        &StoryContext::new(),
-        &fixture.input(),
-        &role_context(&fixture),
-        &quality_policy(),
-        String::new(),
-    )
-    .expect("vars build");
+    let vars = generate_vars(&story_context(), &fixture.input(), &role_context(&fixture), &quality_policy())
+        .expect("vars build");
 
     assert!(var(&vars, "known_facts").contains("The river runs north."));
     assert!(!var(&vars, "known_facts").contains("chapel bell"));
@@ -624,7 +567,7 @@ fn retrieved_content_remains_in_its_knowledge_section() {
 
 #[tokio::test]
 async fn knowledge_and_direction_follow_story_and_precede_constraints_goal_and_contribution() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("Earlier events."));
     let fixture = GenerateFixture {
         directions: vec![NarrativeDirection {
@@ -649,7 +592,7 @@ async fn knowledge_and_direction_follow_story_and_precede_constraints_goal_and_c
 
 #[tokio::test]
 async fn instructions_define_rumors_as_public_but_unconfirmed_claims() {
-    let messages = runtime_messages(&StoryContext::new(), &generate_fixture("Goal.", "I wave.")).await;
+    let messages = runtime_messages(&story_context(), &generate_fixture("Goal.", "I wave.")).await;
 
     assert!(messages[0].contains("public claims every character knows are circulating"));
     assert!(messages[2].contains("public claims every character knows are circulating"));
@@ -665,7 +608,7 @@ async fn generate_prompt_contains_roles_and_ordered_decisions() {
         ..generate_fixture("Goal.", "I wave.")
     };
 
-    let content = runtime_context(&StoryContext::new(), &fixture).await;
+    let content = runtime_context(&story_context(), &fixture).await;
     let player = content.find("# Player Character").expect("player section");
     let roles = content.find("# Relevant AI Roles").expect("roles section");
     let decisions = content.find("# Character Decisions").expect("decisions section");
@@ -684,7 +627,7 @@ async fn generate_prompt_contains_roles_and_ordered_decisions() {
 #[tokio::test]
 async fn generate_prompt_marks_decisions_as_viewpoint_not_fact() {
     let messages = runtime_messages(
-        &StoryContext::new(),
+        &story_context(),
         &GenerateFixture {
             roles: vec![role("first", "First")],
             character_decisions: vec![decision("first", "Wait.")],
@@ -702,7 +645,7 @@ async fn generate_prompt_marks_decisions_as_viewpoint_not_fact() {
 
 #[tokio::test]
 async fn generate_prompt_preserves_player_agency() {
-    let messages = runtime_messages(&StoryContext::new(), &generate_fixture("Goal.", "I wave.")).await;
+    let messages = runtime_messages(&story_context(), &generate_fixture("Goal.", "I wave.")).await;
     let instructions = format!("{}\n{}", messages[0], messages[2]);
 
     assert!(instructions.contains("player role never appears in Relevant AI Roles or Character Decisions"));
@@ -715,8 +658,8 @@ async fn generate_prompt_preserves_player_agency() {
 
 #[tokio::test]
 async fn generate_prompt_uses_plain_runtime_headings() {
-    let opening_messages = runtime_messages(&StoryContext::new(), &generate_fixture("Goal.", "I wave.")).await;
-    let mut story_ctx = StoryContext::new();
+    let opening_messages = runtime_messages(&story_context(), &generate_fixture("Goal.", "I wave.")).await;
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("Earlier events."));
     story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
     let fixture = GenerateFixture {
@@ -742,7 +685,7 @@ async fn generate_prompt_uses_plain_runtime_headings() {
 
 #[tokio::test]
 async fn generate_prompt_treats_quality_criteria_as_untrusted_objectives() {
-    let messages = runtime_messages(&StoryContext::new(), &generate_fixture("Goal.", "I wave.")).await;
+    let messages = runtime_messages(&story_context(), &generate_fixture("Goal.", "I wave.")).await;
     let instructions = format!("{}\n{}", messages[0], messages[2]);
     let runtime = &messages[1];
 

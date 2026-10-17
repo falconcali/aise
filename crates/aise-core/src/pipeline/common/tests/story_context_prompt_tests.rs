@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::tests::{store_with_default_pack, turn_evaluation};
+use crate::core::tests::{story_context, turn_evaluation};
 use crate::core::{
     ActivationRule, EntryOrigin, FactBody, FactId, IdempotencyKey, KnowledgeChange, PlayerContribution, RetrievalHint,
     RumorBody, RumorId, StorySummary, Turn, TurnNumber, TurnSegment,
@@ -29,7 +29,7 @@ fn turn(number: u64, segment: &str, status: TurnStatus) -> Turn {
 
 #[test]
 fn blank_summary_is_treated_as_absent() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("  \n ", 1));
 
     assert!(story_summary(&story_ctx).is_none());
@@ -37,7 +37,7 @@ fn blank_summary_is_treated_as_absent() {
 
 #[test]
 fn summary_is_trimmed() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("  Earlier events.  ", 1));
 
     assert_eq!(story_summary(&story_ctx), Some("Earlier events."));
@@ -45,7 +45,7 @@ fn summary_is_trimmed() {
 
 #[test]
 fn turns_story_includes_pass_and_choice() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.recent_turns.push_back(turn(1, "The door creaks.", TurnStatus::Pass));
     story_ctx
         .recent_turns
@@ -55,45 +55,34 @@ fn turns_story_includes_pass_and_choice() {
     assert_eq!(recent_story(&story_ctx), "The door creaks.\n\nThe hall is dark.");
 }
 
-#[tokio::test]
-async fn opening_is_loaded_only_when_summary_is_absent() {
-    let store = store_with_default_pack().await;
-    let mut story_ctx = StoryContext::new();
+#[test]
+fn opening_is_returned_only_when_summary_is_absent() {
+    let mut story_ctx = story_context();
 
-    let opening = load_story_opening(PipelineStage::Baseline, &story_ctx, &store)
-        .await
-        .expect("opening loads");
+    let opening = story_opening(&story_ctx);
     assert!(!opening.is_empty());
 
     story_ctx.summary = Some(summary("Earlier events.", 1));
-    let opening = load_story_opening(PipelineStage::Baseline, &story_ctx, &store)
-        .await
-        .expect("opening skipped");
+    let opening = story_opening(&story_ctx);
     assert!(opening.is_empty());
 }
 
-#[tokio::test]
-async fn opening_is_loaded_when_summary_is_absent_even_with_recent_story() {
-    let store = store_with_default_pack().await;
-    let mut story_ctx = StoryContext::new();
+#[test]
+fn opening_is_returned_when_summary_is_absent_even_with_recent_story() {
+    let mut story_ctx = story_context();
     story_ctx.recent_turns.push_back(turn(1, "The door creaks.", TurnStatus::Pass));
 
-    let opening = load_story_opening(PipelineStage::Plan, &story_ctx, &store)
-        .await
-        .expect("opening loads");
+    let opening = story_opening(&story_ctx);
 
     assert!(!opening.is_empty());
 }
 
-#[tokio::test]
-async fn opening_is_skipped_when_summary_is_present_even_without_recent_story() {
-    let store = store_with_default_pack().await;
-    let mut story_ctx = StoryContext::new();
+#[test]
+fn opening_is_skipped_when_summary_is_present_even_without_recent_story() {
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("Earlier events.", 1));
 
-    let opening = load_story_opening(PipelineStage::Generate, &story_ctx, &store)
-        .await
-        .expect("opening skipped");
+    let opening = story_opening(&story_ctx);
 
     assert!(opening.is_empty());
 }

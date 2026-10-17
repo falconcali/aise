@@ -1,9 +1,9 @@
 use super::*;
-use crate::core::tests::store_with_default_pack;
+use crate::core::tests::story_context;
 use crate::core::{
     BoundedText, CharacterProfile, CharacterThinkRequest, EntryOrigin, MemoryBody, MemoryEntry, MemoryId,
-    PlayerContribution, ResolvedRole, RetrievalHint, RoleId, RumorBody, RumorEntry, RumorId, StoryContext,
-    StorySummary, TurnNumber,
+    PlayerContribution, RetrievalHint, RoleEntry, RoleId, RoleSpec, RumorBody, RumorEntry, RumorId, StorySummary,
+    TurnNumber,
 };
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -18,13 +18,16 @@ fn text(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", usize::MAX).expect("valid text")
 }
 
-fn role(id: &str, marker: &str) -> ResolvedRole {
-    ResolvedRole {
-        role_id: RoleId::try_new(id).expect("valid role id"),
-        name: text(&format!("{marker} name")),
-        aliases: vec![text(&format!("{marker} alias"))],
-        backstory: text(&format!("{marker} backstory")),
-        retrieval_hint: RetrievalHint::try_new(format!("{marker} hint")).expect("valid hint"),
+fn role(id: &str, marker: &str) -> RoleEntry {
+    RoleEntry {
+        id: RoleId::try_new(id).expect("valid role id"),
+        origin: EntryOrigin::Seed,
+        spec: RoleSpec {
+            name: text(&format!("{marker} name")),
+            alias: vec![text(&format!("{marker} alias"))],
+            backstory: text(&format!("{marker} backstory")),
+            retrieval: RetrievalHint::try_new(format!("{marker} hint")).expect("valid hint"),
+        },
         profile: CharacterProfile {
             appearance: Some(text(&format!("{marker} appearance"))),
             personality: Some(text(&format!("{marker} personality"))),
@@ -100,13 +103,12 @@ fn rendered_text(rendered: &RenderedPrompt) -> String {
         .replace("\r\n", "\n")
 }
 
-#[tokio::test]
-async fn prompt_contains_only_target_role_private_context() {
-    let store = store_with_default_pack().await;
-    let story_ctx = StoryContext::new();
+#[test]
+fn prompt_contains_only_target_role_private_context() {
+    let story_ctx = story_context();
     let roles = [role("target", "TARGET_PRIVATE"), role("other", "OTHER_PRIVATE")];
     let requests = [CharacterThinkRequest {
-        role_id: roles[0].role_id.clone(),
+        role_id: roles[0].id.clone(),
         thinking_focus: text("focus marker"),
     }];
     let player_contribution = PlayerContribution {
@@ -125,7 +127,6 @@ async fn prompt_contains_only_target_role_private_context() {
     )];
     let input = ThinkInput {
         requests: &requests,
-        resolved_roles: &roles,
         player_contribution: &player_contribution,
         activated_rumors: &activated_rumors,
         retrieved_rumors: &retrieved_rumors,
@@ -134,7 +135,6 @@ async fn prompt_contains_only_target_role_private_context() {
 
     let rendered = character_decision(
         &prompt(),
-        &store,
         CharacterDecisionPrompt {
             story_ctx: &story_ctx,
             input: &input,
@@ -144,7 +144,6 @@ async fn prompt_contains_only_target_role_private_context() {
         },
         trace.root(),
     )
-    .await
     .expect("prompt should render");
     let text = rendered_text(&rendered);
 
@@ -164,16 +163,15 @@ async fn prompt_contains_only_target_role_private_context() {
     assert!(!text.contains("Narrative Direction"));
 }
 
-#[tokio::test]
-async fn prompt_omits_empty_optional_runtime_sections() {
-    let store = store_with_default_pack().await;
-    let story_ctx = StoryContext::new();
+#[test]
+fn prompt_omits_empty_optional_runtime_sections() {
+    let story_ctx = story_context();
     let mut target = role("target", "TARGET");
-    target.backstory = text("");
+    target.spec.backstory = text("");
     target.memories.clear();
     let roles = [target];
     let requests = [CharacterThinkRequest {
-        role_id: roles[0].role_id.clone(),
+        role_id: roles[0].id.clone(),
         thinking_focus: text("focus"),
     }];
     let player_contribution = PlayerContribution {
@@ -182,7 +180,6 @@ async fn prompt_omits_empty_optional_runtime_sections() {
     };
     let input = ThinkInput {
         requests: &requests,
-        resolved_roles: &roles,
         player_contribution: &player_contribution,
         activated_rumors: &[],
         retrieved_rumors: &[],
@@ -191,7 +188,6 @@ async fn prompt_omits_empty_optional_runtime_sections() {
 
     let rendered = character_decision(
         &prompt(),
-        &store,
         CharacterDecisionPrompt {
             story_ctx: &story_ctx,
             input: &input,
@@ -201,7 +197,6 @@ async fn prompt_omits_empty_optional_runtime_sections() {
         },
         trace.root(),
     )
-    .await
     .expect("prompt should render");
     let text = rendered_text(&rendered);
     let sections = [
@@ -223,22 +218,21 @@ async fn prompt_omits_empty_optional_runtime_sections() {
     assert!(!text.contains("## Recent Story"));
     assert!(!text.contains("## Rumors"));
     assert!(!text.contains("## Target Backstory"));
-    assert!(!text.contains("## Target Seed Memories"));
+    assert!(!text.contains("## Target Memories"));
     assert!(text.contains(r#"Aliases: ["TARGET alias"]"#));
     assert!(text.contains(r#"{"appearance":"TARGET appearance""#));
 }
 
-#[tokio::test]
-async fn prompt_labels_existing_summary_as_story_summary() {
-    let store = store_with_default_pack().await;
-    let mut story_ctx = StoryContext::new();
+#[test]
+fn prompt_labels_existing_summary_as_story_summary() {
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(StorySummary {
         text: "Earlier events.".to_owned(),
         covered_through: TurnNumber::new(1),
     });
     let roles = [role("target", "TARGET")];
     let requests = [CharacterThinkRequest {
-        role_id: roles[0].role_id.clone(),
+        role_id: roles[0].id.clone(),
         thinking_focus: text("focus"),
     }];
     let player_contribution = PlayerContribution {
@@ -247,7 +241,6 @@ async fn prompt_labels_existing_summary_as_story_summary() {
     };
     let input = ThinkInput {
         requests: &requests,
-        resolved_roles: &roles,
         player_contribution: &player_contribution,
         activated_rumors: &[],
         retrieved_rumors: &[],
@@ -256,7 +249,6 @@ async fn prompt_labels_existing_summary_as_story_summary() {
 
     let rendered = character_decision(
         &prompt(),
-        &store,
         CharacterDecisionPrompt {
             story_ctx: &story_ctx,
             input: &input,
@@ -266,7 +258,6 @@ async fn prompt_labels_existing_summary_as_story_summary() {
         },
         trace.root(),
     )
-    .await
     .expect("prompt should render");
     let text = rendered_text(&rendered);
 
@@ -275,13 +266,12 @@ async fn prompt_labels_existing_summary_as_story_summary() {
     assert!(!text.contains("## Story Summary or Story Opening"));
 }
 
-#[tokio::test]
-async fn oversized_profile_is_rejected_before_rendering() {
-    let store = store_with_default_pack().await;
+#[test]
+fn oversized_profile_is_rejected_before_rendering() {
     let role = role("target", "TARGET");
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
     let request = CharacterThinkRequest {
-        role_id: role.role_id.clone(),
+        role_id: role.id.clone(),
         thinking_focus: text("focus"),
     };
     let player_contribution = PlayerContribution {
@@ -290,7 +280,6 @@ async fn oversized_profile_is_rejected_before_rendering() {
     };
     let input = ThinkInput {
         requests: std::slice::from_ref(&request),
-        resolved_roles: std::slice::from_ref(&role),
         player_contribution: &player_contribution,
         activated_rumors: &[],
         retrieved_rumors: &[],
@@ -303,7 +292,6 @@ async fn oversized_profile_is_rejected_before_rendering() {
 
     let error = character_decision(
         &prompt(),
-        &store,
         CharacterDecisionPrompt {
             story_ctx: &story_ctx,
             input: &input,
@@ -313,7 +301,6 @@ async fn oversized_profile_is_rejected_before_rendering() {
         },
         trace.root(),
     )
-    .await
     .expect_err("oversized profile should fail");
 
     assert!(matches!(
@@ -325,13 +312,12 @@ async fn oversized_profile_is_rejected_before_rendering() {
     ));
 }
 
-#[tokio::test]
-async fn oversized_backstory_is_rejected_before_rendering() {
-    let store = store_with_default_pack().await;
+#[test]
+fn oversized_backstory_is_rejected_before_rendering() {
     let role = role("target", "TARGET");
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
     let request = CharacterThinkRequest {
-        role_id: role.role_id.clone(),
+        role_id: role.id.clone(),
         thinking_focus: text("focus"),
     };
     let player_contribution = PlayerContribution {
@@ -340,7 +326,6 @@ async fn oversized_backstory_is_rejected_before_rendering() {
     };
     let input = ThinkInput {
         requests: std::slice::from_ref(&request),
-        resolved_roles: std::slice::from_ref(&role),
         player_contribution: &player_contribution,
         activated_rumors: &[],
         retrieved_rumors: &[],
@@ -353,7 +338,6 @@ async fn oversized_backstory_is_rejected_before_rendering() {
 
     let error = character_decision(
         &prompt(),
-        &store,
         CharacterDecisionPrompt {
             story_ctx: &story_ctx,
             input: &input,
@@ -363,7 +347,6 @@ async fn oversized_backstory_is_rejected_before_rendering() {
         },
         trace.root(),
     )
-    .await
     .expect_err("oversized backstory should fail");
 
     assert!(matches!(

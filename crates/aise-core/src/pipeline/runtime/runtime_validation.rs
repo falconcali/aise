@@ -1,5 +1,5 @@
 use crate::core::{
-    StoryContext, TurnCheckEvaluation, TurnChoiceEvaluation, TurnEvaluation, TurnScoreEvaluation, TurnStatus,
+    RoleId, StoryContext, TurnCheckEvaluation, TurnChoiceEvaluation, TurnEvaluation, TurnScoreEvaluation, TurnStatus,
 };
 use crate::pipeline::baseline::BaselineOutput;
 use crate::pipeline::common::{
@@ -12,7 +12,6 @@ use crate::pipeline::runtime::runtime::Runtime;
 use crate::pipeline::runtime::runtime_trace;
 use crate::pipeline::think::ThinkOutput;
 use crate::pipeline::validate::{ValidateInput, ValidateOutput};
-use crate::trace::Trace;
 use std::cmp::Ordering;
 
 pub(super) struct ValidatedProposal {
@@ -43,9 +42,8 @@ impl Runtime {
         story_ctx: &StoryContext,
         context: ValidationContext<'_>,
         initial_proposal: String,
-        trace: &Trace,
     ) -> Result<ValidationLoopResult, PipelineError> {
-        let validation_observation = runtime_trace::begin_validation_loop(trace, &initial_proposal);
+        let validation_observation = runtime_trace::begin_validation_loop(pipeline_runner.trace, &initial_proposal);
         let result = self
             .validate_and_repair(pipeline_runner, story_ctx, context, initial_proposal)
             .await;
@@ -141,6 +139,7 @@ pub(super) fn validation_context<'a>(
     plan_output: &'a PlanOutput,
     baseline_output: &'a BaselineOutput,
     retrieval_output: &'a RetrievalOutput,
+    role_ids: &'a [RoleId],
     think_output: &'a ThinkOutput,
 ) -> ValidationContext<'a> {
     ValidationContext {
@@ -151,8 +150,7 @@ pub(super) fn validation_context<'a>(
         knowledge: &baseline_output.knowledge,
         retrieved_facts: &retrieval_output.facts,
         retrieved_rumors: &retrieval_output.rumors,
-        player_role: &plan_output.player_role,
-        roles: &retrieval_output.roles,
+        role_ids,
         character_decisions: &think_output.decisions,
     }
 }

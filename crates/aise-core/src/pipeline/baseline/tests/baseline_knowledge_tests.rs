@@ -1,14 +1,15 @@
 use super::*;
-use crate::core::tests::{demo_pack, snake_pack, turn_evaluation};
+use crate::core::tests::{demo_pack, snake_pack, story_context, turn_evaluation};
 use crate::core::{
     ActivationRule, BoundedText, EntryOrigin, FactBody, FactEntry, IdempotencyKey, KnowledgeChange, MemoryEntry,
-    NarrativeDirection, NarrativeNodeId, RetrievalHint, RoleActor, RoleEntry, RumorBody, RumorEntry, StorySummary,
+    NarrativeDirection, NarrativeNodeId, RetrievalHint, RoleEntry, RumorBody, RumorEntry, StoryPack, StorySummary,
     Turn, TurnNumber, TurnSegment, TurnStatus,
 };
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
 };
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 fn test_trace() -> Trace {
     let session = ObservationSession::begin(
@@ -98,69 +99,65 @@ fn pack_with_rules() -> StoryPack {
 
 fn seed_context(pack: &StoryPack, story_ctx: &StoryContext) -> StoryContext {
     let mut ctx = story_ctx.clone();
-    if ctx.facts.is_empty() {
-        ctx.facts = pack
-            .seed_facts
-            .iter()
-            .map(|(id, body)| {
-                (
-                    id.clone(),
-                    FactEntry {
-                        id: id.clone(),
-                        origin: EntryOrigin::Seed,
-                        body: body.clone(),
-                    },
-                )
-            })
-            .collect();
-    }
-    if ctx.rumors.is_empty() {
-        ctx.rumors = pack
-            .seed_rumors
-            .iter()
-            .map(|(id, body)| {
-                (
-                    id.clone(),
-                    RumorEntry {
-                        id: id.clone(),
-                        origin: EntryOrigin::Seed,
-                        body: body.clone(),
-                    },
-                )
-            })
-            .collect();
-    }
-    if ctx.roles.is_empty() {
-        ctx.roles = pack
-            .roles
-            .iter()
-            .map(|(id, body)| {
-                let memories = body
-                    .seed_memories
-                    .iter()
-                    .map(|(mem_id, mem_body)| {
-                        (
-                            mem_id.clone(),
-                            MemoryEntry {
-                                id: mem_id.clone(),
-                                origin: EntryOrigin::Seed,
-                                body: mem_body.clone(),
-                            },
-                        )
-                    })
-                    .collect();
-                (
-                    id.clone(),
-                    RoleEntry {
-                        id: id.clone(),
-                        actor: RoleActor::Default,
-                        body: body.clone(),
-                        memories,
-                    },
-                )
-            })
-            .collect();
-    }
+    ctx.opening = Arc::new(pack.opening.clone());
+    ctx.facts = pack
+        .seed_facts
+        .iter()
+        .map(|(id, body)| {
+            (
+                id.clone(),
+                FactEntry {
+                    id: id.clone(),
+                    origin: EntryOrigin::Seed,
+                    body: body.clone(),
+                },
+            )
+        })
+        .collect();
+    ctx.rumors = pack
+        .seed_rumors
+        .iter()
+        .map(|(id, body)| {
+            (
+                id.clone(),
+                RumorEntry {
+                    id: id.clone(),
+                    origin: EntryOrigin::Seed,
+                    body: body.clone(),
+                },
+            )
+        })
+        .collect();
+    ctx.roles = pack
+        .roles
+        .iter()
+        .map(|(id, body)| {
+            let memories = body
+                .seed_memories
+                .iter()
+                .map(|(mem_id, mem_body)| {
+                    (
+                        mem_id.clone(),
+                        MemoryEntry {
+                            id: mem_id.clone(),
+                            origin: EntryOrigin::Seed,
+                            body: mem_body.clone(),
+                        },
+                    )
+                })
+                .collect();
+            (
+                id.clone(),
+                RoleEntry {
+                    id: id.clone(),
+                    origin: EntryOrigin::Seed,
+                    spec: body.spec.clone(),
+                    profile: body.default_profile.clone(),
+                    memories,
+                },
+            )
+        })
+        .collect();
     ctx
 }
 
@@ -175,7 +172,6 @@ fn activate_with(
     let player_contribution = contribution(player_text);
     activate_knowledge(
         KnowledgeScope {
-            story_pack: pack,
             story_ctx: &seeded_ctx,
             player_contribution: &player_contribution,
             narrative,
@@ -191,7 +187,7 @@ fn fact_ids(knowledge: &ActivatedKnowledge) -> Vec<&str> {
 
 #[test]
 fn player_contribution_activates_matching_facts_and_rumors() {
-    let knowledge = activate_with(&pack_with_rules(), &StoryContext::new(), "法海在寺门前等我", &empty_narrative());
+    let knowledge = activate_with(&pack_with_rules(), &story_context(), "法海在寺门前等我", &empty_narrative());
 
     assert_eq!(fact_ids(&knowledge), ["fahai_knows_identity"]);
     assert_eq!(knowledge.rumors.len(), 1);
@@ -201,7 +197,7 @@ fn player_contribution_activates_matching_facts_and_rumors() {
 
 #[test]
 fn example_pack_rules_activate_and_recurse() {
-    let knowledge = activate_with(&snake_pack(), &StoryContext::new(), "法海说白娘子是蛇妖", &empty_narrative());
+    let knowledge = activate_with(&snake_pack(), &story_context(), "法海说白娘子是蛇妖", &empty_narrative());
 
     let facts = fact_ids(&knowledge);
     assert_eq!(facts[..2], ["bai_is_thousand_year_snake", "fahai_knows_identity"]);
@@ -210,14 +206,14 @@ fn example_pack_rules_activate_and_recurse() {
 
 #[test]
 fn example_constant_entry_is_always_active() {
-    let knowledge = activate_with(&demo_pack(), &StoryContext::new(), "我坐在火炉边", &empty_narrative());
+    let knowledge = activate_with(&demo_pack(), &story_context(), "我坐在火炉边", &empty_narrative());
 
     assert!(fact_ids(&knowledge).contains(&"lodge_is_remote"));
 }
 
 #[test]
 fn unmatched_story_activates_nothing() {
-    let knowledge = activate_with(&pack_with_rules(), &StoryContext::new(), "今天天气不错", &empty_narrative());
+    let knowledge = activate_with(&pack_with_rules(), &story_context(), "今天天气不错", &empty_narrative());
 
     assert!(knowledge.facts.is_empty());
     assert!(knowledge.rumors.is_empty());
@@ -228,7 +224,7 @@ fn opening_is_scanned_when_summary_is_absent() {
     let mut pack = pack_with_rules();
     pack.opening = BoundedText::try_new("法海在山门前等候。", "test", usize::MAX).expect("test opening should fit");
 
-    let knowledge = activate_with(&pack, &StoryContext::new(), "继续", &empty_narrative());
+    let knowledge = activate_with(&pack, &story_context(), "继续", &empty_narrative());
 
     assert_eq!(fact_ids(&knowledge), ["fahai_knows_identity"]);
     assert_eq!(knowledge.rumors.len(), 1);
@@ -238,7 +234,7 @@ fn opening_is_scanned_when_summary_is_absent() {
 fn summary_replaces_opening_in_scan_buffer() {
     let mut pack = pack_with_rules();
     pack.opening = BoundedText::try_new("法海在山门前等候。", "test", usize::MAX).expect("test opening should fit");
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(StorySummary {
         text: "雨后的西湖十分平静。".to_owned(),
         covered_through: TurnNumber::new(1),
@@ -252,7 +248,7 @@ fn summary_replaces_opening_in_scan_buffer() {
 
 #[test]
 fn recent_story_and_narrative_directions_are_scanned() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.recent_turns.push_back(turn(1, "西湖边有一条白蛇游过。"));
     let narrative = NarrativeProjection {
         directions: vec![NarrativeDirection {
@@ -273,7 +269,7 @@ fn summary_is_only_visible_beyond_recent_story_depth() {
         text: "此前，白蛇来到钱塘。".to_owned(),
         covered_through: TurnNumber::new(3),
     };
-    let mut shallow = StoryContext::new();
+    let mut shallow = story_context();
     shallow.summary = Some(summary.clone());
     let mut deep = shallow.clone();
     deep.recent_turns.push_back(turn(4, "雨停了。"));
@@ -289,7 +285,7 @@ fn summary_is_only_visible_beyond_recent_story_depth() {
 #[test]
 fn dynamically_added_and_updated_knowledge_in_context_is_activated_and_removed_rumors_are_absent() {
     let pack = pack_with_rules();
-    let mut story_ctx = seed_context(&pack, &StoryContext::new());
+    let mut story_ctx = seed_context(&pack, &story_context());
     story_ctx.facts.insert(
         fact_id("dynamic_fact"),
         FactEntry {
@@ -326,7 +322,6 @@ fn dynamically_added_and_updated_knowledge_in_context_is_activated_and_removed_r
     let player_contribution = contribution("法海走向雷峰塔");
     let knowledge = activate_knowledge(
         KnowledgeScope {
-            story_pack: &pack,
             story_ctx: &story_ctx,
             player_contribution: &player_contribution,
             narrative: &empty_narrative(),

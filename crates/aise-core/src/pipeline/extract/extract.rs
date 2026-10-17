@@ -64,7 +64,7 @@ impl ExtractPipeline {
         } else {
             let narrative_observation = extract_trace::begin_evaluate_narrative(observation, proposal, &queries);
             let result = self
-                .evaluate_narrative_queries(story_pack, story_ctx, proposal, &queries, control, &narrative_observation)
+                .evaluate_narrative_queries(story_ctx, proposal, &queries, control, &narrative_observation)
                 .await;
             extract_trace::finish_evaluate_narrative(narrative_observation, &queries, &result);
             result?
@@ -74,7 +74,6 @@ impl ExtractPipeline {
 
     async fn evaluate_narrative_queries(
         &self,
-        story_pack: &StoryPack,
         story_ctx: &StoryContext,
         proposal: &str,
         queries: &[SemanticQuery],
@@ -84,7 +83,6 @@ impl ExtractPipeline {
         let rendered_prompt = extract_prompt::evaluate_narrative(
             self.prompt.as_ref(),
             EvaluateNarrativePrompt {
-                story_pack,
                 story_ctx,
                 proposal,
                 queries,
@@ -104,7 +102,6 @@ impl ExtractPipeline {
 
     async fn extract_world_knowledge(
         &self,
-        story_pack: &StoryPack,
         story_ctx: &StoryContext,
         proposal: &str,
         control: &TurnControl,
@@ -112,7 +109,7 @@ impl ExtractPipeline {
     ) -> Result<WorldKnowledgeExtraction, PipelineError> {
         let world_observation = extract_trace::begin_extract_world_knowledge(observation, proposal);
         let result = self
-            .extract_world_knowledge_inner(story_pack, story_ctx, proposal, control, &world_observation)
+            .extract_world_knowledge_inner(story_ctx, proposal, control, &world_observation)
             .await;
         extract_trace::finish_extract_world_knowledge(world_observation, &result);
         result
@@ -120,7 +117,6 @@ impl ExtractPipeline {
 
     async fn extract_world_knowledge_inner(
         &self,
-        story_pack: &StoryPack,
         story_ctx: &StoryContext,
         proposal: &str,
         control: &TurnControl,
@@ -129,7 +125,6 @@ impl ExtractPipeline {
         let rendered_prompt = extract_prompt::extract_world_knowledge(
             self.prompt.as_ref(),
             ExtractWorldKnowledgePrompt {
-                story_pack,
                 story_ctx,
                 proposal,
                 config: &self.config,
@@ -149,7 +144,6 @@ impl ExtractPipeline {
 
     async fn extract_role_memories(
         &self,
-        story_pack: &StoryPack,
         story_ctx: &StoryContext,
         proposal: &str,
         roles_for_memory: &[RoleId],
@@ -161,7 +155,7 @@ impl ExtractPipeline {
         }
         stream::iter(roles_for_memory.iter().cloned())
             .map(|role_id| async move {
-                self.extract_role_memory(story_pack, story_ctx, proposal, &role_id, control, observation)
+                self.extract_role_memory(story_ctx, proposal, &role_id, control, observation)
                     .await
             })
             .buffered(self.config.max_memory_concurrency.get())
@@ -171,7 +165,6 @@ impl ExtractPipeline {
 
     async fn extract_role_memory(
         &self,
-        story_pack: &StoryPack,
         story_ctx: &StoryContext,
         proposal: &str,
         role_id: &RoleId,
@@ -180,7 +173,7 @@ impl ExtractPipeline {
     ) -> Result<Vec<RoleMemoryChangeOp>, PipelineError> {
         let role_observation = extract_trace::begin_extract_role_memory(observation, role_id, proposal);
         let result = self
-            .extract_role_memory_inner(story_pack, story_ctx, proposal, role_id, control, &role_observation)
+            .extract_role_memory_inner(story_ctx, proposal, role_id, control, &role_observation)
             .await;
         extract_trace::finish_extract_role_memory(role_observation, &result);
         result
@@ -188,7 +181,6 @@ impl ExtractPipeline {
 
     async fn extract_role_memory_inner(
         &self,
-        story_pack: &StoryPack,
         story_ctx: &StoryContext,
         proposal: &str,
         role_id: &RoleId,
@@ -198,7 +190,6 @@ impl ExtractPipeline {
         let rendered_prompt = extract_prompt::extract_role_memory(
             self.prompt.as_ref(),
             ExtractRoleMemoryPrompt {
-                story_pack,
                 story_ctx,
                 proposal,
                 role_id,
@@ -241,11 +232,10 @@ impl<'a> Pipeline<ExtractInput<'a>> for ExtractPipeline {
             .map_err(PipelineError::persistence(PipelineStage::Extract))?;
         let (narrative_change, world_extraction) = tokio::try_join!(
             self.evaluate_narrative(&story_pack, story_ctx, input.proposal, control, observation),
-            self.extract_world_knowledge(&story_pack, story_ctx, input.proposal, control, observation),
+            self.extract_world_knowledge(story_ctx, input.proposal, control, observation),
         )?;
         let role_memories = self
             .extract_role_memories(
-                &story_pack,
                 story_ctx,
                 input.proposal,
                 &world_extraction.roles_for_memory,

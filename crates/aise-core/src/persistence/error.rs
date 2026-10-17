@@ -23,9 +23,7 @@ pub enum PersistenceError {
     InvalidData(#[from] CoreError),
     #[error("persistance invalid story data: {0}")]
     InvalidStory(#[from] StoryError),
-    #[error(
-        "story creation and pack cleanup failed for {story_id}: create={create_source}; cleanup={cleanup_source}"
-    )]
+    #[error("story creation and pack cleanup failed for {story_id}: create={create_source}; cleanup={cleanup_source}")]
     CreateCompensationFailed {
         story_id: StoryId,
         create_source: Box<PersistenceError>,

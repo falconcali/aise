@@ -1,13 +1,15 @@
 use super::*;
-use crate::core::tests::{store_with_default_pack, turn_evaluation};
+use crate::core::tests::{story_context, turn_evaluation};
 use crate::core::{
-    IdempotencyKey, KnowledgeChange, PlayerContribution, StorySummary, Turn, TurnNumber, TurnSegment, TurnStatus,
+    BoundedText, IdempotencyKey, KnowledgeChange, PlayerContribution, StorySummary, Turn, TurnNumber, TurnSegment,
+    TurnStatus,
 };
 use crate::prompt::PromptConfig;
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
 };
 use std::path::Path;
+use std::sync::Arc;
 
 const BUNDLED_PROMPT_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/prompts");
 
@@ -69,19 +71,17 @@ fn var<'a>(vars: &'a PromptVars, name: &str) -> &'a str {
     vars.get(name).and_then(Value::as_str).expect("string var")
 }
 
-async fn runtime_context(story_ctx: &StoryContext, input: &str) -> String {
-    let store = store_with_default_pack().await;
+fn runtime_context(story_ctx: &StoryContext, input: &str) -> String {
     let trace = test_trace();
-    let rendered = process_player_input(&bundled_prompt(), story_ctx, input, &store, trace.root())
-        .await
-        .expect("render");
+    let rendered = process_player_input(&bundled_prompt(), story_ctx, input, trace.root()).expect("render");
     rendered.messages()[1].content.replace("\r\n", "\n")
 }
 
 #[test]
 fn vars_for_new_story_carry_opening_and_empty_summary_and_recent_story() {
-    let story_ctx = StoryContext::new();
-    let vars = player_input_vars(&story_ctx, "I wave.", "Rain falls.".to_owned());
+    let mut story_ctx = story_context();
+    story_ctx.opening = Arc::new(BoundedText::try_new("Rain falls.", "test", usize::MAX).expect("valid opening"));
+    let vars = player_input_vars(&story_ctx, "I wave.");
 
     assert_eq!(var(&vars, "player_input"), "I wave.");
     assert_eq!(var(&vars, "story_opening"), "Rain falls.");
@@ -91,30 +91,23 @@ fn vars_for_new_story_carry_opening_and_empty_summary_and_recent_story() {
 
 #[test]
 fn vars_with_summary_carry_trimmed_summary_and_segments_only() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("  Earlier events.  ", 1));
     story_ctx.recent_turns.push_back(turn(2, "The door creaks.", TurnStatus::Pass));
     story_ctx.recent_turns.push_back(turn(3, "The hall is dark.", TurnStatus::Pass));
-    let vars = player_input_vars(&story_ctx, "I look around.", String::new());
+    let vars = player_input_vars(&story_ctx, "I look around.");
 
     assert_eq!(var(&vars, "story_summary"), "Earlier events.");
     assert_eq!(var(&vars, "story_opening"), "");
     assert_eq!(var(&vars, "recent_story"), "The door creaks.\n\nThe hall is dark.");
 }
 
-#[tokio::test]
-async fn new_story_runtime_context_has_opening_then_input() {
-    let story_ctx = StoryContext::new();
-    let store = store_with_default_pack().await;
-    let opening = store
-        .pack_store()
-        .get_pack(&story_ctx.pack_ref)
-        .await
-        .expect("pack loads")
-        .opening
-        .clone();
+#[test]
+fn new_story_runtime_context_has_opening_then_input() {
+    let story_ctx = story_context();
+    let opening = story_ctx.opening.clone();
 
-    let content = runtime_context(&story_ctx, "I wave.").await;
+    let content = runtime_context(&story_ctx, "I wave.");
 
     assert_eq!(
         content,
@@ -122,20 +115,13 @@ async fn new_story_runtime_context_has_opening_then_input() {
     );
 }
 
-#[tokio::test]
-async fn new_story_runtime_context_orders_opening_recent_story_and_input() {
-    let store = store_with_default_pack().await;
-    let mut story_ctx = StoryContext::new();
+#[test]
+fn new_story_runtime_context_orders_opening_recent_story_and_input() {
+    let mut story_ctx = story_context();
     story_ctx.recent_turns.push_back(turn(1, "The door creaks.", TurnStatus::Pass));
-    let opening = store
-        .pack_store()
-        .get_pack(&story_ctx.pack_ref)
-        .await
-        .expect("pack loads")
-        .opening
-        .clone();
+    let opening = story_ctx.opening.clone();
 
-    let content = runtime_context(&story_ctx, "I wave.").await;
+    let content = runtime_context(&story_ctx, "I wave.");
 
     assert_eq!(
         content,
@@ -145,13 +131,13 @@ async fn new_story_runtime_context_orders_opening_recent_story_and_input() {
     );
 }
 
-#[tokio::test]
-async fn summarized_story_runtime_context_omits_opening() {
-    let mut story_ctx = StoryContext::new();
+#[test]
+fn summarized_story_runtime_context_omits_opening() {
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("Earlier events.", 1));
     story_ctx.recent_turns.push_back(turn(2, "The door creaks.", TurnStatus::Pass));
 
-    let content = runtime_context(&story_ctx, "I wave.").await;
+    let content = runtime_context(&story_ctx, "I wave.");
 
     assert_eq!(
         content,

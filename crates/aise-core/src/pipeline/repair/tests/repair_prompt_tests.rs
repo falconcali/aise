@@ -1,8 +1,6 @@
 use super::*;
-use crate::core::tests::store_with_default_pack;
-use crate::core::{
-    ActivatedKnowledge, BoundedText, CharacterProfile, PlayerContribution, PlayerRoleContext, RoleId, StoryContext,
-};
+use crate::core::tests::story_context;
+use crate::core::{ActivatedKnowledge, BoundedText, PlayerContribution, RoleId};
 use crate::pipeline::ValidateConfig;
 use crate::pipeline::common::{ProposalQualityPolicy, ValidationContext, ValidationIssue};
 use crate::prompt::PromptConfig;
@@ -18,7 +16,7 @@ struct RepairFixture {
     goal: BoundedText,
     contribution: PlayerContribution,
     knowledge: ActivatedKnowledge,
-    player_role: PlayerRoleContext,
+    role_ids: Vec<RoleId>,
     issues: Vec<ValidationIssue>,
 }
 
@@ -33,8 +31,7 @@ impl RepairFixture {
                 knowledge: &self.knowledge,
                 retrieved_facts: &[],
                 retrieved_rumors: &[],
-                player_role: &self.player_role,
-                roles: &[],
+                role_ids: &self.role_ids,
                 character_decisions: &[],
             },
             proposal: "Current proposal.",
@@ -58,18 +55,7 @@ fn fixture() -> RepairFixture {
             processed: "The player follows.".to_owned(),
         },
         knowledge: ActivatedKnowledge::default(),
-        player_role: PlayerRoleContext {
-            role_id: RoleId::try_new("player").expect("valid role id"),
-            name: text("Player"),
-            aliases: Vec::new(),
-            backstory: text("Backstory."),
-            profile: CharacterProfile {
-                appearance: None,
-                personality: None,
-                speaking_style: None,
-                dialogue_examples: Vec::new(),
-            },
-        },
+        role_ids: Vec::new(),
         issues: vec![
             ValidationIssue::Check {
                 name: "explicit_constraints".to_owned(),
@@ -279,11 +265,19 @@ fn repair_prompt_omits_empty_quality_sections() {
     assert!(!runtime.contains("# Score Quality Targets"));
 }
 
-#[tokio::test]
-async fn repair_prompt_keeps_runtime_data_untrusted_with_plain_headings() {
+#[test]
+fn repair_prompt_keeps_runtime_data_untrusted_with_plain_headings() {
     let fixture = fixture();
-    let story_ctx = StoryContext::new();
-    let store = store_with_default_pack().await;
+    let story_ctx = story_context();
+    let private_memory = story_ctx.roles[&story_ctx.player]
+        .memories
+        .values()
+        .next()
+        .expect("player role should have a private memory")
+        .body
+        .content
+        .as_str()
+        .to_owned();
     let trace = trace();
     let policy = quality_policy();
     let messages = repair_story(
@@ -292,10 +286,8 @@ async fn repair_prompt_keeps_runtime_data_untrusted_with_plain_headings() {
         &fixture.input(),
         &policy,
         &RepairConfig::default(),
-        &store,
         trace.root(),
     )
-    .await
     .expect("prompt renders")
     .into_messages();
     let instructions = format!("{}\n{}", messages[0].content, messages[2].content);
@@ -319,4 +311,34 @@ async fn repair_prompt_keeps_runtime_data_untrusted_with_plain_headings() {
     assert!(!runtime.contains("# Retrieved Rumors"));
     assert!(!runtime.contains("# Resolved Roles"));
     assert!(!runtime.contains("# Character Decisions"));
+    assert!(!runtime.contains(&private_memory));
+}
+
+#[test]
+fn missing_role_is_rejected_with_stable_stage_and_code() {
+    let mut fixture = fixture();
+    fixture.role_ids = vec![RoleId::try_new("missing").expect("valid role id")];
+    let story_ctx = story_context();
+    let trace = trace();
+
+    let error = match repair_story(
+        &prompt(),
+        &story_ctx,
+        &fixture.input(),
+        &quality_policy(),
+        &RepairConfig::default(),
+        trace.root(),
+    ) {
+        Ok(_) => panic!("missing role should fail"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(
+        error,
+        PipelineError::InconsistentData {
+            stage: PipelineStage::Repair,
+            code: "repair_role_missing",
+            ..
+        }
+    ));
 }

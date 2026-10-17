@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::tests::snake_pack;
+use crate::core::tests::{snake_pack, story_context};
 use crate::core::{NarrativeConditionId, NarrativeNodeId, NodeStatus};
 use serde_json::json;
 
@@ -20,7 +20,7 @@ fn pack_with_narrative() -> StoryPack {
 }
 
 fn context_at(turn: u64, arrival: NodeStatus) -> StoryContext {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.turn_number = crate::core::TurnNumber::new(turn);
     story_ctx.narrative.node_status.insert(
         NarrativeNodeId::try_new("arrival").expect("test node id should be valid"),
@@ -63,7 +63,7 @@ fn pack_without_narrative_collects_no_queries() {
     let mut pack = pack_with_narrative();
     pack.narrative = None;
 
-    let queries = collect_semantic_queries(&pack, &StoryContext::new()).expect("query collection should succeed");
+    let queries = collect_semantic_queries(&pack, &story_context()).expect("query collection should succeed");
 
     assert!(queries.is_empty());
 }
@@ -84,7 +84,7 @@ fn pack_without_narrative_changes_nothing() {
     let mut pack = pack_with_narrative();
     pack.narrative = None;
 
-    let change = resolve_narrative(&pack, &StoryContext::new(), &BTreeMap::new());
+    let change = resolve_narrative(&pack, &story_context(), &BTreeMap::new());
 
     assert!(matches!(change.narrative, Change::Unchanged));
     assert!(matches!(change.life_cycle, Change::Unchanged));

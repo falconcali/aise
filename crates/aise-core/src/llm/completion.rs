@@ -31,8 +31,8 @@ pub enum LlmCompletionFinishReason {
 #[derive(Clone, Debug, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LlmReasoningEffort {
-    #[default]
     None,
+    #[default]
     Low,
     Medium,
     High,

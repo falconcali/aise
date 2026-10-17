@@ -1,4 +1,4 @@
-use crate::core::{BoundedText, CharacterDecision, CharacterProfile, PlayerRoleContext, ResolvedRole, RoleId};
+use crate::core::{BoundedText, CharacterDecision, CharacterProfile, RoleEntry, RoleId, StoryContext};
 use crate::pipeline::common::{PipelineError, PipelineStage};
 use crate::pipeline::generate::GenerateConfig;
 use serde_json::{Map, Value};
@@ -14,15 +14,17 @@ pub(super) struct GenerateRoleContext {
 }
 
 pub(super) fn project_role_context(
-    player_role: &PlayerRoleContext,
-    roles: &[ResolvedRole],
+    story_ctx: &StoryContext,
+    role_ids: &[RoleId],
     decisions: &[CharacterDecision],
     config: &GenerateConfig,
 ) -> Result<GenerateRoleContext, PipelineError> {
-    validate_ai_roles(player_role, roles)?;
-    validate_decisions(player_role, roles, decisions)?;
+    let player_role = resolve_role(story_ctx, &story_ctx.player)?;
+    let roles = resolve_roles(story_ctx, role_ids)?;
+    validate_ai_roles(player_role, &roles)?;
+    validate_decisions(player_role, &roles, decisions)?;
     let player_role = render_player_role(player_role, config)?;
-    let roles = render_roles(roles, config)?;
+    let roles = render_roles(&roles, config)?;
     validate_aggregate_role_context(&player_role, &roles, config)?;
     Ok(GenerateRoleContext {
         player_role,
@@ -31,21 +33,33 @@ pub(super) fn project_role_context(
     })
 }
 
-pub(super) fn validate_player_role(
-    player_role: &PlayerRoleContext,
-    expected_role_id: &RoleId,
-) -> Result<(), PipelineError> {
-    if &player_role.role_id != expected_role_id {
-        return Err(inconsistent(
-            "generate_player_role_mismatch",
-            "Player Role Context does not match the story player role",
-        ));
-    }
-    Ok(())
+fn resolve_role<'a>(story_ctx: &'a StoryContext, role_id: &RoleId) -> Result<&'a RoleEntry, PipelineError> {
+    story_ctx.roles.get(role_id).ok_or_else(|| {
+        inconsistent(
+            "generate_role_missing",
+            format!("role ID {role_id} is missing from the story context"),
+        )
+    })
 }
 
-fn validate_ai_roles(player_role: &PlayerRoleContext, roles: &[ResolvedRole]) -> Result<(), PipelineError> {
-    if roles.iter().any(|role| role.role_id == player_role.role_id) {
+fn resolve_roles<'a>(story_ctx: &'a StoryContext, role_ids: &[RoleId]) -> Result<Vec<&'a RoleEntry>, PipelineError> {
+    let mut seen = HashSet::with_capacity(role_ids.len());
+    role_ids
+        .iter()
+        .map(|role_id| {
+            if !seen.insert(role_id) {
+                return Err(inconsistent(
+                    "generate_duplicate_role_id",
+                    format!("role ID {role_id} appears more than once"),
+                ));
+            }
+            resolve_role(story_ctx, role_id)
+        })
+        .collect()
+}
+
+fn validate_ai_roles(player_role: &RoleEntry, roles: &[&RoleEntry]) -> Result<(), PipelineError> {
+    if roles.iter().any(|role| role.id == player_role.id) {
         return Err(inconsistent(
             "generate_player_role_in_ai_roles",
             "player role appears in the AI role collection",
@@ -55,13 +69,13 @@ fn validate_ai_roles(player_role: &PlayerRoleContext, roles: &[ResolvedRole]) ->
 }
 
 fn validate_decisions(
-    player_role: &PlayerRoleContext,
-    roles: &[ResolvedRole],
+    player_role: &RoleEntry,
+    roles: &[&RoleEntry],
     decisions: &[CharacterDecision],
 ) -> Result<(), PipelineError> {
     let mut seen = HashSet::with_capacity(decisions.len());
     for decision in decisions {
-        if decision.role_id == player_role.role_id {
+        if decision.role_id == player_role.id {
             return Err(inconsistent(
                 "generate_player_character_decision_forbidden",
                 "Character Decision targets the player role",
@@ -73,7 +87,7 @@ fn validate_decisions(
                 "Character Decision role appears more than once",
             ));
         }
-        if !roles.iter().any(|role| role.role_id == decision.role_id) {
+        if !roles.iter().any(|role| role.id == decision.role_id) {
             return Err(inconsistent(
                 "generate_character_decision_role_missing",
                 "Character Decision role is missing from resolved roles",
@@ -98,10 +112,17 @@ fn validate_aggregate_role_context(
     Ok(())
 }
 
-fn render_roles(roles: &[ResolvedRole], config: &GenerateConfig) -> Result<String, PipelineError> {
+fn render_roles(roles: &[&RoleEntry], config: &GenerateConfig) -> Result<String, PipelineError> {
     let mut rendered = String::new();
     for role in roles {
-        let role = render_role(&role.role_id, &role.name, &role.aliases, &role.profile, &role.backstory, config)?;
+        let role = render_role(
+            &role.id,
+            &role.spec.name,
+            &role.spec.alias,
+            &role.profile,
+            &role.spec.backstory,
+            config,
+        )?;
         if !rendered.is_empty() {
             rendered.push_str("\n\n");
         }
@@ -110,8 +131,15 @@ fn render_roles(roles: &[ResolvedRole], config: &GenerateConfig) -> Result<Strin
     Ok(rendered)
 }
 
-fn render_player_role(role: &PlayerRoleContext, config: &GenerateConfig) -> Result<String, PipelineError> {
-    render_role(&role.role_id, &role.name, &role.aliases, &role.profile, &role.backstory, config)
+fn render_player_role(role: &RoleEntry, config: &GenerateConfig) -> Result<String, PipelineError> {
+    render_role(
+        &role.id,
+        &role.spec.name,
+        &role.spec.alias,
+        &role.profile,
+        &role.spec.backstory,
+        config,
+    )
 }
 
 fn render_role(

@@ -1,8 +1,8 @@
 use super::*;
-use crate::core::tests::snake_pack;
+use crate::core::tests::{snake_pack, story_context};
 use crate::core::{
     ActivationRule, BoundedText, EntryOrigin, FactEntry, MemoryBody, MemoryEntry, MemoryId, NarrativeConditionId,
-    RetrievalHint, RoleActor, RoleEntry, RumorEntry, StorySummary, TurnNumber,
+    RetrievalHint, RoleEntry, RumorEntry, StoryPack, StorySummary, TurnNumber,
 };
 use crate::prompt::PromptConfig;
 use crate::trace::{
@@ -54,7 +54,7 @@ fn query(id: &str, criterion: &str) -> SemanticQuery {
 }
 
 fn populated_context(pack: &StoryPack) -> StoryContext {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.facts = pack
         .seed_facts
         .iter()
@@ -122,8 +122,9 @@ fn populated_context(pack: &StoryPack) -> StoryContext {
                 id.clone(),
                 RoleEntry {
                     id: id.clone(),
-                    actor: RoleActor::Default,
-                    body: body.clone(),
+                    origin: EntryOrigin::Seed,
+                    spec: body.spec.clone(),
+                    profile: body.default_profile.clone(),
                     memories,
                 },
             )
@@ -134,13 +135,11 @@ fn populated_context(pack: &StoryPack) -> StoryContext {
 
 fn render_narrative(story_ctx: &StoryContext) -> String {
     let prompt = bundled_prompt();
-    let story_pack = snake_pack();
     let queries = [query("gate_open", "The gate is open")];
     let trace = test_trace();
     evaluate_narrative(
         &prompt,
         EvaluateNarrativePrompt {
-            story_pack: &story_pack,
             story_ctx,
             proposal: "The gate opens.",
             queries: &queries,
@@ -155,7 +154,7 @@ fn render_narrative(story_ctx: &StoryContext) -> String {
 
 #[test]
 fn prompt_uses_opening_without_summary_and_serializes_queries() {
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
 
     let content = render_narrative(&story_ctx);
 
@@ -167,7 +166,7 @@ fn prompt_uses_opening_without_summary_and_serializes_queries() {
 
 #[test]
 fn prompt_uses_summary_instead_of_opening() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(StorySummary {
         text: "Earlier events.".to_owned(),
         covered_through: TurnNumber::new(2),
@@ -190,7 +189,6 @@ fn world_knowledge_prompt_includes_facts_rumors_and_role_catalog_without_leaking
     let rendered = extract_world_knowledge(
         &prompt,
         ExtractWorldKnowledgePrompt {
-            story_pack: &story_pack,
             story_ctx: &story_ctx,
             proposal: "Bai Suzhen hands the umbrella to Xu Xian.",
             config: &config,
@@ -240,7 +238,6 @@ fn role_memory_prompt_isolates_target_role_memories_and_enforces_perspective_bou
     let rendered = extract_role_memory(
         &prompt,
         ExtractRoleMemoryPrompt {
-            story_pack: &story_pack,
             story_ctx: &story_ctx,
             proposal: "While Bai Suzhen was absent, Fahai secretly spoke with Xu Xian and thought to himself.",
             role_id: &target_role_id,

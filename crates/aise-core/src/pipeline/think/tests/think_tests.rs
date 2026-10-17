@@ -1,8 +1,8 @@
 use super::*;
-use crate::core::tests::store_with_default_pack;
+use crate::core::tests::story_context;
 use crate::core::{
-    BoundedText, CharacterProfile, CharacterThinkRequest, PlayerContribution, ResolvedRole, RetrievalHint, RoleId,
-    StoryContext, TurnCancellation,
+    BoundedText, CharacterProfile, CharacterThinkRequest, EntryOrigin, PlayerContribution, RetrievalHint, RoleEntry,
+    RoleId, StoryContext, TurnCancellation,
 };
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
@@ -76,13 +76,16 @@ fn text(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", usize::MAX).expect("valid text")
 }
 
-fn role(index: usize) -> ResolvedRole {
-    ResolvedRole {
-        role_id: RoleId::try_new(format!("role-{index}")).expect("valid role id"),
-        name: text(&format!("Role {index}")),
-        aliases: Vec::new(),
-        backstory: text(&format!("Backstory {index}")),
-        retrieval_hint: RetrievalHint::try_new(format!("Hint {index}")).expect("valid hint"),
+fn role(index: usize) -> RoleEntry {
+    RoleEntry {
+        id: RoleId::try_new(format!("role-{index}")).expect("valid role id"),
+        origin: EntryOrigin::Seed,
+        spec: crate::core::RoleSpec {
+            name: text(&format!("Role {index}")),
+            alias: Vec::new(),
+            backstory: text(&format!("Backstory {index}")),
+            retrieval: RetrievalHint::try_new(format!("Hint {index}")).expect("valid hint"),
+        },
         profile: CharacterProfile {
             appearance: None,
             personality: Some(text(&format!("Personality {index}"))),
@@ -93,11 +96,19 @@ fn role(index: usize) -> ResolvedRole {
     }
 }
 
-fn request(role: &ResolvedRole) -> CharacterThinkRequest {
+fn request(role: &RoleEntry) -> CharacterThinkRequest {
     CharacterThinkRequest {
-        role_id: role.role_id.clone(),
+        role_id: role.id.clone(),
         thinking_focus: text("Choose an immediate response."),
     }
+}
+
+fn context_with_roles(roles: &[RoleEntry]) -> StoryContext {
+    let mut story_ctx = story_context();
+    story_ctx
+        .roles
+        .extend(roles.iter().cloned().map(|role| (role.id.clone(), role)));
+    story_ctx
 }
 
 fn prompt() -> Prompt {
@@ -132,8 +143,7 @@ fn trace() -> Trace {
     })
 }
 
-async fn pipeline(provider: Arc<ControlledProvider>, max_concurrency: usize) -> ThinkPipeline {
-    let store = Arc::new(store_with_default_pack().await);
+fn pipeline(provider: Arc<ControlledProvider>, max_concurrency: usize) -> ThinkPipeline {
     let config = ThinkConfig {
         max_concurrency: std::num::NonZeroUsize::new(max_concurrency).expect("nonzero concurrency"),
         ..ThinkConfig::default()
@@ -141,7 +151,6 @@ async fn pipeline(provider: Arc<ControlledProvider>, max_concurrency: usize) -> 
     ThinkPipeline::new(
         Arc::new(LlmGateway::new(provider, LlmConfig::default())),
         Arc::new(prompt()),
-        store,
         config,
     )
 }
@@ -154,7 +163,7 @@ async fn decisions_preserve_request_order_with_bounded_concurrency() {
         maximum_active: AtomicUsize::new(0),
         fail_first: AtomicBool::new(false),
     });
-    let pipeline = pipeline(Arc::clone(&provider), 2).await;
+    let pipeline = pipeline(Arc::clone(&provider), 2);
     let roles = (0..4).map(role).collect::<Vec<_>>();
     let requests = roles.iter().map(request).collect::<Vec<_>>();
     let player_contribution = PlayerContribution {
@@ -163,12 +172,11 @@ async fn decisions_preserve_request_order_with_bounded_concurrency() {
     };
     let input = ThinkInput {
         requests: &requests,
-        resolved_roles: &roles,
         player_contribution: &player_contribution,
         activated_rumors: &[],
         retrieved_rumors: &[],
     };
-    let story_ctx = StoryContext::new();
+    let story_ctx = context_with_roles(&roles);
     let control = TurnControl::new(Instant::now() + Duration::from_secs(5), TurnCancellation::new());
     let trace = trace();
 
@@ -197,7 +205,7 @@ async fn any_invalid_role_output_fails_the_whole_stage() {
         maximum_active: AtomicUsize::new(0),
         fail_first: AtomicBool::new(true),
     });
-    let pipeline = pipeline(Arc::clone(&provider), 2).await;
+    let pipeline = pipeline(Arc::clone(&provider), 2);
     let roles = (0..3).map(role).collect::<Vec<_>>();
     let requests = roles.iter().map(request).collect::<Vec<_>>();
     let player_contribution = PlayerContribution {
@@ -206,12 +214,11 @@ async fn any_invalid_role_output_fails_the_whole_stage() {
     };
     let input = ThinkInput {
         requests: &requests,
-        resolved_roles: &roles,
         player_contribution: &player_contribution,
         activated_rumors: &[],
         retrieved_rumors: &[],
     };
-    let story_ctx = StoryContext::new();
+    let story_ctx = context_with_roles(&roles);
     let control = TurnControl::new(Instant::now() + Duration::from_secs(5), TurnCancellation::new());
     let trace = trace();
 
@@ -240,13 +247,13 @@ fn duplicate_request_role_is_rejected() {
     };
     let input = ThinkInput {
         requests: &requests,
-        resolved_roles: &roles,
         player_contribution: &player_contribution,
         activated_rumors: &[],
         retrieved_rumors: &[],
     };
+    let story_ctx = context_with_roles(&roles);
 
-    let error = validate_input(&input, &RoleId::try_new("player").expect("valid player")).expect_err("duplicate fails");
+    let error = validate_input(&input, &story_ctx).expect_err("duplicate fails");
 
     assert!(matches!(
         error,
@@ -267,13 +274,14 @@ fn player_role_request_is_rejected() {
     };
     let input = ThinkInput {
         requests: &requests,
-        resolved_roles: &roles,
         player_contribution: &player_contribution,
         activated_rumors: &[],
         retrieved_rumors: &[],
     };
+    let mut story_ctx = context_with_roles(&roles);
+    story_ctx.player = roles[0].id.clone();
 
-    let error = validate_input(&input, &roles[0].role_id).expect_err("player target fails");
+    let error = validate_input(&input, &story_ctx).expect_err("player target fails");
 
     assert!(matches!(
         error,
@@ -285,43 +293,27 @@ fn player_role_request_is_rejected() {
 }
 
 #[test]
-fn missing_or_duplicate_resolved_role_is_rejected() {
+fn missing_role_is_rejected_with_stable_stage_and_code() {
     let roles = [role(0)];
     let requests = [request(&roles[0])];
     let player_contribution = PlayerContribution {
         raw: String::new(),
         processed: String::new(),
     };
-    let missing_input = ThinkInput {
+    let input = ThinkInput {
         requests: &requests,
-        resolved_roles: &[],
         player_contribution: &player_contribution,
         activated_rumors: &[],
         retrieved_rumors: &[],
     };
-    let duplicate_roles = [roles[0].clone(), roles[0].clone()];
-    let duplicate_input = ThinkInput {
-        requests: &requests,
-        resolved_roles: &duplicate_roles,
-        player_contribution: &player_contribution,
-        activated_rumors: &[],
-        retrieved_rumors: &[],
-    };
-    let player = RoleId::try_new("player").expect("valid player");
+    let story_ctx = story_context();
 
-    let missing = validate_input(&missing_input, &player).expect_err("missing role fails");
-    let duplicate = validate_input(&duplicate_input, &player).expect_err("duplicate role fails");
+    let error = validate_input(&input, &story_ctx).expect_err("missing role fails");
 
     assert!(matches!(
-        missing,
+        error,
         PipelineError::InconsistentData {
-            code: "think_resolved_role_missing",
-            ..
-        }
-    ));
-    assert!(matches!(
-        duplicate,
-        PipelineError::InconsistentData {
+            stage: PipelineStage::Think,
             code: "think_resolved_role_missing",
             ..
         }

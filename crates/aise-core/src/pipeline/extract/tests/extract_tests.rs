@@ -1,8 +1,8 @@
 use super::*;
-use crate::core::tests::snake_pack;
+use crate::core::tests::{snake_pack, story_context};
 use crate::core::{
-    EntryOrigin, FactChangeOp, FactEntry, MemoryEntry, NarrativeNodeId, NodeStatus, RoleActor, RoleEntry,
-    RoleMemoryChangeOp, RumorEntry, StoryAssetSpec, StoryPack, TurnCancellation,
+    EntryOrigin, FactChangeOp, FactEntry, MemoryEntry, NarrativeNodeId, NodeStatus, RoleEntry, RoleMemoryChangeOp,
+    RumorEntry, StoryPack, StoryPackSnapshot, TurnCancellation,
 };
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
@@ -144,7 +144,9 @@ fn semantic_terminal_pack() -> StoryPack {
 }
 
 fn seeded_context(pack: &StoryPack) -> StoryContext {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
+    story_ctx.pack_ref = pack.pack_ref().expect("pack ref computes");
+    story_ctx.opening = Arc::new(pack.opening.clone());
     story_ctx.facts = pack
         .seed_facts
         .iter()
@@ -195,8 +197,9 @@ fn seeded_context(pack: &StoryPack) -> StoryContext {
                 id.clone(),
                 RoleEntry {
                     id: id.clone(),
-                    actor: RoleActor::Default,
-                    body: body.clone(),
+                    origin: EntryOrigin::Seed,
+                    spec: body.spec.clone(),
+                    profile: body.default_profile.clone(),
                     memories,
                 },
             )
@@ -216,11 +219,7 @@ async fn setup_pipeline(
         .pack_store()
         .retain(
             &story_ctx.story_id,
-            StoryAssetSpec {
-                pack_ref: story_ctx.pack_ref.clone(),
-                pack,
-                cards: Vec::new(),
-            },
+            StoryPackSnapshot::from_pack(pack).expect("snapshot builds"),
         )
         .await
         .expect("test pack should be retained");

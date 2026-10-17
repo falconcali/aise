@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::tests::snake_pack;
+use crate::core::tests::{snake_pack, story_context};
 use crate::core::{EntryOrigin, FactBody, FactEntry, RumorBody, RumorEntry, StoryContext};
 use std::collections::BTreeMap;
 
@@ -7,7 +7,7 @@ fn context_with_ids(fact_ids: &[&str], rumor_ids: &[&str]) -> StoryContext {
     let pack = snake_pack();
     let fact_body = pack.seed_facts.values().next().expect("fixture fact").clone();
     let rumor_body = pack.seed_rumors.values().next().expect("fixture rumor").clone();
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.facts = fact_ids
         .iter()
         .map(|id| {

@@ -12,20 +12,23 @@ fn example_character_card_imports() {
 }
 
 #[test]
-fn card_ref_pins_card_id_version_and_digest() {
+fn character_card_round_trips_without_runtime_reference() {
     let card = xu_xian_card();
+    let bytes = serde_json::to_vec(&card).expect("character card should serialize");
+    let reparsed: CharacterCard = serde_json::from_slice(&bytes).expect("character card should deserialize");
 
-    let card_ref = card.card_ref().expect("card ref should compute");
-
-    assert_eq!(card_ref.card_id, card.card_id);
-    assert_eq!(card_ref.version, card.meta.version);
-    assert_eq!(card_ref.digest.as_str().len(), 64);
-    assert!(
-        card_ref
-            .digest
-            .as_str()
-            .chars()
-            .all(|ch| ch.is_ascii_digit() || ('a'..='f').contains(&ch))
+    assert_eq!(
+        serde_json::to_vec(&reparsed).expect("reparsed character card should serialize"),
+        bytes
     );
-    assert_eq!(card_ref.digest, card.card_ref().expect("card ref should compute").digest);
+    assert_eq!(reparsed.card_id, card.card_id);
+    assert_eq!(reparsed.meta.version, card.meta.version);
+}
+
+#[test]
+fn character_card_rejects_unknown_fields() {
+    let mut value = serde_json::to_value(xu_xian_card()).expect("character card should serialize");
+    value["unknown"] = serde_json::json!(true);
+
+    assert!(serde_json::from_value::<CharacterCard>(value).is_err());
 }

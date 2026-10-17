@@ -1,7 +1,7 @@
 use crate::core::{
     CharacterCard, EntryOrigin, FactEntry, FactId, MAX_OPENING_BYTES, MemoryEntry, MemoryId, NarrativeGraph, PlayerId,
-    RoleEntry, RoleId, RumorEntry, RumorId, StoryCreateBundle, StoryError, StoryId, StoryInstanceInfo,
-    StoryPack, StoryPackSnapshot, validate_runtime_roles,
+    RoleEntry, RoleId, RumorEntry, RumorId, StoryCreateBundle, StoryError, StoryId, StoryInstanceInfo, StoryPack,
+    StoryPackSnapshot, validate_runtime_roles,
 };
 use crate::engine::EngineError;
 use crate::llm::{LlmConfig, LlmGateway, LlmProviderType, OpenAiCompatProvider};

@@ -1,9 +1,6 @@
 use super::*;
-use crate::core::tests::store_with_default_pack;
-use crate::core::{
-    ActivatedKnowledge, BoundedText, CharacterProfile, PlayerContribution, PlayerRoleContext, RoleId, StoryContext,
-    TurnCancellation,
-};
+use crate::core::tests::story_context;
+use crate::core::{ActivatedKnowledge, PlayerContribution, TurnCancellation};
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
 };
@@ -37,10 +34,6 @@ impl Provider for GenerateProvider {
             usage: None,
         })
     }
-}
-
-fn text(value: &str) -> BoundedText {
-    BoundedText::try_new(value, "test", usize::MAX).expect("valid text")
 }
 
 fn prompt() -> Prompt {
@@ -80,12 +73,10 @@ async fn execute_calls_gateway_once_and_returns_story() {
     let provider = Arc::new(GenerateProvider {
         calls: AtomicUsize::new(0),
     });
-    let store = Arc::new(store_with_default_pack().await);
     let validate_config = ValidateConfig::default();
     let pipeline = GeneratePipeline::new(
         Arc::new(LlmGateway::new(provider.clone(), LlmConfig::default())),
         Arc::new(prompt()),
-        store,
         GenerateConfig::default(),
         Arc::new(validate_config.quality_policy()),
     );
@@ -94,18 +85,6 @@ async fn execute_calls_gateway_once_and_returns_story() {
         processed: "The player walks.".to_owned(),
     };
     let knowledge = ActivatedKnowledge::default();
-    let player_role = PlayerRoleContext {
-        role_id: RoleId::try_new("player").expect("valid player role"),
-        name: text("Player"),
-        aliases: Vec::new(),
-        backstory: text("Player backstory."),
-        profile: CharacterProfile {
-            appearance: None,
-            personality: None,
-            speaking_style: None,
-            dialogue_examples: Vec::new(),
-        },
-    };
     let input = GenerateInput {
         story_goal: "Reach the gate.",
         player_contribution: &contribution,
@@ -114,11 +93,10 @@ async fn execute_calls_gateway_once_and_returns_story() {
         knowledge: &knowledge,
         retrieved_facts: &[],
         retrieved_rumors: &[],
-        player_role: &player_role,
-        roles: &[],
+        role_ids: &[],
         character_decisions: &[],
     };
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
     let control = TurnControl::new(Instant::now() + Duration::from_secs(5), TurnCancellation::new());
     let trace = trace();
 

@@ -46,6 +46,15 @@ impl Pipeline<CommitInput> for CommitPipeline {
         _control: &TurnControl,
         observation: &Observation,
     ) -> Result<Self::Output, PipelineError> {
+        if let Some(commit) = self
+            .store
+            .story_store()
+            .find_committed(&story_ctx.story_id, &input.idempotency_key)
+            .await
+            .map_err(PipelineError::persistence(PipelineStage::Commit))?
+        {
+            return Ok(commit);
+        }
         let story_commit = StoryCommit {
             story_id: story_ctx.story_id.clone(),
             turn: Turn {

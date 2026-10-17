@@ -1,10 +1,9 @@
 use super::*;
-use crate::core::tests::snake_pack;
+use crate::core::tests::{snake_pack, story_context};
 use crate::core::{
     ActivationRule, BoundedText, CharacterThinkRequest, EntryOrigin, FactBody, FactEntry, FactId, IdempotencyKey,
-    MemoryEntry, NarrativeState, PlayerId, PlayerRoleContext, RetrievalHint, RoleActor, RoleEntry, RumorBody,
-    RumorEntry, RumorId, StoryAssetSpec, StoryCommit, StoryInstanceSpec, StoryPack, TurnCancellation, TurnEvent,
-    TurnStatus,
+    MemoryEntry, PlayerId, RetrievalHint, RoleEntry, RumorBody, RumorEntry, RumorId, StoryCommit, StoryCreateBundle,
+    StoryPack, StoryPackSnapshot, TurnCancellation, TurnEvent, TurnStatus,
 };
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, Provider,
@@ -127,7 +126,9 @@ fn knowledge_pack() -> StoryPack {
 }
 
 fn seeded_context(pack: &StoryPack) -> StoryContext {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
+    story_ctx.pack_ref = pack.pack_ref().expect("pack ref should compute");
+    story_ctx.opening = Arc::new(pack.opening.clone());
     story_ctx.player = RoleId::try_new("xu_xian").expect("player role id should be valid");
     story_ctx.facts = pack
         .seed_facts
@@ -179,14 +180,33 @@ fn seeded_context(pack: &StoryPack) -> StoryContext {
                 id.clone(),
                 RoleEntry {
                     id: id.clone(),
-                    actor: RoleActor::Default,
-                    body: body.clone(),
+                    origin: EntryOrigin::Seed,
+                    spec: body.spec.clone(),
+                    profile: body.default_profile.clone(),
                     memories,
                 },
             )
         })
         .collect();
     story_ctx
+}
+
+async fn create_story(store: &Store, pack: StoryPack, story_ctx: &StoryContext) {
+    let snapshot = StoryPackSnapshot::from_pack(pack).expect("snapshot should build");
+    store
+        .create_story(StoryCreateBundle::assemble(
+            snapshot,
+            story_ctx.story_id.clone(),
+            Arc::clone(&story_ctx.opening),
+            story_ctx.roles.clone(),
+            story_ctx.facts.clone(),
+            story_ctx.rumors.clone(),
+            PlayerId::try_new("player").expect("player id should be valid"),
+            story_ctx.player.clone(),
+            story_ctx.narrative.clone(),
+        ))
+        .await
+        .expect("story should be created");
 }
 
 fn bundled_prompt() -> Prompt {
@@ -246,32 +266,7 @@ async fn run_runtime_scenario(
     let store = Arc::new(Store::default());
     let pack = knowledge_pack();
     let story_ctx = seeded_context(&pack);
-    store
-        .pack_store()
-        .retain(
-            &story_ctx.story_id,
-            StoryAssetSpec {
-                pack_ref: story_ctx.pack_ref.clone(),
-                pack: pack.clone(),
-                cards: Vec::new(),
-            },
-        )
-        .await
-        .expect("pack should be retained");
-    store
-        .story_store()
-        .create(StoryInstanceSpec {
-            story_id: story_ctx.story_id.clone(),
-            pack_ref: story_ctx.pack_ref.clone(),
-            roles: story_ctx.roles.clone(),
-            facts: story_ctx.facts.clone(),
-            rumors: story_ctx.rumors.clone(),
-            player_id: PlayerId::try_new("player").expect("player id should be valid"),
-            player_role: story_ctx.player.clone(),
-            narrative: NarrativeState::default(),
-        })
-        .await
-        .expect("story should be created");
+    create_story(store.as_ref(), pack.clone(), &story_ctx).await;
     let requests = Arc::new(Mutex::new(Vec::new()));
     let think_request_count = serde_json::from_str::<serde_json::Value>(&plan_response)
         .ok()
@@ -480,23 +475,14 @@ fn runtime_constructor_shares_one_policy_across_generate_validate_and_repair() {
 
 #[test]
 fn effective_roles_preserve_generation_order_and_append_unique_think_targets() {
-    let pack = snake_pack();
-    let player_role_id = RoleId::try_new("xu_xian").expect("valid role id");
-    let player_role = &pack.roles[&player_role_id];
     let plan_output = PlanOutput {
         story_goal: text("Continue the encounter."),
-        player_role: PlayerRoleContext {
-            role_id: player_role_id,
-            name: player_role.name.clone(),
-            aliases: player_role.alias.clone(),
-            backstory: player_role.backstory.clone(),
-            profile: player_role.default_profile.clone(),
-        },
         facts_to_retrieve: Vec::new(),
         rumors_to_retrieve: Vec::new(),
         roles_for_generation: vec![
             RoleId::try_new("bai_suzhen").expect("valid role id"),
             RoleId::try_new("xiaoqing").expect("valid role id"),
+            RoleId::try_new("bai_suzhen").expect("valid role id"),
         ],
         character_think_requests: vec![
             CharacterThinkRequest {
@@ -506,6 +492,10 @@ fn effective_roles_preserve_generation_order_and_append_unique_think_targets() {
             CharacterThinkRequest {
                 role_id: RoleId::try_new("fahai").expect("valid role id"),
                 thinking_focus: text("Choose a response."),
+            },
+            CharacterThinkRequest {
+                role_id: RoleId::try_new("xiaoqing").expect("valid role id"),
+                thinking_focus: text("Choose another response."),
             },
         ],
     };
@@ -580,11 +570,11 @@ async fn runtime_delivers_retrieved_knowledge_to_generate() {
 }
 
 #[tokio::test]
-async fn runtime_retrieves_generation_only_role_without_think() {
+async fn runtime_skips_retrieval_for_generation_only_role_without_think() {
     let run = run_runtime(plan_response_with_roles(&[], &[], &["bai_suzhen"], &[])).await;
 
     assert!(run.result.is_ok());
-    assert_eq!(stage_count(&run.stages, "retrieval"), 1);
+    assert_eq!(stage_count(&run.stages, "retrieval"), 0);
     assert_eq!(stage_count(&run.stages, "think"), 0);
     assert_eq!(run.requests.len(), 5);
     let generate_prompt = request_text(&run.requests[2]);
@@ -599,7 +589,7 @@ async fn runtime_runs_one_character_think_and_delivers_decision_to_generate() {
     let run = run_runtime(plan_response_with_roles(&[], &[], &[], &["bai_suzhen"])).await;
 
     assert!(run.result.is_ok());
-    assert_eq!(stage_count(&run.stages, "retrieval"), 1);
+    assert_eq!(stage_count(&run.stages, "retrieval"), 0);
     assert_eq!(stage_count(&run.stages, "think"), 1);
     assert_eq!(run.requests.len(), 6);
     let generate_prompt = request_text(&run.requests[3]);
@@ -656,6 +646,7 @@ async fn runtime_preserves_multi_role_think_request_order() {
     let run = run_runtime(plan_response_with_roles(&[], &[], &[], &["xiaoqing", "bai_suzhen"])).await;
 
     assert!(run.result.is_ok());
+    assert_eq!(stage_count(&run.stages, "retrieval"), 0);
     assert_eq!(stage_count(&run.stages, "think"), 1);
     assert_eq!(run.requests.len(), 7);
     let generate_prompt = request_text(&run.requests[4]);
@@ -1130,32 +1121,7 @@ async fn runtime_commits_extracted_knowledge_change_and_exposes_it_to_next_turn_
     let store = Arc::new(Store::default());
     let pack = knowledge_pack();
     let story_ctx = seeded_context(&pack);
-    store
-        .pack_store()
-        .retain(
-            &story_ctx.story_id,
-            StoryAssetSpec {
-                pack_ref: story_ctx.pack_ref.clone(),
-                pack: pack.clone(),
-                cards: Vec::new(),
-            },
-        )
-        .await
-        .expect("pack should be retained");
-    store
-        .story_store()
-        .create(StoryInstanceSpec {
-            story_id: story_ctx.story_id.clone(),
-            pack_ref: story_ctx.pack_ref.clone(),
-            roles: story_ctx.roles.clone(),
-            facts: story_ctx.facts.clone(),
-            rumors: story_ctx.rumors.clone(),
-            player_id: PlayerId::try_new("player").expect("player id should be valid"),
-            player_role: story_ctx.player.clone(),
-            narrative: NarrativeState::default(),
-        })
-        .await
-        .expect("story should be created");
+    create_story(store.as_ref(), pack.clone(), &story_ctx).await;
 
     let turn1_world_extract = json!({
         "facts": [

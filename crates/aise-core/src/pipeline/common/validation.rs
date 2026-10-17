@@ -1,6 +1,6 @@
 use crate::core::{
-    ActivatedKnowledge, BoundedText, CharacterDecision, FactEntry, NarrativeDirection, PlayerContribution,
-    PlayerRoleContext, ResolvedRole, RumorEntry,
+    ActivatedKnowledge, BoundedText, CharacterDecision, FactEntry, NarrativeDirection, PlayerContribution, RoleId,
+    RumorEntry,
 };
 use crate::pipeline::common::ValidationIssue;
 use serde::Serialize;
@@ -14,8 +14,7 @@ pub struct ValidationContext<'a> {
     pub knowledge: &'a ActivatedKnowledge,
     pub retrieved_facts: &'a [FactEntry],
     pub retrieved_rumors: &'a [RumorEntry],
-    pub player_role: &'a PlayerRoleContext,
-    pub roles: &'a [ResolvedRole],
+    pub role_ids: &'a [RoleId],
     pub character_decisions: &'a [CharacterDecision],
 }
 

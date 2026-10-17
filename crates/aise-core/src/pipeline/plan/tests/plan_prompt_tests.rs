@@ -1,10 +1,9 @@
 use super::*;
-use crate::core::tests::{snake_pack, store_with_default_pack, turn_evaluation};
+use crate::core::tests::{snake_pack, story_context, turn_evaluation};
 use crate::core::{
     ActivatedKnowledge, ActivationRule, BoundedText, EntryOrigin, FactBody, FactEntry, FactId, IdempotencyKey,
-    KnowledgeChange, MemoryEntry, NarrativeDirection, NarrativeNodeId, PlayerContribution, PlayerRoleContext,
-    RetrievalHint, RoleActor, RoleEntry, RoleId, RumorBody, RumorEntry, RumorId, StoryPack, StorySummary, Turn,
-    TurnNumber, TurnSegment, TurnStatus,
+    KnowledgeChange, MemoryEntry, NarrativeDirection, NarrativeNodeId, PlayerContribution, RetrievalHint, RoleEntry,
+    RoleId, RumorBody, RumorEntry, RumorId, StoryPack, StorySummary, Turn, TurnNumber, TurnSegment, TurnStatus,
 };
 use crate::pipeline::plan::plan_candidates::collect_candidates;
 use crate::pipeline::plan::plan_roles::collect_role_catalog;
@@ -162,8 +161,9 @@ fn seed_context(pack: &StoryPack, story_ctx: &StoryContext) -> StoryContext {
                 id.clone(),
                 RoleEntry {
                     id: id.clone(),
-                    actor: RoleActor::Default,
-                    body: body.clone(),
+                    origin: EntryOrigin::Seed,
+                    spec: body.spec.clone(),
+                    profile: body.default_profile.clone(),
                     memories,
                 },
             )
@@ -172,22 +172,8 @@ fn seed_context(pack: &StoryPack, story_ctx: &StoryContext) -> StoryContext {
     ctx
 }
 
-fn player_role(pack: &StoryPack) -> PlayerRoleContext {
-    let role_id = RoleId::try_new("xu_xian").expect("valid role id");
-    let role = &pack.roles[&role_id];
-    PlayerRoleContext {
-        role_id,
-        name: role.name.clone(),
-        aliases: role.alias.clone(),
-        backstory: role.backstory.clone(),
-        profile: role.default_profile.clone(),
-    }
-}
-
-async fn render_runtime_context(story_ctx: &StoryContext, fixture: &PlanFixture) -> String {
-    let store = store_with_default_pack().await;
-    let story_pack = store.pack_store().get_pack(&story_ctx.pack_ref).await.expect("pack loads");
-    without_role_context(render_pack_context(story_ctx, fixture, story_pack.as_ref(), 0))
+fn render_runtime_context(story_ctx: &StoryContext, fixture: &PlanFixture) -> String {
+    without_role_context(render_pack_context(story_ctx, fixture, &snake_pack(), 0))
 }
 
 fn without_role_context(content: String) -> String {
@@ -216,16 +202,15 @@ fn render_pack_context(
     let seeded_ctx = seed_context(story_pack, story_ctx);
     let trace = test_trace();
     let candidates = collect_candidates(&seeded_ctx, &fixture.knowledge, candidate_limit);
-    let player_role = player_role(story_pack);
-    let role_catalog = collect_role_catalog(&seeded_ctx, &player_role.role_id);
+    let player_role = &seeded_ctx.roles[&seeded_ctx.player];
+    let role_catalog = collect_role_catalog(&seeded_ctx, &player_role.id);
     let rendered = process_plan(
         &bundled_prompt(),
         PlanPromptContext {
             story_ctx: &seeded_ctx,
             input: &fixture.input(),
-            story_pack,
             candidates: &candidates,
-            player_role: &player_role,
+            player_role,
             role_catalog: &role_catalog,
             config: &PlanConfig::default(),
         },
@@ -235,17 +220,17 @@ fn render_pack_context(
     rendered.messages()[1].content.replace("\r\n", "\n")
 }
 
-async fn runtime_context(story_ctx: &StoryContext, processed: &str) -> String {
-    render_runtime_context(story_ctx, &plan_fixture(processed)).await
+fn runtime_context(story_ctx: &StoryContext, processed: &str) -> String {
+    render_runtime_context(story_ctx, &plan_fixture(processed))
 }
 
 fn vars(story_ctx: &StoryContext, fixture: &PlanFixture, story_opening: String) -> PromptVars {
     let pack = snake_pack();
     let seeded_ctx = seed_context(&pack, story_ctx);
     let candidates = collect_candidates(&seeded_ctx, &fixture.knowledge, 0);
-    let player_role = player_role(&pack);
-    let role_catalog = collect_role_catalog(&seeded_ctx, &player_role.role_id);
-    let player_role = player_role_text(&player_role, &PlanConfig::default()).expect("player role renders");
+    let player_role = &seeded_ctx.roles[&seeded_ctx.player];
+    let role_catalog = collect_role_catalog(&seeded_ctx, &player_role.id);
+    let player_role = player_role_text(player_role, &PlanConfig::default()).expect("player role renders");
     let role_catalog = role_catalog_text(&role_catalog).expect("catalog renders");
     plan_vars(
         &seeded_ctx,
@@ -261,7 +246,7 @@ fn vars(story_ctx: &StoryContext, fixture: &PlanFixture, story_opening: String) 
 
 #[test]
 fn vars_for_new_story_carry_opening_and_empty_summary_and_recent_story() {
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
     let fixture = plan_fixture("I wave.");
     let vars = vars(&story_ctx, &fixture, "Rain falls.".to_owned());
 
@@ -274,7 +259,7 @@ fn vars_for_new_story_carry_opening_and_empty_summary_and_recent_story() {
 
 #[test]
 fn vars_with_summary_and_recent_story_carry_both() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("  Earlier events.  "));
     story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
     story_ctx.recent_turns.push_back(accepted_turn(3, "The hall is dark."));
@@ -286,19 +271,12 @@ fn vars_with_summary_and_recent_story_carry_both() {
     assert_eq!(var(&vars, "recent_story"), "The door creaks.\n\nThe hall is dark.");
 }
 
-#[tokio::test]
-async fn new_story_context_has_opening_then_input() {
-    let story_ctx = StoryContext::new();
-    let store = store_with_default_pack().await;
-    let opening = store
-        .pack_store()
-        .get_pack(&story_ctx.pack_ref)
-        .await
-        .expect("pack loads")
-        .opening
-        .clone();
+#[test]
+fn new_story_context_has_opening_then_input() {
+    let story_ctx = story_context();
+    let opening = story_ctx.opening.clone();
 
-    let content = runtime_context(&story_ctx, "I wave.").await;
+    let content = runtime_context(&story_ctx, "I wave.");
 
     assert_eq!(
         content,
@@ -306,20 +284,13 @@ async fn new_story_context_has_opening_then_input() {
     );
 }
 
-#[tokio::test]
-async fn recent_story_without_summary_keeps_opening_before_recent_story() {
-    let mut story_ctx = StoryContext::new();
+#[test]
+fn recent_story_without_summary_keeps_opening_before_recent_story() {
+    let mut story_ctx = story_context();
     story_ctx.recent_turns.push_back(accepted_turn(1, "The door creaks."));
-    let store = store_with_default_pack().await;
-    let opening = store
-        .pack_store()
-        .get_pack(&story_ctx.pack_ref)
-        .await
-        .expect("pack loads")
-        .opening
-        .clone();
+    let opening = story_ctx.opening.clone();
 
-    let content = runtime_context(&story_ctx, "I wave.").await;
+    let content = runtime_context(&story_ctx, "I wave.");
 
     assert_eq!(
         content,
@@ -329,13 +300,13 @@ async fn recent_story_without_summary_keeps_opening_before_recent_story() {
     );
 }
 
-#[tokio::test]
-async fn summarized_story_context_orders_summary_recent_story_and_input() {
-    let mut story_ctx = StoryContext::new();
+#[test]
+fn summarized_story_context_orders_summary_recent_story_and_input() {
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("Earlier events."));
     story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
 
-    let content = runtime_context(&story_ctx, "I wave.").await;
+    let content = runtime_context(&story_ctx, "I wave.");
 
     assert_eq!(
         content,
@@ -343,12 +314,12 @@ async fn summarized_story_context_orders_summary_recent_story_and_input() {
     );
 }
 
-#[tokio::test]
-async fn summary_without_recent_story_omits_opening() {
-    let mut story_ctx = StoryContext::new();
+#[test]
+fn summary_without_recent_story_omits_opening() {
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("Earlier events."));
 
-    let content = runtime_context(&story_ctx, "I wave.").await;
+    let content = runtime_context(&story_ctx, "I wave.");
 
     assert_eq!(
         content,
@@ -359,15 +330,15 @@ async fn summary_without_recent_story_omits_opening() {
 #[test]
 fn vars_without_narrative_carry_empty_direction_and_constraints() {
     let fixture = plan_fixture("I wave.");
-    let vars = vars(&StoryContext::new(), &fixture, String::new());
+    let vars = vars(&story_context(), &fixture, String::new());
 
     assert_eq!(var(&vars, "narrative_directions"), "");
     assert_eq!(var(&vars, "story_constraints"), "");
 }
 
-#[tokio::test]
-async fn narrative_direction_and_constraints_precede_player_input() {
-    let mut story_ctx = StoryContext::new();
+#[test]
+fn narrative_direction_and_constraints_precede_player_input() {
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("Earlier events."));
     let fixture = PlanFixture {
         player_contribution: contribution("I wave."),
@@ -379,7 +350,7 @@ async fn narrative_direction_and_constraints_precede_player_input() {
         knowledge: ActivatedKnowledge::default(),
     };
 
-    let content = render_runtime_context(&story_ctx, &fixture).await;
+    let content = render_runtime_context(&story_ctx, &fixture);
 
     assert_eq!(
         content,
@@ -441,15 +412,15 @@ fn vars_carry_knowledge_content_only() {
         knowledge: knowledge(),
         ..plan_fixture("I wave.")
     };
-    let vars = vars(&StoryContext::new(), &fixture, String::new());
+    let vars = vars(&story_context(), &fixture, String::new());
 
     assert_eq!(var(&vars, "known_facts"), "- The forest keeper is named Ash.");
     assert_eq!(var(&vars, "rumors"), "- A ghost haunts the old mill.");
 }
 
-#[tokio::test]
-async fn knowledge_follows_story_and_precedes_narrative_direction() {
-    let mut story_ctx = StoryContext::new();
+#[test]
+fn knowledge_follows_story_and_precedes_narrative_direction() {
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("Earlier events."));
     let fixture = PlanFixture {
         player_contribution: contribution("I wave."),
@@ -461,7 +432,7 @@ async fn knowledge_follows_story_and_precedes_narrative_direction() {
         knowledge: knowledge(),
     };
 
-    let content = render_runtime_context(&story_ctx, &fixture).await;
+    let content = render_runtime_context(&story_ctx, &fixture);
 
     assert_eq!(
         content,
@@ -471,7 +442,7 @@ async fn knowledge_follows_story_and_precedes_narrative_direction() {
 
 #[test]
 fn candidate_sections_include_ids_and_hints_without_bodies() {
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
     let fixture = plan_fixture("I wave.");
     let pack = candidate_pack(&["fact-a"], &["rumor-a"]);
 
@@ -485,7 +456,7 @@ fn candidate_sections_include_ids_and_hints_without_bodies() {
 
 #[test]
 fn empty_candidate_kind_omits_its_section() {
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
     let fixture = plan_fixture("I wave.");
     let pack = candidate_pack(&["fact-a"], &[]);
 
@@ -497,7 +468,7 @@ fn empty_candidate_kind_omits_its_section() {
 
 #[test]
 fn empty_candidate_lists_omit_both_sections() {
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
     let fixture = plan_fixture("I wave.");
     let pack = candidate_pack(&[], &[]);
 
@@ -509,7 +480,7 @@ fn empty_candidate_lists_omit_both_sections() {
 
 #[test]
 fn candidate_ids_and_hints_are_json_escaped() {
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
     let fixture = plan_fixture("I wave.");
     let mut pack = candidate_pack(&["fact-\"quoted\""], &[]);
     pack.seed_facts.values_mut().next().expect("fixture fact").retrieval =
@@ -523,14 +494,14 @@ fn candidate_ids_and_hints_are_json_escaped() {
 
 #[test]
 fn ai_role_catalog_contains_lightweight_fields_without_private_role_data() {
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
     let fixture = plan_fixture("I wave.");
     let mut pack = candidate_pack(&[], &[]);
     let role = pack.roles.values_mut().next().expect("fixture role");
-    role.name = text("Catalog Name");
-    role.alias = vec![text("Alias \"One\""), text("Alias Two")];
-    role.retrieval = RetrievalHint::try_new("Catalog\nHint").expect("valid hint");
-    role.backstory = text("PRIVATE_BACKSTORY");
+    role.spec.name = text("Catalog Name");
+    role.spec.alias = vec![text("Alias \"One\""), text("Alias Two")];
+    role.spec.retrieval = RetrievalHint::try_new("Catalog\nHint").expect("valid hint");
+    role.spec.backstory = text("PRIVATE_BACKSTORY");
     role.default_profile.personality = Some(text("PRIVATE_PROFILE"));
     role.seed_memories.values_mut().next().expect("fixture memory").content = text("PRIVATE_MEMORY");
 
@@ -547,19 +518,19 @@ fn ai_role_catalog_contains_lightweight_fields_without_private_role_data() {
 
 #[test]
 fn player_context_contains_planning_fields_without_voice_memory_or_retrieval_hint() {
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
     let fixture = plan_fixture("I wave.");
     let mut pack = candidate_pack(&[], &[]);
     let player_id = RoleId::try_new("xu_xian").expect("valid role id");
     let player = pack.roles.get_mut(&player_id).expect("fixture player role");
-    player.name = text("Player Name");
-    player.alias = vec![text("Player Alias")];
-    player.backstory = text("PLAYER_BACKSTORY");
+    player.spec.name = text("Player Name");
+    player.spec.alias = vec![text("Player Alias")];
+    player.spec.backstory = text("PLAYER_BACKSTORY");
     player.default_profile.appearance = Some(text("PLAYER_APPEARANCE"));
     player.default_profile.personality = Some(text("PLAYER_PERSONALITY"));
     player.default_profile.speaking_style = Some(text("PLAYER_SPEAKING_STYLE"));
     player.default_profile.dialogue_examples[0].response = text("PLAYER_DIALOGUE_EXAMPLE");
-    player.retrieval = RetrievalHint::try_new("PLAYER_RETRIEVAL_HINT").expect("valid hint");
+    player.spec.retrieval = RetrievalHint::try_new("PLAYER_RETRIEVAL_HINT").expect("valid hint");
     player.seed_memories.values_mut().next().expect("fixture memory").content = text("PLAYER_MEMORY");
 
     let content = render_pack_context(&story_ctx, &fixture, &pack, 0);
@@ -585,7 +556,7 @@ fn player_context_contains_planning_fields_without_voice_memory_or_retrieval_hin
 
 #[test]
 fn candidate_sections_follow_known_knowledge_and_precede_narrative_direction() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("Earlier events."));
     let fixture = PlanFixture {
         player_contribution: contribution("I wave."),
@@ -616,11 +587,11 @@ fn candidate_sections_follow_known_knowledge_and_precede_narrative_direction() {
 #[test]
 fn instructions_enforce_goal_budget_rumor_semantics_and_strict_json_protocol() {
     let pack = candidate_pack(&["fact-a"], &["rumor-a"]);
-    let story_ctx = seed_context(&pack, &StoryContext::new());
+    let story_ctx = seed_context(&pack, &story_context());
     let fixture = plan_fixture("I wave.");
     let candidates = collect_candidates(&story_ctx, &fixture.knowledge, 8);
-    let player_role = player_role(&pack);
-    let role_catalog = collect_role_catalog(&story_ctx, &player_role.role_id);
+    let player_role = &story_ctx.roles[&story_ctx.player];
+    let role_catalog = collect_role_catalog(&story_ctx, &player_role.id);
     let trace = test_trace();
     let config = PlanConfig {
         max_story_goal_bytes: 321,
@@ -632,9 +603,8 @@ fn instructions_enforce_goal_budget_rumor_semantics_and_strict_json_protocol() {
         PlanPromptContext {
             story_ctx: &story_ctx,
             input: &fixture.input(),
-            story_pack: &pack,
             candidates: &candidates,
-            player_role: &player_role,
+            player_role,
             role_catalog: &role_catalog,
             config: &config,
         },

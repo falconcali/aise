@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::tests::{store_with_default_pack, turn_evaluation};
+use crate::core::tests::{story_context, turn_evaluation};
 use crate::core::{
     IdempotencyKey, KnowledgeChange, PlayerContribution, StorySummary, Turn, TurnNumber, TurnSegment, TurnStatus,
 };
@@ -69,44 +69,34 @@ fn var<'a>(vars: &'a PromptVars, name: &str) -> &'a str {
     vars.get(name).and_then(Value::as_str).expect("string var")
 }
 
-async fn runtime_context(story_ctx: &StoryContext, covered_turns: usize) -> String {
-    let store = store_with_default_pack().await;
+fn runtime_context(story_ctx: &StoryContext, covered_turns: usize) -> String {
     let trace = test_trace();
-    let rendered = summarize_story(&bundled_prompt(), story_ctx, covered_turns, &store, trace.root())
-        .await
-        .expect("render");
+    let rendered = summarize_story(&bundled_prompt(), story_ctx, covered_turns, trace.root()).expect("render");
     rendered.messages()[1].content.replace("\r\n", "\n")
 }
 
 #[test]
 fn vars_carry_only_the_covered_leading_turns() {
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("  Earlier events.  "));
     story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
     story_ctx.recent_turns.push_back(accepted_turn(3, "The hall is dark."));
     story_ctx.recent_turns.push_back(accepted_turn(4, "A candle flickers."));
 
-    let vars = summary_vars(&story_ctx, 2, String::new());
+    let vars = summary_vars(&story_ctx, 2);
 
     assert_eq!(var(&vars, "story_summary"), "Earlier events.");
     assert_eq!(var(&vars, "story_opening"), "");
     assert_eq!(var(&vars, "story_to_summarize"), "The door creaks.\n\nThe hall is dark.");
 }
 
-#[tokio::test]
-async fn first_summary_context_has_opening_then_story_to_summarize() {
-    let mut story_ctx = StoryContext::new();
+#[test]
+fn first_summary_context_has_opening_then_story_to_summarize() {
+    let mut story_ctx = story_context();
     story_ctx.recent_turns.push_back(accepted_turn(1, "The door creaks."));
-    let store = store_with_default_pack().await;
-    let opening = store
-        .pack_store()
-        .get_pack(&story_ctx.pack_ref)
-        .await
-        .expect("pack loads")
-        .opening
-        .clone();
+    let opening = story_ctx.opening.clone();
 
-    let content = runtime_context(&story_ctx, 1).await;
+    let content = runtime_context(&story_ctx, 1);
 
     assert_eq!(
         content,
@@ -114,14 +104,14 @@ async fn first_summary_context_has_opening_then_story_to_summarize() {
     );
 }
 
-#[tokio::test]
-async fn merge_context_orders_previous_summary_then_story_to_summarize() {
-    let mut story_ctx = StoryContext::new();
+#[test]
+fn merge_context_orders_previous_summary_then_story_to_summarize() {
+    let mut story_ctx = story_context();
     story_ctx.summary = Some(summary("Earlier events."));
     story_ctx.recent_turns.push_back(accepted_turn(2, "The door creaks."));
     story_ctx.recent_turns.push_back(accepted_turn(3, "The hall is dark."));
 
-    let content = runtime_context(&story_ctx, 1).await;
+    let content = runtime_context(&story_ctx, 1);
 
     assert_eq!(
         content,

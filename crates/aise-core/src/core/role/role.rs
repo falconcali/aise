@@ -134,11 +134,7 @@ enum SeedRoleField {
     SeedMemories,
 }
 
-fn set_once<'de, A, T>(
-    target: &mut Option<T>,
-    field: &'static str,
-    map: &mut A,
-) -> Result<(), A::Error>
+fn set_once<'de, A, T>(target: &mut Option<T>, field: &'static str, map: &mut A) -> Result<(), A::Error>
 where
     A: MapAccess<'de>,
     T: Deserialize<'de>,

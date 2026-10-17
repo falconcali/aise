@@ -64,14 +64,8 @@ impl BaselinePipeline {
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<PlayerContribution, PipelineError> {
-        let rendered_prompt = baseline_prompt::process_player_input(
-            self.prompt.as_ref(),
-            story_ctx,
-            input.player_input,
-            self.store.as_ref(),
-            observation,
-        )
-        .await?;
+        let rendered_prompt =
+            baseline_prompt::process_player_input(self.prompt.as_ref(), story_ctx, input.player_input, observation)?;
 
         let player_contribution = baseline_llm::process_player_input(
             self.gateway.as_ref(),
@@ -101,7 +95,6 @@ impl BaselinePipeline {
 
     fn activate_knowledge(
         &self,
-        story_pack: &StoryPack,
         story_ctx: &StoryContext,
         player_contribution: &PlayerContribution,
         narrative: &NarrativeProjection,
@@ -109,7 +102,6 @@ impl BaselinePipeline {
     ) -> ActivatedKnowledge {
         baseline_knowledge::activate_knowledge(
             KnowledgeScope {
-                story_pack,
                 story_ctx,
                 player_contribution,
                 narrative,
@@ -139,7 +131,7 @@ impl<'a> Pipeline<BaselineInput<'a>> for BaselinePipeline {
         let player_contribution = self
             .generate_player_contribution(&input, story_ctx, control, observation)
             .await?;
-        let knowledge = self.activate_knowledge(&story_pack, story_ctx, &player_contribution, &narrative, observation);
+        let knowledge = self.activate_knowledge(story_ctx, &player_contribution, &narrative, observation);
 
         Ok(BaselineOutput {
             player_contribution,

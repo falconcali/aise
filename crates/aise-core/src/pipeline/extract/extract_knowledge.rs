@@ -94,9 +94,9 @@ pub(super) fn project_role_catalog(story_ctx: &StoryContext) -> Vec<ExtractRoleC
         .values()
         .map(|role| ExtractRoleCatalogEntry {
             role_id: &role.id,
-            name: &role.body.name,
-            aliases: &role.body.alias,
-            retrieval_hint: &role.body.retrieval,
+            name: &role.spec.name,
+            aliases: &role.spec.alias,
+            retrieval_hint: &role.spec.retrieval,
         })
         .collect()
 }

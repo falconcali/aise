@@ -1,6 +1,5 @@
 use crate::core::{StoryContext, TurnControl};
 use crate::llm::LlmGateway;
-use crate::persistence::Store;
 use crate::pipeline::common::{
     Pipeline, PipelineError, PipelineStage, ProposalQualityPolicy, ValidationContext, ValidationIssue,
 };
@@ -28,7 +27,6 @@ pub struct RepairOutput {
 pub struct RepairPipeline {
     gateway: Arc<LlmGateway>,
     prompt: Arc<Prompt>,
-    store: Arc<Store>,
     config: RepairConfig,
     quality_policy: Arc<ProposalQualityPolicy>,
 }
@@ -37,14 +35,12 @@ impl RepairPipeline {
     pub fn new(
         gateway: Arc<LlmGateway>,
         prompt: Arc<Prompt>,
-        store: Arc<Store>,
         config: RepairConfig,
         quality_policy: Arc<ProposalQualityPolicy>,
     ) -> Self {
         Self {
             gateway,
             prompt,
-            store,
             config,
             quality_policy,
         }
@@ -68,10 +64,8 @@ impl RepairPipeline {
             input,
             self.quality_policy.as_ref(),
             &self.config,
-            self.store.as_ref(),
             observation,
-        )
-        .await?;
+        )?;
         let raw =
             repair_llm::repair_story(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
                 .await

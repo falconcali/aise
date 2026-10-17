@@ -1,9 +1,6 @@
 use super::*;
-use crate::core::tests::store_with_default_pack;
-use crate::core::{
-    ActivatedKnowledge, BoundedText, CharacterProfile, PlayerContribution, PlayerRoleContext, RoleId, StoryContext,
-    TurnCancellation,
-};
+use crate::core::tests::story_context;
+use crate::core::{ActivatedKnowledge, BoundedText, PlayerContribution, TurnCancellation};
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmReasoningEffort,
     Provider,
@@ -96,13 +93,11 @@ async fn execute_calls_gateway_once_and_returns_report() {
         calls: AtomicUsize::new(0),
         reasoning_effort: Mutex::new(None),
     });
-    let store = Arc::new(store_with_default_pack().await);
     let config = ValidateConfig::default();
     let policy = Arc::new(config.quality_policy());
     let pipeline = ValidatePipeline::new(
         Arc::new(LlmGateway::new(provider.clone(), LlmConfig::default())),
         Arc::new(prompt()),
-        store,
         config,
         policy,
     );
@@ -112,18 +107,6 @@ async fn execute_calls_gateway_once_and_returns_report() {
         processed: "The player walks.".to_owned(),
     };
     let knowledge = ActivatedKnowledge::default();
-    let player_role = PlayerRoleContext {
-        role_id: RoleId::try_new("player").expect("valid player role"),
-        name: text("Player"),
-        aliases: Vec::new(),
-        backstory: text("Player backstory."),
-        profile: CharacterProfile {
-            appearance: None,
-            personality: None,
-            speaking_style: None,
-            dialogue_examples: Vec::new(),
-        },
-    };
     let input = ValidateInput {
         context: ValidationContext {
             story_goal: &goal,
@@ -133,8 +116,7 @@ async fn execute_calls_gateway_once_and_returns_report() {
             knowledge: &knowledge,
             retrieved_facts: &[],
             retrieved_rumors: &[],
-            player_role: &player_role,
-            roles: &[],
+            role_ids: &[],
             character_decisions: &[],
         },
         proposal: "The player reaches the gate.",
@@ -142,7 +124,7 @@ async fn execute_calls_gateway_once_and_returns_report() {
         repair_rounds_used: 0,
         repair_rounds_remaining: 2,
     };
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
     let control = TurnControl::new(Instant::now() + Duration::from_secs(5), TurnCancellation::new());
     let trace = trace();
 

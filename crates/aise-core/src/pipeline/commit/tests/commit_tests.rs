@@ -1,7 +1,8 @@
 use super::*;
+use crate::core::tests::{snake_pack, story_context};
 use crate::core::{
-    BoundedText, Change, KnowledgeChange, PlayerId, StoryInstanceSpec, TurnCancellation, TurnCheckEvaluation,
-    TurnChoiceEvaluation, TurnScoreEvaluation,
+    BoundedText, Change, KnowledgeChange, PlayerId, StoryCreateBundle, StoryPackSnapshot, TurnCancellation,
+    TurnCheckEvaluation, TurnChoiceEvaluation, TurnScoreEvaluation,
 };
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, TraceSpec,
@@ -57,19 +58,20 @@ fn evaluation(choice: Option<TurnChoiceEvaluation>) -> TurnEvaluation {
 
 async fn commit(status: TurnStatus, evaluation: TurnEvaluation) -> StoryCommit {
     let store = Arc::new(Store::default());
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
+    let snapshot = StoryPackSnapshot::from_pack(snake_pack()).expect("snapshot builds");
     store
-        .story_store()
-        .create(StoryInstanceSpec {
-            story_id: story_ctx.story_id.clone(),
-            pack_ref: story_ctx.pack_ref.clone(),
-            roles: story_ctx.roles.clone(),
-            facts: story_ctx.facts.clone(),
-            rumors: story_ctx.rumors.clone(),
-            player_id: PlayerId::try_new("player").expect("valid player id"),
-            player_role: story_ctx.player.clone(),
-            narrative: story_ctx.narrative.clone(),
-        })
+        .create_story(StoryCreateBundle::assemble(
+            snapshot,
+            story_ctx.story_id.clone(),
+            Arc::clone(&story_ctx.opening),
+            story_ctx.roles.clone(),
+            story_ctx.facts.clone(),
+            story_ctx.rumors.clone(),
+            PlayerId::try_new("player").expect("valid player id"),
+            story_ctx.player.clone(),
+            story_ctx.narrative.clone(),
+        ))
         .await
         .expect("story creation succeeds");
     let pipeline = CommitPipeline::new(Arc::clone(&store));

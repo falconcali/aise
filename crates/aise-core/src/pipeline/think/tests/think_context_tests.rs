@@ -1,7 +1,7 @@
 use super::*;
 use crate::core::tests::snake_pack;
 use crate::core::{
-    BoundedText, EntryOrigin, MemoryBody, MemoryEntry, MemoryId, ResolvedRole, RetrievalHint, RoleId, RumorBody,
+    BoundedText, EntryOrigin, MemoryBody, MemoryEntry, MemoryId, RetrievalHint, RoleEntry, RoleId, RumorBody,
     RumorEntry, RumorId, TurnNumber,
 };
 use std::collections::BTreeMap;
@@ -22,17 +22,15 @@ fn memory(id: &str, content: &str, hint: &str) -> MemoryEntry {
     }
 }
 
-fn role(entries: &[(&str, &str, &str)]) -> ResolvedRole {
+fn role(entries: &[(&str, &str, &str)]) -> RoleEntry {
     let pack = snake_pack();
     let role_id = RoleId::try_new("bai_suzhen").expect("valid role id");
-    let body = pack.roles[&role_id].clone();
-    ResolvedRole {
-        role_id,
-        name: body.name,
-        aliases: body.alias,
-        backstory: body.backstory,
-        retrieval_hint: body.retrieval,
-        profile: body.default_profile,
+    let seed_role = pack.roles[&role_id].clone();
+    RoleEntry {
+        id: role_id,
+        origin: EntryOrigin::Seed,
+        spec: seed_role.spec,
+        profile: seed_role.default_profile,
         memories: entries
             .iter()
             .map(|(id, content, hint)| (MemoryId::try_new(*id).expect("valid memory id"), memory(id, content, hint)))
@@ -79,7 +77,7 @@ fn memories_render_only_content_in_memory_id_order_across_seed_and_turn_entries(
 fn memories_respect_count_limit() {
     let role = role(&[("memory-a", "first", "hint-a"), ("memory-b", "second", "hint-b")]);
     let config = ThinkConfig {
-        max_seed_memories: 1,
+        max_memories_in_prompt: 1,
         ..ThinkConfig::default()
     };
 
@@ -95,7 +93,7 @@ fn memories_respect_byte_limit_without_partial_item() {
     let first = memories(
         &role,
         &ThinkConfig {
-            max_seed_memories: 1,
+            max_memories_in_prompt: 1,
             ..ThinkConfig::default()
         },
     );
@@ -129,7 +127,7 @@ fn zero_memory_limits_render_empty_context() {
         memories(
             &role,
             &ThinkConfig {
-                max_seed_memories: 0,
+                max_memories_in_prompt: 0,
                 ..ThinkConfig::default()
             }
         )

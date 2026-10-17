@@ -1,18 +1,24 @@
 use super::*;
-use crate::core::{BoundedText, CharacterProfile, DialogueExample, PlayerRoleContext, RetrievalHint};
+use crate::core::tests::story_context;
+use crate::core::{
+    BoundedText, CharacterDecision, CharacterProfile, DialogueExample, EntryOrigin, RetrievalHint, RoleEntry, RoleSpec,
+};
 use std::collections::BTreeMap;
 
 fn text(value: &str) -> BoundedText {
     BoundedText::try_new(value, "test", usize::MAX).expect("test text should fit")
 }
 
-fn role(role_id: &str, name: &str, personality: &str) -> ResolvedRole {
-    ResolvedRole {
-        role_id: RoleId::try_new(role_id).expect("valid role ID"),
-        name: text(name),
-        aliases: vec![text(&format!("{name} alias"))],
-        backstory: text(&format!("{name} backstory")),
-        retrieval_hint: RetrievalHint::try_new(name).expect("valid retrieval hint"),
+fn role(role_id: &str, name: &str, personality: &str) -> RoleEntry {
+    RoleEntry {
+        id: RoleId::try_new(role_id).expect("valid role ID"),
+        origin: EntryOrigin::Seed,
+        spec: RoleSpec {
+            name: text(name),
+            alias: vec![text(&format!("{name} alias"))],
+            backstory: text(&format!("{name} backstory")),
+            retrieval: RetrievalHint::try_new(name).expect("valid retrieval hint"),
+        },
         profile: CharacterProfile {
             appearance: Some(text(&format!("{name} appearance"))),
             personality: Some(text(personality)),
@@ -26,12 +32,16 @@ fn role(role_id: &str, name: &str, personality: &str) -> ResolvedRole {
     }
 }
 
-fn player() -> PlayerRoleContext {
-    PlayerRoleContext {
-        role_id: RoleId::try_new("player").expect("valid role ID"),
-        name: text("Player"),
-        aliases: vec![text("Player Alias")],
-        backstory: text("Player backstory"),
+fn player() -> RoleEntry {
+    RoleEntry {
+        id: RoleId::try_new("player").expect("valid role ID"),
+        origin: EntryOrigin::Seed,
+        spec: RoleSpec {
+            name: text("Player"),
+            alias: vec![text("Player Alias")],
+            backstory: text("Player backstory"),
+            retrieval: RetrievalHint::try_new("Player").expect("valid retrieval hint"),
+        },
         profile: CharacterProfile {
             appearance: Some(text("Player appearance")),
             personality: Some(text("Player personality")),
@@ -41,7 +51,25 @@ fn player() -> PlayerRoleContext {
                 response: text("Hello."),
             }],
         },
+        memories: BTreeMap::new(),
     }
+}
+
+fn project(
+    player: RoleEntry,
+    roles: &[RoleEntry],
+    decisions: &[CharacterDecision],
+    config: &GenerateConfig,
+) -> Result<GenerateRoleContext, PipelineError> {
+    let mut story_ctx = story_context();
+    story_ctx.player = player.id.clone();
+    story_ctx.roles.clear();
+    story_ctx.roles.insert(player.id.clone(), player);
+    story_ctx
+        .roles
+        .extend(roles.iter().cloned().map(|role| (role.id.clone(), role)));
+    let role_ids = roles.iter().map(|role| role.id.clone()).collect::<Vec<_>>();
+    project_role_context(&story_ctx, &role_ids, decisions, config)
 }
 
 fn decision(role_id: &str, value: &str) -> CharacterDecision {
@@ -56,8 +84,7 @@ fn decision(role_id: &str, value: &str) -> CharacterDecision {
 fn role_projection_preserves_effective_role_order() {
     let roles = vec![role("second", "Second", "calm"), role("first", "First", "bold")];
 
-    let context =
-        project_role_context(&player(), &roles, &[], &GenerateConfig::default()).expect("projection succeeds");
+    let context = project(player(), &roles, &[], &GenerateConfig::default()).expect("projection succeeds");
 
     assert!(context.roles.find("role_id: \"second\"") < context.roles.find("role_id: \"first\""));
 }
@@ -66,8 +93,7 @@ fn role_projection_preserves_effective_role_order() {
 fn role_projection_uses_effective_card_profile_and_role_body_identity() {
     let roles = vec![role("role_body_id", "Role Body Name", "Card personality")];
 
-    let context =
-        project_role_context(&player(), &roles, &[], &GenerateConfig::default()).expect("projection succeeds");
+    let context = project(player(), &roles, &[], &GenerateConfig::default()).expect("projection succeeds");
 
     assert!(context.roles.contains("role_id: \"role_body_id\""));
     assert!(context.roles.contains("name: \"Role Body Name\""));
@@ -78,7 +104,7 @@ fn role_projection_uses_effective_card_profile_and_role_body_identity() {
 
 #[test]
 fn player_projection_contains_full_profile_and_backstory() {
-    let context = project_role_context(&player(), &[], &[], &GenerateConfig::default()).expect("projection succeeds");
+    let context = project(player(), &[], &[], &GenerateConfig::default()).expect("projection succeeds");
 
     assert!(context.player_role.contains("role_id: \"player\""));
     assert!(context.player_role.contains("profile.appearance: \"Player appearance\""));
@@ -90,7 +116,7 @@ fn player_projection_contains_full_profile_and_backstory() {
 
 #[test]
 fn player_role_is_rejected_from_ai_roles() {
-    let error = project_role_context(&player(), &[role("player", "Player", "calm")], &[], &GenerateConfig::default())
+    let error = project(player(), &[role("player", "Player", "calm")], &[], &GenerateConfig::default())
         .expect_err("projection fails");
 
     assert!(matches!(
@@ -132,8 +158,7 @@ fn role_projection_excludes_private_memories() {
         },
     );
 
-    let context = project_role_context(&player(), &[first, second], &[], &GenerateConfig::default())
-        .expect("projection succeeds");
+    let context = project(player(), &[first, second], &[], &GenerateConfig::default()).expect("projection succeeds");
 
     assert!(!context.roles.contains("First secret"));
     assert!(!context.roles.contains("Second secret"));
@@ -144,8 +169,7 @@ fn role_projection_rejects_missing_decision_role() {
     let roles = vec![role("present", "Present", "calm")];
     let decisions = vec![decision("missing", "Wait.")];
 
-    let error =
-        project_role_context(&player(), &roles, &decisions, &GenerateConfig::default()).expect_err("projection fails");
+    let error = project(player(), &roles, &decisions, &GenerateConfig::default()).expect_err("projection fails");
 
     assert!(matches!(
         error,
@@ -162,8 +186,7 @@ fn role_projection_rejects_duplicate_decision_role() {
     let roles = vec![role("present", "Present", "calm")];
     let decisions = vec![decision("present", "Wait."), decision("present", "Speak.")];
 
-    let error =
-        project_role_context(&player(), &roles, &decisions, &GenerateConfig::default()).expect_err("projection fails");
+    let error = project(player(), &roles, &decisions, &GenerateConfig::default()).expect_err("projection fails");
 
     assert!(matches!(
         error,
@@ -179,8 +202,7 @@ fn role_projection_rejects_duplicate_decision_role() {
 fn role_projection_rejects_player_decision() {
     let decisions = vec![decision("player", "Choose.")];
 
-    let error =
-        project_role_context(&player(), &[], &decisions, &GenerateConfig::default()).expect_err("validation fails");
+    let error = project(player(), &[], &decisions, &GenerateConfig::default()).expect_err("validation fails");
 
     assert!(matches!(
         error,
@@ -199,8 +221,7 @@ fn role_projection_rejects_aggregate_overflow() {
         ..GenerateConfig::default()
     };
 
-    let error =
-        project_role_context(&player(), &[role("role", "Role", "calm")], &[], &config).expect_err("projection fails");
+    let error = project(player(), &[role("role", "Role", "calm")], &[], &config).expect_err("projection fails");
 
     assert!(matches!(
         error,
@@ -219,8 +240,7 @@ fn role_projection_rejects_mandatory_role_overflow() {
         ..GenerateConfig::default()
     };
 
-    let error =
-        project_role_context(&player(), &[role("role", "Role", "calm")], &[], &config).expect_err("projection fails");
+    let error = project(player(), &[role("role", "Role", "calm")], &[], &config).expect_err("projection fails");
 
     assert!(matches!(
         error,
@@ -239,13 +259,8 @@ fn role_projection_rejects_decision_overflow() {
         ..GenerateConfig::default()
     };
 
-    let error = project_role_context(
-        &player(),
-        &[role("role", "Role", "calm")],
-        &[decision("role", "Wait.")],
-        &config,
-    )
-    .expect_err("projection fails");
+    let error = project(player(), &[role("role", "Role", "calm")], &[decision("role", "Wait.")], &config)
+        .expect_err("projection fails");
 
     assert!(matches!(
         error,
@@ -260,16 +275,34 @@ fn role_projection_rejects_decision_overflow() {
 #[test]
 fn role_projection_truncates_backstory_on_utf8_boundary() {
     let mut selected = role("role", "Role", "calm");
-    selected.backstory = text("白蛇传中的角色拥有一段很长的往事");
-    let full = project_role_context(&player(), std::slice::from_ref(&selected), &[], &GenerateConfig::default())
+    selected.spec.backstory = text("白蛇传中的角色拥有一段很长的往事");
+    let full = project(player(), std::slice::from_ref(&selected), &[], &GenerateConfig::default())
         .expect("full projection succeeds");
     let config = GenerateConfig {
         max_role_bytes_per_role: full.roles.len() - 5,
         ..GenerateConfig::default()
     };
 
-    let context = project_role_context(&player(), &[selected], &[], &config).expect("truncated projection succeeds");
+    let context = project(player(), &[selected], &[], &config).expect("truncated projection succeeds");
 
     assert!(context.roles.contains("[truncated]"));
     assert!(context.roles.len() <= config.max_role_bytes_per_role);
+}
+
+#[test]
+fn missing_role_is_rejected_with_stable_stage_and_code() {
+    let story_ctx = story_context();
+    let role_ids = [RoleId::try_new("missing").expect("valid role ID")];
+
+    let error = project_role_context(&story_ctx, &role_ids, &[], &GenerateConfig::default())
+        .expect_err("missing role should fail");
+
+    assert!(matches!(
+        error,
+        PipelineError::InconsistentData {
+            stage: PipelineStage::Generate,
+            code: "generate_role_missing",
+            ..
+        }
+    ));
 }

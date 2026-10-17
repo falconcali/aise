@@ -1,9 +1,7 @@
 use crate::core::{
-    CharacterDecision, CharacterThinkRequest, PlayerContribution, ResolvedRole, RoleId, RumorEntry, StoryContext,
-    TurnControl,
+    CharacterDecision, CharacterThinkRequest, PlayerContribution, RoleEntry, RumorEntry, StoryContext, TurnControl,
 };
 use crate::llm::LlmGateway;
-use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::pipeline::think::{ThinkConfig, think_llm, think_output, think_prompt, think_trace};
 use crate::prompt::Prompt;
@@ -16,7 +14,6 @@ use std::sync::Arc;
 #[derive(Serialize)]
 pub struct ThinkInput<'a> {
     pub requests: &'a [CharacterThinkRequest],
-    pub resolved_roles: &'a [ResolvedRole],
     pub player_contribution: &'a PlayerContribution,
     pub activated_rumors: &'a [RumorEntry],
     pub retrieved_rumors: &'a [RumorEntry],
@@ -30,16 +27,14 @@ pub struct ThinkOutput {
 pub struct ThinkPipeline {
     gateway: Arc<LlmGateway>,
     prompt: Arc<Prompt>,
-    store: Arc<Store>,
     config: ThinkConfig,
 }
 
 impl ThinkPipeline {
-    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, store: Arc<Store>, config: ThinkConfig) -> Self {
+    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, config: ThinkConfig) -> Self {
         Self {
             gateway,
             prompt,
-            store,
             config,
         }
     }
@@ -51,17 +46,19 @@ impl ThinkPipeline {
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<ThinkOutput, PipelineError> {
-        let work = validate_input(input, &story_ctx.player)?;
-        let decisions = stream::iter(work)
-            .map(|(request_index, role_index)| {
-                self.decide(
-                    &input.requests[request_index],
-                    &input.resolved_roles[role_index],
-                    story_ctx,
-                    input,
-                    control,
-                    observation,
-                )
+        validate_input(input, story_ctx)?;
+        let decisions = stream::iter(0..input.requests.len())
+            .map(|request_index| {
+                async move {
+                    let request = &input.requests[request_index];
+                    let role = story_ctx.roles.get(&request.role_id).ok_or_else(|| {
+                        inconsistent(
+                            "think_resolved_role_missing",
+                            format!("role ID {} is missing from the story context", request.role_id),
+                        )
+                    })?;
+                    self.decide(request, role, story_ctx, input, control, observation).await
+                }
                 .boxed()
             })
             .buffered(self.config.max_concurrency.get())
@@ -73,7 +70,7 @@ impl ThinkPipeline {
     async fn decide(
         &self,
         request: &CharacterThinkRequest,
-        role: &ResolvedRole,
+        role: &RoleEntry,
         story_ctx: &StoryContext,
         input: &ThinkInput<'_>,
         control: &TurnControl,
@@ -90,7 +87,7 @@ impl ThinkPipeline {
     async fn decide_role(
         &self,
         request: &CharacterThinkRequest,
-        role: &ResolvedRole,
+        role: &RoleEntry,
         story_ctx: &StoryContext,
         input: &ThinkInput<'_>,
         control: &TurnControl,
@@ -98,7 +95,6 @@ impl ThinkPipeline {
     ) -> Result<CharacterDecision, PipelineError> {
         let rendered = think_prompt::character_decision(
             self.prompt.as_ref(),
-            self.store.as_ref(),
             think_prompt::CharacterDecisionPrompt {
                 story_ctx,
                 input,
@@ -107,8 +103,7 @@ impl ThinkPipeline {
                 config: &self.config,
             },
             observation,
-        )
-        .await?;
+        )?;
         let raw = think_llm::character_decision(self.gateway.as_ref(), rendered.into_messages(), control, observation)
             .await
             .map_err(PipelineError::llm(PipelineStage::Think))?;
@@ -137,39 +132,29 @@ impl<'a> Pipeline<ThinkInput<'a>> for ThinkPipeline {
     }
 }
 
-fn validate_input(input: &ThinkInput<'_>, player_role: &RoleId) -> Result<Vec<(usize, usize)>, PipelineError> {
+fn validate_input(input: &ThinkInput<'_>, story_ctx: &StoryContext) -> Result<(), PipelineError> {
     let mut request_roles = HashSet::with_capacity(input.requests.len());
-    let mut work = Vec::with_capacity(input.requests.len());
-    for (request_index, request) in input.requests.iter().enumerate() {
+    for request in input.requests {
         if !request_roles.insert(&request.role_id) {
             return Err(inconsistent(
                 "think_duplicate_request_role_id",
                 format!("duplicate Character Think request for role {}", request.role_id),
             ));
         }
-        if &request.role_id == player_role {
+        if request.role_id == story_ctx.player {
             return Err(inconsistent(
                 "think_player_role_forbidden",
                 format!("Character Think request targets player role {}", request.role_id),
             ));
         }
-        let mut matching_roles = input
-            .resolved_roles
-            .iter()
-            .enumerate()
-            .filter(|(_, role)| role.role_id == request.role_id);
-        let role_index = matching_roles.next().map(|(index, _)| index);
-        if role_index.is_none() || matching_roles.next().is_some() {
-            return Err(inconsistent(
+        story_ctx.roles.get(&request.role_id).ok_or_else(|| {
+            inconsistent(
                 "think_resolved_role_missing",
-                format!("expected exactly one resolved role for {}", request.role_id),
-            ));
-        }
-        if let Some(role_index) = role_index {
-            work.push((request_index, role_index));
-        }
+                format!("role ID {} is missing from the story context", request.role_id),
+            )
+        })?;
     }
-    Ok(work)
+    Ok(())
 }
 
 fn inconsistent(code: &'static str, message: impl Into<String>) -> PipelineError {

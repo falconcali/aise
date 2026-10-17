@@ -1,6 +1,5 @@
 use crate::core::{Change, StoryContext, StorySummary, TurnControl, TurnNumber};
 use crate::llm::LlmGateway;
-use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage};
 use crate::pipeline::summary::{SummaryConfig, summary_llm, summary_prompt, summary_trace};
 use crate::prompt::Prompt;
@@ -21,16 +20,14 @@ pub struct SummaryOutput {
 pub struct SummaryPipeline {
     gateway: Arc<LlmGateway>,
     prompt: Arc<Prompt>,
-    store: Arc<Store>,
     config: SummaryConfig,
 }
 
 impl SummaryPipeline {
-    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, store: Arc<Store>, config: SummaryConfig) -> Self {
+    pub fn new(gateway: Arc<LlmGateway>, prompt: Arc<Prompt>, config: SummaryConfig) -> Self {
         Self {
             gateway,
             prompt,
-            store,
             config,
         }
     }
@@ -42,14 +39,8 @@ impl SummaryPipeline {
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<String, PipelineError> {
-        let rendered_prompt = summary_prompt::summarize_story(
-            self.prompt.as_ref(),
-            story_ctx,
-            covered_turns,
-            self.store.as_ref(),
-            observation,
-        )
-        .await?;
+        let rendered_prompt =
+            summary_prompt::summarize_story(self.prompt.as_ref(), story_ctx, covered_turns, observation)?;
 
         let summary_text =
             summary_llm::summarize_story(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)

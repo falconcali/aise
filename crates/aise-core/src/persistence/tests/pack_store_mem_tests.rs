@@ -1,25 +1,17 @@
 use super::*;
-use crate::core::tests::{demo_pack, snake_pack, xu_xian_card};
+use crate::core::tests::{demo_pack, snake_pack};
 
 fn story_id(value: &str) -> StoryId {
     StoryId::try_new(value).expect("test story id should be valid")
 }
 
-fn assets(pack: StoryPack, cards: Vec<CharacterCard>) -> StoryAssetSpec {
-    StoryAssetSpec {
-        pack_ref: pack.pack_ref().expect("pack ref should compute"),
-        pack,
-        cards: cards
-            .into_iter()
-            .map(|card| (card.card_ref().expect("card ref should compute"), card))
-            .collect(),
-    }
+fn snapshot(pack: StoryPack) -> StoryPackSnapshot {
+    StoryPackSnapshot::from_pack(pack).expect("pack snapshot should build")
 }
 
-fn store_with_capacity(max_packs: usize, max_character_cards: usize) -> PackStoreMem {
+fn store_with_capacity(max_packs: usize) -> PackStoreMem {
     PackStoreMem::with_config(PackStoreConfig {
         max_packs,
-        max_character_cards,
         ..PackStoreConfig::default()
     })
 }
@@ -27,10 +19,12 @@ fn store_with_capacity(max_packs: usize, max_character_cards: usize) -> PackStor
 #[tokio::test]
 async fn retained_pack_is_loadable_by_ref() {
     let store = PackStoreMem::new();
-    let spec = assets(snake_pack(), Vec::new());
-    let pack_ref = spec.pack_ref.clone();
+    let pack_ref = snake_pack().pack_ref().expect("pack ref should compute");
 
-    store.retain(&story_id("story"), spec).await.expect("pack should be retained");
+    store
+        .retain(&story_id("story"), snapshot(snake_pack()))
+        .await
+        .expect("pack should be retained");
     let loaded = store.get_pack(&pack_ref).await.expect("pack should load");
 
     assert_eq!(loaded.opening, snake_pack().opening);
@@ -39,7 +33,7 @@ async fn retained_pack_is_loadable_by_ref() {
 #[tokio::test]
 async fn unretained_pack_is_not_found() {
     let store = PackStoreMem::new();
-    let pack_ref = assets(snake_pack(), Vec::new()).pack_ref;
+    let pack_ref = snake_pack().pack_ref().expect("pack ref should compute");
 
     let error = store.get_pack(&pack_ref).await.expect_err("missing pack should fail");
     assert!(matches!(error, PersistenceError::NotFound));
@@ -47,14 +41,14 @@ async fn unretained_pack_is_not_found() {
 
 #[tokio::test]
 async fn identical_pack_is_shared_until_last_story_releases_it() {
-    let store = store_with_capacity(1, 0);
-    let pack_ref = assets(snake_pack(), Vec::new()).pack_ref;
+    let store = store_with_capacity(1);
+    let pack_ref = snake_pack().pack_ref().expect("pack ref should compute");
     store
-        .retain(&story_id("first"), assets(snake_pack(), Vec::new()))
+        .retain(&story_id("first"), snapshot(snake_pack()))
         .await
         .expect("first story should retain pack");
     store
-        .retain(&story_id("second"), assets(snake_pack(), Vec::new()))
+        .retain(&story_id("second"), snapshot(snake_pack()))
         .await
         .expect("identical pack should share the snapshot");
 
@@ -77,47 +71,44 @@ async fn releasing_unknown_story_is_a_no_op() {
 
 #[tokio::test]
 async fn pack_beyond_capacity_is_rejected() {
-    let store = store_with_capacity(1, 1);
+    let store = store_with_capacity(1);
     store
-        .retain(&story_id("snake"), assets(snake_pack(), Vec::new()))
+        .retain(&story_id("snake"), snapshot(snake_pack()))
         .await
         .expect("first pack should be retained");
 
     let error = store
-        .retain(&story_id("demo"), assets(demo_pack(), Vec::new()))
+        .retain(&story_id("demo"), snapshot(demo_pack()))
         .await
         .expect_err("pack beyond capacity should fail");
-    assert!(matches!(error, PersistenceError::ConstraintViolation { .. }));
+    assert!(matches!(
+        error,
+        PersistenceError::PackCapacityExceeded { actual: 2, maximum: 1 }
+    ));
 }
 
 #[tokio::test]
-async fn card_capacity_failure_retains_nothing() {
-    let store = store_with_capacity(1, 0);
-    let spec = assets(snake_pack(), vec![xu_xian_card()]);
-    let pack_ref = spec.pack_ref.clone();
+async fn duplicate_story_holder_leaves_original_snapshot_unchanged() {
+    let store = PackStoreMem::new();
+    let holder = story_id("story");
+    let original_ref = snake_pack().pack_ref().expect("pack ref should compute");
+    let rejected_ref = demo_pack().pack_ref().expect("pack ref should compute");
+    store
+        .retain(&holder, snapshot(snake_pack()))
+        .await
+        .expect("original snapshot should be retained");
 
     let error = store
-        .retain(&story_id("story"), spec)
+        .retain(&holder, snapshot(demo_pack()))
         .await
-        .expect_err("card beyond capacity should fail");
+        .expect_err("duplicate holder should fail");
 
-    assert!(matches!(error, PersistenceError::ConstraintViolation { .. }));
-    assert!(matches!(store.get_pack(&pack_ref).await, Err(PersistenceError::NotFound)));
-}
-
-#[tokio::test]
-async fn retained_card_is_loadable_and_released_with_story() {
-    let store = PackStoreMem::new();
-    let spec = assets(snake_pack(), vec![xu_xian_card(), xu_xian_card()]);
-    let card_ref = spec.cards[0].0.clone();
-
-    store.retain(&story_id("story"), spec).await.expect("assets should be retained");
-    let loaded = store.get_character_card(&card_ref).await.expect("card should load");
-    assert_eq!(loaded.name, xu_xian_card().name);
-
-    store.release(&story_id("story")).await.expect("release should succeed");
     assert!(matches!(
-        store.get_character_card(&card_ref).await,
-        Err(PersistenceError::NotFound)
+        error,
+        PersistenceError::StoryHolderAlreadyExists { story_id } if story_id == holder
     ));
+    store.get_pack(&original_ref).await.expect("original snapshot should remain");
+    assert!(matches!(store.get_pack(&rejected_ref).await, Err(PersistenceError::NotFound)));
+    store.release(&holder).await.expect("release should succeed");
+    assert!(matches!(store.get_pack(&original_ref).await, Err(PersistenceError::NotFound)));
 }

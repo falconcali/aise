@@ -1,9 +1,8 @@
 use crate::core::{
-    ActivatedKnowledge, BoundedText, CharacterDecision, FactEntry, NarrativeDirection, PlayerContribution,
-    PlayerRoleContext, ResolvedRole, RumorEntry, StoryContext, TurnControl,
+    ActivatedKnowledge, BoundedText, CharacterDecision, FactEntry, NarrativeDirection, PlayerContribution, RoleId,
+    RumorEntry, StoryContext, TurnControl,
 };
 use crate::llm::LlmGateway;
-use crate::persistence::Store;
 use crate::pipeline::common::{Pipeline, PipelineError, PipelineStage, ProposalQualityPolicy};
 use crate::pipeline::generate::{GenerateConfig, generate_llm, generate_prompt, generate_roles, generate_trace};
 use crate::prompt::Prompt;
@@ -20,8 +19,7 @@ pub struct GenerateInput<'a> {
     pub knowledge: &'a ActivatedKnowledge,
     pub retrieved_facts: &'a [FactEntry],
     pub retrieved_rumors: &'a [RumorEntry],
-    pub player_role: &'a PlayerRoleContext,
-    pub roles: &'a [ResolvedRole],
+    pub role_ids: &'a [RoleId],
     pub character_decisions: &'a [CharacterDecision],
 }
 
@@ -33,7 +31,6 @@ pub struct GenerateOutput {
 pub struct GeneratePipeline {
     gateway: Arc<LlmGateway>,
     prompt: Arc<Prompt>,
-    store: Arc<Store>,
     config: GenerateConfig,
     quality_policy: Arc<ProposalQualityPolicy>,
 }
@@ -42,14 +39,12 @@ impl GeneratePipeline {
     pub fn new(
         gateway: Arc<LlmGateway>,
         prompt: Arc<Prompt>,
-        store: Arc<Store>,
         config: GenerateConfig,
         quality_policy: Arc<ProposalQualityPolicy>,
     ) -> Self {
         Self {
             gateway,
             prompt,
-            store,
             config,
             quality_policy,
         }
@@ -67,23 +62,16 @@ impl GeneratePipeline {
         control: &TurnControl,
         observation: &Observation,
     ) -> Result<String, PipelineError> {
-        generate_roles::validate_player_role(input.player_role, &story_ctx.player)?;
-        let role_context = generate_roles::project_role_context(
-            input.player_role,
-            input.roles,
-            input.character_decisions,
-            &self.config,
-        )?;
+        let role_context =
+            generate_roles::project_role_context(story_ctx, input.role_ids, input.character_decisions, &self.config)?;
         let rendered_prompt = generate_prompt::generate_story(
             self.prompt.as_ref(),
             story_ctx,
             input,
             &role_context,
             self.quality_policy.as_ref(),
-            self.store.as_ref(),
             observation,
-        )
-        .await?;
+        )?;
 
         generate_llm::generate_story(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
             .await

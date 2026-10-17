@@ -1,8 +1,7 @@
 use super::*;
-use crate::core::tests::snake_pack;
+use crate::core::tests::{snake_pack, story_context};
 use crate::core::{
-    ActivatedKnowledge, EntryOrigin, FactEntry, MemoryEntry, PlayerRoleContext, RoleActor, RoleEntry, RoleId,
-    RumorEntry, StoryContext, StoryPack,
+    ActivatedKnowledge, EntryOrigin, FactEntry, MemoryEntry, RoleEntry, RoleId, RumorEntry, StoryContext, StoryPack,
 };
 use crate::pipeline::plan::plan_candidates::{PlanCandidates, collect_candidates};
 use crate::pipeline::plan::plan_roles::collect_role_catalog;
@@ -25,7 +24,7 @@ fn candidate_pack() -> StoryPack {
 }
 
 fn candidate_context(pack: &StoryPack) -> StoryContext {
-    let mut ctx = StoryContext::new();
+    let mut ctx = story_context();
     ctx.facts = pack
         .seed_facts
         .iter()
@@ -76,8 +75,9 @@ fn candidate_context(pack: &StoryPack) -> StoryContext {
                 id.clone(),
                 RoleEntry {
                     id: id.clone(),
-                    actor: RoleActor::Default,
-                    body: body.clone(),
+                    origin: EntryOrigin::Seed,
+                    spec: body.spec.clone(),
+                    profile: body.default_profile.clone(),
                     memories,
                 },
             )
@@ -105,16 +105,8 @@ fn role_id(value: &str) -> RoleId {
     RoleId::try_new(value).expect("valid role id")
 }
 
-fn player_role(pack: &StoryPack) -> PlayerRoleContext {
-    let role_id = role_id("xu_xian");
-    let role = &pack.roles[&role_id];
-    PlayerRoleContext {
-        role_id,
-        name: role.name.clone(),
-        aliases: role.alias.clone(),
-        backstory: role.backstory.clone(),
-        profile: role.default_profile.clone(),
-    }
+fn player_role() -> RoleId {
+    role_id("xu_xian")
 }
 
 fn parse(raw: &str, pack: &StoryPack, config: &PlanConfig) -> Result<PlanOutput, PipelineError> {
@@ -130,9 +122,9 @@ fn parse(raw: &str, pack: &StoryPack, config: &PlanConfig) -> Result<PlanOutput,
     };
     let ctx = candidate_context(pack);
     let candidates = candidates(&ctx);
-    let player_role = player_role(pack);
-    let role_catalog = collect_role_catalog(&ctx, &player_role.role_id);
-    parse_plan_output(&raw, &candidates, &role_catalog, player_role, config)
+    let player_role = player_role();
+    let role_catalog = collect_role_catalog(&ctx, &player_role);
+    parse_plan_output(&raw, &candidates, &role_catalog, &player_role, config)
 }
 
 fn error_code(error: PipelineError) -> &'static str {
@@ -336,10 +328,10 @@ fn missing_role_selection_field_is_rejected() {
     }"#;
     let ctx = candidate_context(&pack);
     let candidates = candidates(&ctx);
-    let player_role = player_role(&pack);
-    let role_catalog = collect_role_catalog(&ctx, &player_role.role_id);
+    let player_role = player_role();
+    let role_catalog = collect_role_catalog(&ctx, &player_role);
 
-    let error = parse_plan_output(raw, &candidates, &role_catalog, player_role, &config(512))
+    let error = parse_plan_output(raw, &candidates, &role_catalog, &player_role, &config(512))
         .expect_err("missing field should fail");
 
     assert_eq!(error_code(error), "plan_output_invalid_json");

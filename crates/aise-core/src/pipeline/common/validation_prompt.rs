@@ -1,5 +1,4 @@
-use crate::core::StoryContext;
-use crate::persistence::Store;
+use crate::core::{BoundedText, CharacterProfile, RoleEntry, RoleId, StoryContext};
 use crate::pipeline::common::{PipelineError, PipelineStage, ValidationContext, pipeline_prompt};
 use serde::Serialize;
 
@@ -20,15 +19,29 @@ pub(in crate::pipeline) struct ValidationPromptEvidence {
     pub character_decisions: String,
 }
 
-pub(in crate::pipeline) async fn project_validation_evidence(
+#[derive(Serialize)]
+struct RolePromptView<'a> {
+    role_id: &'a RoleId,
+    name: &'a BoundedText,
+    aliases: &'a [BoundedText],
+    profile: &'a CharacterProfile,
+    backstory: &'a BoundedText,
+}
+
+pub(in crate::pipeline) fn project_validation_evidence(
     stage: PipelineStage,
     story_ctx: &StoryContext,
     context: &ValidationContext<'_>,
-    store: &Store,
 ) -> Result<ValidationPromptEvidence, PipelineError> {
+    let player_role = resolve_role(stage, story_ctx, &story_ctx.player)?;
+    let roles = context
+        .role_ids
+        .iter()
+        .map(|role_id| resolve_role(stage, story_ctx, role_id).map(role_view))
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(ValidationPromptEvidence {
         story_summary: pipeline_prompt::story_summary(story_ctx).unwrap_or_default().to_owned(),
-        story_opening: pipeline_prompt::load_story_opening(stage, story_ctx, store).await?,
+        story_opening: pipeline_prompt::story_opening(story_ctx).to_owned(),
         recent_story: pipeline_prompt::recent_story(story_ctx),
         story_goal: context.story_goal.as_str().to_owned(),
         player_contribution: context.player_contribution.processed.clone(),
@@ -38,14 +51,46 @@ pub(in crate::pipeline) async fn project_validation_evidence(
         activated_rumors: pipeline_prompt::rumors(&context.knowledge.rumors),
         retrieved_facts: pipeline_prompt::known_facts(context.retrieved_facts),
         retrieved_rumors: pipeline_prompt::rumors(context.retrieved_rumors),
-        player_role: serialize(stage, &context.player_role, "validation_player_role_serialization")?,
-        resolved_roles: serialize_optional_slice(stage, context.roles, "validation_resolved_roles_serialization")?,
+        player_role: serialize(stage, &role_view(player_role), "validation_player_role_serialization")?,
+        resolved_roles: serialize_optional_slice(stage, &roles, "validation_resolved_roles_serialization")?,
         character_decisions: serialize_optional_slice(
             stage,
             context.character_decisions,
             "validation_character_decisions_serialization",
         )?,
     })
+}
+
+fn resolve_role<'a>(
+    stage: PipelineStage,
+    story_ctx: &'a StoryContext,
+    role_id: &RoleId,
+) -> Result<&'a RoleEntry, PipelineError> {
+    story_ctx.roles.get(role_id).ok_or_else(|| {
+        PipelineError::inconsistent_data(
+            stage,
+            missing_role_code(stage),
+            format!("role ID {role_id} is missing from the story context"),
+        )
+    })
+}
+
+fn missing_role_code(stage: PipelineStage) -> &'static str {
+    match stage {
+        PipelineStage::Validate => "validate_role_missing",
+        PipelineStage::Repair => "repair_role_missing",
+        _ => "validation_role_missing",
+    }
+}
+
+fn role_view(role: &RoleEntry) -> RolePromptView<'_> {
+    RolePromptView {
+        role_id: &role.id,
+        name: &role.spec.name,
+        aliases: &role.spec.alias,
+        profile: &role.profile,
+        backstory: &role.spec.backstory,
+    }
 }
 
 fn serialize<T: Serialize + ?Sized>(

@@ -1,5 +1,4 @@
 use crate::core::StoryContext;
-use crate::persistence::Store;
 use crate::pipeline::common::proposal_quality_prompt::project_proposal_quality;
 use crate::pipeline::common::validation_prompt::{ValidationPromptEvidence, project_validation_evidence};
 use crate::pipeline::common::{PipelineError, PipelineStage, ProposalQualityPolicy};
@@ -29,16 +28,15 @@ const CHECK_CRITERIA_VAR: &str = "check_criteria";
 const SCORE_CRITERIA_VAR: &str = "score_criteria";
 const MAX_ISSUE_BYTES_VAR: &str = "max_issue_bytes";
 
-pub(super) async fn evaluate_story(
+pub(super) fn evaluate_story(
     prompt: &Prompt,
     story_ctx: &StoryContext,
     input: &ValidateInput<'_>,
     policy: &ProposalQualityPolicy,
     max_issue_bytes: usize,
-    store: &Store,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
-    let evidence = project_validation_evidence(PipelineStage::Validate, story_ctx, &input.context, store).await?;
+    let evidence = project_validation_evidence(PipelineStage::Validate, story_ctx, &input.context)?;
     let vars = evaluate_vars(input, policy, max_issue_bytes, evidence)?;
     prompt
         .render(PromptSpec::new(EVALUATE_STORY_PROMPT_ID, vars), observation)

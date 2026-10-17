@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::tests::snake_pack;
+use crate::core::tests::{snake_pack, story_context};
 use crate::core::{NarrativeNodeId, NodeStatus};
 use crate::trace::{
     ContentCapture, ContentCapturePolicy, ObservabilityContentConfig, ObservationSession, SessionSpec, Trace, TraceSpec,
@@ -53,7 +53,7 @@ fn pack_without_narrative_projects_only_global_constraints() {
 
     let trace = test_trace();
 
-    let output = project_narrative(&pack, &StoryContext::new(), trace.root()).expect("projection should succeed");
+    let output = project_narrative(&pack, &story_context(), trace.root()).expect("projection should succeed");
 
     assert!(output.directions.is_empty());
     assert_eq!(output.constraints, [text("Modern technology appears.")]);
@@ -64,7 +64,7 @@ fn global_constraints_come_before_active_node_constraints() {
     let mut pack = snake_pack();
     pack.constraints = vec![text("Modern technology appears.")];
     pack.narrative = Some(graph());
-    let mut story_ctx = StoryContext::new();
+    let mut story_ctx = story_context();
     story_ctx.narrative.node_status.insert(
         NarrativeNodeId::try_new("arrival").expect("test node id should be valid"),
         NodeStatus::Active,

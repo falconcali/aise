@@ -1,5 +1,4 @@
 use crate::core::StoryContext;
-use crate::persistence::Store;
 use crate::pipeline::common::proposal_quality_prompt::project_proposal_quality;
 use crate::pipeline::common::{PipelineError, PipelineStage, ProposalQualityPolicy, pipeline_prompt};
 use crate::pipeline::generate::GenerateInput;
@@ -24,17 +23,15 @@ const PLAYER_CONTRIBUTION_VAR: &str = "player_contribution";
 const CHECK_CRITERIA_VAR: &str = "check_criteria";
 const SCORE_CRITERIA_VAR: &str = "score_criteria";
 
-pub async fn generate_story(
+pub fn generate_story(
     prompt: &Prompt,
     story_ctx: &StoryContext,
     input: &GenerateInput<'_>,
     role_context: &GenerateRoleContext,
     quality_policy: &ProposalQualityPolicy,
-    store: &Store,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
-    let story_opening = pipeline_prompt::load_story_opening(PipelineStage::Generate, story_ctx, store).await?;
-    let vars = generate_vars(story_ctx, input, role_context, quality_policy, story_opening)?;
+    let vars = generate_vars(story_ctx, input, role_context, quality_policy)?;
     prompt
         .render(PromptSpec::new(GENERATE_STORY_PROMPT_ID, vars), observation)
         .map_err(PipelineError::prompt(PipelineStage::Generate))
@@ -45,7 +42,6 @@ fn generate_vars(
     input: &GenerateInput<'_>,
     role_context: &GenerateRoleContext,
     quality_policy: &ProposalQualityPolicy,
-    story_opening: String,
 ) -> Result<PromptVars, PipelineError> {
     let quality = project_proposal_quality(PipelineStage::Generate, quality_policy)?;
     Ok(PromptVars::from([
@@ -53,7 +49,10 @@ fn generate_vars(
             STORY_SUMMARY_VAR.to_owned(),
             Value::String(pipeline_prompt::story_summary(story_ctx).unwrap_or_default().to_owned()),
         ),
-        (STORY_OPENING_VAR.to_owned(), Value::String(story_opening)),
+        (
+            STORY_OPENING_VAR.to_owned(),
+            Value::String(pipeline_prompt::story_opening(story_ctx).to_owned()),
+        ),
         (
             RECENT_STORY_VAR.to_owned(),
             Value::String(pipeline_prompt::recent_story(story_ctx)),

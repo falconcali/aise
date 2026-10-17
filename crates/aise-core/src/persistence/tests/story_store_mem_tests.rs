@@ -1,14 +1,15 @@
 use super::*;
-use crate::core::tests::{snake_pack, turn_evaluation};
+use crate::core::tests::{snake_pack, story_context, turn_evaluation};
 use crate::core::{
     ActivationRule, BoundedText, Change, EntryOrigin, FactBody, FactChangeOp, FactEntry, FactId, IdempotencyKey,
-    KnowledgeChange, MemoryBody, MemoryEntry, MemoryId, NarrativeNodeId, NarrativeState, NodeStatus, PackId, PackRef,
-    PlayerId, RetrievalHint, RoleActor, RoleEntry, RoleId, RoleMemoryChangeOp, RumorBody, RumorChangeOp, RumorEntry,
-    RumorId, SemanticVersion, Sha256Digest, StoryCommit, StoryId, StoryInstanceSpec, StorySummary, Turn, TurnNumber,
-    TurnSegment, TurnStatus,
+    KnowledgeChange, MemoryBody, MemoryEntry, MemoryId, NarrativeNodeId, NarrativeState, NodeStatus, PlayerId,
+    RetrievalHint, RoleEntry, RoleId, RoleMemoryChangeOp, RumorBody, RumorChangeOp, RumorEntry, RumorId, StoryCommit,
+    StoryCreateBundle, StoryId, StoryInstanceSpec, StoryPackSnapshot, StorySummary, Turn, TurnNumber, TurnSegment,
+    TurnStatus,
 };
 use crate::persistence::StoreType;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 fn story_id(value: &str) -> StoryId {
     StoryId::try_new(value).expect("test story id should be valid")
@@ -63,48 +64,52 @@ fn memory_body(content: &str) -> MemoryBody {
 }
 
 fn story_spec(value: &str) -> StoryInstanceSpec {
-    StoryInstanceSpec {
-        story_id: story_id(value),
-        pack_ref: PackRef {
-            pack_id: PackId::try_new("pack").expect("test pack id should be valid"),
-            version: SemanticVersion::try_new("1.0.0").expect("test version should be valid"),
-            digest: Sha256Digest::try_new("digest").expect("test digest should be valid"),
-        },
-        roles: BTreeMap::new(),
-        facts: BTreeMap::new(),
-        rumors: BTreeMap::new(),
-        player_id: PlayerId::try_new("player").expect("test player id should be valid"),
-        player_role: RoleId::try_new("protagonist").expect("test role id should be valid"),
-        narrative: NarrativeState::default(),
-    }
+    story_spec_with_narrative(value, NarrativeState::default())
+}
+
+fn story_spec_with_narrative(value: &str, narrative: NarrativeState) -> StoryInstanceSpec {
+    let pack = snake_pack();
+    let snapshot = StoryPackSnapshot::from_pack(pack.clone()).expect("test pack snapshot should build");
+    let bundle = StoryCreateBundle::assemble(
+        snapshot,
+        story_id(value),
+        Arc::new(pack.opening),
+        BTreeMap::new(),
+        BTreeMap::new(),
+        BTreeMap::new(),
+        PlayerId::try_new("player").expect("test player id should be valid"),
+        RoleId::try_new("protagonist").expect("test role id should be valid"),
+        narrative,
+    );
+    bundle.into_parts().1
 }
 
 fn seeded_story_spec(value: &str) -> StoryInstanceSpec {
     let pack = snake_pack();
     let role_body = pack.roles.values().next().expect("fixture role").clone();
-    let mut spec = story_spec(value);
-    spec.facts.insert(
+    let facts = BTreeMap::from([(
         fact_id("seed-fact"),
         FactEntry {
             id: fact_id("seed-fact"),
             origin: EntryOrigin::Seed,
             body: fact_body("seed fact"),
         },
-    );
-    spec.rumors.insert(
+    )]);
+    let rumors = BTreeMap::from([(
         rumor_id("seed-rumor"),
         RumorEntry {
             id: rumor_id("seed-rumor"),
             origin: EntryOrigin::Seed,
             body: rumor_body("seed rumor"),
         },
-    );
-    spec.roles.insert(
+    )]);
+    let roles = BTreeMap::from([(
         role_id("npc"),
         RoleEntry {
             id: role_id("npc"),
-            actor: RoleActor::Default,
-            body: role_body,
+            origin: EntryOrigin::Seed,
+            spec: role_body.spec,
+            profile: role_body.default_profile,
             memories: BTreeMap::from([(
                 memory_id("seed-mem"),
                 MemoryEntry {
@@ -114,8 +119,21 @@ fn seeded_story_spec(value: &str) -> StoryInstanceSpec {
                 },
             )]),
         },
-    );
-    spec
+    )]);
+    let snapshot = StoryPackSnapshot::from_pack(pack.clone()).expect("test pack snapshot should build");
+    StoryCreateBundle::assemble(
+        snapshot,
+        story_id(value),
+        Arc::new(pack.opening),
+        roles,
+        facts,
+        rumors,
+        PlayerId::try_new("player").expect("test player id should be valid"),
+        role_id("npc"),
+        NarrativeState::default(),
+    )
+    .into_parts()
+    .1
 }
 
 fn commit(story_id: &StoryId, turn_number: u64, key: &str, summary: Change<StorySummary>) -> StoryCommit {
@@ -158,15 +176,18 @@ async fn creates_and_loads_story_context_and_info() {
     assert_eq!(info.story_id.as_str(), "story-1");
     assert!(matches!(info.life_cycle, crate::core::StoryLifeCycle::Active));
 
-    let loaded = store.load(&spec.story_id).await.expect("story should load");
-    assert_eq!(loaded.story_id, spec.story_id);
-    assert_eq!(loaded.player, spec.player_role);
+    let loaded = store.load(spec.story_id()).await.expect("story should load");
+    let fixture = story_context();
+    assert_eq!(&loaded.story_id, spec.story_id());
+    assert_eq!(loaded.player, role_id("protagonist"));
+    assert_eq!(loaded.opening.as_str(), fixture.opening.as_str());
     assert_eq!(loaded.turn_number.value(), 0);
     assert!(loaded.summary.is_none());
     assert!(loaded.recent_turns.is_empty());
 
-    let loaded_info = store.get_info(&spec.story_id).await.expect("story info should load");
+    let loaded_info = store.get_info(spec.story_id()).await.expect("story info should load");
     assert_eq!(loaded_info.story_id, info.story_id);
+    assert_eq!(loaded_info.player_id.as_str(), "player");
     assert_eq!(loaded_info.created_at, info.created_at);
 }
 
@@ -188,7 +209,7 @@ async fn commits_turn_and_returns_idempotent_result() {
     let store = StoryStoreMem::new();
     let spec = story_spec("story-1");
     store.create(spec.clone()).await.expect("story creation should succeed");
-    let first = commit(&spec.story_id, 1, "key-1", Change::Unchanged);
+    let first = commit(spec.story_id(), 1, "key-1", Change::Unchanged);
 
     let committed = store.commit(first.clone()).await.expect("commit should succeed");
     assert_eq!(committed.turn.turn_number.value(), 1);
@@ -197,13 +218,13 @@ async fn commits_turn_and_returns_idempotent_result() {
     assert_eq!(replayed.turn.turn_number.value(), 1);
 
     let found = store
-        .find_committed(&spec.story_id, &idempotency_key("key-1"))
+        .find_committed(spec.story_id(), &idempotency_key("key-1"))
         .await
         .expect("idempotency lookup should succeed")
         .expect("committed turn should be found");
     assert_eq!(found.turn.turn_number.value(), 1);
 
-    let loaded = store.load(&spec.story_id).await.expect("story should load");
+    let loaded = store.load(spec.story_id()).await.expect("story should load");
     assert_eq!(loaded.turn_number.value(), 1);
     assert_eq!(loaded.recent_turns.len(), 1);
 }
@@ -218,7 +239,7 @@ async fn removes_turns_covered_by_summary_before_window_trim() {
     store.create(spec.clone()).await.expect("story creation should succeed");
 
     for turn_number in 1..=4 {
-        let turn = commit(&spec.story_id, turn_number, &format!("key-{turn_number}"), Change::Unchanged);
+        let turn = commit(spec.story_id(), turn_number, &format!("key-{turn_number}"), Change::Unchanged);
         store.commit(turn).await.expect("turn commit should succeed");
     }
 
@@ -226,10 +247,10 @@ async fn removes_turns_covered_by_summary_before_window_trim() {
         text: "summary".to_owned(),
         covered_through: TurnNumber::new(3),
     };
-    let turn = commit(&spec.story_id, 5, "key-5", Change::Replaced(summary));
+    let turn = commit(spec.story_id(), 5, "key-5", Change::Replaced(summary));
     store.commit(turn).await.expect("summary commit should succeed");
 
-    let loaded = store.load(&spec.story_id).await.expect("story should load");
+    let loaded = store.load(spec.story_id()).await.expect("story should load");
     assert_eq!(
         loaded.summary.as_ref().expect("summary should exist").covered_through.value(),
         3
@@ -250,12 +271,12 @@ async fn rejects_invalid_turn_number_and_future_summary() {
     let spec = story_spec("story-1");
     store.create(spec.clone()).await.expect("story creation should succeed");
 
-    let invalid_turn = commit(&spec.story_id, 2, "key-2", Change::Unchanged);
+    let invalid_turn = commit(spec.story_id(), 2, "key-2", Change::Unchanged);
     let error = store.commit(invalid_turn).await.expect_err("turn conflict should fail");
     assert!(matches!(error, PersistenceError::ConstraintViolation { .. }));
 
     let future_summary = commit(
-        &spec.story_id,
+        spec.story_id(),
         1,
         "key-1",
         Change::Replaced(StorySummary {
@@ -270,15 +291,16 @@ async fn rejects_invalid_turn_number_and_future_summary() {
 #[tokio::test]
 async fn creation_keeps_initial_narrative_state() {
     let store = StoryStoreMem::new();
-    let mut spec = story_spec("story-1");
-    spec.narrative.node_status.insert(
+    let mut narrative = NarrativeState::default();
+    narrative.node_status.insert(
         NarrativeNodeId::try_new("arrival").expect("test node id should be valid"),
         NodeStatus::Active,
     );
+    let spec = story_spec_with_narrative("story-1", narrative.clone());
     store.create(spec.clone()).await.expect("story creation should succeed");
 
-    let loaded = store.load(&spec.story_id).await.expect("story should load");
-    assert_eq!(loaded.narrative, spec.narrative);
+    let loaded = store.load(spec.story_id()).await.expect("story should load");
+    assert_eq!(loaded.narrative, narrative);
 }
 
 #[tokio::test]
@@ -291,12 +313,12 @@ async fn commit_replaces_narrative_state() {
         NarrativeNodeId::try_new("arrival").expect("test node id should be valid"),
         NodeStatus::Completed,
     );
-    let mut turn = commit(&spec.story_id, 1, "key-1", Change::Unchanged);
+    let mut turn = commit(spec.story_id(), 1, "key-1", Change::Unchanged);
     turn.narrative = Change::Replaced(narrative.clone());
 
     store.commit(turn).await.expect("commit should succeed");
 
-    let loaded = store.load(&spec.story_id).await.expect("story should load");
+    let loaded = store.load(spec.story_id()).await.expect("story should load");
     assert_eq!(loaded.narrative, narrative);
 }
 
@@ -305,13 +327,13 @@ async fn completing_story_updates_life_cycle_and_rejects_further_turns() {
     let store = StoryStoreMem::new();
     let spec = story_spec("story-1");
     store.create(spec.clone()).await.expect("story creation should succeed");
-    let mut final_turn = commit(&spec.story_id, 1, "key-1", Change::Unchanged);
+    let mut final_turn = commit(spec.story_id(), 1, "key-1", Change::Unchanged);
     final_turn.life_cycle = Change::Replaced(crate::core::StoryLifeCycle::Completed);
     store.commit(final_turn.clone()).await.expect("final commit should succeed");
 
-    let loaded = store.load(&spec.story_id).await.expect("story should load");
+    let loaded = store.load(spec.story_id()).await.expect("story should load");
     assert_eq!(loaded.life_cycle, crate::core::StoryLifeCycle::Completed);
-    let info = store.get_info(&spec.story_id).await.expect("story info should load");
+    let info = store.get_info(spec.story_id()).await.expect("story info should load");
     assert_eq!(info.life_cycle, crate::core::StoryLifeCycle::Completed);
 
     let replayed = store
@@ -320,7 +342,7 @@ async fn completing_story_updates_life_cycle_and_rejects_further_turns() {
         .expect("replaying the final commit stays idempotent");
     assert_eq!(replayed.turn.turn_number.value(), 1);
 
-    let next_turn = commit(&spec.story_id, 2, "key-2", Change::Unchanged);
+    let next_turn = commit(spec.story_id(), 2, "key-2", Change::Unchanged);
     let error = store
         .commit(next_turn)
         .await
@@ -369,7 +391,7 @@ async fn commit_applies_knowledge_change_and_preserves_entry_origins() {
     };
     store
         .commit(commit_with_knowledge(
-            &spec.story_id,
+            spec.story_id(),
             1,
             "key-1",
             Change::Unchanged,
@@ -395,7 +417,7 @@ async fn commit_applies_knowledge_change_and_preserves_entry_origins() {
     };
     store
         .commit(commit_with_knowledge(
-            &spec.story_id,
+            spec.story_id(),
             2,
             "key-2",
             Change::Unchanged,
@@ -404,7 +426,7 @@ async fn commit_applies_knowledge_change_and_preserves_entry_origins() {
         .await
         .expect("turn 2 commit should succeed");
 
-    let loaded = store.load(&spec.story_id).await.expect("story should load");
+    let loaded = store.load(spec.story_id()).await.expect("story should load");
     assert!(matches!(loaded.facts[&fact_id("seed-fact")].origin, EntryOrigin::Seed));
     assert_eq!(loaded.facts[&fact_id("seed-fact")].body.content.as_str(), "updated seed fact");
     assert!(matches!(
@@ -444,7 +466,7 @@ async fn commit_rejects_invalid_knowledge_change_without_mutating_context() {
     let store = StoryStoreMem::new();
     let spec = seeded_story_spec("story-1");
     store.create(spec.clone()).await.expect("story creation should succeed");
-    let before = serde_json::to_value(store.load(&spec.story_id).await.expect("story should load"))
+    let before = serde_json::to_value(store.load(spec.story_id()).await.expect("story should load"))
         .expect("before context serializes");
 
     let invalid_changes = [
@@ -551,7 +573,7 @@ async fn commit_rejects_invalid_knowledge_change_without_mutating_context() {
     for (index, invalid) in invalid_changes.into_iter().enumerate() {
         let error = store
             .commit(commit_with_knowledge(
-                &spec.story_id,
+                spec.story_id(),
                 1,
                 &format!("invalid-{index}"),
                 Change::Unchanged,
@@ -561,7 +583,7 @@ async fn commit_rejects_invalid_knowledge_change_without_mutating_context() {
             .expect_err("invalid knowledge_change must fail");
         assert!(matches!(error, PersistenceError::ConstraintViolation { .. }));
 
-        let after = serde_json::to_value(store.load(&spec.story_id).await.expect("story should load"))
+        let after = serde_json::to_value(store.load(spec.story_id()).await.expect("story should load"))
             .expect("after context serializes");
         assert_eq!(after, before);
     }

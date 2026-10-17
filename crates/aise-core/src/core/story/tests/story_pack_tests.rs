@@ -1,6 +1,6 @@
 use super::*;
-use crate::core::CharacterCardId;
 use crate::core::tests::{SNAKE_PACK_JSON, demo_pack, snake_pack};
+use crate::core::{MAX_ALIASES_PER_ROLE, MAX_MEMORIES_PER_ROLE, MAX_ROLE_CATALOG_BYTES, MAX_ROLES_PER_STORY};
 use serde_json::json;
 
 const LEGACY_V5_PACK_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/snake_pack.json"));
@@ -44,14 +44,6 @@ fn role_id(value: &str) -> RoleId {
     RoleId::try_new(value).expect("test role id should be valid")
 }
 
-fn card_ref() -> CharacterCardRef {
-    CharacterCardRef {
-        card_id: CharacterCardId::try_new("card-1").expect("test card id should be valid"),
-        version: SemanticVersion::try_new("1.0.0").expect("test version should be valid"),
-        digest: Sha256Digest::try_new("digest").expect("test digest should be valid"),
-    }
-}
-
 #[test]
 fn example_story_packs_import() {
     let snake = snake_pack();
@@ -84,6 +76,14 @@ fn digest_is_stable_hex_and_content_sensitive() {
 }
 
 #[test]
+fn legacy_story_pack_digest_matches_golden_value() {
+    assert_eq!(
+        snake_pack().pack_ref().expect("pack ref should compute").digest.as_str(),
+        "aa5d334278c8250ce863e002eb4eb099e1cf93ada90030933833787080fa8257"
+    );
+}
+
+#[test]
 fn pack_ref_pins_pack_id_version_and_digest() {
     let pack = snake_pack();
 
@@ -92,6 +92,28 @@ fn pack_ref_pins_pack_id_version_and_digest() {
     assert_eq!(pack_ref.pack_id, pack.pack_id);
     assert_eq!(pack_ref.version, pack.meta.version);
     assert_eq!(pack_ref.digest, pack.pack_ref().expect("pack ref should compute").digest);
+}
+
+#[test]
+fn legacy_story_pack_round_trip_preserves_canonical_bytes() {
+    let pack = serde_json::from_str::<StoryPack>(SNAKE_PACK_JSON).expect("legacy pack should import");
+    let canonical = serde_json::to_vec(&pack).expect("legacy pack should serialize");
+    let reparsed = serde_json::from_slice::<StoryPack>(&canonical).expect("canonical pack should import");
+
+    assert_eq!(
+        serde_json::to_vec(&reparsed).expect("reparsed pack should serialize"),
+        canonical
+    );
+}
+
+#[test]
+fn legacy_story_pack_rejects_unknown_and_duplicate_fields() {
+    let mut unknown = pack_json();
+    unknown["unknown"] = json!(true);
+    let duplicate = r#"{"spec":"aise_story_v1","spec":"aise_story_v1","pack_id":"pack-1","meta":{"creator":"aise","version":"1.0.0"},"profile":{"title":"title","description":null,"point_of_view":"third","tense":"past"},"roles":{},"play":{"playable_roles":[]},"opening":"opening"}"#;
+
+    assert!(serde_json::from_value::<StoryPack>(unknown).is_err());
+    assert!(serde_json::from_str::<StoryPack>(duplicate).is_err());
 }
 
 #[test]
@@ -197,38 +219,6 @@ fn pack_with_invalid_narrative_is_rejected() {
     ));
 }
 
-#[test]
-fn resolve_cast_fills_unbound_roles_with_default_actor() {
-    let pack = pack(pack_json());
-    let cast = BTreeMap::from([(role_id("xu_xian"), RoleActor::Card(card_ref()))]);
-
-    let resolved = pack.resolve_cast(&role_id("xu_xian"), cast).expect("cast should resolve");
-
-    assert!(matches!(resolved[&role_id("xu_xian")], RoleActor::Card(_)));
-    assert!(matches!(resolved[&role_id("bai_suzhen")], RoleActor::Default));
-}
-
-#[test]
-fn resolve_cast_rejects_non_playable_player_role() {
-    let pack = pack(pack_json());
-
-    assert!(matches!(
-        pack.resolve_cast(&role_id("bai_suzhen"), BTreeMap::new()),
-        Err(StoryError::RoleNotPlayable { role_id }) if role_id == "bai_suzhen"
-    ));
-}
-
-#[test]
-fn resolve_cast_rejects_unknown_cast_role() {
-    let pack = pack(pack_json());
-    let cast = BTreeMap::from([(role_id("ghost"), RoleActor::Default)]);
-
-    assert!(matches!(
-        pack.resolve_cast(&role_id("xu_xian"), cast),
-        Err(StoryError::UnknownRole { field: "cast", role_id }) if role_id == "ghost"
-    ));
-}
-
 fn text(value: impl Into<String>) -> BoundedText {
     BoundedText::try_new(value, "test", usize::MAX).expect("test text should fit")
 }
@@ -253,9 +243,9 @@ fn pack_with_catalog_bytes(size: usize) -> StoryPack {
     let mut pack = single_role_pack();
     let role_id = pack.roles.keys().next().expect("fixture role").clone();
     let role = pack.roles.get_mut(&role_id).expect("fixture role");
-    role.alias.clear();
-    let fixed_bytes = role_id.as_str().len() + role.retrieval.as_str().len();
-    role.name = text("x".repeat(size - fixed_bytes));
+    role.spec.alias.clear();
+    let fixed_bytes = role_id.as_str().len() + role.spec.retrieval.as_str().len();
+    role.spec.name = text("x".repeat(size - fixed_bytes));
     pack
 }
 
@@ -274,38 +264,26 @@ fn pack_with_seed_memory_count(count: usize) -> StoryPack {
     pack
 }
 
-fn pack_with_role_assets_bytes(size: usize) -> StoryPack {
-    let mut pack = single_role_pack();
-    let role = pack.roles.values_mut().next().expect("fixture role");
-    role.backstory = text("");
-    role.alias.clear();
-    role.seed_memories.clear();
-    let base_size = serde_json::to_vec(&pack.roles).expect("roles serialize").len();
-    pack.roles.values_mut().next().expect("fixture role").backstory = text("x".repeat(size - base_size));
-    assert_eq!(serde_json::to_vec(&pack.roles).expect("roles serialize").len(), size);
-    pack
-}
-
 #[test]
 fn role_count_at_limit_is_accepted() {
-    assert!(pack_with_role_count(MAX_ROLES_PER_PACK).validate_roles().is_ok());
+    assert!(pack_with_role_count(MAX_ROLES_PER_STORY).validate_roles().is_ok());
 }
 
 #[test]
 fn role_count_over_limit_is_rejected() {
     assert!(matches!(
-        pack_with_role_count(MAX_ROLES_PER_PACK + 1).validate_roles(),
+        pack_with_role_count(MAX_ROLES_PER_STORY + 1).validate_roles(),
         Err(StoryError::TooManyRoles {
             actual,
-            maximum: MAX_ROLES_PER_PACK
-        }) if actual == MAX_ROLES_PER_PACK + 1
+            maximum: MAX_ROLES_PER_STORY
+        }) if actual == MAX_ROLES_PER_STORY + 1
     ));
 }
 
 #[test]
 fn alias_count_at_limit_is_accepted() {
     let mut pack = single_role_pack();
-    pack.roles.values_mut().next().expect("fixture role").alias = vec![text("alias"); MAX_ALIASES_PER_ROLE];
+    pack.roles.values_mut().next().expect("fixture role").spec.alias = vec![text("alias"); MAX_ALIASES_PER_ROLE];
 
     assert!(pack.validate_roles().is_ok());
 }
@@ -313,7 +291,7 @@ fn alias_count_at_limit_is_accepted() {
 #[test]
 fn alias_count_over_limit_is_rejected() {
     let mut pack = single_role_pack();
-    pack.roles.values_mut().next().expect("fixture role").alias = vec![text("alias"); MAX_ALIASES_PER_ROLE + 1];
+    pack.roles.values_mut().next().expect("fixture role").spec.alias = vec![text("alias"); MAX_ALIASES_PER_ROLE + 1];
 
     assert!(matches!(
         pack.validate_roles(),
@@ -343,33 +321,17 @@ fn role_catalog_bytes_over_limit_are_rejected() {
 
 #[test]
 fn seed_memory_count_at_limit_is_accepted() {
-    assert!(pack_with_seed_memory_count(MAX_SEED_MEMORIES_PER_ROLE).validate_roles().is_ok());
+    assert!(pack_with_seed_memory_count(MAX_MEMORIES_PER_ROLE).validate_roles().is_ok());
 }
 
 #[test]
 fn seed_memory_count_over_limit_is_rejected() {
     assert!(matches!(
-        pack_with_seed_memory_count(MAX_SEED_MEMORIES_PER_ROLE + 1).validate_roles(),
-        Err(StoryError::TooManySeedMemories {
+        pack_with_seed_memory_count(MAX_MEMORIES_PER_ROLE + 1).validate_roles(),
+        Err(StoryError::TooManyRoleMemories {
             actual,
-            maximum: MAX_SEED_MEMORIES_PER_ROLE,
+            maximum: MAX_MEMORIES_PER_ROLE,
             ..
-        }) if actual == MAX_SEED_MEMORIES_PER_ROLE + 1
-    ));
-}
-
-#[test]
-fn role_assets_bytes_at_limit_are_accepted() {
-    assert!(pack_with_role_assets_bytes(MAX_ROLE_ASSETS_BYTES).validate_roles().is_ok());
-}
-
-#[test]
-fn role_assets_bytes_over_limit_are_rejected() {
-    assert!(matches!(
-        pack_with_role_assets_bytes(MAX_ROLE_ASSETS_BYTES + 1).validate_roles(),
-        Err(StoryError::RoleAssetsTooLarge {
-            actual,
-            maximum: MAX_ROLE_ASSETS_BYTES
-        }) if actual == MAX_ROLE_ASSETS_BYTES + 1
+        }) if actual == MAX_MEMORIES_PER_ROLE + 1
     ));
 }

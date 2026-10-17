@@ -1,6 +1,5 @@
 use crate::core::{StoryContext, TurnControl};
 use crate::llm::LlmGateway;
-use crate::persistence::Store;
 use crate::pipeline::common::{
     Pipeline, PipelineError, PipelineStage, ProposalQualityPolicy, ValidationContext, ValidationReport,
 };
@@ -27,7 +26,6 @@ pub struct ValidateOutput {
 pub struct ValidatePipeline {
     gateway: Arc<LlmGateway>,
     prompt: Arc<Prompt>,
-    store: Arc<Store>,
     config: ValidateConfig,
     quality_policy: Arc<ProposalQualityPolicy>,
 }
@@ -36,14 +34,12 @@ impl ValidatePipeline {
     pub fn new(
         gateway: Arc<LlmGateway>,
         prompt: Arc<Prompt>,
-        store: Arc<Store>,
         config: ValidateConfig,
         quality_policy: Arc<ProposalQualityPolicy>,
     ) -> Self {
         Self {
             gateway,
             prompt,
-            store,
             config,
             quality_policy,
         }
@@ -67,10 +63,8 @@ impl ValidatePipeline {
             input,
             self.quality_policy.as_ref(),
             self.config.max_issue_bytes,
-            self.store.as_ref(),
             observation,
-        )
-        .await?;
+        )?;
         let raw =
             validate_llm::evaluate_story(self.gateway.as_ref(), rendered_prompt.into_messages(), control, observation)
                 .await

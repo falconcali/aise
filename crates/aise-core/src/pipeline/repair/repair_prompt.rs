@@ -1,5 +1,4 @@
 use crate::core::StoryContext;
-use crate::persistence::Store;
 use crate::pipeline::common::proposal_quality_prompt::project_proposal_quality;
 use crate::pipeline::common::validation_prompt::{ValidationPromptEvidence, project_validation_evidence};
 use crate::pipeline::common::{PipelineError, PipelineStage, ProposalQualityPolicy};
@@ -30,16 +29,15 @@ const PROPOSAL_VERSION_VAR: &str = "proposal_version";
 const REPAIR_ISSUES_VAR: &str = "repair_issues";
 const MAX_PROPOSAL_BYTES_VAR: &str = "max_proposal_bytes";
 
-pub(super) async fn repair_story(
+pub(super) fn repair_story(
     prompt: &Prompt,
     story_ctx: &StoryContext,
     input: &RepairInput<'_>,
     quality_policy: &ProposalQualityPolicy,
     config: &RepairConfig,
-    store: &Store,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
-    let evidence = project_validation_evidence(PipelineStage::Repair, story_ctx, &input.context, store).await?;
+    let evidence = project_validation_evidence(PipelineStage::Repair, story_ctx, &input.context)?;
     let vars = repair_vars(input, quality_policy, config, evidence)?;
     prompt
         .render(PromptSpec::new(REPAIR_STORY_PROMPT_ID, vars), observation)

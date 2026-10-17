@@ -1,8 +1,7 @@
 use super::*;
-use crate::core::tests::store_with_default_pack;
+use crate::core::tests::{store_with_default_pack, story_context};
 use crate::core::{
-    ActivatedKnowledge, BoundedText, CharacterProfile, PlayerContribution, PlayerRoleContext, RoleId, StoryContext,
-    TurnCancellation, TurnControl, TurnEvent, TurnEventSink,
+    ActivatedKnowledge, BoundedText, PlayerContribution, TurnCancellation, TurnControl, TurnEvent, TurnEventSink,
 };
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmGateway, Provider,
@@ -161,25 +160,13 @@ async fn runtime(responses: Vec<String>, max_repair_rounds: u32) -> (Runtime, Ar
 
 async fn run_validation_loop(responses: Vec<String>, max_repair_rounds: u32) -> ValidationLoopRun {
     let (runtime, requests) = runtime(responses, max_repair_rounds).await;
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
     let goal = text("Reach the gate.");
     let contribution = PlayerContribution {
         raw: "I follow.".to_owned(),
         processed: "The player follows.".to_owned(),
     };
     let knowledge = ActivatedKnowledge::default();
-    let player_role = PlayerRoleContext {
-        role_id: RoleId::try_new("player").expect("valid role id"),
-        name: text("Player"),
-        aliases: Vec::new(),
-        backstory: text("Backstory."),
-        profile: CharacterProfile {
-            appearance: None,
-            personality: None,
-            speaking_style: None,
-            dialogue_examples: Vec::new(),
-        },
-    };
     let context = ValidationContext {
         story_goal: &goal,
         player_contribution: &contribution,
@@ -188,8 +175,7 @@ async fn run_validation_loop(responses: Vec<String>, max_repair_rounds: u32) -> 
         knowledge: &knowledge,
         retrieved_facts: &[],
         retrieved_rumors: &[],
-        player_role: &player_role,
-        roles: &[],
+        role_ids: &[],
         character_decisions: &[],
     };
     let control = TurnControl::new(Instant::now() + Duration::from_secs(5), TurnCancellation::new());
@@ -201,7 +187,7 @@ async fn run_validation_loop(responses: Vec<String>, max_repair_rounds: u32) -> 
         trace: &trace,
     };
     let result = runtime
-        .validate_repair_loop(&runner, &story_ctx, context, "Initial proposal.".to_owned(), &trace)
+        .validate_repair_loop(&runner, &story_ctx, context, "Initial proposal.".to_owned())
         .await;
     let requests = lock(&requests).clone();
     let stages = lock(&sink.stages).clone();

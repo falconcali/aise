@@ -1,7 +1,8 @@
 use super::*;
+use crate::core::tests::story_context;
 use crate::core::{
     ActivationRule, BoundedText, CharacterProfile, EntryOrigin, FactChangeOp, FactEntry, MemoryEntry, RetrievalHint,
-    RoleActor, RoleBody, RoleEntry, RumorChangeOp, RumorEntry,
+    RoleEntry, RoleSpec, RumorChangeOp, RumorEntry,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -38,7 +39,10 @@ fn valid_rule() -> ActivationRule {
 }
 
 fn seeded_context() -> StoryContext {
-    let mut ctx = StoryContext::new();
+    let mut ctx = story_context();
+    ctx.facts.clear();
+    ctx.rumors.clear();
+    ctx.roles.clear();
     let fact_id = FactId::try_new("fact_seal_location").expect("valid fact id");
     ctx.facts.insert(
         fact_id.clone(),
@@ -86,19 +90,18 @@ fn seeded_context() -> StoryContext {
         role_id.clone(),
         RoleEntry {
             id: role_id,
-            actor: RoleActor::Default,
-            body: RoleBody {
+            origin: EntryOrigin::Seed,
+            spec: RoleSpec {
                 name: text("Bai Suzhen"),
                 alias: vec![text("White Snake")],
                 backstory: text("Immortal spirit."),
                 retrieval: hint("Bai Suzhen"),
-                default_profile: CharacterProfile {
-                    appearance: None,
-                    personality: None,
-                    speaking_style: None,
-                    dialogue_examples: Vec::new(),
-                },
-                seed_memories: BTreeMap::new(),
+            },
+            profile: CharacterProfile {
+                appearance: None,
+                personality: None,
+                speaking_style: None,
+                dialogue_examples: Vec::new(),
             },
             memories,
         },

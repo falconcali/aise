@@ -1,4 +1,4 @@
-use crate::core::{RoleId, SemanticQuery, StoryContext, StoryPack};
+use crate::core::{RoleId, SemanticQuery, StoryContext};
 use crate::pipeline::common::{PipelineError, PipelineStage, pipeline_prompt};
 use crate::pipeline::extract::{ExtractConfig, extract_knowledge};
 use crate::prompt::{Prompt, PromptSpec, PromptVars, RenderedPrompt};
@@ -27,21 +27,18 @@ const EXISTING_MEMORIES_VAR: &str = "existing_memories";
 const MAX_MEMORY_CHANGES_PER_ROLE_VAR: &str = "max_memory_changes_per_role";
 
 pub(super) struct EvaluateNarrativePrompt<'a> {
-    pub story_pack: &'a StoryPack,
     pub story_ctx: &'a StoryContext,
     pub proposal: &'a str,
     pub queries: &'a [SemanticQuery],
 }
 
 pub(super) struct ExtractWorldKnowledgePrompt<'a> {
-    pub story_pack: &'a StoryPack,
     pub story_ctx: &'a StoryContext,
     pub proposal: &'a str,
     pub config: &'a ExtractConfig,
 }
 
 pub(super) struct ExtractRoleMemoryPrompt<'a> {
-    pub story_pack: &'a StoryPack,
     pub story_ctx: &'a StoryContext,
     pub proposal: &'a str,
     pub role_id: &'a RoleId,
@@ -53,7 +50,7 @@ pub(super) fn evaluate_narrative(
     spec: EvaluateNarrativePrompt<'_>,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
-    let (story_summary, story_opening) = story_context_vars(spec.story_pack, spec.story_ctx);
+    let (story_summary, story_opening) = story_context_vars(spec.story_ctx);
     let semantic_queries = serde_json::to_string(spec.queries).map_err(|error| {
         PipelineError::inconsistent_data(
             PipelineStage::Extract,
@@ -81,7 +78,7 @@ pub(super) fn extract_world_knowledge(
     spec: ExtractWorldKnowledgePrompt<'_>,
     observation: &Observation,
 ) -> Result<RenderedPrompt, PipelineError> {
-    let (story_summary, story_opening) = story_context_vars(spec.story_pack, spec.story_ctx);
+    let (story_summary, story_opening) = story_context_vars(spec.story_ctx);
     let existing_facts = serde_json::to_string(&extract_knowledge::project_facts(spec.story_ctx)).map_err(|error| {
         PipelineError::inconsistent_data(PipelineStage::Extract, "extract_world_facts_serialization", error.to_string())
     })?;
@@ -136,8 +133,8 @@ pub(super) fn extract_role_memory(
             format!("role {} does not exist in story context", spec.role_id),
         )
     })?;
-    let (story_summary, story_opening) = story_context_vars(spec.story_pack, spec.story_ctx);
-    let target_aliases = serde_json::to_string(&role.body.alias).map_err(|error| {
+    let (story_summary, story_opening) = story_context_vars(spec.story_ctx);
+    let target_aliases = serde_json::to_string(&role.spec.alias).map_err(|error| {
         PipelineError::inconsistent_data(
             PipelineStage::Extract,
             "extract_role_aliases_serialization",
@@ -161,11 +158,11 @@ pub(super) fn extract_role_memory(
         ),
         (CURRENT_PROPOSAL_VAR.to_owned(), Value::String(spec.proposal.to_owned())),
         (TARGET_ROLE_ID_VAR.to_owned(), Value::String(spec.role_id.as_str().to_owned())),
-        (TARGET_NAME_VAR.to_owned(), Value::String(role.body.name.as_str().to_owned())),
+        (TARGET_NAME_VAR.to_owned(), Value::String(role.spec.name.as_str().to_owned())),
         (TARGET_ALIASES_VAR.to_owned(), Value::String(target_aliases)),
         (
             TARGET_BACKSTORY_VAR.to_owned(),
-            Value::String(role.body.backstory.as_str().to_owned()),
+            Value::String(role.spec.backstory.as_str().to_owned()),
         ),
         (EXISTING_MEMORIES_VAR.to_owned(), Value::String(existing_memories)),
         (
@@ -178,13 +175,9 @@ pub(super) fn extract_role_memory(
         .map_err(PipelineError::prompt(PipelineStage::Extract))
 }
 
-fn story_context_vars<'a>(story_pack: &'a StoryPack, story_ctx: &'a StoryContext) -> (&'a str, &'a str) {
+fn story_context_vars(story_ctx: &StoryContext) -> (&str, &str) {
     let story_summary = pipeline_prompt::story_summary(story_ctx).unwrap_or_default();
-    let story_opening = if story_summary.is_empty() {
-        story_pack.opening.as_str()
-    } else {
-        ""
-    };
+    let story_opening = pipeline_prompt::story_opening(story_ctx);
     (story_summary, story_opening)
 }
 

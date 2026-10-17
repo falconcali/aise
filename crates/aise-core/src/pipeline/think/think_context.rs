@@ -1,11 +1,11 @@
-use crate::core::{ResolvedRole, RumorEntry};
+use crate::core::{RoleEntry, RumorEntry};
 use crate::pipeline::think::ThinkConfig;
 use serde_json::Value;
 
-pub(super) fn memories(role: &ResolvedRole, config: &ThinkConfig) -> String {
+pub(super) fn memories(role: &RoleEntry, config: &ThinkConfig) -> String {
     let mut rendered = String::new();
     for (index, memory) in role.memories.values().enumerate() {
-        if index >= config.max_seed_memories {
+        if index >= config.max_memories_in_prompt {
             break;
         }
         let item = format!("- {}", json_string(memory.body.content.as_str()));

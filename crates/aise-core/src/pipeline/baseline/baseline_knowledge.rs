@@ -1,7 +1,6 @@
 use crate::core::{
     ActivatedKnowledge, ActivationCandidate, ActivationConfig, ActivationOutcome, ActivationTurn, FactId,
-    PlayerContribution, Recallable, RumorId, ScanBuffer, ScanFragment, ScanFragmentKind, StoryContext, StoryPack,
-    activate,
+    PlayerContribution, Recallable, RumorId, ScanBuffer, ScanFragment, ScanFragmentKind, StoryContext, activate,
 };
 use crate::pipeline::baseline::baseline_narrative::NarrativeProjection;
 use crate::pipeline::baseline::baseline_trace;
@@ -26,7 +25,6 @@ impl Display for KnowledgeKey {
 }
 
 pub struct KnowledgeScope<'a> {
-    pub story_pack: &'a StoryPack,
     pub story_ctx: &'a StoryContext,
     pub player_contribution: &'a PlayerContribution,
     pub narrative: &'a NarrativeProjection,
@@ -76,7 +74,7 @@ fn build_scan_buffer(scope: &KnowledgeScope<'_>) -> ScanBuffer {
     let player_role_name = story_ctx
         .roles
         .get(&story_ctx.player)
-        .map(|role| ScanFragment::new(ScanFragmentKind::PlayerRoleName, 0, role.body.name.as_str()));
+        .map(|role| ScanFragment::new(ScanFragmentKind::PlayerRoleName, 0, role.spec.name.as_str()));
     let directions =
         scope.narrative.directions.iter().map(|direction| {
             ScanFragment::new(ScanFragmentKind::NarrativeDirection, 0, direction.dramatic_focus.as_str())
@@ -94,13 +92,7 @@ fn build_scan_buffer(scope: &KnowledgeScope<'_>) -> ScanBuffer {
         .as_ref()
         .filter(|summary| !summary.text.trim().is_empty())
         .map_or_else(
-            || {
-                ScanFragment::new(
-                    ScanFragmentKind::StoryOpening,
-                    prior_story_depth,
-                    scope.story_pack.opening.as_str(),
-                )
-            },
+            || ScanFragment::new(ScanFragmentKind::StoryOpening, prior_story_depth, story_ctx.opening.as_str()),
             |summary| ScanFragment::new(ScanFragmentKind::StorySummary, prior_story_depth, &summary.text),
         );
     ScanBuffer::new(

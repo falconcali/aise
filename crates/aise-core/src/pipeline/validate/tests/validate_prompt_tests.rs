@@ -1,9 +1,9 @@
 use super::*;
-use crate::core::tests::store_with_default_pack;
+use crate::core::tests::story_context;
 use crate::core::{
     ActivatedKnowledge, ActivationRule, BoundedText, CharacterDecision, CharacterProfile, EntryOrigin, FactBody,
-    FactEntry, FactId, PlayerContribution, PlayerRoleContext, ResolvedRole, RetrievalHint, RoleId, RumorBody,
-    RumorEntry, RumorId, StoryContext,
+    FactEntry, FactId, MemoryBody, MemoryEntry, MemoryId, PlayerContribution, RetrievalHint, RoleEntry, RoleId,
+    RoleSpec, RumorBody, RumorEntry, RumorId, StoryContext,
 };
 use crate::pipeline::ValidateConfig;
 use crate::pipeline::common::ValidationContext;
@@ -22,8 +22,9 @@ struct ValidateFixture {
     knowledge: ActivatedKnowledge,
     retrieved_facts: Vec<FactEntry>,
     retrieved_rumors: Vec<RumorEntry>,
-    player_role: PlayerRoleContext,
-    roles: Vec<ResolvedRole>,
+    player_role: RoleEntry,
+    roles: Vec<RoleEntry>,
+    role_ids: Vec<RoleId>,
     decisions: Vec<CharacterDecision>,
 }
 
@@ -38,8 +39,7 @@ impl ValidateFixture {
                 knowledge: &self.knowledge,
                 retrieved_facts: &self.retrieved_facts,
                 retrieved_rumors: &self.retrieved_rumors,
-                player_role: &self.player_role,
-                roles: &self.roles,
+                role_ids: &self.role_ids,
                 character_decisions: &self.decisions,
             },
             proposal: "Current proposal.",
@@ -101,28 +101,61 @@ fn fixture() -> ValidateFixture {
         },
         retrieved_facts: vec![fact("retrieved_fact", "Retrieved fact.")],
         retrieved_rumors: vec![rumor("retrieved_rumor", "Retrieved rumor.")],
-        player_role: PlayerRoleContext {
-            role_id: RoleId::try_new("player").expect("valid player role"),
-            name: text("Player"),
-            aliases: Vec::new(),
-            backstory: text("Player backstory."),
+        player_role: RoleEntry {
+            id: RoleId::try_new("player").expect("valid player role"),
+            origin: EntryOrigin::Seed,
+            spec: RoleSpec {
+                name: text("Player"),
+                alias: Vec::new(),
+                backstory: text("Player backstory."),
+                retrieval: RetrievalHint::try_new("player").expect("valid retrieval hint"),
+            },
             profile: profile(),
+            memories: BTreeMap::from([(
+                MemoryId::try_new("guide_secret").expect("valid memory id"),
+                MemoryEntry {
+                    id: MemoryId::try_new("guide_secret").expect("valid memory id"),
+                    origin: EntryOrigin::Seed,
+                    body: MemoryBody {
+                        content: text("VALIDATE_PRIVATE_MEMORY_SENTINEL"),
+                        activation: ActivationRule::default(),
+                        retrieval: RetrievalHint::try_new("secret").expect("valid retrieval hint"),
+                    },
+                },
+            )]),
         },
-        roles: vec![ResolvedRole {
-            role_id: role_id.clone(),
-            name: text("Guide"),
-            aliases: Vec::new(),
-            backstory: text("Guide backstory."),
-            retrieval_hint: RetrievalHint::try_new("guide").expect("valid retrieval hint"),
+        roles: vec![RoleEntry {
+            id: role_id.clone(),
+            origin: EntryOrigin::Seed,
+            spec: RoleSpec {
+                name: text("Guide"),
+                alias: Vec::new(),
+                backstory: text("Guide backstory."),
+                retrieval: RetrievalHint::try_new("guide").expect("valid retrieval hint"),
+            },
             profile: profile(),
             memories: BTreeMap::new(),
         }],
+        role_ids: vec![role_id.clone()],
         decisions: vec![CharacterDecision {
             role_id,
             decision: text("Wait at the gate."),
             suggested_utterance: Some(text("Stay close.")),
         }],
     }
+}
+
+fn context(fixture: &ValidateFixture) -> StoryContext {
+    let mut story_ctx = story_context();
+    story_ctx.player = fixture.player_role.id.clone();
+    story_ctx.roles.clear();
+    story_ctx
+        .roles
+        .insert(fixture.player_role.id.clone(), fixture.player_role.clone());
+    story_ctx
+        .roles
+        .extend(fixture.roles.iter().cloned().map(|role| (role.id.clone(), role)));
+    story_ctx
 }
 
 fn prompt() -> Prompt {
@@ -165,11 +198,9 @@ fn var<'a>(vars: &'a PromptVars, name: &str) -> &'a str {
 async fn evaluate_vars_contain_exact_contract_names() {
     let fixture = fixture();
     let input = fixture.input();
-    let story_ctx = StoryContext::new();
-    let store = store_with_default_pack().await;
-    let evidence = project_validation_evidence(PipelineStage::Validate, &story_ctx, &input.context, &store)
-        .await
-        .expect("evidence projects");
+    let story_ctx = context(&fixture);
+    let evidence =
+        project_validation_evidence(PipelineStage::Validate, &story_ctx, &input.context).expect("evidence projects");
     let config = ValidateConfig::default();
     let policy = config.quality_policy();
     let vars = evaluate_vars(&input, &policy, config.max_issue_bytes, evidence).expect("vars build");
@@ -205,11 +236,9 @@ async fn evaluate_vars_contain_exact_contract_names() {
 async fn evaluate_vars_keep_evidence_collections_separate() {
     let fixture = fixture();
     let input = fixture.input();
-    let story_ctx = StoryContext::new();
-    let store = store_with_default_pack().await;
-    let evidence = project_validation_evidence(PipelineStage::Validate, &story_ctx, &input.context, &store)
-        .await
-        .expect("evidence projects");
+    let story_ctx = context(&fixture);
+    let evidence =
+        project_validation_evidence(PipelineStage::Validate, &story_ctx, &input.context).expect("evidence projects");
     let config = ValidateConfig::default();
     let policy = config.quality_policy();
     let vars = evaluate_vars(&input, &policy, config.max_issue_bytes, evidence).expect("vars build");
@@ -219,6 +248,7 @@ async fn evaluate_vars_keep_evidence_collections_separate() {
     assert_eq!(var(&vars, "activated_rumors"), "- Activated rumor.");
     assert_eq!(var(&vars, "retrieved_rumors"), "- Retrieved rumor.");
     assert!(var(&vars, "resolved_roles").contains("Guide backstory."));
+    assert!(!var(&vars, "resolved_roles").contains("VALIDATE_PRIVATE_MEMORY_SENTINEL"));
     assert!(!var(&vars, "resolved_roles").contains("Wait at the gate."));
     assert!(var(&vars, "character_decisions").contains("Wait at the gate."));
     assert!(!var(&vars, "character_decisions").contains("Guide backstory."));
@@ -228,13 +258,11 @@ async fn evaluate_vars_keep_evidence_collections_separate() {
 async fn evaluate_vars_include_target_guidance_from_policy() {
     let fixture = fixture();
     let input = fixture.input();
-    let story_ctx = StoryContext::new();
-    let store = store_with_default_pack().await;
+    let story_ctx = context(&fixture);
     let config = ValidateConfig::default();
     let policy = config.quality_policy();
-    let evidence = project_validation_evidence(PipelineStage::Validate, &story_ctx, &input.context, &store)
-        .await
-        .expect("evidence projects");
+    let evidence =
+        project_validation_evidence(PipelineStage::Validate, &story_ctx, &input.context).expect("evidence projects");
     let vars = evaluate_vars(&input, &policy, config.max_issue_bytes, evidence).expect("vars build");
     let expected = serde_json::to_string(policy.scores()).expect("scores serialize");
 
@@ -247,8 +275,7 @@ async fn evaluate_vars_include_target_guidance_from_policy() {
 #[tokio::test]
 async fn rendered_prompt_keeps_sections_untrusted_with_plain_headings() {
     let fixture = fixture();
-    let story_ctx = StoryContext::new();
-    let store = store_with_default_pack().await;
+    let story_ctx = context(&fixture);
     let trace = trace();
     let config = ValidateConfig::default();
     let policy = config.quality_policy();
@@ -258,10 +285,8 @@ async fn rendered_prompt_keeps_sections_untrusted_with_plain_headings() {
         &fixture.input(),
         &policy,
         config.max_issue_bytes,
-        &store,
         trace.root(),
     )
-    .await
     .expect("prompt renders")
     .into_messages();
     let instructions = format!("{}\n{}", messages[0].content, messages[2].content);
@@ -275,6 +300,7 @@ async fn rendered_prompt_keeps_sections_untrusted_with_plain_headings() {
     assert!(runtime.contains("# Retrieved Facts"));
     assert!(runtime.contains("# Character Decisions"));
     assert!(runtime.contains("# Current Proposal"));
+    assert!(!runtime.contains("VALIDATE_PRIVATE_MEMORY_SENTINEL"));
 }
 
 #[tokio::test]
@@ -284,9 +310,9 @@ async fn rendered_prompt_omits_empty_optional_sections() {
     fixture.retrieved_facts.clear();
     fixture.retrieved_rumors.clear();
     fixture.roles.clear();
+    fixture.role_ids.clear();
     fixture.decisions.clear();
-    let story_ctx = StoryContext::new();
-    let store = store_with_default_pack().await;
+    let story_ctx = context(&fixture);
     let trace = trace();
     let config = ValidateConfig::default();
     let policy = config.quality_policy();
@@ -296,10 +322,8 @@ async fn rendered_prompt_omits_empty_optional_sections() {
         &fixture.input(),
         &policy,
         config.max_issue_bytes,
-        &store,
         trace.root(),
     )
-    .await
     .expect("prompt renders")
     .into_messages();
     let runtime = &messages[1].content;
@@ -323,11 +347,9 @@ async fn rendered_prompt_omits_empty_optional_sections() {
 async fn rendered_prompt_omits_empty_quality_sections() {
     let fixture = fixture();
     let input = fixture.input();
-    let story_ctx = StoryContext::new();
-    let store = store_with_default_pack().await;
-    let evidence = project_validation_evidence(PipelineStage::Validate, &story_ctx, &input.context, &store)
-        .await
-        .expect("evidence projects");
+    let story_ctx = context(&fixture);
+    let evidence =
+        project_validation_evidence(PipelineStage::Validate, &story_ctx, &input.context).expect("evidence projects");
     let config = ValidateConfig::default();
     let vars = evaluate_vars(
         &input,
@@ -345,4 +367,26 @@ async fn rendered_prompt_omits_empty_quality_sections() {
 
     assert!(!runtime.contains("# Check Criteria"));
     assert!(!runtime.contains("# Score Criteria"));
+}
+
+#[test]
+fn missing_role_is_rejected_with_stable_stage_and_code() {
+    let mut fixture = fixture();
+    fixture.role_ids = vec![RoleId::try_new("missing").expect("valid role id")];
+    let story_ctx = context(&fixture);
+    let input = fixture.input();
+
+    let error = match project_validation_evidence(PipelineStage::Validate, &story_ctx, &input.context) {
+        Ok(_) => panic!("missing role should fail"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(
+        error,
+        PipelineError::InconsistentData {
+            stage: PipelineStage::Validate,
+            code: "validate_role_missing",
+            ..
+        }
+    ));
 }

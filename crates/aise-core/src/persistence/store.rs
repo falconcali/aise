@@ -74,6 +74,14 @@ impl Store {
         self.pack_store.as_ref()
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_backends(story_store: Box<dyn StoryStore>, pack_store: Box<dyn PackStore>) -> Self {
+        Self {
+            story_store,
+            pack_store,
+        }
+    }
+
     fn create_story_store(config: StoryStoreConfig) -> Box<dyn StoryStore> {
         match config.store_type {
             StoreType::Memory => Box::new(StoryStoreMem::with_config(config)),

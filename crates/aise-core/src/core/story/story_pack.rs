@@ -1,8 +1,8 @@
-use crate::core::{
-    BoundedText, CoreError, FactBody, FactId, NarrativeError, NarrativeGraph, PackId, RoleId, SeedRole, RumorBody,
-    RumorId, SemanticVersion, Sha256Digest, StoryError,
-};
 use crate::core::role::validate_seed_roles;
+use crate::core::{
+    BoundedText, CoreError, FactBody, FactId, NarrativeError, NarrativeGraph, PackId, RoleId, RumorBody, RumorId,
+    SeedRole, SemanticVersion, Sha256Digest, StoryError,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 

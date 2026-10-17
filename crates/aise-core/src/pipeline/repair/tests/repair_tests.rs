@@ -1,9 +1,6 @@
 use super::*;
-use crate::core::tests::store_with_default_pack;
-use crate::core::{
-    ActivatedKnowledge, BoundedText, CharacterProfile, PlayerContribution, PlayerRoleContext, RoleId, StoryContext,
-    TurnCancellation,
-};
+use crate::core::tests::story_context;
+use crate::core::{ActivatedKnowledge, BoundedText, PlayerContribution, TurnCancellation};
 use crate::llm::{
     LlmCompletionFinishReason, LlmCompletionRequest, LlmCompletionResponse, LlmConfig, LlmError, LlmProvider,
 };
@@ -81,12 +78,10 @@ async fn repair_performs_one_gateway_call() {
     let provider = Arc::new(RepairProvider {
         calls: AtomicUsize::new(0),
     });
-    let store = Arc::new(store_with_default_pack().await);
     let quality_policy = Arc::new(ValidateConfig::default().quality_policy());
     let pipeline = RepairPipeline::new(
         Arc::new(LlmGateway::new(provider.clone(), LlmConfig::default())),
         Arc::new(prompt()),
-        store,
         RepairConfig::default(),
         quality_policy,
     );
@@ -96,18 +91,6 @@ async fn repair_performs_one_gateway_call() {
         processed: "The player walks.".to_owned(),
     };
     let knowledge = ActivatedKnowledge::default();
-    let player_role = PlayerRoleContext {
-        role_id: RoleId::try_new("player").expect("valid player role"),
-        name: text("Player"),
-        aliases: Vec::new(),
-        backstory: text("Player backstory."),
-        profile: CharacterProfile {
-            appearance: None,
-            personality: None,
-            speaking_style: None,
-            dialogue_examples: Vec::new(),
-        },
-    };
     let issues = vec![ValidationIssue::Check {
         name: "internal_logic".to_owned(),
         message: text("Fix the contradiction."),
@@ -121,8 +104,7 @@ async fn repair_performs_one_gateway_call() {
             knowledge: &knowledge,
             retrieved_facts: &[],
             retrieved_rumors: &[],
-            player_role: &player_role,
-            roles: &[],
+            role_ids: &[],
             character_decisions: &[],
         },
         proposal: "Broken story.",
@@ -131,7 +113,7 @@ async fn repair_performs_one_gateway_call() {
         repair_round: 1,
         repair_rounds_remaining: 1,
     };
-    let story_ctx = StoryContext::new();
+    let story_ctx = story_context();
     let control = TurnControl::new(Instant::now() + Duration::from_secs(5), TurnCancellation::new());
     let trace = trace();
 
@@ -149,12 +131,10 @@ async fn repair_uses_runtime_shared_quality_policy() {
     let provider = Arc::new(RepairProvider {
         calls: AtomicUsize::new(0),
     });
-    let store = Arc::new(store_with_default_pack().await);
     let quality_policy = Arc::new(ValidateConfig::default().quality_policy());
     let pipeline = RepairPipeline::new(
         Arc::new(LlmGateway::new(provider, LlmConfig::default())),
         Arc::new(prompt()),
-        store,
         RepairConfig::default(),
         Arc::clone(&quality_policy),
     );
